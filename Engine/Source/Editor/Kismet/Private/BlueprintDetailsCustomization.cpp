@@ -3386,18 +3386,17 @@ bool FBaseBlueprintGraphActionDetails::OnPinRenamed(UK2Node_EditablePinBase* Tar
 	{
 		FPinRenamedHelper PinRenamedHelper;
 
-		if (FunctionEntryNodePtr.IsValid())
-		{
-			PinRenamedHelper.NodesToRename.Add(FunctionEntryNodePtr.Get());
-		}
-
 		const FScopedTransaction Transaction(LOCTEXT("RenameParam", "Rename Parameter"));
 
-		auto ResultNodes = GatherAllResultNodes(FunctionResultNodePtr.Get());
-		for (auto ResultNode : ResultNodes)
+		auto TerminalNodes = GatherAllResultNodes(FunctionResultNodePtr.Get());
+		if (auto EntryNode = FunctionEntryNodePtr.Get())
 		{
-			ResultNode->Modify();
-			PinRenamedHelper.NodesToRename.Add(ResultNode);
+			TerminalNodes.Add(EntryNode);
+		}
+		for (auto TerminalNode : TerminalNodes)
+		{
+			TerminalNode->Modify();
+			PinRenamedHelper.NodesToRename.Add(TerminalNode);
 		}
 
 		PinRenamedHelper.ModifiedBlueprints.Add(GetBlueprintObj());
@@ -3421,9 +3420,9 @@ bool FBaseBlueprintGraphActionDetails::OnPinRenamed(UK2Node_EditablePinBase* Tar
 			(*NodeIter)->RenameUserDefinedPin(OldName, NewName, false);
 		}
 
-		for (auto ResultNode : ResultNodes)
+		for (auto TerminalNode : TerminalNodes)
 		{
-			auto UDPinPtr = ResultNode->UserDefinedPins.FindByPredicate([&](TSharedPtr<FUserPinInfo>& Pin)
+			auto UDPinPtr = TerminalNode->UserDefinedPins.FindByPredicate([&](TSharedPtr<FUserPinInfo>& Pin)
 			{
 				return Pin.IsValid() && (Pin->PinName == OldName);
 			});

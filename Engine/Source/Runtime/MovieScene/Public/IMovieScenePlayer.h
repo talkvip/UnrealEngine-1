@@ -36,9 +36,10 @@ public:
 	/**
 	 * Updates the perspective viewports with the actor to view through
 	 *
-	 * @param ObjectToViewThrough The object, probably a camera, that the viewports should lock to
+	 * @param ObjectToViewThrough	The object, probably a camera, that the viewports should lock to
+	 * @param bNewCameraCut			If true this is a new camera cut
 	 */
-	virtual void UpdatePreviewViewports(UObject* ObjectToViewThrough) const = 0;
+	virtual void UpdateCameraCut(UObject* ObjectToViewThrough, bool bNewCameraCut) const = 0;
 
 	/**
 	 * Adds a MovieScene instance to the player.  MovieScene players need to know about each instance for actor spawning
@@ -46,7 +47,7 @@ public:
 	 * @param MovieSceneSection	The section owning the MovieScene being instanced. 
 	 * @param InstanceToAdd		The instance being added
 	 */
-	virtual void AddMovieSceneInstance( class UMovieSceneSection& MovieSceneSection, TSharedRef<FMovieSceneInstance> InstanceToAdd ) = 0;
+	virtual void AddOrUpdateMovieSceneInstance( class UMovieSceneSection& MovieSceneSection, TSharedRef<FMovieSceneInstance> InstanceToAdd ) = 0;
 
 	/**
 	 * Removes a MovieScene instance from the player. 

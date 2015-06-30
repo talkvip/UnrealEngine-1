@@ -16,7 +16,6 @@
 #if WITH_EDITOR
 #include "UnrealEd.h"
 #endif
-#include "Engine/GameEngine.h"
 
 
 UGameInstance::UGameInstance(const FObjectInitializer& ObjectInitializer)
@@ -88,10 +87,8 @@ void UGameInstance::Shutdown()
 
 void UGameInstance::InitializeStandalone()
 {
-	UGameEngine* const Engine = CastChecked<UGameEngine>(GetEngine());
-
 	// Creates the world context. This should be the only WorldContext that ever gets created for this GameInstance.
-	WorldContext = &Engine->CreateNewWorldContext(EWorldType::Game);
+	WorldContext = &GetEngine()->CreateNewWorldContext(EWorldType::Game);
 	WorldContext->OwningGameInstance = this;
 
 	// In standalone create a dummy world from the beginning to avoid issues of not having a world until LoadMap gets us our real world
@@ -326,10 +323,11 @@ void UGameInstance::StartGameInstance()
 		UE_LOG(LogLoad, Error, TEXT("%s"), *FString::Printf(TEXT("Failed to enter %s: %s. Please check the log for errors."), *URL.Map, *Error));
 
 		// the map specified on the command-line couldn't be loaded.  ask the user if we should load the default map instead
-		if (FCString::Stricmp(*URL.Map, *DefaultMap) != 0)
+		if (FCString::Stricmp(Parm, *DefaultMap) != 0)
 		{
 			const FText Message = FText::Format(NSLOCTEXT("Engine", "MapNotFound", "The map specified on the commandline '{0}' could not be found. Would you like to load the default map instead?"), FText::FromString(URL.Map));
-			if (FMessageDialog::Open(EAppMsgType::OkCancel, Message) != EAppReturnType::Ok)
+			if (   FCString::Stricmp(*URL.Map, *DefaultMap) != 0  
+				&& FMessageDialog::Open(EAppMsgType::OkCancel, Message) != EAppReturnType::Ok)
 			{
 				// user canceled (maybe a typo while attempting to run a commandlet)
 				FPlatformMisc::RequestExit(false);

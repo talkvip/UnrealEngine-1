@@ -23,7 +23,7 @@ FName USubMovieSceneTrack::GetTrackName() const
 	FName Name = DefaultName;
 	if( SubMovieSceneSections.Num() > 0 )
 	{
-		Name = SubMovieSceneSections[0]->GetMovieScene()->GetFName();
+		Name = CastChecked<USubMovieSceneSection>(SubMovieSceneSections[0])->GetMovieScene()->GetFName();
 	}
 
 	return Name;
@@ -34,15 +34,9 @@ TSharedPtr<IMovieSceneTrackInstance> USubMovieSceneTrack::CreateInstance()
 	return MakeShareable( new FSubMovieSceneTrackInstance( *this ) ); 
 }
 
-TArray<UMovieSceneSection*> USubMovieSceneTrack::GetAllSections() const 
+const TArray<UMovieSceneSection*>& USubMovieSceneTrack::GetAllSections() const 
 {
-	TArray<UMovieSceneSection*> AllSections;
-	for( int32 Section = 0; Section < SubMovieSceneSections.Num(); ++Section )
-	{
-		AllSections.Add( SubMovieSceneSections[Section] );
-	}
-
-	return AllSections;
+	return SubMovieSceneSections;
 }
 
 void USubMovieSceneTrack::RemoveSection( UMovieSceneSection* Section )
@@ -52,6 +46,11 @@ void USubMovieSceneTrack::RemoveSection( UMovieSceneSection* Section )
 	{
 		SubMovieSceneSections.Remove( SubMovieSceneSection );
 	}
+}
+
+void USubMovieSceneTrack::RemoveAllAnimationData()
+{
+	SubMovieSceneSections.Empty();
 }
 
 bool USubMovieSceneTrack::IsEmpty() const

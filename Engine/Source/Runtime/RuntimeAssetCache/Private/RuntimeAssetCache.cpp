@@ -57,6 +57,8 @@ int32 FRuntimeAssetCache::GetAsynchronous(IRuntimeAssetCacheBuilder* CacheBuilde
 	/** Make sure task isn't processed twice. */
 	check(!PendingTasks.Contains(Handle));
 
+	checkf(CacheBuilder->IsBuildThreadSafe(), TEXT("CacheBuilder %s Build function is not thread safe, but builder was used in asynchronous code. Use GetSynchronous instead."), CacheBuilder->GetBuilderName());
+
 	FAsyncTask<FRuntimeAssetCacheAsyncWorker>* AsyncTask = new FAsyncTask<FRuntimeAssetCacheAsyncWorker>(CacheBuilder, &Buckets, Handle, OnComplete);
 
 	{
@@ -64,20 +66,25 @@ int32 FRuntimeAssetCache::GetAsynchronous(IRuntimeAssetCacheBuilder* CacheBuilde
 		PendingTasks.Add(Handle, AsyncTask);
 	}
 	AddToAsyncCompletionCounter(1);
+
 	AsyncTask->StartBackgroundTask();
+
 	return Handle;
 }
+
 int32 FRuntimeAssetCache::GetAsynchronous(IRuntimeAssetCacheBuilder* CacheBuilder)
 {
 	return GetAsynchronous(CacheBuilder, FOnRuntimeAssetCacheAsyncComplete());
 }
 
-void* FRuntimeAssetCache::GetSynchronous(IRuntimeAssetCacheBuilder* CacheBuilder)
+FVoidPtrParam FRuntimeAssetCache::GetSynchronous(IRuntimeAssetCacheBuilder* CacheBuilder)
 {
+	checkf(!CacheBuilder->ShouldBuildAsynchronously(), TEXT("CacheBuilder %s can be only called asynchronously."), CacheBuilder->GetBuilderName());
+	
 	FAsyncTask<FRuntimeAssetCacheAsyncWorker>* AsyncTask = new FAsyncTask<FRuntimeAssetCacheAsyncWorker>(CacheBuilder, &Buckets, -1, FOnRuntimeAssetCacheAsyncComplete());
 	AddToAsyncCompletionCounter(1);
 	AsyncTask->StartSynchronousTask();
-	return AsyncTask->GetTask().GetData();
+	return AsyncTask->GetTask().GetDataAndSize();
 }
 
 bool FRuntimeAssetCache::ClearCache()
@@ -140,7 +147,7 @@ void FRuntimeAssetCache::WaitAsynchronousCompletion(int32 Handle)
 	INC_FLOAT_STAT_BY(STAT_RAC_ASyncWaitTime, (float)ThisTime);
 }
 
-void* FRuntimeAssetCache::GetAsynchronousResults(int32 Handle)
+FVoidPtrParam FRuntimeAssetCache::GetAsynchronousResults(int32 Handle)
 {
 	FAsyncTask<FRuntimeAssetCacheAsyncWorker>* AsyncTask = nullptr;
 	{
@@ -150,7 +157,7 @@ void* FRuntimeAssetCache::GetAsynchronousResults(int32 Handle)
 	}
 	check(AsyncTask);
 
-	void* Data = AsyncTask->GetTask().GetData();
+	FVoidPtrParam Data = AsyncTask->GetTask().GetDataAndSize();
 	delete AsyncTask;
 	return Data;
 }

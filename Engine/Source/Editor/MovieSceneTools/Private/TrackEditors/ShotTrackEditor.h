@@ -6,7 +6,7 @@
 /**
  * Tools for director tracks
  */
-class FDirectorTrackEditor : public FMovieSceneTrackEditor
+class FShotTrackEditor : public FMovieSceneTrackEditor
 {
 public:
 	/**
@@ -14,8 +14,8 @@ public:
 	 *
 	 * @param InSequencer	The sequencer instance to be used by this tool
 	 */
-	FDirectorTrackEditor( TSharedRef<ISequencer> InSequencer );
-	~FDirectorTrackEditor();
+	FShotTrackEditor( TSharedRef<ISequencer> InSequencer );
+	~FShotTrackEditor();
 
 	/**
 	 * Creates an instance of this class.  Called by a sequencer 
@@ -36,6 +36,11 @@ private:
 	/** Delegate for AnimatablePropertyChanged in AddKey */
 	void AddKeyInternal(float AutoKeyTime, const FGuid ObjectGuid);
 
+	/** Generates a shot number for a new section by looking at the existing shots in relation to the new shot time */
+	int32 GenerateShotNumber( class UMovieSceneShotTrack& ShotTrack, int32 SectionIndex ) const;
+
+	/** Finds the index in the ShotSections array where a new shot should be inserted */
+	int32 FindIndexForNewShot( const TArray<UMovieSceneSection*>& ShotSections, float NewShotTime ) const;
 private:
 	/** The Thumbnail pool which draws all the viewport thumbnails for the director track */
 	TSharedPtr<class FShotThumbnailPool> ThumbnailPool;
@@ -113,8 +118,8 @@ private:
 	/** Where in time this thumbnail is a rendering of */
 	TRange<float> TimeRange;
 
-	/** The time when the thumbnail started to fade in. */
-	double FadeInStartTime;
+	/** Fade curve to display while the thumbnail is redrawing */
+	FCurveSequence FadeInCurve;
 };
 
 
@@ -124,18 +129,23 @@ private:
 class FShotSection : public ISequencerSection, public TSharedFromThis<FShotSection>
 {
 public:
-	FShotSection( TSharedPtr<ISequencer> InSequencer, TSharedPtr<FShotThumbnailPool> InThumbnailPool, UMovieSceneSection& InSection, UObject* InTargetObject );
+	FShotSection( TSharedPtr<ISequencer> InSequencer, TSharedPtr<FShotThumbnailPool> InThumbnailPool, UMovieSceneSection& InSection );
 	~FShotSection();
 
 	/** ISequencerSection interface */
 	virtual UMovieSceneSection* GetSectionObject() override;
+	virtual TSharedRef<SWidget> GenerateSectionWidget() override;
 	virtual int32 OnPaintSection( const FGeometry& AllottedGeometry, const FSlateRect& SectionClippingRect, FSlateWindowElementList& OutDrawElements, int32 LayerId, bool bParentEnabled ) const override;
 	virtual void Tick( const FGeometry& AllottedGeometry, const FGeometry& ParentGeometry, const double InCurrentTime, const float InDeltaTime ) override;
-	virtual FText GetDisplayName() const override { return NSLOCTEXT("FShotSection", "DirectorTrack", "Director Track"); }
+	virtual FText GetDisplayName() const override { return NSLOCTEXT("FShotSection", "", "Shots"); }
 	virtual FText GetSectionTitle() const override;
 	virtual float GetSectionHeight() const override;
 	virtual void GenerateSectionLayout( class ISectionLayoutBuilder& LayoutBuilder ) const override {}
 	virtual FReply OnSectionDoubleClicked( const FGeometry& SectionGeometry, const FPointerEvent& MouseEvent ) override;
+	virtual void BuildSectionContextMenu(FMenuBuilder& MenuBuilder) override;
+
+	/** Filter to selected shot sections */
+	void FilterToSelectedShotSections(bool bZoomToShotBounds);
 
 	/** Gets the thumbnail width */
 	uint32 GetThumbnailWidth() const;
@@ -152,9 +162,15 @@ public:
 	/** Gets the time range of what in the sequencer is visible */
 	TRange<float> GetVisibleTimeRange() const {return VisibleTimeRange;}
 
+	/** @return The sequencer widget owning the shot section */
+	TSharedRef<SWidget> GetSequencerWidget() { return Sequencer.Pin()->GetSequencerWidget(); }
+private:
+	ACameraActor* UpdateCameraObject() const;
+	FText GetShotName() const;
+	void OnRenameShot( const FText& NewShotName, ETextCommit::Type CommitType );
 private:
 	/** The section we are visualizing */
-	UMovieSceneSection* Section;
+	class UMovieSceneShotSection* Section;
 	/** The parent sequencer we are a part of */
 	TWeakPtr<ISequencer> Sequencer;
 	/** The actual camera actor we are possessing */
@@ -179,4 +195,10 @@ private:
 	TSharedPtr<FSceneViewport> InternalViewportScene;
 	/** An internal editor viewport client to render the thumbnails with */
 	TSharedPtr<FLevelEditorViewportClient> InternalViewportClient;
+	
+	/** Fade brush */
+	const FSlateBrush* WhiteBrush;
+
+	/** Reference to owner of the current popup */
+	TWeakPtr<class IMenu> NameEntryPopupMenu;
 };

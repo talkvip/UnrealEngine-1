@@ -3,13 +3,14 @@
 #pragma once
 
 #include "MovieSceneSection.h"
+#include "SubMovieSceneSection.h"
 #include "MovieSceneShotSection.generated.h"
 
 /**
- * Movie shots are sections on the director's track, that show what the viewer "sees"
+ * Movie shots are sections on the shots track, that show what the viewer "sees"
  */
 UCLASS( MinimalAPI )
-class UMovieSceneShotSection : public UMovieSceneSection
+class UMovieSceneShotSection : public USubMovieSceneSection
 {
 	GENERATED_UCLASS_BODY()
 public:
@@ -19,18 +20,29 @@ public:
 	/** Gets the camera guid for this shot section */
 	virtual FGuid GetCameraGuid() const;
 
-	/** Sets the shot title */
-	virtual void SetTitle(const FText& NewTitle);
+	/** 
+	 * Sets the shot display name and shot number
+	 * 
+ 	 * @param InDisplayName	The display name shown next to each shot in Sequencer
+	 * @param InShotNumber	The generated shot number.
+	 */
+	virtual void SetShotNameAndNumber(const FText& InDisplayName, int32 InShotNumber);
 
-	/** Gets the shot title */
-	virtual FText GetTitle() const;
+	/** @return The display name for the shot */
+	FText GetShotDisplayName() const { return DisplayName; }
 
+	/** @return The shot number generated for this shot */
+	int32 GetShotNumber() const { return ShotNumber; }
 private:
 	/** The camera possessable or spawnable that this movie shot uses */
 	UPROPERTY()
 	FGuid CameraGuid;
 
-	/** The shot's title */
+	/** The shot's display name */
 	UPROPERTY()
-	FText Title;
+	FText DisplayName;
+	
+	 /** The Shot number.  Shot numbers are generally part of the display name but is stored seperatley so we can use it to generate subsequent shot numbers */
+	UPROPERTY()
+	int32 ShotNumber;
 };

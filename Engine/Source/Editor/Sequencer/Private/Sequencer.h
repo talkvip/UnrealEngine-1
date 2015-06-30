@@ -39,7 +39,9 @@ struct FSequencerInitParams
 class FSequencer : public ISequencer, public FGCObject, public FEditorUndoClient, public FTickableEditorObject
 { 
 
-public:
+public:	
+	static bool IsSequencerEnabled();
+
 	/**
 	 * Initializes sequencer
 	 *
@@ -92,12 +94,12 @@ public:
 	virtual void NotifyMovieSceneDataChanged() override;
 	virtual void UpdateRuntimeInstances() override;
 	virtual void AddSubMovieScene(UMovieScene* SubMovieScene) override;
-	virtual void FilterToShotSections(const TArray< TWeakObjectPtr<class UMovieSceneSection> >& ShotSections, bool bZoomToShotBounds = true) override;
+	virtual void FilterToShotSections(const TArray< TWeakObjectPtr<class UMovieSceneSection> >& ShotSections, bool bZoomToShotBounds = false) override;
 	virtual void FilterToSelectedShotSections(bool bZoomToShotBounds = true) override;
 	virtual bool CanKeyProperty(FCanKeyPropertyParams CanKeyPropertyParams) const override;
 	virtual void KeyProperty(FKeyPropertyParams KeyPropertyParams) override;
 	virtual TSharedRef<ISequencerObjectBindingManager> GetObjectBindingManager() const override;
-	virtual FSequencerSelection* GetSelection() override;
+	virtual FSequencerSelection& GetSelection() override;
 
 	/** @return The current view range */
 	FAnimatedRange GetViewRange() const;
@@ -116,11 +118,6 @@ public:
 	 */
 	void SpawnOrDestroyPuppetObjects( TSharedRef<FMovieSceneInstance> MovieSceneInstance );
 
-	/** 
-	 * Opens a renaming dialog for the passed in shot section
-	 */
-	void RenameShot(class UMovieSceneSection* ShotSection);
-	 
 	/** 
 	 * Deletes the passed in section
 	 */
@@ -180,7 +177,7 @@ public:
 	/**
 	 * Gets all shots that are filtering currently
 	 */
-	TArray< TWeakObjectPtr<UMovieSceneSection> > GetFilteringShotSections() const;
+	const TArray< TWeakObjectPtr<UMovieSceneSection> >& GetFilteringShotSections() const;
 
 	/**
 	 * Checks to see if an object is unfilterable
@@ -219,11 +216,20 @@ public:
 	 */
 	void BuildObjectBindingContextMenu(class FMenuBuilder& MenuBuilder, const FGuid& ObjectBinding, const class UClass* ObjectClass);
 
+	/**
+	 * Builds up the edit buttons for object binding nodes in the outliner
+	 * 
+	 * @param EditBox	    The edit box to add things to
+	 * @param ObjectBinding	The object binding of the selected node
+	 * @param ObjectClass	The class of the selected object
+	 */
+	void BuildObjectBindingEditButtons(TSharedPtr<SHorizontalBox> EditBox, const FGuid& ObjectBinding, const class UClass* ObjectClass);
+
 	/** IMovieScenePlayer interface */
 	virtual void GetRuntimeObjects( TSharedRef<FMovieSceneInstance> MovieSceneInstance, const FGuid& ObjectHandle, TArray< UObject* >& OutObjects ) const override;
-	virtual void UpdatePreviewViewports(UObject* ObjectToViewThrough) const override;
+	virtual void UpdateCameraCut(UObject* ObjectToViewThrough, bool bNewCameraCut) const override;
 	virtual EMovieScenePlayerStatus::Type GetPlaybackStatus() const override;
-	virtual void AddMovieSceneInstance( class UMovieSceneSection& MovieSceneSection, TSharedRef<FMovieSceneInstance> InstanceToAdd ) override;
+	virtual void AddOrUpdateMovieSceneInstance( class UMovieSceneSection& MovieSceneSection, TSharedRef<FMovieSceneInstance> InstanceToAdd ) override;
 	virtual void RemoveMovieSceneInstance( class UMovieSceneSection& MovieSceneSection, TSharedRef<FMovieSceneInstance> InstanceToRemove ) override;
 
 	virtual void SpawnActorsForMovie( TSharedRef<FMovieSceneInstance> MovieSceneInstance );
@@ -252,8 +258,9 @@ public:
 
 	/** @return Whether or not this sequencer is used in the level editor */
 	bool IsLevelEditorSequencer() const { return bIsEditingWithinLevelEditor; }
-	
-	static bool IsSequencerEnabled();
+
+	/** Called to save the current movie scene */
+	void SaveCurrentMovieScene();
 protected:
 	/**
 	 * Reset data about a movie scene when pushing or popping a movie scene
@@ -329,9 +336,6 @@ protected:
 	/** Called via UEditorEngine::GetActorRecordingStateEvent to check to see whether we need to record actor state */
 	void GetActorRecordingState( bool& bIsRecording /* In+Out */ ) const;
 	
-	/* Called when committing a rename shot text entry popup */
-	void RenameShotCommitted(const FText& RenameText, ETextCommit::Type CommitInfo, UMovieSceneSection* Section);
-
 	/** Called when a user executes the delete command to delete sections or keys */
 	void DeleteSelectedItems();
 	
@@ -367,17 +371,20 @@ protected:
 	/** Called after the world has been saved. The sequencer updates to the animated state. */
 	void OnPostSaveWorld(uint32 SaveFlags, class UWorld* World, bool bSuccess);
 
+	/** Updates a viewport client from camera cut data */
+	void UpdatePreviewLevelViewportClientFromCameraCut( FLevelEditorViewportClient& InViewportClient, UObject* InCameraObject, bool bNewCameraCut ) const;
+
 private:
 	TMap< TWeakObjectPtr<UMovieSceneSection>, TSharedRef<FMovieSceneInstance> > MovieSceneSectionToInstanceMap;
 
-	/** Command list for seququencer commands */
+	/** Command list for sequencer commands */
 	TSharedRef<FUICommandList> SequencerCommandBindings;
 
 	/** List of tools we own */
 	TArray< TSharedPtr<FMovieSceneTrackEditor> > TrackEditors;
 
 	/** The editors we keep track of for special behaviors */
-	TWeakPtr<FMovieSceneTrackEditor> DirectorTrackEditor;
+	TWeakPtr<FMovieSceneTrackEditor> ShotTrackEditor;
 	TWeakPtr<FMovieSceneTrackEditor> AnimationTrackEditor;
 
 	/** Manager for handling runtime object bindings */
@@ -392,9 +399,6 @@ private:
 	/** Main sequencer widget */
 	TSharedPtr< class SSequencer > SequencerWidget;
 	
-	/** Reference to owner of the current popup */
-	TWeakPtr<class IMenu> NameEntryPopupMenu;
-
 	/** The asset editor that created this Sequencer if any */
 	TWeakPtr<IToolkitHost> ToolkitHost;
 

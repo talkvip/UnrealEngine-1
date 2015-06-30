@@ -15,7 +15,7 @@
 #include "BreakIterator.h"
 #include "SHyperlink.h"
 #include "SOutputLogDialog.h"
-
+#include "TemplateItem.h"
 #include "Settings/EditorSettings.h"
 
 #define LOCTEXT_NAMESPACE "NewProjectWizard"
@@ -30,28 +30,6 @@ namespace NewProjectWizardDefs
 	const float ItemWidth = ThumbnailSize + 2*ThumbnailPadding;
 	const float ItemHeight = ItemWidth + 30;
 }
-
-/** Struct describing a single template project */
-struct FTemplateItem
-{
-	FText		Name;
-	FText		Description;
-	bool		bGenerateCode;
-	FName		Type;
-
-	FString		SortKey;
-	FString		ProjectFile;
-
-	TSharedPtr<FSlateBrush> Thumbnail;
-	TSharedPtr<FSlateBrush> PreviewImage;
-
-	FString		ClassTypes;
-	FString		AssetTypes;
-	FTemplateItem(FText InName, FText InDescription, bool bInGenerateCode, FName InType, FString InSortKey, FString InProjectFile, TSharedPtr<FSlateBrush> InThumbnail, TSharedPtr<FSlateBrush> InPreviewImage,FString InClassTypes, FString InAssetTypes)
-		: Name(InName), Description(InDescription), bGenerateCode(bInGenerateCode), Type(InType), SortKey(MoveTemp(InSortKey)), ProjectFile(MoveTemp(InProjectFile)), Thumbnail(InThumbnail), PreviewImage(InPreviewImage)
-		, ClassTypes(InClassTypes), AssetTypes(InAssetTypes)
-	{}
-};
 
 /**
  * Simple widget used to display a folder path, and a name of a file:
@@ -1131,10 +1109,13 @@ FText SNewProjectWizard::GetNameAndLocationErrorLabelText() const
 	return FText::GetEmpty();
 }
 
-void SNewProjectWizard::FindTemplateProjects()
+TMap<FName, TArray<TSharedPtr<FTemplateItem>> >& SNewProjectWizard::FindTemplateProjects()
 {
 	// Default to showing the blueprint category
 	ActiveCategory = FTemplateCategory::BlueprintCategoryName;
+	
+	// Clear the list out first - or we could end up with duplicates
+	Templates.Empty();
 
 	// Add some default non-data driven templates
 	Templates.FindOrAdd(FTemplateCategory::BlueprintCategoryName).Add(MakeShareable(new FTemplateItem(
@@ -1211,6 +1192,9 @@ void SNewProjectWizard::FindTemplateProjects()
 				UTemplateProjectDefs* TemplateDefs = GameProjectUtils::LoadTemplateDefs(Root);
 				if ( TemplateDefs )
 				{
+					// Ignore any templates whoose definition says we cannot use to create a project
+					if( TemplateDefs->bAllowProjectCreation == false )
+						continue;
 					// Found a template. Add it to the template items list.
 					const FString ProjectFilename = Root / FoundProjectFiles[0];
 					FText TemplateName = TemplateDefs->GetDisplayNameText();
@@ -1282,6 +1266,7 @@ void SNewProjectWizard::FindTemplateProjects()
 			}
 		}
 	}
+	return Templates;
 }
 
 

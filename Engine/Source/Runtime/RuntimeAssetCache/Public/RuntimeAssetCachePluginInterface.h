@@ -23,7 +23,7 @@ public:
 	* Get the builder type name. This is used to categorize cached data to buckets.
 	* @return Type name of builder.
 	*/
-	virtual const TCHAR* GetTypeName() const = 0;
+	virtual const TCHAR* GetBucketConfigName() const = 0;
 
 	/**
 	* Get the name of cache builder, this is used as part of the cache key.
@@ -41,22 +41,16 @@ public:
 	* Does the work of creating serialized cache entry.
 	* @return Pointer to contiguous memory block with serialized cache entry on success, nullptr otherwise.
 	*/
-	virtual void* Build() = 0;
-
-	/**
-	 * Get size in bytes of serialized cache entry.
-	 * @return Cache entry size.
-	 */
-	virtual int64 GetSerializedDataSize() = 0;
+	virtual FVoidPtrParam Build() = 0;
 
 	/**
 	* Serializes data into archive
 	* @param Ar Archive to serialize to.
 	* @param InData Data to serialize.
 	*/
-	virtual void SerializeData(FArchive& Ar, void* InData)
+	virtual void SerializeData(FArchive& Ar, FVoidPtrParam InData)
 	{
-		Ar.Serialize(InData, GetSerializedDataSize());
+		Ar.Serialize(InData.Data, InData.DataSize);
 	}
 
 	/**
@@ -64,4 +58,19 @@ public:
 	* @return Asset version.
 	*/
 	virtual int32 GetAssetVersion() = 0;
+
+	/**
+	* Gets whether Build function must be called asynchronously.
+	* @return true if Build should be called asynchronously, false otherwise.
+	*/
+	virtual bool ShouldBuildAsynchronously() const
+	{
+		return false;
+	}
+
+	/**
+	* Gets whether Build function is threadsafe
+	* @return true if Build is threadsafe, false otherwise.
+	*/
+	virtual bool IsBuildThreadSafe() const = 0;
 };

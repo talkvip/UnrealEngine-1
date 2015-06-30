@@ -38,13 +38,20 @@ void FMovieSceneInstance::RestoreState()
 
 void FMovieSceneInstance::Update( float Position, float LastPosition, class IMovieScenePlayer& Player )
 {
-	// Update each type
-	TArray<UObject*> Objects;
-	for( FMovieSceneInstanceMap::TIterator It( MasterTrackInstances ); It; ++It )
+	// Update  shot track
+	TArray<UObject*> NoObjects;
+	if( ShotTrackInstance.IsValid() )
 	{
-		It.Value()->Update( Position, LastPosition, Objects, Player );
+		ShotTrackInstance->Update( Position, LastPosition, NoObjects, Player );
 	}
 
+	// Update each master track
+	for( FMovieSceneInstanceMap::TIterator It( MasterTrackInstances ); It; ++It )
+	{
+		It.Value()->Update( Position, LastPosition, NoObjects, Player );
+	}
+
+	// Update tracks bound to objects
 	TMap<FGuid, FMovieSceneObjectBindingInstance>::TIterator ObjectIt = ObjectBindingInstances.CreateIterator();
 	for(; ObjectIt; ++ObjectIt )
 	{
@@ -59,6 +66,32 @@ void FMovieSceneInstance::Update( float Position, float LastPosition, class IMov
 
 void FMovieSceneInstance::RefreshInstance( IMovieScenePlayer& Player )
 {
+	UMovieSceneTrack* ShotTrack = MovieScene->GetShotTrack();
+
+	TSharedRef<FMovieSceneInstance> ThisInstance = AsShared();
+
+	FMovieSceneInstanceMap ShotTrackInstanceMap;
+	// Only if root movie scene. Any sub-movie scene that has a shot track is ignored
+	if( ShotTrack && Player.GetRootMovieSceneInstance() == ThisInstance )
+	{
+		if( ShotTrackInstance.IsValid() )
+		{
+			ShotTrackInstanceMap.Add(  ShotTrack, ShotTrackInstance );
+		}
+
+		TArray<UObject*> Objects;
+		TArray<UMovieSceneTrack*> Tracks;
+		Tracks.Add(ShotTrack);
+		RefreshInstanceMap(Tracks, Objects, ShotTrackInstanceMap, Player);
+
+		ShotTrackInstance = ShotTrackInstanceMap.FindRef( ShotTrack );
+	}
+	else if( !ShotTrack && ShotTrackInstance.IsValid() )
+	{
+		ShotTrackInstance->ClearInstance( Player );
+		ShotTrackInstance.Reset();
+	}
+
 	// Get all the master tracks and create instances for them if needed
 	const TArray<UMovieSceneTrack*>& MasterTracks = MovieScene->GetMasterTracks();
 	TArray<UObject*> Objects;
@@ -139,6 +172,8 @@ void FMovieSceneInstance::RefreshInstanceMap( const TArray<UMovieSceneTrack*>& T
 	{
 		if( !FoundTracks.Contains( It.Key().Get() ) )
 		{
+			It.Value()->ClearInstance( Player );
+
 			// This track was not found in the moviescene's track list so it was removed.
 			It.RemoveCurrent();
 		}

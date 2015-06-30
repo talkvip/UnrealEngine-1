@@ -367,6 +367,33 @@ class UMovieSceneTrack* UMovieScene::AddMasterTrack( TSubclassOf<UMovieSceneTrac
 	return CreatedType;
 }
 
+UMovieSceneTrack* UMovieScene::AddShotTrack( TSubclassOf<UMovieSceneTrack> TrackClass )
+{
+	if( !ShotTrack )
+	{
+		Modify();
+
+		ShotTrack = NewObject<UMovieSceneTrack>(this, TrackClass, FName("Shots"), RF_Transactional);
+	}
+
+	return ShotTrack;
+}
+
+UMovieSceneTrack* UMovieScene::GetShotTrack()
+{
+	return ShotTrack;
+}
+
+void UMovieScene::RemoveShotTrack()
+{
+	if( ShotTrack )
+	{
+		Modify();
+
+		ShotTrack = nullptr;
+	}
+}
+
 bool UMovieScene::RemoveMasterTrack( UMovieSceneTrack* Track ) 
 {
 	Modify();

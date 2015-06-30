@@ -17,7 +17,7 @@
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "BlueprintEditorModule.h"
 #include "MovieSceneTrack.h"
-#include "MovieSceneDirectorTrack.h"
+#include "MovieSceneShotTrack.h"
 #include "MovieSceneAudioTrack.h"
 #include "MovieSceneAnimationTrack.h"
 #include "MovieSceneTrackEditor.h"
@@ -32,7 +32,6 @@
 #include "MovieSceneInstance.h"
 #include "IKeyArea.h"
 #include "SnappingUtils.h"
-#include "STextEntryPopup.h"
 #include "GenericCommands.h"
 #include "Engine/BlueprintGeneratedClass.h"
 #include "Engine/Selection.h"
@@ -118,9 +117,9 @@ void FSequencer::InitSequencer( const FSequencerInitParams& InitParams, const TA
 			TSharedRef<FMovieSceneTrackEditor> TrackEditor = TrackEditorDelegates[DelegateIndex].Execute( SharedThis( this ) );
 
 			// Keep track of certain editors
-			if ( TrackEditor->SupportsType( UMovieSceneDirectorTrack::StaticClass() ) )
+			if ( TrackEditor->SupportsType( UMovieSceneShotTrack::StaticClass() ) )
 			{
-				DirectorTrackEditor = TrackEditor;
+				ShotTrackEditor = TrackEditor;
 			}
 			else if ( TrackEditor->SupportsType( UMovieSceneAnimationTrack::StaticClass() ) )
 			{
@@ -357,9 +356,9 @@ void FSequencer::PopToMovieScene( TSharedRef<FMovieSceneInstance> SubMovieSceneI
 
 void FSequencer::AddNewShot(FGuid CameraGuid)
 {
-	if (DirectorTrackEditor.IsValid())
+	if (ShotTrackEditor.IsValid())
 	{
-		DirectorTrackEditor.Pin()->AddKey(CameraGuid);
+		ShotTrackEditor.Pin()->AddKey(CameraGuid);
 	}
 }
 
@@ -369,26 +368,6 @@ void FSequencer::AddAnimation(FGuid ObjectGuid, class UAnimSequence* AnimSequenc
 	{
 		AnimationTrackEditor.Pin()->AddKey(ObjectGuid, AnimSequence);
 	}
-}
-
-void FSequencer::RenameShot(UMovieSceneSection* ShotSection)
-{
-	auto ActualShotSection = CastChecked<UMovieSceneShotSection>(ShotSection);
-
-	TSharedRef<STextEntryPopup> TextEntry = 
-		SNew(STextEntryPopup)
-		.Label(NSLOCTEXT("Sequencer", "RenameShotHeader", "Name"))
-		.DefaultText( ActualShotSection->GetTitle() )
-		.OnTextCommitted(this, &FSequencer::RenameShotCommitted, ShotSection)
-		.ClearKeyboardFocusOnCommit( false );
-	
-	NameEntryPopupMenu = FSlateApplication::Get().PushMenu(
-		SequencerWidget.ToSharedRef(),
-		FWidgetPath(),
-		TextEntry,
-		FSlateApplication::Get().GetCursorPos(),
-		FPopupTransitionEffect( FPopupTransitionEffect::TypeInPopup )
-		);
 }
 
 void FSequencer::DeleteSection(class UMovieSceneSection* Section)
@@ -423,7 +402,7 @@ void FSequencer::DeleteSelectedKeys()
 {
 	FScopedTransaction DeleteKeysTransaction( NSLOCTEXT("Sequencer", "DeleteSelectedKeys_Transaction", "Delete Selected Keys") );
 	bool bAnythingRemoved = false;
-	TArray<FSelectedKey> SelectedKeysArray = Selection.GetSelectedKeys()->Array();
+	TArray<FSelectedKey> SelectedKeysArray = Selection.GetSelectedKeys().Array();
 
 	for ( const FSelectedKey& Key : SelectedKeysArray )
 	{
@@ -438,20 +417,6 @@ void FSequencer::DeleteSelectedKeys()
 	if (bAnythingRemoved)
 	{
 		UpdateRuntimeInstances();
-	}
-}
-
-void FSequencer::RenameShotCommitted(const FText& RenameText, ETextCommit::Type CommitInfo, UMovieSceneSection* Section)
-{
-	if (CommitInfo == ETextCommit::OnEnter)
-	{
-		auto ShotSection = CastChecked<UMovieSceneShotSection>(Section);
-		ShotSection->SetTitle(RenameText);
-	}
-
-	if (NameEntryPopupMenu.IsValid())
-	{
-		NameEntryPopupMenu.Pin()->Dismiss();
 	}
 }
 
@@ -476,6 +441,8 @@ void FSequencer::OnMapChanged( class UWorld* NewWorld, EMapChangeType::Type MapC
 	if( ( MapChangeType == EMapChangeType::LoadMap || MapChangeType == EMapChangeType::NewMap ) )
 	{
 		SpawnOrDestroyPuppetObjects( GetFocusedMovieSceneInstance() );
+
+		NotifyMovieSceneDataChanged();
 	}
 }
 
@@ -591,16 +558,7 @@ void FSequencer::SetGlobalTime( float NewTime )
 
 	RootMovieSceneInstance->Update( ScrubPosition, LastTime, *this );
 
-	for(FLevelEditorViewportClient* LevelVC : GEditor->LevelViewportClients)
-	{
-		if (LevelVC && LevelVC->IsPerspective())
-		{
-			if (!LevelVC->IsRealtime())
-			{
-				LevelVC->Invalidate();
-			}
-		}
-	}
+	GEditor->RedrawLevelEditingViewports();
 }
 
 TOptional<float> FSequencer::CalculateAutoscrollEncroachment(float NewTime) const
@@ -739,7 +697,7 @@ void FSequencer::GetRuntimeObjects( TSharedRef<FMovieSceneInstance> MovieSceneIn
 	}*/
 }
 
-void FSequencer::UpdatePreviewViewports(UObject* ObjectToViewThrough) const
+void FSequencer::UpdateCameraCut(UObject* ObjectToViewThrough, bool bNewCameraCut) const
 {
 	if(!IsPerspectiveViewportPosessionEnabled())
 	{
@@ -748,9 +706,9 @@ void FSequencer::UpdatePreviewViewports(UObject* ObjectToViewThrough) const
 
 	for(FLevelEditorViewportClient* LevelVC : GEditor->LevelViewportClients)
 	{
-		if(LevelVC && LevelVC->IsPerspective() && LevelVC->AllowMatineePreview())
+		if(LevelVC && LevelVC->IsPerspective() && LevelVC->AllowsCinematicPreview())
 		{
-			LevelVC->SetMatineeActorLock(Cast<AActor>(ObjectToViewThrough));
+			UpdatePreviewLevelViewportClientFromCameraCut( *LevelVC, ObjectToViewThrough, bNewCameraCut );
 		}
 	}
 }
@@ -760,9 +718,12 @@ EMovieScenePlayerStatus::Type FSequencer::GetPlaybackStatus() const
 	return PlaybackState;
 }
 
-void FSequencer::AddMovieSceneInstance( UMovieSceneSection& MovieSceneSection, TSharedRef<FMovieSceneInstance> InstanceToAdd )
+void FSequencer::AddOrUpdateMovieSceneInstance( UMovieSceneSection& MovieSceneSection, TSharedRef<FMovieSceneInstance> InstanceToAdd )
 {
-	MovieSceneSectionToInstanceMap.Add( &MovieSceneSection, InstanceToAdd );
+	if( !MovieSceneSectionToInstanceMap.Contains( &MovieSceneSection ) )
+	{
+		MovieSceneSectionToInstanceMap.Add( &MovieSceneSection, InstanceToAdd );
+	}
 
 	SpawnOrDestroyPuppetObjects( InstanceToAdd );
 }
@@ -771,8 +732,7 @@ void FSequencer::RemoveMovieSceneInstance( UMovieSceneSection& MovieSceneSection
 {
 	if( ObjectBindingManager->AllowsSpawnableObjects() )
 	{
-		const bool bDestroyAll = true;
-		ObjectBindingManager->SpawnOrDestroyObjectsForInstance( InstanceToRemove, bDestroyAll );
+		ObjectBindingManager->RemoveMovieSceneInstance( InstanceToRemove );
 	}
 	
 
@@ -934,7 +894,7 @@ TRange<float> FSequencer::GetTimeBounds() const
 	}
 
 	const UMovieScene* MovieScene = GetFocusedMovieScene();
-	const UMovieSceneTrack* AnimatableShot = MovieScene->FindMasterTrack( UMovieSceneDirectorTrack::StaticClass() );
+	const UMovieSceneTrack* AnimatableShot = MovieScene->FindMasterTrack( UMovieSceneShotTrack::StaticClass() );
 	if (AnimatableShot)
 	{
 		// try getting filtered shot boundaries
@@ -1212,6 +1172,10 @@ void FSequencer::OnRequestNodeDeleted( TSharedRef<const FSequencerDisplayNode>& 
 		{
 			FocusedMovieScene->RemoveMasterTrack( Track );
 		}
+		else if( FocusedMovieScene->GetShotTrack() == Track )
+		{
+			FocusedMovieScene->RemoveShotTrack();
+		}
 		else
 		{
 			FocusedMovieScene->RemoveTrack( Track );
@@ -1223,12 +1187,6 @@ void FSequencer::OnRequestNodeDeleted( TSharedRef<const FSequencerDisplayNode>& 
 	
 	if( bAnythingRemoved )
 	{
-		if( bAnySpawnablesRemoved )
-		{
-			// @todo Sequencer Sub-MovieScenes needs to destroy objects for all movie scenes that had this node
-			SpawnOrDestroyPuppetObjects( MovieSceneInstance );
-		}
-
 		NotifyMovieSceneDataChanged();
 	}
 }
@@ -1300,9 +1258,77 @@ void FSequencer::OnPostSaveWorld(uint32 SaveFlags, class UWorld* World, bool bSu
 	SetGlobalTime(GetGlobalTime());
 }
 
+void FSequencer::UpdatePreviewLevelViewportClientFromCameraCut( FLevelEditorViewportClient& InViewportClient, UObject* InCameraObject, bool bNewCameraCut ) const
+{
+	ACameraActor* Cam = Cast<ACameraActor>(InCameraObject);
+	if (Cam)
+	{
+		InViewportClient.SetViewLocation(Cam->GetActorLocation());
+		InViewportClient.SetViewRotation(Cam->GetActorRotation());
+
+		// @todo Sequencer previewing
+		/*InViewportClient.FadeAmount = InFadeAmount;
+		InViewportClient.bEnableFading = true;*/
+
+		/*InViewportClient.bEnableColorScaling = bInEnableColorScaling;
+		InViewportClient.ColorScale = InColorScale;*/
+
+		InViewportClient.bEditorCameraCut = bNewCameraCut;
+	}
+	else
+	{
+		InViewportClient.ViewFOV = InViewportClient.FOVAngle;
+
+		// @todo Sequencer previewing
+		/*InViewportClient.>FadeAmount = InFadeAmount;
+		InViewportClient.bEnableFading = true;*/
+
+		InViewportClient.bEditorCameraCut = false;
+	}
+
+	// Set the actor lock.
+	InViewportClient.SetMatineeActorLock(Cam);
+
+	// If viewing through a camera - enforce aspect ratio.
+	if (Cam)
+	{
+		if (Cam->GetCameraComponent()->AspectRatio == 0)
+		{
+			InViewportClient.AspectRatio = 1.7f;
+		}
+		else
+		{
+			InViewportClient.AspectRatio = Cam->GetCameraComponent()->AspectRatio;
+		}
+
+		//don't stop the camera from zooming when not playing back
+		InViewportClient.ViewFOV = Cam->GetCameraComponent()->FieldOfView;
+
+		// If there are selected actors, invalidate the viewports hit proxies, otherwise they won't be selectable afterwards
+		if (InViewportClient.Viewport && GEditor->GetSelectedActorCount() > 0)
+		{
+			InViewportClient.Viewport->InvalidateHitProxy();
+		}
+	}
+
+	// Update ControllingActorViewInfo, so it is in sync with the updated viewport
+	InViewportClient.UpdateViewForLockedActor();
+}
+
+void FSequencer::SaveCurrentMovieScene()
+{
+	UPackage* MovieScenePackage = GetFocusedMovieScene()->GetOutermost();
+
+	TArray<UPackage*> PackagesToSave;
+
+	PackagesToSave.Add( MovieScenePackage );
+
+	FEditorFileUtils::PromptForCheckoutAndSave( PackagesToSave, false, false );
+}
+
 void FSequencer::OnSectionSelectionChanged()
 {
-	for (TWeakObjectPtr<UMovieSceneSection> SelectedSection : *Selection.GetSelectedSections())
+	for (TWeakObjectPtr<UMovieSceneSection> SelectedSection : Selection.GetSelectedSections())
 	{
 		// if we select something, consider it unfilterable until we change shot filters
 		UnfilterableSections.AddUnique(TWeakObjectPtr<UMovieSceneSection>(SelectedSection));
@@ -1312,7 +1338,7 @@ void FSequencer::OnSectionSelectionChanged()
 void FSequencer::ZoomToSelectedSections()
 {
 	TArray< TRange<float> > Bounds;
-	for (TWeakObjectPtr<UMovieSceneSection> SelectedSection : *Selection.GetSelectedSections())
+	for (TWeakObjectPtr<UMovieSceneSection> SelectedSection : Selection.GetSelectedSections())
 	{
 		Bounds.Add(SelectedSection->GetRange());
 	}
@@ -1391,7 +1417,7 @@ void FSequencer::FilterToShotSections(const TArray< TWeakObjectPtr<class UMovieS
 void FSequencer::FilterToSelectedShotSections(bool bZoomToShotBounds)
 {
 	TArray< TWeakObjectPtr<UMovieSceneSection> > SelectedShotSections;
-	for (TWeakObjectPtr<UMovieSceneSection> SelectedSection : *Selection.GetSelectedSections())
+	for (TWeakObjectPtr<UMovieSceneSection> SelectedSection : Selection.GetSelectedSections())
 	{
 		if (SelectedSection->IsA<UMovieSceneShotSection>())
 		{
@@ -1416,12 +1442,12 @@ TSharedRef<ISequencerObjectBindingManager> FSequencer::GetObjectBindingManager()
 	return ObjectBindingManager.ToSharedRef();
 }
 
-FSequencerSelection* FSequencer::GetSelection()
+FSequencerSelection& FSequencer::GetSelection()
 {
-	return &Selection;
+	return Selection;
 }
 
-TArray< TWeakObjectPtr<UMovieSceneSection> > FSequencer::GetFilteringShotSections() const
+const TArray< TWeakObjectPtr<UMovieSceneSection> >& FSequencer::GetFilteringShotSections() const
 {
 	return FilteringShots;
 }
@@ -1472,7 +1498,7 @@ void FSequencer::DeleteSelectedItems()
 	if (Selection.GetActiveSelection() == FSequencerSelection::EActiveSelection::KeyAndSection)
 	{
 		DeleteSelectedKeys();
-		for (TWeakObjectPtr<UMovieSceneSection> SelectedSection : *Selection.GetSelectedSections())
+		for (TWeakObjectPtr<UMovieSceneSection> SelectedSection : Selection.GetSelectedSections())
 		{
 			DeleteSection(SelectedSection.Get());
 		}
@@ -1530,8 +1556,8 @@ void FSequencer::SetKey()
 		FGuid ObjectGuid = GetHandleToObject(*It);
 		for ( auto& TrackEditor : TrackEditors )
 		{
-			// @todo Handle this director track business better
-			if (TrackEditor != DirectorTrackEditor.Pin())
+			// @todo Handle this shot track business better
+			if (TrackEditor != ShotTrackEditor.Pin())
 			{
 				TrackEditor->AddKey(ObjectGuid);
 			}
@@ -1678,6 +1704,14 @@ void FSequencer::BuildObjectBindingContextMenu(FMenuBuilder& MenuBuilder, const 
 	for (int32 i = 0; i < TrackEditors.Num(); ++i)
 	{
 		TrackEditors[i]->BuildObjectBindingContextMenu(MenuBuilder, ObjectBinding, ObjectClass);
+	}
+}
+
+void FSequencer::BuildObjectBindingEditButtons(TSharedPtr<SHorizontalBox> EditBox, const FGuid& ObjectBinding, const UClass* ObjectClass)
+{
+	for (int32 i = 0; i < TrackEditors.Num(); ++i)
+	{
+		TrackEditors[i]->BuildObjectBindingEditButtons(EditBox, ObjectBinding, ObjectClass);
 	}
 }
 

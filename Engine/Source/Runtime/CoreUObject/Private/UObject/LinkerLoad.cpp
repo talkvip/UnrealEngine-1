@@ -85,9 +85,12 @@ void FLinkerLoad::CreateActiveRedirectsMap(const FString& GEngineIniName)
 		FConfigSection* PackageRedirects = GConfig->GetSectionPrivate( TEXT("/Script/Engine.Engine"), false, true, GEngineIniName );
 		if (PackageRedirects)
 		{
+			FDeferredMessageLog RedirectErrors(NAME_LoadErrors);
+
+			static FName ActiveClassRedirectsKey(TEXT("ActiveClassRedirects"));
 			for( FConfigSection::TIterator It(*PackageRedirects); It; ++It )
 			{
-				if( It.Key() == TEXT("ActiveClassRedirects") )
+				if (It.Key() == ActiveClassRedirectsKey)
 				{
 					FName OldClassName = NAME_None;
 					FName NewClassName = NAME_None;
@@ -109,16 +112,32 @@ void FLinkerLoad::CreateActiveRedirectsMap(const FString& GEngineIniName)
 					if (NewSubobjName != NAME_None || OldSubobjName != NAME_None)
 					{
 						check(OldSubobjName != NAME_None && OldClassName != NAME_None );
+
+						if (SubobjectNameRedirects.Contains(OldSubobjName))
+						{
+							RedirectErrors.Error(FText::Format(LOCTEXT("SubobjRedirectorCollision", "{0} contains a collision with multiple redirectors for old suboject named {1} (old class {2})"), FText::FromName(ActiveClassRedirectsKey), FText::FromName(OldSubobjName), FText::FromName(OldClassName)));
+						}
+
 						SubobjectNameRedirects.Add(OldSubobjName, FSubobjectRedirect(OldClassName, NewSubobjName));
 					}
 					//instances only
 					else if( bInstanceOnly )
 					{
+						if (ObjectNameRedirectsInstanceOnly.Contains(OldClassName))
+						{
+							RedirectErrors.Error(FText::Format(LOCTEXT("InstanceOnlyRedirectorCollision", "{0} contains a collision with multiple instance-only redirectors for old class named {1}"), FText::FromName(ActiveClassRedirectsKey), FText::FromName(OldClassName)));
+						}
+
 						ObjectNameRedirectsInstanceOnly.Add(OldClassName,NewClassName);
 					}
 					//objects only on a per-object basis
 					else if( ObjectName != NAME_None )
 					{
+						if (ObjectNameRedirectsObjectOnly.Contains(OldClassName))
+						{
+							RedirectErrors.Error(FText::Format(LOCTEXT("ObjectOnlyRedirectorCollision", "{0} contains a collision with multiple object-only redirectors for old class named {1}"), FText::FromName(ActiveClassRedirectsKey), FText::FromName(OldClassName)));
+						}
+
 						ObjectNameRedirectsObjectOnly.Add(ObjectName, NewClassName);
 					}
 					//full redirect
@@ -126,10 +145,15 @@ void FLinkerLoad::CreateActiveRedirectsMap(const FString& GEngineIniName)
 					{
 						if (NewClassName.ToString().Find(TEXT("."), ESearchCase::CaseSensitive) != NewClassName.ToString().Find(TEXT("."), ESearchCase::CaseSensitive, ESearchDir::FromEnd))
 						{
-							UE_LOG(LogLinker, Error, TEXT("Currently we cannot rename nested objects for '%s'; if you want to leave the outer alone, just specify the name with no path"), *NewClassName.ToString());
+							RedirectErrors.Error(FText::Format(LOCTEXT("NestedRenameDisallowed", "{0} cannot contain a rename of nested objects for '{1}'; if you want to leave the outer alone, just specify the name with no path"), FText::FromName(ActiveClassRedirectsKey), FText::FromName(NewClassName)));
 						}
 						else
 						{
+							if (ObjectNameRedirects.Contains(OldClassName))
+							{
+								RedirectErrors.Error(FText::Format(LOCTEXT("RedirectorCollision", "{0} contains a collision with multiple redirectors for old class named {1}"), FText::FromName(ActiveClassRedirectsKey), FText::FromName(OldClassName)));
+							}
+
 							ObjectNameRedirects.Add(OldClassName,NewClassName);
 						}
 					}
@@ -945,7 +969,7 @@ FLinkerLoad::ELinkerStatus FLinkerLoad::SerializePackageFileSummary()
 			UE_LOG(LogLinker, Warning, TEXT("Asset '%s' has been saved with engine version newer than current and therefore can't be loaded. CurrEngineVersion: %s AssetEngineVersion: %s"), *Filename, *GEngineVersion.ToString(), *Summary.CompatibleWithEngineVersion.ToString() );
 			return LINKER_Failed;
 		}
-		else if( !FPlatformProperties::RequiresCookedData() && !Summary.SavedByEngineVersion.IsPromotedBuild() && GEngineVersion.IsPromotedBuild() )
+		else if( !FPlatformProperties::RequiresCookedData() && !Summary.SavedByEngineVersion.HasChangelist() && GEngineVersion.HasChangelist() )
 		{
 			// This warning can be disabled in ini with [Core.System] ZeroEngineVersionWarning=False
 			static struct FInitZeroEngineVersionWarning
@@ -1256,7 +1280,7 @@ FLinkerLoad::ELinkerStatus FLinkerLoad::FixupImportMap()
 				{
 					FObjectImport& Import = ImportMap[i];
 					{
-						FSubobjectRedirect *Redirect = SubobjectNameRedirects.Find(Import.ObjectName);
+						FSubobjectRedirect* Redirect = SubobjectNameRedirects.Find(Import.ObjectName);
 						if (Redirect)
 						{
 							if (Import.ClassName == Redirect->MatchClass)
@@ -2203,8 +2227,10 @@ FLinkerLoad::EVerifyResult FLinkerLoad::VerifyImport(int32 ImportIndex)
 				{
 					FDeferredMessageLog LoadErrors(NAME_LoadErrors);
 					// put something into the load warnings dialog, with any extra information from above (in WarningAppend)
-					TSharedRef<FTokenizedMessage> TokenizedMessage = LoadErrors.Error(FText::Format(LOCTEXT("ImportFailure", "Failed import for {ImportClass}"), FText::FromName(GetImportClassName(ImportIndex))));
-					TokenizedMessage->AddToken(FAssetNameToken::Create(GetImportPathName(ImportIndex)));
+					TSharedRef<FTokenizedMessage> TokenizedMessage = LoadErrors.Error(FText());
+					TokenizedMessage->AddToken(FAssetNameToken::Create(LinkerRoot->GetName()));
+					TokenizedMessage->AddToken(FTextToken::Create(FText::Format(LOCTEXT("ImportFailure", " : Failed import for {ImportClass}"), FText::FromName(GetImportClassName(ImportIndex)))));
+					TokenizedMessage->AddToken(FAssetNameToken::Create(GetImportPathName(ImportIndex)));					
 
 					if (!WarningAppend.IsEmpty())
 					{
@@ -3911,6 +3937,12 @@ UObject* FLinkerLoad::CreateImport( int32 Index )
 				FUObjectThreadContext::Get().ImportCount++;
 				FLinkerManager::Get().AddLoaderWithNewImports(this);
 			}
+		}
+
+		if (Import.XObject == nullptr)
+		{
+			const FString OuterName = Import.OuterIndex.IsNull() ? LinkerRoot->GetFullName() : GetFullImpExpName(Import.OuterIndex);
+			UE_LOG(LogLinker, Verbose, TEXT("Failed to resolve import named %s in %s"), *Import.ObjectName.ToString(), *OuterName);
 		}
 	}
 	return Import.XObject;

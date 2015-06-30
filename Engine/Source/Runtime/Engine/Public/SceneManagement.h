@@ -618,8 +618,12 @@ public:
 	/** Initialization constructor. */
 	FSkyLightSceneProxy(const class USkyLightComponent* InLightComponent);
 
+	void Initialize(float InBlendFraction, const FSHVectorRGB3* InIrradianceEnvironmentMap, const FSHVectorRGB3* BlendDestinationIrradianceEnvironmentMap);
+
 	const USkyLightComponent* LightComponent;
 	FTexture* ProcessedTexture;
+	float BlendFraction;
+	FTexture* BlendDestinationProcessedTexture;
 	float SkyDistanceThreshold;
 	bool bCastShadows;
 	bool bWantsStaticShadowing;
@@ -914,9 +918,6 @@ protected:
 
 	const uint32 bCastShadowsFromCinematicObjectsOnly : 1;
 
-	/** Whether the light will cast modulated shadows when using the forward renderer (mobile). */
-	const uint32 bCastModulatedShadows : 1;
-
 	/** Whether the light affects translucency or not.  Disabling this can save GPU time when there are many small lights. */
 	const uint32 bAffectTranslucentLighting : 1;
 
@@ -949,6 +950,9 @@ protected:
 
 	/** Only for whole scene directional lights, 0: no FarShadowCascades, otherwise the count of cascades between WholeSceneDynamicShadowRadius and FarShadowDistance that are covered by distant shadow cascades. */
 	uint32 FarShadowCascadeCount;
+
+	/** Whether the light will cast modulated shadows when using the forward renderer (mobile). */
+	uint32 bCastModulatedShadows : 1;
 
 	/** Modulated shadow color. */
 	FLinearColor ModulatedShadowColor;

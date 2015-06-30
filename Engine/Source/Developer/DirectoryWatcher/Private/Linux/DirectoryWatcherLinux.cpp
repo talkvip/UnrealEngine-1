@@ -102,7 +102,7 @@ bool FDirectoryWatcherLinux::UnregisterDirectoryChangedCallback(const FString& D
 	return false;
 }
 
-bool FDirectoryWatcherLinux::RegisterDirectoryChangedCallback_Handle( const FString& Directory, const FDirectoryChanged& InDelegate, FDelegateHandle& OutHandle, bool bIncludeDirectoryChanges )
+bool FDirectoryWatcherLinux::RegisterDirectoryChangedCallback_Handle(const FString& Directory, const FDirectoryChanged& InDelegate, FDelegateHandle& OutHandle, uint32 Flags)
 {
 	FDirectoryWatchRequestLinux** RequestPtr = RequestMap.Find(Directory);
 	FDirectoryWatchRequestLinux* Request = NULL;
@@ -120,7 +120,7 @@ bool FDirectoryWatcherLinux::RegisterDirectoryChangedCallback_Handle( const FStr
 		NumRequests++;
 
 		// Begin reading directory changes
-		if (!Request->Init(Directory, bIncludeDirectoryChanges))
+		if (!Request->Init(Directory, Flags))
 		{
 			UE_LOG(LogDirectoryWatcher, Warning, TEXT("Failed to begin reading directory changes for %s."), *Directory);
 			delete Request;
@@ -135,6 +135,7 @@ bool FDirectoryWatcherLinux::RegisterDirectoryChangedCallback_Handle( const FStr
 
 	return true;
 }
+
 
 bool FDirectoryWatcherLinux::UnregisterDirectoryChangedCallback_Handle(const FString& Directory, FDelegateHandle InHandle)
 {

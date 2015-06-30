@@ -885,7 +885,7 @@ void SSlateFileOpenDlg::OnPathClicked(const FString & NewPath)
 
 	// set new current path and flag that we need to update directory display
 	CurrentPath = NewPath;
-	bRebuildDirPath = false;
+	bRebuildDirPath = true;
 	bNeedsBuilding = true;
 
 	RefreshCrumbs();
@@ -1160,7 +1160,7 @@ void SSlateFileOpenDlg::ReadDir(bool bIsRefresh)
 	{
 		DirectoryWatcher->RegisterDirectoryChangedCallback_Handle(CurrentPath.Get(),
 						IDirectoryWatcher::FDirectoryChanged::CreateRaw(this, &SSlateFileOpenDlg::OnDirectoryChanged),
-						OnDialogDirectoryChangedDelegateHandle);
+						OnDialogDirectoryChangedDelegateHandle, IDirectoryWatcher::WatchOptions::IncludeDirectoryChanges | IDirectoryWatcher::WatchOptions::IgnoreChangesInSubtree);
 
 		RegisteredPath = CurrentPath.Get();
 	}

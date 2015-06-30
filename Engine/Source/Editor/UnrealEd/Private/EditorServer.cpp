@@ -1797,6 +1797,15 @@ void UEditorEngine::CheckForWorldGCLeaks( UWorld* NewWorld, UPackage* WorldPacka
 
 void UEditorEngine::EditorDestroyWorld( FWorldContext & Context, const FText& CleanseText, UWorld* NewWorld )
 {
+	if( FModuleManager::Get().IsModuleLoaded("LevelEditor") )
+	{
+		FLevelEditorModule& LevelEditor = FModuleManager::GetModuleChecked<FLevelEditorModule>("LevelEditor");
+
+		// Notify level editors of the map change
+		LevelEditor.BroadcastMapChanged( Context.World(), EMapChangeType::TearDownWorld );
+	}
+
+
 	UWorld* ContextWorld = Context.World();
 
 	if (ContextWorld == NULL )
@@ -2071,7 +2080,7 @@ UWorld* UEditorEngine::NewMap()
 	GUnrealEd->ResetTransaction( CleanseText );
 
 	// Invalidate all the level viewport hit proxies
-	InvalidateAllLevelEditorViewportClientHitProxies();
+	RedrawLevelEditingViewports();
 
 	return NewWorld;
 }
@@ -2510,7 +2519,7 @@ bool UEditorEngine::Map_Load(const TCHAR* Str, FOutputDevice& Ar)
 					{
 						FLevelEditorModule& LevelEditor = FModuleManager::GetModuleChecked<FLevelEditorModule>("LevelEditor");
 
-						// Notify slate level editors of the map change
+						// Notify level editors of the map change
 						LevelEditor.BroadcastMapChanged( Context.World(), EMapChangeType::LoadMap );
 					}
 
@@ -2521,7 +2530,7 @@ bool UEditorEngine::Map_Load(const TCHAR* Str, FOutputDevice& Ar)
 					}
 
 					// Invalidate all the level viewport hit proxies
-					InvalidateAllLevelEditorViewportClientHitProxies();
+					RedrawLevelEditingViewports();
 				}
 			}
 			else

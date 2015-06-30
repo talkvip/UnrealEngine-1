@@ -7,6 +7,7 @@
 #include "PhysicsEngine/PhysicsConstraintComponent.h"
 #include "SkeletalMeshTypes.h"
 #include "Animation/AnimationAsset.h"
+#include "AnimCurveTypes.h"
 #include "SkeletalMeshComponent.generated.h"
 
 class UAnimInstance;
@@ -27,6 +28,9 @@ struct FAnimationEvaluationContext
 	TArray<FActiveVertexAnim> VertexAnims;
 	FVector RootBoneTranslation;
 
+	// Double buffer curve data
+	FBlendedCurve	Curve;
+
 	// Are we performing interpolation this tick
 	bool bDoInterpolation;
 
@@ -35,6 +39,9 @@ struct FAnimationEvaluationContext
 
 	// Are we storing data in cache bones this tick
 	bool bDuplicateToCacheBones;
+
+	// duplicate the cache curves
+	bool bDuplicateToCacheCurve;
 
 	FAnimationEvaluationContext()
 	{
@@ -317,6 +324,9 @@ public:
 	/** Cached SpaceBases for Update Rate optimization. */
 	UPROPERTY(Transient)
 	TArray<FTransform> CachedSpaceBases;
+
+	/** Cached Curve result for Update Rate optimization */
+	FBlendedCurve CachedCurve;
 
 	/** Used to scale speed of all animations on this skeletal mesh. */
 	UPROPERTY(EditAnywhere, AdvancedDisplay, BlueprintReadWrite, Category=Animation)
@@ -924,7 +934,7 @@ public:
 	* @param	OutVertexAnims			Active vertex animations
 	* @param	OutRootBoneTranslation	Calculated root bone translation
 	*/
-	void PerformAnimationEvaluation(const USkeletalMesh* InSkeletalMesh, UAnimInstance* InAnimInstance, TArray<FTransform>& OutSpaceBases, TArray<FTransform>& OutLocalAtoms, TArray<FActiveVertexAnim>& OutVertexAnims, FVector& OutRootBoneTranslation) const;
+	void PerformAnimationEvaluation(const USkeletalMesh* InSkeletalMesh, UAnimInstance* InAnimInstance, TArray<FTransform>& OutSpaceBases, TArray<FTransform>& OutLocalAtoms, TArray<FActiveVertexAnim>& OutVertexAnims, FVector& OutRootBoneTranslation, FBlendedCurve& OutCurve) const;
 	void PostAnimEvaluation( FAnimationEvaluationContext& EvaluationContext );
 
 	/**
@@ -932,7 +942,11 @@ public:
 	 *
 	 * @param	RequiredBones	List of bones to be blend
 	 */
-	void BlendPhysicsBones( TArray<FBoneIndexType>& RequiredBones );
+	void BlendPhysicsBones( TArray<FBoneIndexType>& Bones )
+	{
+		PerformBlendPhysicsBones(Bones, AnimEvaluationContext.LocalAtoms);
+	}
+
 
 	/** Take the results of the physics and blend them with the animation state (based on the PhysicsWeight parameter), and update the SpaceBases array. */
 	void BlendInPhysics();	
@@ -1194,7 +1208,7 @@ protected:
 	
 private:
 	/** Evaluate Anim System **/
-	void EvaluateAnimation(const USkeletalMesh* InSkeletalMesh, UAnimInstance* InAnimInstance, TArray<FTransform>& OutLocalAtoms, TArray<struct FActiveVertexAnim>& OutVertexAnims, FVector& OutRootBoneTranslation) const;
+	void EvaluateAnimation(const USkeletalMesh* InSkeletalMesh, UAnimInstance* InAnimInstance, TArray<FTransform>& OutLocalAtoms, TArray<struct FActiveVertexAnim>& OutVertexAnims, FVector& OutRootBoneTranslation, FBlendedCurve& OutCurve) const;
 
 	/**
 	* Take the SourceAtoms array (translation vector, rotation quaternion and scale vector) and update the array of component-space bone transformation matrices (DestSpaceBases).
@@ -1217,9 +1231,12 @@ private:
 	// Reference to our current parallel animation evaluation task (if there is one)
 	FGraphEventRef				ParallelAnimationEvaluationTask;
 
+	// Reference to our current blend physics task (if there is one)
+	FGraphEventRef				ParallelBlendPhysicsCompletionTask;
+
 public:
 	// Parallel evaluation wrappers
-	void ParallelAnimationEvaluation() { PerformAnimationEvaluation(AnimEvaluationContext.SkeletalMesh, AnimEvaluationContext.AnimInstance, AnimEvaluationContext.SpaceBases, AnimEvaluationContext.LocalAtoms, AnimEvaluationContext.VertexAnims, AnimEvaluationContext.RootBoneTranslation); }
+	void ParallelAnimationEvaluation() { PerformAnimationEvaluation(AnimEvaluationContext.SkeletalMesh, AnimEvaluationContext.AnimInstance, AnimEvaluationContext.SpaceBases, AnimEvaluationContext.LocalAtoms, AnimEvaluationContext.VertexAnims, AnimEvaluationContext.RootBoneTranslation, AnimEvaluationContext.Curve); }
 	void CompleteParallelAnimationEvaluation(bool bDoPostAnimEvaluation)
 	{
 		ParallelAnimationEvaluationTask.SafeRelease(); //We are done with this task now, clean up!
@@ -1246,6 +1263,18 @@ private:
 
 	// Handles registering/unregistering the pre cloth tick as it is needed
 	void UpdatePreClothTickRegisteredState();
+	friend class FParallelBlendPhysicsTask;
+	
+	//wrapper for parallel blend physics
+	void ParallelBlendPhysics() { PerformBlendPhysicsBones(RequiredBones, AnimEvaluationContext.LocalAtoms); }
+
+	void PerformBlendPhysicsBones(const TArray<FBoneIndexType>& InRequiredBones, TArray<FTransform>& InLocalAtoms);
+
+	friend class FParallelBlendPhysicsCompletionTask;
+	void CompleteParallelBlendPhysics();
+
+	friend class FTickClothingTask;
+	void PerformTickClothing(float DeltaTime);
 
 	// these are deprecated variables from removing SingleAnimSkeletalComponent
 	// remove if this version goes away : VER_UE4_REMOVE_SINGLENODEINSTANCE

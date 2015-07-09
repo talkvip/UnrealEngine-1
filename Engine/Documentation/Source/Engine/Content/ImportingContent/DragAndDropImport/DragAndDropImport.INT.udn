@@ -2,50 +2,105 @@ Availability:Docs
 Title:Drag-and-Drop Import
 Crumbs:%ROOT%, Engine, Engine/Content, Engine/Content/ImportingContent
 Description:Learn how to import content by dragging and dropping files into your Content Browser.
+prereq:Engine/Basics/Projects/Browser
+Related: GettingStarted
+Related: GettingStarted/HowTo
+Related: Engine/Content/Packs
 SkillLevel: Beginner
 Version: 4.8
 
 [REGION:note]
-Before you get started: Download Quick Start Assets from the following link.
+Before getting started: Download and extract sample assets from the following link.
 * [Sample Assets](SampleAssets.zip)
 [/REGION]
 
-This is where the description is going.
+Unreal Engine supports **drag-and-drop** workflows for developers who prefer to **drag-and-drop** content into their project directories.
 
 ## Goal
 
-This is where the goal is going.
+The focus of this guide is to show developers how to **drag-and-drop** content into the Unreal Editor.
 
-## Objective
+## Objectives
 
-This is where the objective is going.
+After going through this tutorial, developers will know the following:
 
-## Importing using Click and Drag
+*	How to **drag-and-drop** content into their projects.
+*	How to verify that assets were properly imported into the project folder.
 
-(#Bookmark2)
+![](ContentHowToPrjSetup.png)
 
-**Dragging** files from your hard drive into the **Content Browser** (pictured below) is another way of adding content to your project.
+[REGION:note]
+If you're creating a new project, use these project **settings** (also pictured above):
+*	**Desktop / Console**
+*	**Maximum Quality**
+*	**No Starter Content**
+[/REGION]
 
-<!--![](CnD_importAll.jpg)-->
+## Dragging-and-Dropping Content into the Project
 
-### When Importing Meshes
+After locating your content, **drag-and-drop** the files from your Explorer menu into the Content Browser's file box (pictured below).
 
-<!--![](FBXImportOptions.png)-->
+![](DragAndDropContent.png)
 
-UE4 prompts you to define import options for FBX/OBJ files (pictured above).
+1.	Entering the Editor, the **FBX Import Options** dialog box appears. **Clicking** **Import** or **Import All** will add your meshes to the Project.
 
-### When Importing Textures
+	![](FBX_ImportOptionsDialogBox.png)
 
-UE4 batch imports [__supported__](Engine/Content/Types/Textures/Importing "Click HERE to learn more about supported images.") image files for you.
+1.	A confirmation box appears in the lower right corner of the Unreal Editor (pictured below).
 
-If you see the following pop-up message:
+	![](TextureDialogBox.png)
 
-<!--![](TextureImportMessage.png)-->
+1.	Click **OK** to accept the **T_Rock_04_n.TGA** normal map's settings (pictured above).
 
-UE4 just prevented you from importing an unsupported image file.
+	[REGION:warning]
+	UE4 batch imports [supported](Engine/Content/Types/Textures/Importing "Click HERE to learn more about supported images.") image files for you.
+	
+	If you see the following pop-up message:
+	
+	![](TextureImportMessage.png)
+	
+	UE4 just prevented you from importing an unsupported image file.
+	
+	Also, if you see the following pop-up message:
+	
+	![](nonpoweoftwowarning.png)
+	
+	UE4 is telling you that odd-sized images aren't streamed or mipmapped.
+	[/REGION]
 
-Also, if you see the following pop-up message:
+1.	Unsaved assets are marked with an asterisk (pictured below).
 
-<!--![](nonpoweoftwowarning.png)-->
+	![](UnsavedAssets.png)
 
-UE4 is telling you that odd-sized images aren't streamed or mipmapped.
+1.	**Click** the **Save All** button to save your imported meshes.
+
+	![](SaveAllButton_UI.png)
+
+1.	A **Save Content** dialog box appears (pictured below). **Click** **Save Selected** to save your imported assets.
+
+	![](SaveSelectedButton_UI.png)
+
+1.	UE4 removes the asterisk from saved assets (pictured below).
+
+	![](SavedAssets.png)
+
+## Verifying Imported Assets
+
+It's good practice to verify that ** *.uasset files ** were imported properly onto the hard disk.
+
+1.	From inside the editor, **right-click** the **'Content'** folder to open the **Folder Options** dialog box (pictured below).
+
+	![](FolderDialogBox_UI.png)
+
+1.	Under **Folder Options**, **click 'Show In Explorer'** (pictured below).
+
+	![](ShowInExplorer_Selection.png)
+
+1.	With Explorer open, verify that UE4 created the corresponding ** *.uasset files **  for your project (pictured below).
+
+	![](ImportedAssets_Explorer.png)
+
+Now that we've reached the end of this tutorial, you've learned how to:
+
+&#x2713;	**Drag-and-drop** content into your project.  
+&#x2713;	Verify that assets were properly imported to the project folder.

@@ -488,7 +488,7 @@ class ENGINE_API UKismetMathLibrary : public UBlueprintFunctionLibrary
 	static int32 FFloor(float A);
 	
 	/* Rounds A to an integer with truncation towards zero.  (e.g. -1.7 truncated to -1, 2.8 truncated to 2) */
-	UFUNCTION(BlueprintPure, meta=(DisplayName = "Truncate"), Category="Math|Float")
+	UFUNCTION(BlueprintPure, meta=(DisplayName = "Truncate", BlueprintAutocast), Category="Math|Float")
 	static int32 FTrunc(float A);
 	
 	/* Rounds A to the smallest following integer */
@@ -535,6 +535,17 @@ class ENGINE_API UKismetMathLibrary : public UBlueprintFunctionLibrary
 	UFUNCTION(BlueprintPure, Category = "Math|Float")
 	static float MakePulsatingValue(float InCurrentTime, float InPulsesPerSecond = 1.0f, float InPhase = 0.0f);
 
+	/** 
+	 * Returns a new rotation component value
+	 *
+	 * @param InCurrent is the current rotation value
+	 * @param InDesired is the desired rotation value
+	 * @param  is the rotation amount to apply
+	 *
+	 * @return a new rotation component value clamped in the range (-360,360)
+	 */
+	UFUNCTION(BlueprintPure, Category="Math|Float")
+	static float FixedTurn(float InCurrent, float InDesired, float InDeltaRate);
 
 	//
 	// Vector functions.
@@ -543,6 +554,10 @@ class ENGINE_API UKismetMathLibrary : public UBlueprintFunctionLibrary
 	/* Scales Vector A by B */
 	UFUNCTION(BlueprintPure, meta=(DisplayName = "vector * float", CompactNodeTitle = "*", Keywords = "* multiply"), Category="Math|Vector")
 	static FVector Multiply_VectorFloat(FVector A, float B);
+	
+	/* Scales Vector A by B */
+	UFUNCTION(BlueprintPure, meta=(DisplayName = "vector * int", CompactNodeTitle = "*", Keywords = "* multiply"), Category="Math|Vector")
+	static FVector Multiply_VectorInt(FVector A, int32 B);
 
 	/* Element-wise Vector multiplication (Result = {A.x*B.x, A.y*B.y, A.z*B.z}) */
 	UFUNCTION(BlueprintPure, meta=(DisplayName = "vector * vector", CompactNodeTitle = "*", Keywords = "* multiply", CommutativeAssociativeBinaryOperator = "true"), Category="Math|Vector")
@@ -552,6 +567,10 @@ class ENGINE_API UKismetMathLibrary : public UBlueprintFunctionLibrary
 	UFUNCTION(BlueprintPure, meta=(DisplayName = "vector / float", CompactNodeTitle = "/", Keywords = "/ divide division"), Category="Math|Vector")
 	static FVector Divide_VectorFloat(FVector A, float B = 1.f);
 
+	/* Vector divide by an integer */
+	UFUNCTION(BlueprintPure, meta=(DisplayName = "vector / int", CompactNodeTitle = "/", Keywords = "/ divide division"), Category="Math|Vector")
+	static FVector Divide_VectorInt(FVector A, int32 B = 1);
+	
 	/* Vector divide by vector */
 	UFUNCTION(BlueprintPure, meta=(DisplayName = "vector / vector", CompactNodeTitle = "/", Keywords = "/ divide division"), Category="Math|Vector")
 	static FVector Divide_VectorVector(FVector A, FVector B = FVector(1.f,1.f,1.f));
@@ -560,15 +579,25 @@ class ENGINE_API UKismetMathLibrary : public UBlueprintFunctionLibrary
 	UFUNCTION(BlueprintPure, meta=(DisplayName = "vector + vector", CompactNodeTitle = "+", Keywords = "+ add plus", CommutativeAssociativeBinaryOperator = "true"), Category="Math|Vector")
 	static FVector Add_VectorVector(FVector A, FVector B);
 
+	/** Adds a float to each component of a vector */
 	UFUNCTION(BlueprintPure, meta=(DisplayName = "vector + float", CompactNodeTitle = "+", Keywords = "+ add plus"), Category="Math|Vector")
 	static FVector Add_VectorFloat(FVector A, float B);
+	
+	/** Adds an integer to each component of a vector */
+	UFUNCTION(BlueprintPure, meta=(DisplayName = "vector + int", CompactNodeTitle = "+", Keywords = "+ add plus"), Category="Math|Vector")
+	static FVector Add_VectorInt(FVector A, int32 B);
 
 	/* Vector subtraction */
 	UFUNCTION(BlueprintPure, meta=(DisplayName = "vector - vector", CompactNodeTitle = "-", Keywords = "- subtract minus"), Category="Math|Vector")
 	static FVector Subtract_VectorVector(FVector A, FVector B);
 
+	/** Subtracts a float from each component of a vector */
 	UFUNCTION(BlueprintPure, meta=(DisplayName = "vector - float", CompactNodeTitle = "-", Keywords = "- subtract minus"), Category="Math|Vector")
 	static FVector Subtract_VectorFloat(FVector A, float B);
+
+	/** Subtracts an integer from each component of a vector */
+	UFUNCTION(BlueprintPure, meta=(DisplayName = "vector - int", CompactNodeTitle = "-", Keywords = "- subtract minus"), Category="Math|Vector")
+	static FVector Subtract_VectorInt(FVector A, int32 B);
 
 	/* Returns result of vector A rotated by the inverse of Rotator B */
 	UFUNCTION(BlueprintPure, meta=(DisplayName = "UnrotateVector"), Category="Math|Vector")
@@ -718,24 +747,28 @@ class ENGINE_API UKismetMathLibrary : public UBlueprintFunctionLibrary
 	// Rotator functions.
 	//
 
-	//Returns true if rotator A is equal to rotator B (A == B) within a specified error tolerance
+	// Returns true if rotator A is equal to rotator B (A == B) within a specified error tolerance
 	UFUNCTION(BlueprintPure, meta=(DisplayName = "Equal (Rotator)", CompactNodeTitle = "==", Keywords = "== equal"), Category="Math|Rotator")
 	static bool EqualEqual_RotatorRotator(FRotator A, FRotator B, float ErrorTolerance = 1.e-4f);
 
-	//Returns true if rotator A is not equal to rotator B (A != B) within a specified error tolerance
+	// Returns true if rotator A is not equal to rotator B (A != B) within a specified error tolerance
 	UFUNCTION(BlueprintPure, meta=(DisplayName = "Not Equal (Rotator)", CompactNodeTitle = "!=", Keywords = "!= not equal"), Category="Math|Rotator")
 	static bool NotEqual_RotatorRotator(FRotator A, FRotator B, float ErrorTolerance = 1.e-4f);
 
-	//Returns rotator representing rotator A scaled by B 
+	// Returns rotator representing rotator A scaled by B 
 	UFUNCTION(BlueprintPure, meta=(DisplayName = "ScaleRotator", CompactNodeTitle = "*", Keywords = "* multiply rotate rotation"), Category="Math|Rotator")
 	static FRotator Multiply_RotatorFloat(FRotator A, float B);
+	
+	// Returns rotator representing rotator A scaled by B 
+	UFUNCTION(BlueprintPure, meta=(DisplayName = "ScaleRotator (int)", CompactNodeTitle = "*", Keywords = "* multiply rotate rotation"), Category="Math|Rotator")
+	static FRotator Multiply_RotatorInt(FRotator A, int32 B);
 
 	/** Combine 2 rotations to give you the resulting rotation */
 	UFUNCTION(BlueprintPure, meta=(DisplayName = "CombineRotators", Keywords="rotate rotation add"), Category="Math|Rotator")
 	static FRotator ComposeRotators(FRotator A, FRotator B);
 
 	/** Negate a rotator*/
-	UFUNCTION(BlueprintPure, Category="Math|Rotator", meta=(Keywords="rotate rotation"))
+	UFUNCTION(BlueprintPure, Category="Math|Rotator", meta=(DisplayName="InvertRotator", Keywords="rotate rotation"))
 	static FRotator NegateRotator(FRotator A);
 
 	/** Get the reference frame direction vectors (axes) described by this rotation */
@@ -942,6 +975,14 @@ class ENGINE_API UKismetMathLibrary : public UBlueprintFunctionLibrary
 	UFUNCTION(BlueprintPure, meta=(DisplayName="UtcNow"), Category="Math|DateTime")
 	static FDateTime UtcNow( );
 
+	/* Converts a date string in ISO-8601 format to a DateTime object */
+	UFUNCTION(BlueprintPure, Category="Math|DateTime")
+	static bool DateTimeFromIsoString(FString IsoString, FDateTime& Result);
+
+	/* Converts a date string to a DateTime object */
+	UFUNCTION(BlueprintPure, Category="Math|DateTime")
+	static bool DateTimeFromString(FString DateTimeString, FDateTime& Result);
+
 	//
 	// Timespan functions.
 	//
@@ -1070,74 +1111,79 @@ class ENGINE_API UKismetMathLibrary : public UBlueprintFunctionLibrary
 	UFUNCTION(BlueprintPure, meta=(DisplayName="ZeroValue"), Category="Math|Timespan")
 	static FTimespan TimespanZeroValue( );
 
+	/* Converts a time span string to a Timespan object */
+	UFUNCTION(BlueprintPure, Category="Math|Timespan")
+	static bool TimespanFromString(FString TimespanString, FTimespan& Result);
+
+
 	// -- Begin K2 utilities
 
 	/** Converts a byte to a float */
-	UFUNCTION(BlueprintPure, meta=(DisplayName = "ToFloat (byte)", CompactNodeTitle = "->", Keywords="cast convert"), Category="Math|Conversions")
+	UFUNCTION(BlueprintPure, meta=(DisplayName = "ToFloat (byte)", CompactNodeTitle = "->", Keywords="cast convert", BlueprintAutocast), Category="Math|Conversions")
 	static float Conv_ByteToFloat(uint8 InByte);
 
 	/** Converts an integer to a float */
-	UFUNCTION(BlueprintPure, meta=(DisplayName = "ToFloat (int)", CompactNodeTitle = "->", Keywords="cast convert"), Category="Math|Conversions")
+	UFUNCTION(BlueprintPure, meta=(DisplayName = "ToFloat (int)", CompactNodeTitle = "->", Keywords="cast convert", BlueprintAutocast), Category="Math|Conversions")
 	static float Conv_IntToFloat(int32 InInt);
 
 	/** Converts an integer to a byte (if the integer is too large, returns the low 8 bits) */
-	UFUNCTION(BlueprintPure, meta=(DisplayName = "ToByte (int)", CompactNodeTitle = "->", Keywords="cast convert"), Category="Math|Conversions")
+	UFUNCTION(BlueprintPure, meta=(DisplayName = "ToByte (int)", CompactNodeTitle = "->", Keywords="cast convert", BlueprintAutocast), Category="Math|Conversions")
 	static uint8 Conv_IntToByte(int32 InInt);
 
 	/** Converts a int to a bool*/
-	UFUNCTION(BlueprintPure, meta=(DisplayName = "ToBool (int)", CompactNodeTitle = "->", Keywords="cast convert"), Category="Math|Conversions")
+	UFUNCTION(BlueprintPure, meta=(DisplayName = "ToBool (int)", CompactNodeTitle = "->", Keywords="cast convert", BlueprintAutocast), Category="Math|Conversions")
 	static bool Conv_IntToBool(int32 InInt);
 
 	/** Converts a bool to an int */
-	UFUNCTION(BlueprintPure, meta=(DisplayName = "ToInt (bool)", CompactNodeTitle = "->", Keywords="cast convert"), Category="Math|Conversions")
+	UFUNCTION(BlueprintPure, meta=(DisplayName = "ToInt (bool)", CompactNodeTitle = "->", Keywords="cast convert", BlueprintAutocast), Category="Math|Conversions")
 	static int32 Conv_BoolToInt(bool InBool);
 
 	/** Converts a bool to a float (0.0f or 1.0f) */
-	UFUNCTION(BlueprintPure, meta=(DisplayName = "ToFloat (bool)", CompactNodeTitle = "->", Keywords="cast convert"), Category="Math|Conversions")
+	UFUNCTION(BlueprintPure, meta=(DisplayName = "ToFloat (bool)", CompactNodeTitle = "->", Keywords="cast convert", BlueprintAutocast), Category="Math|Conversions")
 	static float Conv_BoolToFloat(bool InBool);
 
 	/** Converts a bool to a byte */
-	UFUNCTION(BlueprintPure, meta=(DisplayName = "ToByte (bool)", CompactNodeTitle = "->", Keywords="cast convert"), Category="Math|Conversions")
+	UFUNCTION(BlueprintPure, meta=(DisplayName = "ToByte (bool)", CompactNodeTitle = "->", Keywords="cast convert", BlueprintAutocast), Category="Math|Conversions")
 	static uint8 Conv_BoolToByte(bool InBool);
 	
 	/** Converts a byte to an integer */
-	UFUNCTION(BlueprintPure, meta=(DisplayName = "ToInt (byte)", CompactNodeTitle = "->", Keywords="cast convert"), Category="Math|Conversions")
+	UFUNCTION(BlueprintPure, meta=(DisplayName = "ToInt (byte)", CompactNodeTitle = "->", Keywords="cast convert", BlueprintAutocast), Category="Math|Conversions")
 	static int32 Conv_ByteToInt(uint8 InByte);
 
 	/** Converts a vector to LinearColor */
-	UFUNCTION(BlueprintPure, meta=(DisplayName = "ToLinearColor (vector)", CompactNodeTitle = "->", Keywords="cast convert"), Category="Math|Conversions")
+	UFUNCTION(BlueprintPure, meta=(DisplayName = "ToLinearColor (vector)", CompactNodeTitle = "->", Keywords="cast convert", BlueprintAutocast), Category="Math|Conversions")
 	static FLinearColor Conv_VectorToLinearColor(FVector InVec);
 
 	/** Converts a LinearColor to a vector */
-	UFUNCTION(BlueprintPure, meta=(DisplayName = "ToVector (linear color)", CompactNodeTitle = "->", Keywords="cast convert"), Category="Math|Conversions")
+	UFUNCTION(BlueprintPure, meta=(DisplayName = "ToVector (linear color)", CompactNodeTitle = "->", Keywords="cast convert", BlueprintAutocast), Category="Math|Conversions")
 	static FVector Conv_LinearColorToVector(FLinearColor InLinearColor);
 
 	/** Converts a color to LinearColor */
-	UFUNCTION(BlueprintPure, meta=(DisplayName = "ToLinearColor (color)", CompactNodeTitle = "->", Keywords="cast convert"), Category="Math|Conversions")
+	UFUNCTION(BlueprintPure, meta=(DisplayName = "ToLinearColor (color)", CompactNodeTitle = "->", Keywords="cast convert", BlueprintAutocast), Category="Math|Conversions")
 	static FLinearColor Conv_ColorToLinearColor(FColor InColor);
 
 	/** Converts a LinearColor to a color*/
-	UFUNCTION(BlueprintPure, meta=(DisplayName = "ToColor (linear color)", CompactNodeTitle = "->", Keywords="cast convert"), Category="Math|Conversions")
+	UFUNCTION(BlueprintPure, meta=(DisplayName = "ToColor (linear color)", CompactNodeTitle = "->", Keywords="cast convert", BlueprintAutocast), Category="Math|Conversions")
 	static FColor Conv_LinearColorToColor(FLinearColor InLinearColor);
 
 	/** Convert a vector to a transform. Uses vector as location */
-	UFUNCTION(BlueprintPure, meta=(DisplayName = "ToTransform (vector)", CompactNodeTitle = "->", Keywords="cast convert"), Category="Math|Conversions")
+	UFUNCTION(BlueprintPure, meta=(DisplayName = "ToTransform (vector)", CompactNodeTitle = "->", Keywords="cast convert", BlueprintAutocast), Category="Math|Conversions")
 	static FTransform Conv_VectorToTransform(FVector InLocation);
 	
 	/** Convert a Vector to a Vector2D */
-	UFUNCTION(BlueprintPure, meta=(DisplayName = "ToVector2D (Vector)", CompactNodeTitle = "->", Keywords="cast convert"), Category="Math|Conversions")
+	UFUNCTION(BlueprintPure, meta=(DisplayName = "ToVector2D (Vector)", CompactNodeTitle = "->", Keywords="cast convert", BlueprintAutocast), Category="Math|Conversions")
 	static FVector2D Conv_VectorToVector2D(FVector InVector);
 
 	/** Convert a Vector2D to a Vector */
-	UFUNCTION(BlueprintPure, meta=(DisplayName = "ToVector (Vector2D)", CompactNodeTitle = "->", Keywords="cast convert"), Category="Math|Conversions")
+	UFUNCTION(BlueprintPure, meta=(DisplayName = "ToVector (Vector2D)", CompactNodeTitle = "->", Keywords="cast convert", BlueprintAutocast), Category="Math|Conversions")
 	static FVector Conv_Vector2DToVector(FVector2D InVector2D, float Z = 0);
 
 	/** Convert a float into a vector, where each element is that float */
-	UFUNCTION(BlueprintPure, meta=(DisplayName = "ToVector (float)", CompactNodeTitle = "->", Keywords="cast convert"), Category="Math|Conversions")
+	UFUNCTION(BlueprintPure, meta=(DisplayName = "ToVector (float)", CompactNodeTitle = "->", Keywords="cast convert", BlueprintAutocast), Category="Math|Conversions")
 	static FVector Conv_FloatToVector(float InFloat);
 
 	/** Convert a float into a LinearColor, where each element is that float */
-	UFUNCTION(BlueprintPure, meta=(DisplayName = "ToLinearColor (float)", CompactNodeTitle = "->", Keywords="cast convert"), Category="Math|Conversions")
+	UFUNCTION(BlueprintPure, meta=(DisplayName = "ToLinearColor (float)", CompactNodeTitle = "->", Keywords="cast convert", BlueprintAutocast), Category="Math|Conversions")
 	static FLinearColor Conv_FloatToLinearColor(float InFloat);
 
 	/** Makes a vector {X, Y, Z} */
@@ -1168,10 +1214,19 @@ class ENGINE_API UKismetMathLibrary : public UBlueprintFunctionLibrary
 	UFUNCTION(BlueprintPure, Category="Math|Vector", meta=(Keywords="rotation rotate"))
 	static FVector GetUpVector(FRotator InRot);
 
-	/** Makes a rotator {Pitch, Yaw, Roll} from rotation values supplied in degrees */
+	/** Makes a rotator {Roll, Pitch, Yaw} from rotation values supplied in degrees */
 	UFUNCTION(BlueprintPure, Category="Math|Rotator", meta=(Keywords="construct build rotation rotate rotator makerotator", NativeMakeFunc))
-	static FRotator MakeRot(float Pitch, float Yaw, float Roll);
-	
+	static FRotator MakeRotator(
+		UPARAM(DisplayName="X (Roll)") float Roll,	
+		UPARAM(DisplayName="Y (Pitch)") float Pitch,
+		UPARAM(DisplayName="Z (Yaw)") float Yaw);
+
+	DEPRECATED(4.9, "Method renamed to MakeRotator as the parameter order changed")
+	static inline FRotator MakeRot(float Pitch, float Yaw, float Roll)
+	{
+		return MakeRotator(Roll, Pitch, Yaw);
+	}
+
 	/** Find a rotation for an object at Start location to point at Target location. */
 	UFUNCTION(BlueprintPure, Category="Math|Rotator", meta=(Keywords="rotation rotate"))
 	static FRotator FindLookAtRotation(const FVector& Start, const FVector& Target);
@@ -1212,9 +1267,18 @@ class ENGINE_API UKismetMathLibrary : public UBlueprintFunctionLibrary
 	UFUNCTION(BlueprintPure, Category="Math|Rotator", meta=(Keywords="construct build rotation rotate rotator makerotator"))
 	static FRotator MakeRotFromZY(const FVector& Z, const FVector& Y);
 
-	/** Breaks apart a rotator into Pitch, Yaw, Roll angles in degrees*/
-	UFUNCTION(BlueprintPure, Category="Math|Rotator", meta=(Keywords="rotation rotate rotator breakrotator", NativeBreakFunc))
-	static void BreakRot(FRotator InRot, float& Pitch, float& Yaw, float& Roll);
+	/** Breaks apart a rotator into {Roll, Pitch, Yaw} angles in degrees */
+	UFUNCTION(BlueprintPure, Category = "Math|Rotator", meta = (Keywords = "rotation rotate rotator breakrotator", NativeBreakFunc))
+	static void BreakRotator(FRotator InRot,
+		UPARAM(DisplayName="X (Roll)") float& Roll,
+		UPARAM(DisplayName="Y (Pitch)") float& Pitch,
+		UPARAM(DisplayName="Z (Yaw)") float& Yaw);
+
+	DEPRECATED(4.9, "Method renamed to BreakRotator as the parameter order changed")
+	static inline void BreakRot(FRotator InRot, float& Pitch, float& Yaw, float& Roll)
+	{
+		BreakRotator(InRot, Roll, Pitch, Yaw);
+	}
 
 	/** Breaks apart a rotator into its component axes */
 	UFUNCTION(BlueprintPure, Category="Math|Rotator", meta=(Keywords="rotation rotate rotator breakrotator"))
@@ -1301,11 +1365,11 @@ class ENGINE_API UKismetMathLibrary : public UBlueprintFunctionLibrary
 	static FRotator MakeRotationFromAxes(FVector Forward, FVector Right, FVector Up);
 
 	/** Create a rotator which orients X along the supplied direction vector */
-	UFUNCTION(BlueprintPure, meta=(DisplayName = "RotationFromXVector", Keywords="rotation rotate cast convert"), Category="Math|Rotator")
+	UFUNCTION(BlueprintPure, meta=(DisplayName = "RotationFromXVector", Keywords="rotation rotate cast convert", BlueprintAutocast), Category="Math|Rotator")
 	static FRotator Conv_VectorToRotator(FVector InVec);
 
 	/** Get the X direction vector after this rotation */
-	UFUNCTION(BlueprintPure, meta=(DisplayName = "GetRotationXVector", Keywords="rotation rotate cast convert"), Category="Math|Rotator")
+	UFUNCTION(BlueprintPure, meta=(DisplayName = "GetRotationXVector", Keywords="rotation rotate cast convert", BlueprintAutocast), Category="Math|Rotator")
 	static FVector Conv_RotatorToVector(FRotator InRot);
 
 
@@ -1434,6 +1498,19 @@ class ENGINE_API UKismetMathLibrary : public UBlueprintFunctionLibrary
 	/** Tries to reach a target transform. */
 	UFUNCTION(BlueprintPure, Category="Math|Interpolation")
 	static FTransform TInterpTo(const FTransform& Current, const FTransform& Target, float DeltaTime, float InterpSpeed);
+
+	/** Returns true if transform A is equal to transform B */
+	UFUNCTION(BlueprintPure, meta = (DisplayName = "Equal Transform", CompactNodeTitle = "==", Keywords = "== equal"), Category="Math|Transform")
+	static bool EqualEqual_TransformTransform(const FTransform& A, const FTransform& B);
+
+	/** 
+	 *	Returns true if transform A is nearly equal to B 
+	 *	@param LocationTolerance	How close position of transforms need to be to be considered equal
+	 *	@param RotationTolerance	How close rotations of transforms need to be to be considered equal
+	 *	@param Scale3DTolerance		How close scale of transforms need to be to be considered equal
+	 */
+	UFUNCTION(BlueprintPure, meta = (DisplayName = "Nearly Equal (transform)", Keywords = "== equal"), Category = "Math|Transform")
+	static bool NearlyEqual_TransformTransform(const FTransform& A, const FTransform& B, float LocationTolerance = 1.e-4f, float RotationTolerance = 1.e-4f, float Scale3DTolerance = 1.e-4f);
 
 	//
 	// Vector2D functions
@@ -1640,7 +1717,7 @@ class ENGINE_API UKismetMathLibrary : public UBlueprintFunctionLibrary
 	 *
 	 * @return Whether the points are relatively coplanar, based on the tolerance
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Math|Geometry")
+	UFUNCTION(BlueprintPure, Category = "Math|Geometry")
 	static bool PointsAreCoplanar(const TArray<FVector>& Points, float Tolerance = 0.1f);
 
 	//
@@ -1653,7 +1730,7 @@ class ENGINE_API UKismetMathLibrary : public UBlueprintFunctionLibrary
 	 * @param		Intersection - The point of intersection between the line and the plane
 	 * @return		True if the intersection test was successful.
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Math|Intersection")
+	UFUNCTION(BlueprintPure, Category = "Math|Intersection")
 	static bool LinePlaneIntersection(const FVector& LineStart, const FVector& LineEnd, const FPlane& APlane, float& T, FVector& Intersection);
 
 	/**
@@ -1662,6 +1739,6 @@ class ENGINE_API UKismetMathLibrary : public UBlueprintFunctionLibrary
 	 * @param		Intersection - The point of intersection between the line and the plane
 	 * @return		True if the intersection test was successful.
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Math|Intersection", meta = (DisplayName = "Line Plane Intersection (Origin & Normal)"))
+	UFUNCTION(BlueprintPure, Category = "Math|Intersection", meta = (DisplayName = "Line Plane Intersection (Origin & Normal)"))
 	static bool LinePlaneIntersection_OriginNormal(const FVector& LineStart, const FVector& LineEnd, FVector PlaneOrigin, FVector PlaneNormal, float& T, FVector& Intersection);
 };

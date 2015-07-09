@@ -5,6 +5,7 @@
 #include "SecureHash.h"
 #include "WindowsApplication.h"
 #include "EngineVersion.h"
+#include "WindowsPlatformCrashContext.h"
 
 #include "GenericPlatformChunkInstall.h"
 
@@ -1886,6 +1887,9 @@ bool FWindowsPlatformMisc::GetWindowTitleMatchingText(const TCHAR* TitleStartsWi
 
 void FWindowsPlatformMisc::RaiseException( uint32 ExceptionCode )
 {
+	/** This is the last place to gather memory stats before exception. */
+	FGenericCrashContext::CrashMemoryStats = FPlatformMemory::GetStats();
+
 	::RaiseException( ExceptionCode, 0, 0, NULL );
 }
 

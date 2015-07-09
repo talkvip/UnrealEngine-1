@@ -1193,7 +1193,9 @@ void UInstancedStaticMeshComponent::GetStaticLightingInfo(FStaticLightingPrimiti
 		// Need to create per-LOD instance data to fix that
 		if (!bCanLODsShareStaticLighting)
 		{
-			UE_LOG(LogStaticMesh, Warning, TEXT("Instanced meshes don't yet support unique static lighting for each LOD, lighting on LOD 1+ may be incorrect"));
+			FMessageLog("LightingResults").Message(EMessageSeverity::Warning)
+				->AddToken(FUObjectToken::Create(this))
+				->AddToken(FTextToken::Create(NSLOCTEXT("InstancedStaticMesh", "UniqueStaticLightingForLODWarning", "Instanced meshes don't yet support unique static lighting for each LOD, lighting on LOD 1+ may be incorrect")));
 			bCanLODsShareStaticLighting = true;
 		}
 
@@ -1481,9 +1483,35 @@ bool UInstancedStaticMeshComponent::UpdateInstanceTransform(int32 InstanceIndex,
 	return true;
 }
 
+TArray<int32> UInstancedStaticMeshComponent::GetInstancesOverlappingSphere(const FVector& Center, float Radius, bool bSphereInWorldSpace) const
+{
+	TArray<int32> Result;
+
+	FSphere Sphere(Center, Radius);
+	if (bSphereInWorldSpace)
+	{
+		Sphere = Sphere.TransformBy(ComponentToWorld.Inverse());
+	}
+
+	float StaticMeshBoundsRadius = StaticMesh->GetBounds().SphereRadius;
+
+	for (int32 Index = 0; Index < PerInstanceSMData.Num(); Index++)
+	{
+		const FMatrix& Matrix = PerInstanceSMData[Index].Transform;
+		FSphere InstanceSphere(Matrix.GetOrigin(), StaticMeshBoundsRadius * Matrix.GetScaleVector().GetMax());
+
+		if (Sphere.Intersects(InstanceSphere))
+		{
+			Result.Add(Index);
+		}
+	}
+
+	return Result;
+}
+
 bool UInstancedStaticMeshComponent::ShouldCreatePhysicsState() const
 {
-	return IsRegistered() && (bAlwaysCreatePhysicsState || IsCollisionEnabled());
+	return IsRegistered() && !IsBeingDestroyed() && (bAlwaysCreatePhysicsState || IsCollisionEnabled());
 }
 
 void UInstancedStaticMeshComponent::ClearInstances()

@@ -141,6 +141,7 @@ FParallelCommandListSet::FParallelCommandListSet(const FViewInfo& InView, FRHICo
 	: View(InView)
 	, ParentCmdList(InParentCmdList)
 	, Snapshot(nullptr)
+	, NumAlloc(0)
 	, bParallelExecute(GRHISupportsParallelRHIExecute && bInParallelExecute)
 	, bCreateSceneContext(bInCreateSceneContext)
 {
@@ -155,6 +156,7 @@ FParallelCommandListSet::FParallelCommandListSet(const FViewInfo& InView, FRHICo
 
 FRHICommandList* FParallelCommandListSet::AllocCommandList()
 {
+	NumAlloc++;
 	return new FRHICommandList;
 }
 
@@ -162,6 +164,7 @@ void FParallelCommandListSet::Dispatch()
 {
 	check(IsInRenderingThread() && FMemStack::Get().GetNumMarks() == 1); // we do not want this popped before the end of the scene and it better be the scene allocator
 	check(CommandLists.Num() == Events.Num());
+	check(CommandLists.Num() == NumAlloc);
 	if (bSpewBalance)
 	{
 		// finish them all
@@ -202,6 +205,7 @@ void FParallelCommandListSet::Dispatch()
 	{
 		UE_CLOG(bSpewBalance, LogTemp, Display, TEXT("%d cmdlists for parallel translate"), CommandLists.Num());
 		check(GRHISupportsParallelRHIExecute);
+		NumAlloc -= CommandLists.Num();
 		ParentCmdList.QueueParallelAsyncCommandListSubmit(&Events[0], &CommandLists[0], &NumDrawsIfKnown[0], CommandLists.Num(), (MinDrawsPerCommandList * 4) / 3, bSpewBalance);
 		SetStateOnCommandList(ParentCmdList);
 	}
@@ -211,6 +215,7 @@ void FParallelCommandListSet::Dispatch()
 		for (int32 Index = 0; Index < CommandLists.Num(); Index++)
 		{
 			ParentCmdList.QueueAsyncCommandListSubmit(Events[Index], CommandLists[Index]);
+			NumAlloc--;
 		}
 	}
 	CommandLists.Reset();
@@ -222,6 +227,7 @@ FParallelCommandListSet::~FParallelCommandListSet()
 {
 	check(IsInRenderingThread() && FMemStack::Get().GetNumMarks() == 1); // we do not want this popped before the end of the scene and it better be the scene allocator
 	checkf(CommandLists.Num() == 0, TEXT("Derived class of FParallelCommandListSet did not call Dispatch in virtual destructor"));
+	checkf(NumAlloc == 0, TEXT("Derived class of FParallelCommandListSet did not call Dispatch in virtual destructor"));
 }
 
 FRHICommandList* FParallelCommandListSet::NewParallelCommandList()
@@ -974,14 +980,25 @@ void FViewInfo::InitRHIResources(const TArray<FProjectedShadowInfo*, SceneRender
 	}
 }
 
+// These are not real view infos, just dumb memory blocks
 static TArray<FViewInfo*> ViewInfoSnapshots;
+// these are never freed, even at program shutdown
+static TArray<FViewInfo*> FreeViewInfoSnapshots;
 
 FViewInfo* FViewInfo::CreateSnapshot() const
 {
 	QUICK_SCOPE_CYCLE_COUNTER(STAT_FViewInfo_CreateSnapshot);
 
-	check(IsInRenderingThread() && FMemStack::Get().GetNumMarks() == 1); // we do not want this popped before the end of the scene and it better be the scene allocator
-	FViewInfo* Result = (FViewInfo*)FMemStack::Get().Alloc(sizeof(FViewInfo),ALIGNOF(FViewInfo));
+	check(IsInRenderingThread()); // we do not want this popped before the end of the scene and it better be the scene allocator
+	FViewInfo* Result;
+	if (FreeViewInfoSnapshots.Num())
+	{
+		Result = FreeViewInfoSnapshots.Pop(false);
+	}
+	else
+	{
+		Result = (FViewInfo*)FMemory::Malloc(sizeof(FViewInfo), ALIGNOF(FViewInfo));
+	}
 	FMemory::Memcpy(*Result, *this);
 	TUniformBufferRef<FViewUniformShaderParameters> NullUniformBuffer;
 	FMemory::Memcpy(Result->UniformBuffer, NullUniformBuffer); // we want this to start null without a reference count, since we clear a ref later
@@ -995,9 +1012,20 @@ void FViewInfo::DestroyAllSnapshots()
 	QUICK_SCOPE_CYCLE_COUNTER(STAT_FViewInfo_DestroyAllSnapshots);
 
 	check(IsInRenderingThread());
+	// we will only keep double the number actually used, plus a few
+	int32 NumToRemove = FreeViewInfoSnapshots.Num() - (ViewInfoSnapshots.Num() + 2);
+	if (NumToRemove > 0)
+	{
+		for (int32 Index = 0; Index < NumToRemove; Index++)
+		{
+			FMemory::Free(FreeViewInfoSnapshots[Index]);
+		}
+		FreeViewInfoSnapshots.RemoveAt(0, NumToRemove, false);
+	}
 	for (FViewInfo* Snapshot : ViewInfoSnapshots)
 	{
 		Snapshot->UniformBuffer.SafeRelease();
+		FreeViewInfoSnapshots.Add(Snapshot);
 	}
 	ViewInfoSnapshots.Reset();
 }

@@ -53,6 +53,8 @@ public:
 /** A base class for all asset view items */
 class SAssetViewItem : public SCompoundWidget
 {
+	friend class SAssetViewItemToolTip;
+
 public:
 	DECLARE_DELEGATE_TwoParams( FOnAssetsDragDropped, const TArray<FAssetData>& /*AssetList*/, const FString& /*DestinationPath*/);
 	DECLARE_DELEGATE_TwoParams( FOnPathsDragDropped, const TArray<FString>& /*PathNames*/, const FString& /*DestinationPath*/);
@@ -142,6 +144,9 @@ protected:
 	/** Used by OnDragEnter, OnDragOver, and OnDrop to check and update the validity of the drag operation */
 	bool ValidateDragDrop( const FGeometry& MyGeometry, const FDragDropEvent& DragDropEvent, bool& OutIsKnownDragOperation ) const;
 
+	/** Check to see if the name should be read-only */
+	bool IsNameReadOnly() const;
+
 	/** Handles starting a name change */
 	virtual void HandleBeginNameChange( const FText& OriginalText );
 
@@ -170,7 +175,7 @@ protected:
 	EVisibility GetThumbnailEditModeUIVisibility() const;
 
 	/** Creates a tooltip widget for this item */
-	TSharedRef<SToolTip> CreateToolTipWidget() const;
+	TSharedRef<SWidget> CreateToolTipWidget() const;
 
 	/** Gets the visibility of the checked out by other text block in the tooltip */
 	EVisibility GetCheckedOutByOtherTextVisibility() const;
@@ -196,18 +201,39 @@ protected:
 	/** Cache the package name from the asset we are representing */
 	void CachePackageName();
 
+	/** Cache the tags that should appear in the tooltip for this item */
+	void CacheToolTipTags();
+
 	/** Whether this item is a folder */
 	bool IsFolder() const;
 
 	/** Set mips to be resident while this (loaded) asset is visible */
 	void SetForceMipLevelsToBeResident(bool bForce) const;
 
+	/** Delegate handler for when the source control provider changes */
+	void HandleSourceControlProviderChanged(class ISourceControlProvider& OldProvider, class ISourceControlProvider& NewProvider);
+
 	/** Delegate handler for when source control state changes */
 	void HandleSourceControlStateChanged();
 
 	/** Returns the width at which the name label will wrap the name */
 	virtual float GetNameTextWrapWidth() const { return 0.0f; }
+
 protected:
+	/** Data for a cached tag used in the tooltip for this item */
+	struct FToolTipTagItem
+	{
+		FToolTipTagItem(FText InKey, FText InValue, const bool InImportant)
+			: Key(MoveTemp(InKey))
+			, Value(MoveTemp(InValue))
+			, bImportant(InImportant)
+		{
+		}
+
+		FText Key;
+		FText Value;
+		bool bImportant;
+	};
 
 	TSharedPtr< SInlineEditableTextBlock > InlineRenameWidget;
 
@@ -225,6 +251,9 @@ protected:
 
 	/** The cached filename of the package containing the asset that this item represents */
 	FString CachedPackageFileName;
+
+	/** The cached tags that should appear in the tooltip for this item */
+	TArray<FToolTipTagItem> CachedToolTipTags;
 
 	/** Delegate for when an asset name has entered a rename state */
 	FOnRenameBegin OnRenameBegin;
@@ -285,6 +314,9 @@ protected:
 
 	/** Cached brush for the source control state */
 	const FSlateBrush* SCCStateBrush;
+
+	/** Delegate handle for the HandleSourceControlStateChanged function callback */
+	FDelegateHandle SourceControlStateChangedDelegateHandle;
 };
 
 

@@ -10,6 +10,7 @@
 #include "Engine/Channel.h"
 #include "Engine/Player.h"
 #include "Engine/NetDriver.h"
+#include "Runtime/PacketHandlers/PacketHandler/Public/PacketHandler.h"
 
 #include "NetConnection.generated.h"
 
@@ -204,6 +205,9 @@ public:
 	
 	uint32 bPendingDestroy:1;    // when true, playercontroller is being destroyed
 
+	// Packet Handler
+	TUniquePtr<PacketHandler> Handler;
+
 	/** Whether this channel needs to byte swap all data or not */
 	bool			bNeedsByteSwapping;
 	/** Net id of remote player on this connection. Only valid on client connections. */
@@ -352,7 +356,7 @@ public:
 	 *
 	 * @return true if it should be sent on this connection, false otherwise
 	 */
-	bool ShouldReplicateVoicePacketFrom(const FUniqueNetId& Sender);
+	ENGINE_API bool ShouldReplicateVoicePacketFrom(const FUniqueNetId& Sender);
 	
 	/**
 	 * @hack: set to net connection currently inside CleanUp(), for HasClientLoadedCurrentWorld() to be able to find it during PlayerController
@@ -596,7 +600,7 @@ public:
 	/**
 	 * @return Finds the voice channel for this connection or NULL if none
 	 */
-	class UVoiceChannel* GetVoiceChannel();
+	ENGINE_API class UVoiceChannel* GetVoiceChannel();
 
 	void FlushDormancy(class AActor* Actor);
 

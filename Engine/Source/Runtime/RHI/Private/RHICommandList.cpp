@@ -1401,9 +1401,6 @@ void* FRHICommandList::operator new(size_t Size)
 	//return FMemory::Malloc(Size);
 }
 
-/**
- * Custom delete
- */
 void FRHICommandList::operator delete(void *RawMemory)
 {
 	check(RawMemory != (void*) &GRHICommandList.GetImmediateCommandList());
@@ -1411,7 +1408,35 @@ void FRHICommandList::operator delete(void *RawMemory)
 	//FMemory::Free(RawMemory);
 }	
 
+void* FRHICommandListBase::operator new(size_t Size)
+{
+	check(0); // you shouldn't be creating these
+	return FMemory::Malloc(Size);
+}
+
+void FRHICommandListBase::operator delete(void *RawMemory)
+{
+	check(RawMemory != (void*) &GRHICommandList.GetImmediateCommandList());
+	RHICommandListAllocator.Free(RawMemory);
+	//FMemory::Free(RawMemory);
+}	
+
 ///////// Pass through functions that allow RHIs to optimize certain calls.
+
+FVertexBufferRHIRef FDynamicRHI::CreateAndLockVertexBuffer_RenderThread(class FRHICommandListImmediate& RHICmdList, uint32 Size, uint32 InUsage, FRHIResourceCreateInfo& CreateInfo, void*& OutDataBuffer)
+{
+	FVertexBufferRHIRef VertexBuffer = CreateVertexBuffer_RenderThread(RHICmdList, Size, InUsage, CreateInfo);
+	OutDataBuffer = LockVertexBuffer_RenderThread(RHICmdList, VertexBuffer, 0, Size, RLM_WriteOnly);
+
+	return VertexBuffer;
+}
+
+FIndexBufferRHIRef FDynamicRHI::CreateAndLockIndexBuffer_RenderThread(class FRHICommandListImmediate& RHICmdList, uint32 Stride, uint32 Size, uint32 InUsage, FRHIResourceCreateInfo& CreateInfo, void*& OutDataBuffer)
+{
+	FIndexBufferRHIRef IndexBuffer = CreateIndexBuffer_RenderThread(RHICmdList, Stride, Size, InUsage, CreateInfo);
+	OutDataBuffer = LockIndexBuffer_RenderThread(RHICmdList, IndexBuffer, 0, Size, RLM_WriteOnly);
+	return IndexBuffer;
+}
 
 
 FVertexBufferRHIRef FDynamicRHI::CreateVertexBuffer_RenderThread(class FRHICommandListImmediate& RHICmdList, uint32 Size, uint32 InUsage, FRHIResourceCreateInfo& CreateInfo)

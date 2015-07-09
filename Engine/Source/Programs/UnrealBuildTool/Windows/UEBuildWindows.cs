@@ -218,6 +218,24 @@ namespace UnrealBuildTool
             return new DirectoryInfo(Path.Combine(VSPath, "..", "Tools")).FullName;
         }
 
+		/**
+         *	If this platform can be compiled with SN-DBS
+         */
+		public override bool CanUseSNDBS()
+		{
+			// Check that SN-DBS is available
+			string SCERootPath = Environment.GetEnvironmentVariable("SCE_ROOT_DIR");
+			if (!String.IsNullOrEmpty(SCERootPath))
+			{
+				string SNDBSPath = Path.Combine(SCERootPath, "common", "sn-dbs", "bin", "dbsbuild.exe");
+				bool bIsSNDBSAvailable = File.Exists(SNDBSPath);
+				return bIsSNDBSAvailable;
+			}
+			else
+			{
+				return false;
+			}
+		}
 
         /**
          *	Register the platform with the UEBuildPlatform class

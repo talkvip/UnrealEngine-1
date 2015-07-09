@@ -8,6 +8,7 @@
 #include "AssetViewWidgets.h"
 #include "SThumbnailEditModeTools.h"
 #include "CollectionManagerModule.h"
+#include "CollectionViewUtils.h"
 #include "DragAndDrop/AssetDragDropOp.h"
 #include "DragAndDrop/AssetPathDragDropOp.h"
 #include "DragDropHandler.h"
@@ -84,16 +85,17 @@ TSharedRef<SWidget> FAssetViewItemHelper::CreateListTileItemContents(T* const In
 
 		TSharedPtr<FAssetViewFolder> AssetFolderItem = StaticCastSharedPtr<FAssetViewFolder>(InTileOrListItem->AssetItem);
 
-		const bool bIsDeveloperFolder = AssetFolderItem->bDeveloperFolder;
-
 		ECollectionShareType::Type CollectionFolderShareType = ECollectionShareType::CST_All;
-		const bool bIsCollectionFolder = ContentBrowserUtils::IsCollectionPath(AssetFolderItem->FolderPath, nullptr, &CollectionFolderShareType);
+		if (AssetFolderItem->bCollectionFolder)
+		{
+			ContentBrowserUtils::IsCollectionPath(AssetFolderItem->FolderPath, nullptr, &CollectionFolderShareType);
+		}
 
-		const FSlateBrush* FolderBaseImage = bIsDeveloperFolder 
+		const FSlateBrush* FolderBaseImage = AssetFolderItem->bDeveloperFolder 
 			? FEditorStyle::GetBrush("ContentBrowser.ListViewDeveloperFolderIcon.Base") 
 			: FEditorStyle::GetBrush("ContentBrowser.ListViewFolderIcon.Base");
 
-		const FSlateBrush* FolderTintImage = bIsDeveloperFolder 
+		const FSlateBrush* FolderTintImage = AssetFolderItem->bDeveloperFolder 
 			? FEditorStyle::GetBrush("ContentBrowser.ListViewDeveloperFolderIcon.Mask") 
 			: FEditorStyle::GetBrush("ContentBrowser.ListViewFolderIcon.Mask");
 
@@ -105,7 +107,7 @@ TSharedRef<SWidget> FAssetViewItemHelper::CreateListTileItemContents(T* const In
 			.ColorAndOpacity(InTileOrListItem, &T::GetAssetColor)
 		];
 
-		if (bIsCollectionFolder)
+		if (AssetFolderItem->bCollectionFolder)
 		{
 			FLinearColor IconColor = FLinearColor::White;
 			switch(CollectionFolderShareType)
@@ -204,6 +206,57 @@ TSharedRef<SWidget> FAssetViewItemHelper::CreateListTileItemContents(T* const In
 
 
 ///////////////////////////////
+// Asset view item tool tip
+///////////////////////////////
+
+class SAssetViewItemToolTip : public SToolTip
+{
+public:
+	SLATE_BEGIN_ARGS(SAssetViewItemToolTip)
+		: _AssetViewItem()
+	{ }
+
+		SLATE_ARGUMENT(TSharedPtr<SAssetViewItem>, AssetViewItem)
+
+	SLATE_END_ARGS()
+
+	void Construct(const FArguments& InArgs)
+	{
+		AssetViewItem = InArgs._AssetViewItem;
+
+		SToolTip::Construct(
+			SToolTip::FArguments()
+			.TextMargin(1.0f)
+			.BorderImage(FEditorStyle::GetBrush("ContentBrowser.TileViewTooltip.ToolTipBorder"))
+			);
+	}
+
+	// IToolTip interface
+	virtual bool IsEmpty() const override
+	{
+		return !AssetViewItem.IsValid();
+	}
+
+	virtual void OnOpening() override
+	{
+		TSharedPtr<SAssetViewItem> AssetViewItemPin = AssetViewItem.Pin();
+		if (AssetViewItemPin.IsValid())
+		{
+			SetContentWidget(AssetViewItemPin->CreateToolTipWidget());
+		}
+	}
+
+	virtual void OnClosed() override
+	{
+		SetContentWidget(SNullWidget::NullWidget);
+	}
+
+private:
+	TWeakPtr<SAssetViewItem> AssetViewItem;
+};
+
+
+///////////////////////////////
 // Asset view modes
 ///////////////////////////////
 
@@ -293,13 +346,14 @@ void SAssetViewItem::Construct( const FArguments& InArgs )
 	AssetDirtyBrush = FEditorStyle::GetBrush("ContentBrowser.ContentDirty");
 	SCCStateBrush = nullptr;
 
-	// refresh SCC state icon
-	HandleSourceControlStateChanged();
+	// Set our tooltip - this will refresh each time it's opened to make sure it's up-to-date
+	SetToolTip(SNew(SAssetViewItemToolTip).AssetViewItem(SharedThis(this)));
 
 	SourceControlStateDelay = 0.0f;
 	bSourceControlStateRequested = false;
 
-	ISourceControlModule::Get().GetProvider().RegisterSourceControlStateChanged_Handle(FSourceControlStateChanged::FDelegate::CreateSP(this, &SAssetViewItem::HandleSourceControlStateChanged));
+	ISourceControlModule::Get().RegisterProviderChanged(FSourceControlProviderChanged::FDelegate::CreateSP(this, &SAssetViewItem::HandleSourceControlProviderChanged));
+	SourceControlStateChangedDelegateHandle = ISourceControlModule::Get().GetProvider().RegisterSourceControlStateChanged_Handle(FSourceControlStateChanged::FDelegate::CreateSP(this, &SAssetViewItem::HandleSourceControlStateChanged));
 
 	// Source control state may have already been cached, make sure the control is in sync with 
 	// cached state as the delegate is not going to be invoked again until source control state 
@@ -415,6 +469,34 @@ FReply SAssetViewItem::OnDrop( const FGeometry& MyGeometry, const FDragDropEvent
 	return FReply::Unhandled();
 }
 
+bool SAssetViewItem::IsNameReadOnly() const
+{
+	if (ThumbnailEditMode.Get())
+	{
+		// Read-only while editing thumbnails
+		return true;
+	}
+
+	if (!AssetItem.IsValid())
+	{
+		// Read-only if no valid asset item
+		return true;
+	}
+
+	if (AssetItem->GetType() != EAssetItemType::Folder)
+	{
+		// Read-only if we can't be renamed
+		return !ContentBrowserUtils::CanRenameAsset(StaticCastSharedPtr<FAssetViewAsset>(AssetItem)->Data);
+	}
+	else
+	{
+		// Read-only if we can't be renamed
+		return !ContentBrowserUtils::CanRenameFolder(StaticCastSharedPtr<FAssetViewFolder>(AssetItem)->FolderPath);
+	}
+
+	return false;
+}
+
 void SAssetViewItem::HandleBeginNameChange( const FText& OriginalText )
 {
 	OnRenameBegin.ExecuteIfBound(AssetItem, OriginalText.ToString(), LastGeometry.GetClippingRect());
@@ -451,6 +533,8 @@ void SAssetViewItem::OnAssetDataChanged()
 	{
 		InlineRenameWidget->SetText( GetNameText() );
 	}
+
+	CacheToolTipTags();
 }
 
 void SAssetViewItem::DirtyStateChanged()
@@ -486,6 +570,19 @@ const FSlateBrush* SAssetViewItem::GetSCCStateImage() const
 	return SCCStateBrush;
 }
 
+void SAssetViewItem::HandleSourceControlProviderChanged(ISourceControlProvider& OldProvider, ISourceControlProvider& NewProvider)
+{
+	OldProvider.UnregisterSourceControlStateChanged_Handle(SourceControlStateChangedDelegateHandle);
+	SourceControlStateChangedDelegateHandle = NewProvider.RegisterSourceControlStateChanged_Handle(FSourceControlStateChanged::FDelegate::CreateSP(this, &SAssetViewItem::HandleSourceControlStateChanged));
+	
+	// Reset this so the state will be queried from the new provider on the next Tick
+	SourceControlStateDelay = 0.0f;
+	bSourceControlStateRequested = false;
+	SCCStateBrush = nullptr;
+	
+	HandleSourceControlStateChanged();
+}
+
 void SAssetViewItem::HandleSourceControlStateChanged()
 {
 	if ( ISourceControlModule::Get().IsEnabled() && AssetItem.IsValid() && (AssetItem->GetType() == EAssetItemType::Normal) && !AssetItem->IsTemporaryItem() && !FPackageName::IsScriptPackage(CachedPackageName) )
@@ -509,7 +606,7 @@ EVisibility SAssetViewItem::GetThumbnailEditModeUIVisibility() const
 }
 
 BEGIN_SLATE_FUNCTION_BUILD_OPTIMIZATION
-TSharedRef<SToolTip> SAssetViewItem::CreateToolTipWidget() const
+TSharedRef<SWidget> SAssetViewItem::CreateToolTipWidget() const
 {
 	if ( AssetItem.IsValid() )
 	{
@@ -521,12 +618,10 @@ TSharedRef<SToolTip> SAssetViewItem::CreateToolTipWidget() const
 		else if(AssetItem->GetType() != EAssetItemType::Folder)
 		{
 			const FAssetData& AssetData = StaticCastSharedPtr<FAssetViewAsset>(AssetItem)->Data;
-			UClass* AssetClass = FindObject<UClass>(ANY_PACKAGE, *AssetData.AssetClass.ToString());
 
 			// The tooltip contains the name, class, path, and asset registry tags
 			const FText NameText = FText::FromName( AssetData.AssetName );
 			const FText ClassText = FText::Format( LOCTEXT("ClassName", "({0})"), GetAssetClassText() );
-
 
 			// Create a box to hold every line of info in the body of the tooltip
 			TSharedRef<SVerticalBox> InfoBox = SNew(SVerticalBox);
@@ -545,87 +640,10 @@ TSharedRef<SToolTip> SAssetViewItem::CreateToolTipWidget() const
 				}
 			}
 
-			// If we are using a loaded class, find all the hidden tags so we don't display them
-			TMap<FName, UObject::FAssetRegistryTagMetadata> MetadataMap;
-			TSet<FName> ShownTags;
-			if ( AssetClass != NULL && AssetClass->GetDefaultObject() != NULL )
+			// Add tags
+			for (const auto& ToolTipTagItem : CachedToolTipTags)
 			{
-				AssetClass->GetDefaultObject()->GetAssetRegistryTagMetadata(MetadataMap);
-
-				TArray<UObject::FAssetRegistryTag> Tags;
-				AssetClass->GetDefaultObject()->GetAssetRegistryTags(Tags);
-
-				for ( auto TagIt = Tags.CreateConstIterator(); TagIt; ++TagIt )
-				{
-					if (TagIt->Type != UObject::FAssetRegistryTag::TT_Hidden )
-					{
-						ShownTags.Add(TagIt->Name);
-					}
-				}
-			}
-
-			// If an asset class could not be loaded we cannot determine hidden tags so display no tags.  
-			if( AssetClass != NULL )
-			{
-				// Add all asset registry tags and values
-				for ( auto TagIt = AssetData.TagsAndValues.CreateConstIterator(); TagIt; ++TagIt )
-				{
-					// Skip tags that are set to be hidden
-					if ( ShownTags.Contains(TagIt.Key()) )
-					{
-						const UObject::FAssetRegistryTagMetadata* Metadata = MetadataMap.Find(TagIt.Key());
-
-						const bool bImportant = (Metadata != nullptr && !Metadata->ImportantValue.IsEmpty() && Metadata->ImportantValue == TagIt.Value());
-
-						// Since all we have at this point is a string, we can't be very smart here.
-						// We need to strip some noise off class paths in some cases, but can't load the asset to inspect its UPROPERTYs manually due to performance concerns.
-						FString ValueString = TagIt.Value();
-						const TCHAR StringToRemove[] = TEXT("Class'/Script/");
-						if (ValueString.StartsWith(StringToRemove) && ValueString.EndsWith(TEXT("'")))
-						{
-							// Remove the class path for native classes, and also remove Engine. for engine classes
-							const int32 SizeOfPrefix = ARRAY_COUNT(StringToRemove);
-							ValueString = ValueString.Mid(SizeOfPrefix - 1, ValueString.Len() - SizeOfPrefix).Replace(TEXT("Engine."), TEXT(""));
-						}
-						
-						// Check for DisplayName metadata
-						FText DisplayName;
-						if (UProperty* Field = FindField<UProperty>(AssetClass, TagIt.Key()))
-						{
-							DisplayName = Field->GetDisplayNameText();
-
-							// Strip off enum prefixes if they exist
-							if (UByteProperty* ByteProperty = Cast<UByteProperty>(Field))
-							{
-								if (ByteProperty->Enum)
-								{
-									const FString EnumPrefix = ByteProperty->Enum->GenerateEnumPrefix();
-									if (EnumPrefix.Len() && ValueString.StartsWith(EnumPrefix))
-									{
-										ValueString = ValueString.RightChop(EnumPrefix.Len() + 1);	// +1 to skip over the underscore
-									}
-								}
-
-								ValueString = FName::NameToDisplayString(ValueString, false);
-							}
-						}
-						else
-						{
-							// We have no type information by this point, so no idea if it's a bool :(
-							const bool bIsBool = false;
-							DisplayName = FText::FromString(FName::NameToDisplayString(TagIt.Key().ToString(), bIsBool));
-						}
-					
-						// Add suffix to the value string, if one is defined for this tag
-						if (Metadata != nullptr && !Metadata->Suffix.IsEmpty())
-						{
-							ValueString += TEXT(" ");
-							ValueString += Metadata->Suffix.ToString();
-						}
-
-						AddToToolTipInfoBox(InfoBox, DisplayName, FText::FromString(ValueString), bImportant);
-					}
-				}
+				AddToToolTipInfoBox(InfoBox, ToolTipTagItem.Key, ToolTipTagItem.Value, ToolTipTagItem.bImportant);
 			}
 
 			TSharedRef<SVerticalBox> OverallTooltipVBox = SNew(SVerticalBox);
@@ -709,16 +727,11 @@ TSharedRef<SToolTip> SAssetViewItem::CreateToolTipWidget() const
 				];
 
 
-			return SNew(SToolTip)
-				.TextMargin(1)
-				.BorderImage( FEditorStyle::GetBrush("ContentBrowser.TileViewTooltip.ToolTipBorder") )
+			return SNew(SBorder)
+				.Padding(6)
+				.BorderImage( FEditorStyle::GetBrush("ContentBrowser.TileViewTooltip.NonContentBorder") )
 				[
-					SNew(SBorder)
-					.Padding(6)
-					.BorderImage( FEditorStyle::GetBrush("ContentBrowser.TileViewTooltip.NonContentBorder") )
-					[
-						OverallTooltipVBox
-					]
+					OverallTooltipVBox
 				];
 		}
 		else
@@ -731,61 +744,56 @@ TSharedRef<SToolTip> SAssetViewItem::CreateToolTipWidget() const
 
 			AddToToolTipInfoBox( InfoBox, LOCTEXT("TileViewTooltipPath", "Path"), FText::FromString(FolderPath), false );
 
-			return SNew(SToolTip)
-				.TextMargin(1)
-				.BorderImage( FEditorStyle::GetBrush("ContentBrowser.TileViewTooltip.ToolTipBorder") )
+			return SNew(SBorder)
+				.Padding(6)
+				.BorderImage( FEditorStyle::GetBrush("ContentBrowser.TileViewTooltip.NonContentBorder") )
 				[
-					SNew(SBorder)
-					.Padding(6)
-					.BorderImage( FEditorStyle::GetBrush("ContentBrowser.TileViewTooltip.NonContentBorder") )
+					SNew(SVerticalBox)
+
+					+SVerticalBox::Slot()
+					.AutoHeight()
+					.Padding(0, 0, 0, 4)
 					[
-						SNew(SVerticalBox)
-
-						+SVerticalBox::Slot()
-						.AutoHeight()
-						.Padding(0, 0, 0, 4)
+						SNew(SBorder)
+						.Padding(6)
+						.BorderImage( FEditorStyle::GetBrush("ContentBrowser.TileViewTooltip.ContentBorder") )
 						[
-							SNew(SBorder)
-							.Padding(6)
-							.BorderImage( FEditorStyle::GetBrush("ContentBrowser.TileViewTooltip.ContentBorder") )
+							SNew(SVerticalBox)
+
+							+SVerticalBox::Slot()
+							.AutoHeight()
 							[
-								SNew(SVerticalBox)
+								SNew(SHorizontalBox)
 
-								+SVerticalBox::Slot()
-								.AutoHeight()
+								+SHorizontalBox::Slot()
+								.AutoWidth()
+								.VAlign(VAlign_Center)
+								.Padding(0, 0, 4, 0)
 								[
-									SNew(SHorizontalBox)
+									SNew(STextBlock)
+									.Text( FolderName )
+									.Font( FEditorStyle::GetFontStyle("ContentBrowser.TileViewTooltip.NameFont") )
+								]
 
-									+SHorizontalBox::Slot()
-									.AutoWidth()
-									.VAlign(VAlign_Center)
-									.Padding(0, 0, 4, 0)
-									[
-										SNew(STextBlock)
-										.Text( FolderName )
-										.Font( FEditorStyle::GetFontStyle("ContentBrowser.TileViewTooltip.NameFont") )
-									]
-
-									+SHorizontalBox::Slot()
-									.AutoWidth()
-									.VAlign(VAlign_Center)
-									[
-										SNew(STextBlock) 
-										.Text( LOCTEXT("FolderNameBracketed", "(Folder)") )
-									]
+								+SHorizontalBox::Slot()
+								.AutoWidth()
+								.VAlign(VAlign_Center)
+								[
+									SNew(STextBlock) 
+									.Text( LOCTEXT("FolderNameBracketed", "(Folder)") )
 								]
 							]
 						]
+					]
 
-						+SVerticalBox::Slot()
-						.AutoHeight()
+					+SVerticalBox::Slot()
+					.AutoHeight()
+					[
+						SNew(SBorder)
+						.Padding(6)
+						.BorderImage( FEditorStyle::GetBrush("ContentBrowser.TileViewTooltip.ContentBorder") )
 						[
-							SNew(SBorder)
-							.Padding(6)
-							.BorderImage( FEditorStyle::GetBrush("ContentBrowser.TileViewTooltip.ContentBorder") )
-							[
-								InfoBox
-							]
+							InfoBox
 						]
 					]
 				];
@@ -794,7 +802,7 @@ TSharedRef<SToolTip> SAssetViewItem::CreateToolTipWidget() const
 	else
 	{
 		// Return an empty tooltip since the asset item wasn't valid
-		return SNew(SToolTip);
+		return SNullWidget::NullWidget;
 	}
 }
 END_SLATE_FUNCTION_BUILD_OPTIMIZATION
@@ -898,10 +906,10 @@ void SAssetViewItem::UpdateSourceControlState(float InDeltaTime)
 {
 	SourceControlStateDelay += InDeltaTime;
 
-	if ( !bSourceControlStateRequested && SourceControlStateDelay > 1.0f && AssetItem.IsValid() )
+	if ( !bSourceControlStateRequested && SourceControlStateDelay > 1.0f && ISourceControlModule::Get().IsEnabled() && AssetItem.IsValid() )
 	{
 		// Only update the SCC state for non-temporary asset items that aren't a built in script
-		if ( AssetItem.IsValid() && !AssetItem->IsTemporaryItem() && AssetItem->GetType() != EAssetItemType::Folder && !FPackageName::IsScriptPackage(CachedPackageName) )
+		if ( !AssetItem->IsTemporaryItem() && AssetItem->GetType() != EAssetItemType::Folder && !FPackageName::IsScriptPackage(CachedPackageName) )
 		{
 			// Request the most recent SCC state for this asset
 			ISourceControlModule::Get().QueueStatusUpdate(CachedPackageFileName);
@@ -923,6 +931,100 @@ void SAssetViewItem::CachePackageName()
 		else
 		{
 			CachedPackageName = StaticCastSharedPtr<FAssetViewFolder>(AssetItem)->FolderName.ToString();
+		}
+	}
+}
+
+void SAssetViewItem::CacheToolTipTags()
+{
+	CachedToolTipTags.Reset();
+
+	if(AssetItem->GetType() != EAssetItemType::Folder)
+	{
+		const FAssetData& AssetData = StaticCastSharedPtr<FAssetViewAsset>(AssetItem)->Data;
+		UClass* AssetClass = FindObject<UClass>(ANY_PACKAGE, *AssetData.AssetClass.ToString());
+
+		// If we are using a loaded class, find all the hidden tags so we don't display them
+		TMap<FName, UObject::FAssetRegistryTagMetadata> MetadataMap;
+		TSet<FName> ShownTags;
+		if ( AssetClass != NULL && AssetClass->GetDefaultObject() != NULL )
+		{
+			AssetClass->GetDefaultObject()->GetAssetRegistryTagMetadata(MetadataMap);
+
+			TArray<UObject::FAssetRegistryTag> Tags;
+			AssetClass->GetDefaultObject()->GetAssetRegistryTags(Tags);
+
+			for ( auto TagIt = Tags.CreateConstIterator(); TagIt; ++TagIt )
+			{
+				if (TagIt->Type != UObject::FAssetRegistryTag::TT_Hidden )
+				{
+					ShownTags.Add(TagIt->Name);
+				}
+			}
+		}
+
+		// If an asset class could not be loaded we cannot determine hidden tags so display no tags.
+		if( AssetClass != NULL )
+		{
+			// Add all asset registry tags and values
+			for (const auto& KeyValue: AssetData.TagsAndValues)
+			{
+				// Skip tags that are set to be hidden
+				if ( ShownTags.Contains(KeyValue.Key) )
+				{
+					const UObject::FAssetRegistryTagMetadata* Metadata = MetadataMap.Find(KeyValue.Key);
+
+					const bool bImportant = (Metadata != nullptr && !Metadata->ImportantValue.IsEmpty() && Metadata->ImportantValue == KeyValue.Value);
+
+					// Since all we have at this point is a string, we can't be very smart here.
+					// We need to strip some noise off class paths in some cases, but can't load the asset to inspect its UPROPERTYs manually due to performance concerns.
+					FString ValueString = KeyValue.Value;
+					const TCHAR StringToRemove[] = TEXT("Class'/Script/");
+					if (ValueString.StartsWith(StringToRemove) && ValueString.EndsWith(TEXT("'")))
+					{
+						// Remove the class path for native classes, and also remove Engine. for engine classes
+						const int32 SizeOfPrefix = ARRAY_COUNT(StringToRemove);
+						ValueString = ValueString.Mid(SizeOfPrefix - 1, ValueString.Len() - SizeOfPrefix).Replace(TEXT("Engine."), TEXT(""));
+					}
+						
+					// Check for DisplayName metadata
+					FText DisplayName;
+					if (UProperty* Field = FindField<UProperty>(AssetClass, KeyValue.Key))
+					{
+						DisplayName = Field->GetDisplayNameText();
+
+						// Strip off enum prefixes if they exist
+						if (UByteProperty* ByteProperty = Cast<UByteProperty>(Field))
+						{
+							if (ByteProperty->Enum)
+							{
+								const FString EnumPrefix = ByteProperty->Enum->GenerateEnumPrefix();
+								if (EnumPrefix.Len() && ValueString.StartsWith(EnumPrefix))
+								{
+									ValueString = ValueString.RightChop(EnumPrefix.Len() + 1);	// +1 to skip over the underscore
+								}
+							}
+
+							ValueString = FName::NameToDisplayString(ValueString, false);
+						}
+					}
+					else
+					{
+						// We have no type information by this point, so no idea if it's a bool :(
+						const bool bIsBool = false;
+						DisplayName = FText::FromString(FName::NameToDisplayString(KeyValue.Key.ToString(), bIsBool));
+					}
+					
+					// Add suffix to the value string, if one is defined for this tag
+					if (Metadata != nullptr && !Metadata->Suffix.IsEmpty())
+					{
+						ValueString += TEXT(" ");
+						ValueString += Metadata->Suffix.ToString();
+					}
+
+					CachedToolTipTags.Add(FToolTipTagItem(DisplayName, FText::FromString(ValueString), bImportant));
+				}
+			}
 		}
 	}
 }
@@ -960,7 +1062,22 @@ FSlateColor SAssetViewItem::GetAssetColor() const
 	{
 		if(AssetItem->GetType() == EAssetItemType::Folder)
 		{
-			const TSharedPtr<FLinearColor> Color = ContentBrowserUtils::LoadColor( StaticCastSharedPtr<FAssetViewFolder>(AssetItem)->FolderPath );
+			TSharedPtr<FAssetViewFolder> AssetFolderItem = StaticCastSharedPtr<FAssetViewFolder>(AssetItem);
+
+			TSharedPtr<FLinearColor> Color;
+			if (AssetFolderItem->bCollectionFolder)
+			{
+				FName CollectionName;
+				ECollectionShareType::Type CollectionFolderShareType = ECollectionShareType::CST_All;
+				ContentBrowserUtils::IsCollectionPath(AssetFolderItem->FolderPath, &CollectionName, &CollectionFolderShareType);
+
+				Color = CollectionViewUtils::LoadColor( CollectionName.ToString(), CollectionFolderShareType );
+			}
+			else
+			{
+				Color = ContentBrowserUtils::LoadColor( AssetFolderItem->FolderPath );
+			}
+
 			if ( Color.IsValid() )
 			{
 				return *Color.Get();
@@ -1135,7 +1252,7 @@ void SAssetListItem::Construct( const FArguments& InArgs )
 					.OnVerifyTextChanged(this, &SAssetListItem::HandleVerifyNameChanged)
 					.HighlightText(InArgs._HighlightText)
 					.IsSelected(InArgs._IsSelected)
-					.IsReadOnly(ThumbnailEditMode)
+					.IsReadOnly(this, &SAssetListItem::IsNameReadOnly)
 				]
 
 				+SVerticalBox::Slot()
@@ -1151,8 +1268,6 @@ void SAssetListItem::Construct( const FArguments& InArgs )
 			]
 		]
 	];
-
-	SetToolTip( CreateToolTipWidget() );
 
 	if(AssetItem.IsValid())
 	{
@@ -1174,8 +1289,6 @@ void SAssetListItem::OnAssetDataChanged()
 	{
 		ClassText->SetText(GetAssetClassText());
 	}
-
-	SetToolTip( CreateToolTipWidget() );
 }
 
 FOptionalSize SAssetListItem::GetThumbnailBoxSize() const
@@ -1287,15 +1400,13 @@ void SAssetTileItem::Construct( const FArguments& InArgs )
 					.OnVerifyTextChanged(this, &SAssetTileItem::HandleVerifyNameChanged)
 					.HighlightText(InArgs._HighlightText)
 					.IsSelected(InArgs._IsSelected)
-					.IsReadOnly(ThumbnailEditMode)
+					.IsReadOnly(this, &SAssetTileItem::IsNameReadOnly)
 					.Justification(ETextJustify::Center)
 					.LineBreakPolicy(FBreakIterator::CreateCamelCaseBreakIterator())
 			]
 		]
 	
 	];
-
-	SetToolTip( CreateToolTipWidget() );
 
 	if(AssetItem.IsValid())
 	{
@@ -1312,8 +1423,6 @@ END_SLATE_FUNCTION_BUILD_OPTIMIZATION
 void SAssetTileItem::OnAssetDataChanged()
 {
 	SAssetViewItem::OnAssetDataChanged();
-
-	SetToolTip( CreateToolTipWidget() );
 }
 
 FOptionalSize SAssetTileItem::GetThumbnailBoxSize() const
@@ -1382,6 +1491,16 @@ public:
 				InArgs._Content.Widget
 			]
 		];
+	}
+
+	virtual TSharedPtr<IToolTip> GetToolTip() override
+	{
+		if ( OwnerAssetColumnItem.IsValid() )
+		{
+			return OwnerAssetColumnItem.Pin()->GetToolTip();
+		}
+
+		return nullptr;
 	}
 
 	/** Forward the event to the view item that this name box belongs to */
@@ -1504,7 +1623,7 @@ TSharedRef<SWidget> SAssetColumnItem::GenerateWidgetForColumn( const FName& Colu
 				.OnVerifyTextChanged(this, &SAssetColumnItem::HandleVerifyNameChanged)
 				.HighlightText(HighlightText)
 				.IsSelected(InIsSelected)
-				.IsReadOnly(ThumbnailEditMode)
+				.IsReadOnly(this, &SAssetColumnItem::IsNameReadOnly)
 			];
 
 		if(AssetItem.IsValid())
@@ -1514,7 +1633,6 @@ TSharedRef<SWidget> SAssetColumnItem::GenerateWidgetForColumn( const FName& Colu
 
 		return SNew( SAssetColumnItemNameBox, SharedThis(this) )
 			.Padding( ColumnItemPadding )
-			.ToolTip( CreateToolTipWidget() )
 			[
 				Content.ToSharedRef()
 			];

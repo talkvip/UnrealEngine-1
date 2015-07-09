@@ -181,6 +181,8 @@ protected:
 	uint32 bUsesParticleSubUVs : 1;
 	/** Boolean indicating using LightmapUvs */
 	uint32 bUsesLightmapUVs : 1;
+	/** Whether the material uses AO Material Mask */
+	uint32 bUsesAOMaterialMask : 1;
 	/** true if needs SpeedTree code */
 	uint32 bUsesSpeedTree : 1;
 	/** Boolean indicating the material uses worldspace position without shader offsets applied */
@@ -235,6 +237,7 @@ public:
 	,	bUsesSphericalParticleOpacity(false)
 	,   bUsesParticleSubUVs(false)
 	,	bUsesLightmapUVs(false)
+	,	bUsesAOMaterialMask(false)
 	,	bUsesSpeedTree(false)
 	,	bNeedsWorldPositionExcludingShaderOffsets(false)
 	,	bNeedsParticleSize(false)
@@ -595,6 +598,11 @@ public:
 		if (bUsesLightmapUVs)
 		{
 			OutEnvironment.SetDefine(TEXT("LIGHTMAP_UV_ACCESS"),TEXT("1"));
+		}
+
+		if (bUsesAOMaterialMask)
+		{
+			OutEnvironment.SetDefine(TEXT("USES_AO_MATERIAL_MASK"),TEXT("1"));
 		}
 
 		if (bUsesSpeedTree)
@@ -3360,7 +3368,7 @@ protected:
 		return TransformBase(SourceCoordBasis, DestCoordBasis, A, 1);
 	}
 
-	virtual int32 DynamicParameter() override
+	virtual int32 DynamicParameter(FLinearColor& DefaultValue) override
 	{
 		if (ShaderFrequency != SF_Vertex && ShaderFrequency != SF_Pixel && ShaderFrequency != SF_Compute)
 		{
@@ -3369,9 +3377,11 @@ protected:
 
 		bNeedsParticleDynamicParameter = true;
 
+		int32 Default = Constant4(DefaultValue.R, DefaultValue.G, DefaultValue.B, DefaultValue.A);
 		return AddInlinedCodeChunk(
 			MCT_Float4,
-			TEXT("Parameters.Particle.DynamicParameter")
+			TEXT("GetDynamicParameter(Parameters.Particle, %s)"),
+			*GetParameterCode(Default)
 			);
 	}
 
@@ -3393,6 +3403,29 @@ protected:
 		FString CodeChunk = FString::Printf(TEXT("GetLightmapUVs(Parameters)"));
 		ResultIdx = AddCodeChunk(
 			MCT_Float2,
+			*CodeChunk
+			);
+		return ResultIdx;
+	}
+
+	virtual int32 PrecomputedAOMask() override
+	{
+		if (ShaderFrequency != SF_Pixel && ShaderFrequency != SF_Compute)
+		{
+			return NonPixelShaderExpressionError();
+		}
+
+		if (ErrorUnlessFeatureLevelSupported(ERHIFeatureLevel::SM4) == INDEX_NONE)
+		{
+			return INDEX_NONE;
+		}
+
+		bUsesAOMaterialMask = true;
+
+		int32 ResultIdx = INDEX_NONE;
+		FString CodeChunk = FString::Printf(TEXT("Parameters.AOMaterialMask"));
+		ResultIdx = AddCodeChunk(
+			MCT_Float,
 			*CodeChunk
 			);
 		return ResultIdx;

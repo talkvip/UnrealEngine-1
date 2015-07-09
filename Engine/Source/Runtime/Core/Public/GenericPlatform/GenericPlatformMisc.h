@@ -371,16 +371,7 @@ struct CORE_API FGenericPlatformMisc
 		return 0;
 	}
 
-	FORCEINLINE static void RaiseException( uint32 ExceptionCode )
-	{
-#if HACK_HEADER_GENERATOR && !PLATFORM_EXCEPTIONS_DISABLED
-		// We want Unreal Header Tool to throw an exception but in normal runtime code 
-		// we don't support exception handling
-		throw( ExceptionCode );
-#else	
-		*((uint32*)3) = ExceptionCode;
-#endif
-	}
+	static void RaiseException( uint32 ExceptionCode );
 
 protected:
 
@@ -834,6 +825,24 @@ public:
 	 * Get a string description of the mode the engine was running in.
 	 */
 	static const TCHAR* GetEngineMode();
+
+	/**
+	 * Returns an array of the user's preferred languages in order of preference
+	 * @return An array of language IDs ordered from most preferred to least
+	 */
+	static TArray<FString> GetPreferredLanguages();
+
+	/**
+	* Returns the currency code associated with the device's locale
+	* @return the currency code associated with the device's locale
+	*/
+	static FString GetLocalCurrencyCode();
+
+	/**
+	* Returns the currency symbol associated with the device's locale
+	* @return the currency symbol associated with the device's locale
+	*/
+	static FString GetLocalCurrencySymbol();
 
 	/**
 	 * Requests permission to send remote notifications to the user's device.

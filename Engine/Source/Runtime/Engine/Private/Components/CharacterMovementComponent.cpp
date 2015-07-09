@@ -112,6 +112,13 @@ static TAutoConsoleVariable<float> CVarNetCorrectionLifetime(
 	TEXT("How long a visualized network correction persists.\n")
 	TEXT("Time in seconds each visualized network correction persists."),
 	ECVF_Cheat);
+
+static TAutoConsoleVariable<int32> CVarVisualizeMovement(
+	TEXT("p.VisualizeMovement"),
+	0,
+	TEXT("Whether to draw in-world debug information for character movement.\n")
+	TEXT("0: Disable, 1: Enable"),
+	ECVF_Cheat);
 #endif // !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
 
 
@@ -202,6 +209,7 @@ UCharacterMovementComponent::UCharacterMovementComponent(const FObjectInitialize
 	AirControlBoostVelocityThreshold = 25.f;
 	FallingLateralFriction = 0.f;
 	MaxAcceleration = 2048.0f;
+	BrakingFrictionFactor = 2.0f; // Historical value, 1 would be more appropriate.
 	BrakingDecelerationWalking = MaxAcceleration;
 	BrakingDecelerationFalling = 0.f;
 	BrakingDecelerationFlying = 0.f;
@@ -978,6 +986,15 @@ void UCharacterMovementComponent::TickComponent(float DeltaTime, enum ELevelTick
 
 		ApplyRepulsionForce(DeltaTime);
 	}
+
+#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+	const bool bVisualizeMovement = CVarVisualizeMovement.GetValueOnGameThread() > 0;
+	if (bVisualizeMovement)
+	{
+		VisualizeMovement();
+	}
+#endif // !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+
 }
 
 void UCharacterMovementComponent::PreClothTick(float DeltaTime, FCharacterMovementComponentPreClothTickFunction& ThisTickFunction)
@@ -1383,7 +1400,7 @@ void UCharacterMovementComponent::UpdateBasedMovement(float DeltaSeconds)
 	}
 
 	// Find change in rotation
-	const bool bRotationChanged = !OldBaseQuat.Equals(NewBaseQuat, 1e-6f);
+	const bool bRotationChanged = !OldBaseQuat.Equals(NewBaseQuat, 1e-8f);
 	if (bRotationChanged)
 	{
 		DeltaQuat = NewBaseQuat * OldBaseQuat.Inverse();
@@ -1416,7 +1433,7 @@ void UCharacterMovementComponent::UpdateBasedMovement(float DeltaSeconds)
 				CharacterOwner->FaceRotation(TargetRotator, 0.f);
 				FinalQuat = UpdatedComponent->GetComponentQuat();
 
-				if (PawnOldQuat.Equals(FinalQuat))
+				if (PawnOldQuat.Equals(FinalQuat, 1e-6f))
 				{
 					// Nothing changed. This means we probably are using another rotation mechanism (bOrientToMovement etc). We should still follow the base object.
 					// @todo: This assumes only Yaw is used, currently a valid assumption. This is the only reason FaceRotation() is used above really, aside from being a virtual hook.
@@ -2235,56 +2252,27 @@ float UCharacterMovementComponent::ImmersionDepth()
 
 bool UCharacterMovementComponent::IsFlying() const
 {
-	if (!CharacterOwner || !UpdatedComponent)
-	{
-		return false;
-	}
-
-	return MovementMode == MOVE_Flying;
+	return (MovementMode == MOVE_Flying) && UpdatedComponent;
 }
-
-
 
 bool UCharacterMovementComponent::IsMovingOnGround() const
 {
-	if (!CharacterOwner || !UpdatedComponent)
-	{
-		return false;
-	}
-
-	return (MovementMode == MOVE_Walking) || (MovementMode == MOVE_NavWalking);
+	return ((MovementMode == MOVE_Walking) || (MovementMode == MOVE_NavWalking)) && UpdatedComponent;
 }
-
-
 
 bool UCharacterMovementComponent::IsFalling() const
 {
-	if (!CharacterOwner || !UpdatedComponent)
-	{
-		return false;
-	}
-
-	return MovementMode == MOVE_Falling;
+	return (MovementMode == MOVE_Falling) && UpdatedComponent;
 }
 
 bool UCharacterMovementComponent::IsSwimming() const
 {
-	if (!CharacterOwner || !UpdatedComponent)
-	{
-		return false;
-	}
-
-	return MovementMode == MOVE_Swimming;
+	return (MovementMode == MOVE_Swimming) && UpdatedComponent;
 }
 
 bool UCharacterMovementComponent::IsCrouching() const
 {
 	return CharacterOwner && CharacterOwner->bIsCrouched;
-}
-
-bool UCharacterMovementComponent::IsWalking() const
-{
-	return IsMovingOnGround();
 }
 
 void UCharacterMovementComponent::CalcVelocity(float DeltaTime, float Friction, bool bFluid, float BrakingDeceleration)
@@ -2721,7 +2709,8 @@ void UCharacterMovementComponent::ApplyVelocityBraking(float DeltaTime, float Fr
 		return;
 	}
 
-	Friction = FMath::Max(0.f, Friction);
+	const float FrictionFactor = FMath::Max(0.f, BrakingFrictionFactor);
+	Friction = FMath::Max(0.f, Friction * FrictionFactor);
 	BrakingDeceleration = FMath::Max(0.f, BrakingDeceleration);
 	const bool bZeroFriction = (Friction == 0.f);
 	const bool bZeroBraking = (BrakingDeceleration == 0.f);
@@ -2738,9 +2727,6 @@ void UCharacterMovementComponent::ApplyVelocityBraking(float DeltaTime, float Fr
 	float RemainingTime = DeltaTime;
 	const float MaxTimeStep = (1.0f / 33.0f);
 
-	// Old (legacy) friction doubled the affect of "Friction" here.
-	const float FrictionFactor = (bUseSeparateBrakingFriction ? 1.0f : 2.0f);
-
 	// Decelerate to brake to a stop
 	const FVector RevAccel = (bZeroBraking ? FVector::ZeroVector : (-BrakingDeceleration * Velocity.GetSafeNormal()));
 	while( RemainingTime >= MIN_TICK_TIME )
@@ -2750,7 +2736,7 @@ void UCharacterMovementComponent::ApplyVelocityBraking(float DeltaTime, float Fr
 		RemainingTime -= dt;
 
 		// apply friction and braking
-		Velocity = Velocity + ((-FrictionFactor * Friction) * Velocity + RevAccel) * dt ; 
+		Velocity = Velocity + ((-Friction) * Velocity + RevAccel) * dt ; 
 		
 		// Don't reverse direction
 		if ((Velocity | OldVel) <= 0.f)
@@ -5511,7 +5497,7 @@ void UCharacterMovementComponent::ApplyImpactPhysicsForces(const FHitResult& Imp
 	}
 }
 
-FString UCharacterMovementComponent::GetMovementName()
+FString UCharacterMovementComponent::GetMovementName() const
 {
 	if( CharacterOwner )
 	{
@@ -5572,6 +5558,51 @@ void UCharacterMovementComponent::DisplayDebug(UCanvas* Canvas, const FDebugDisp
 	YPos += YL;
 }
 
+void UCharacterMovementComponent::VisualizeMovement() const
+{
+	if (CharacterOwner == nullptr)
+	{
+		return;
+	}
+
+#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+	const FVector TopOfCapsule = GetActorLocation() + FVector(0.f, 0.f, CharacterOwner->GetSimpleCollisionHalfHeight());
+
+	// Velocity
+	{
+		const FColor DebugColor = FColor::Green;
+		const FVector DebugLocation = TopOfCapsule;
+		DrawDebugDirectionalArrow(GetWorld(), DebugLocation, DebugLocation + Velocity, 
+			100.f, DebugColor, false, -1.f, (uint8)'\000', 10.f);
+
+		FString DebugText = FString::Printf(TEXT("Velocity: %s (Speed: %.2f)"), *Velocity.ToCompactString(), Velocity.Size());
+		DrawDebugString(GetWorld(), DebugLocation + FVector(0.f,0.f,5.f), DebugText, nullptr, DebugColor, 0.f, true);
+	}
+
+	// Acceleration
+	{
+		const FColor DebugColor = FColor::Yellow;
+		const float MaxAccelerationLineLength = 200.f;
+		const float CurrentMaxAccel = GetMaxAcceleration();
+		const float CurrentAccelAsPercentOfMaxAccel = CurrentMaxAccel > 0.f ? Acceleration.Size() / CurrentMaxAccel : 1.f;
+		const FVector DebugLocation = TopOfCapsule + FVector(0.f,0.f,15.f);
+		DrawDebugDirectionalArrow(GetWorld(), DebugLocation, 
+			DebugLocation + Acceleration.GetSafeNormal(SMALL_NUMBER) * CurrentAccelAsPercentOfMaxAccel * MaxAccelerationLineLength, 
+			25.f, DebugColor, false, -1.f, (uint8)'\000', 8.f);
+
+		FString DebugText = FString::Printf(TEXT("Acceleration: %s"), *Acceleration.ToCompactString());
+		DrawDebugString(GetWorld(), DebugLocation + FVector(0.f,0.f,5.f), DebugText, nullptr, DebugColor, 0.f, true);
+	}
+
+	// Movement Mode
+	{
+		const FColor DebugColor = FColor::Blue;
+		const FVector DebugLocation = TopOfCapsule + FVector(0.f,0.f,35.f);
+		FString DebugText = FString::Printf(TEXT("MovementMode: %s"), *GetMovementName());
+		DrawDebugString(GetWorld(), DebugLocation, DebugText, nullptr, DebugColor, 0.f, true);
+	}
+#endif // !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+}
 
 void UCharacterMovementComponent::ForceReplicationUpdate()
 {

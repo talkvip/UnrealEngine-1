@@ -358,9 +358,8 @@ void UModel::PostLoad()
 		if (ABrush* Owner = Cast<ABrush>(GetOuter()))
 		{
 			OwnerLocationWhenLastBuilt = Owner->GetActorLocation();
-			OwnerPrepivotWhenLastBuilt = Owner->GetPrePivot();
 			OwnerScaleWhenLastBuilt = Owner->GetActorScale();
-			OwnerRotationWhenLastBuilt = -Owner->GetActorRotation();
+			OwnerRotationWhenLastBuilt = Owner->GetActorRotation();
 			bCachedOwnerTransformValid = true;
 		}
 #endif
@@ -561,6 +560,8 @@ UModel::UModel(const FObjectInitializer& ObjectInitializer)
 	, Points()
 	, Surfs()
 	, VertexBuffer(this)
+	, InvalidSurfaces(false)
+	, bOnlyRebuildMaterialIndexBuffers(false)
 #if WITH_EDITOR
 	, bCachedOwnerTransformValid(false)
 #endif
@@ -577,6 +578,8 @@ UModel::UModel(FVTableHelper& Helper)
 	, Points()
 	, Surfs()
 	, VertexBuffer(this)
+	, InvalidSurfaces(false)
+	, bOnlyRebuildMaterialIndexBuffers(false)
 #if WITH_EDITOR
 	, bCachedOwnerTransformValid(false)
 #endif
@@ -640,7 +643,7 @@ void UModel::Transform( ABrush* Owner )
 	check(Owner);
 
 	for( int32 i=0; i<Polys->Element.Num(); i++ )
-		Polys->Element[ i ].Transform( Owner->GetPrePivot(), Owner->GetActorLocation());
+		Polys->Element[i].Transform(Owner->GetActorLocation());
 
 }
 

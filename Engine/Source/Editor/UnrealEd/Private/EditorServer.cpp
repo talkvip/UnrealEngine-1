@@ -571,13 +571,13 @@ bool UEditorEngine::Exec_Brush( UWorld* InWorld, const TCHAR* Str, FOutputDevice
 			{
 				DefaultBrush->Brush->Modify();
 				SnapLocation = DefaultBrush->GetActorLocation();
-				PrePivot = DefaultBrush->GetPrePivot();
+				PrePivot = DefaultBrush->GetPivotOffset();
 			}
 			
 			FSnappingUtils::SnapToBSPVertex( SnapLocation, FVector::ZeroVector, Temp );
 
 			WorldBrush->SetActorLocation(SnapLocation - PrePivot, false);
-			WorldBrush->SetPrePivot( FVector::ZeroVector );
+			WorldBrush->SetPivotOffset( FVector::ZeroVector );
 			WorldBrush->Brush->Polys->Element.Empty();
 			UPolysFactory* It = NewObject<UPolysFactory>();
 			It->FactoryCreateText( UPolys::StaticClass(), WorldBrush->Brush->Polys->GetOuter(), *WorldBrush->Brush->Polys->GetName(), RF_NoFlags, WorldBrush->Brush->Polys, TEXT("t3d"), GStream, GStream+FCString::Strlen(GStream), GWarn );
@@ -628,11 +628,11 @@ bool UEditorEngine::Exec_Brush( UWorld* InWorld, const TCHAR* Str, FOutputDevice
 
 						Poly->TextureU *= InvScale;
 						Poly->TextureV *= InvScale;
-						Poly->Base = ((Poly->Base - Brush->GetPrePivot()) * Scale) + Brush->GetPrePivot();
+						Poly->Base = ((Poly->Base - Brush->GetPivotOffset()) * Scale) + Brush->GetPivotOffset();
 
 						for( int32 vtx = 0 ; vtx < Poly->Vertices.Num() ; vtx++ )
 						{
-							Poly->Vertices[vtx] = ((Poly->Vertices[vtx] - Brush->GetPrePivot()) * Scale) + Brush->GetPrePivot();
+							Poly->Vertices[vtx] = ((Poly->Vertices[vtx] - Brush->GetPivotOffset()) * Scale) + Brush->GetPivotOffset();
 						}
 
 						Poly->CalcNormal();
@@ -2042,6 +2042,8 @@ UWorld* UEditorEngine::NewMap()
 	Context.SetCurrentWorld(NewWorld);
 	GWorld = NewWorld;
 	NewWorld->AddToRoot();
+	// Register components in the persistent level (current)
+	NewWorld->UpdateWorldComponents(true, true);
 
 	NoteSelectionChange();
 
@@ -2254,7 +2256,9 @@ bool UEditorEngine::Map_Load(const TCHAR* Str, FOutputDevice& Ar)
 					for (TObjectIterator<UWorld> It; It; ++It)
 					{
 						UPackage* Package = Cast<UPackage>(It->GetOuter());
-						if (Package && Package != GetTransientPackage())
+						
+
+						if (Package && Package != GetTransientPackage() && Package->GetPathName() != LongTempFname)
 						{
 							WorldPackages.AddUnique(Package);
 						}
@@ -2411,6 +2415,9 @@ bool UEditorEngine::Map_Load(const TCHAR* Str, FOutputDevice& Ar)
 					{
 						Context.World()->GetModel()->Polys->SetFlags( RF_Transactional );
 					}
+
+					// Register components in the persistent level (current)
+					Context.World()->UpdateWorldComponents(true, true);
 
 					// Make sure secondary levels are loaded & visible.
 					Context.World()->FlushLevelStreaming();
@@ -3804,11 +3811,11 @@ bool UEditorEngine::Map_Scale( UWorld* InWorld, const TCHAR* Str, FOutputDevice&
 
 					Poly->TextureU /= Factor;
 					Poly->TextureV /= Factor;
-					Poly->Base = ((Poly->Base - Brush->GetPrePivot()) * Factor) + Brush->GetPrePivot();
+					Poly->Base = ((Poly->Base - Brush->GetPivotOffset()) * Factor) + Brush->GetPivotOffset();
 
 					for( int32 vtx = 0 ; vtx < Poly->Vertices.Num() ; vtx++ )
 					{
-						Poly->Vertices[vtx] = ((Poly->Vertices[vtx] - Brush->GetPrePivot()) * Factor) + Brush->GetPrePivot();
+						Poly->Vertices[vtx] = ((Poly->Vertices[vtx] - Brush->GetPivotOffset()) * Factor) + Brush->GetPivotOffset();
 					}
 
 					Poly->CalcNormal();
@@ -4102,7 +4109,9 @@ bool UEditorEngine::Exec_Poly( UWorld* InWorld, const TCHAR* Str, FOutputDevice&
 				const int32 SurfaceIndex = It.GetSurfaceIndex();
 
 				Model->Surfs[SurfaceIndex].Material = SelectedMaterialInstance;
-				polyUpdateMaster( Model, SurfaceIndex, 0 );
+				const bool bUpdateTexCoords = false;
+				const bool bOnlyRefreshSurfaceMaterials = true;
+				polyUpdateMaster(Model, SurfaceIndex, bUpdateTexCoords, bOnlyRefreshSurfaceMaterials);
 				Model->MarkPackageDirty();
 
 				bModelDirtied = true;
@@ -4133,7 +4142,9 @@ bool UEditorEngine::Exec_Poly( UWorld* InWorld, const TCHAR* Str, FOutputDevice&
 				{
 					const int32 SurfaceIndex = It.GetSurfaceIndex();
 					It.GetModel()->Surfs[SurfaceIndex].Material = Material;
-					polyUpdateMaster( It.GetModel(), SurfaceIndex, 0 );
+					const bool bUpdateTexCoords = false;
+					const bool bOnlyRefreshSurfaceMaterials = true;
+					polyUpdateMaster(It.GetModel(), SurfaceIndex, bUpdateTexCoords, bOnlyRefreshSurfaceMaterials);
 				}
 			}
 

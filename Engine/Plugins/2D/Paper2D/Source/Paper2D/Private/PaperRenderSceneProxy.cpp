@@ -79,22 +79,27 @@ FPaperSpriteVertexFactory::FPaperSpriteVertexFactory()
 
 void FPaperSpriteVertexFactory::Init(const FPaperSpriteVertexBuffer* InVertexBuffer)
 {
-	check(!IsInRenderingThread());
-
-	ENQUEUE_UNIQUE_RENDER_COMMAND_TWOPARAMETER(
-		InitPaperSpriteVertexFactory,
-		FPaperSpriteVertexFactory*,VertexFactory,this,
-		const FPaperSpriteVertexBuffer*,VB,InVertexBuffer,
+	if (IsInRenderingThread())
 	{
 		// Initialize the vertex factory's stream components.
 		DataType NewData;
-		NewData.PositionComponent = STRUCTMEMBER_VERTEXSTREAMCOMPONENT(VB,FPaperSpriteVertex,Position,VET_Float3);
-		NewData.TangentBasisComponents[0] = STRUCTMEMBER_VERTEXSTREAMCOMPONENT(VB,FPaperSpriteVertex,TangentX,VET_PackedNormal);
-		NewData.TangentBasisComponents[1] = STRUCTMEMBER_VERTEXSTREAMCOMPONENT(VB,FPaperSpriteVertex,TangentZ,VET_PackedNormal);
-		NewData.ColorComponent = STRUCTMEMBER_VERTEXSTREAMCOMPONENT(VB,FPaperSpriteVertex,Color,VET_Color);
-		NewData.TextureCoordinates.Add(FVertexStreamComponent(VB, STRUCT_OFFSET(FPaperSpriteVertex,TexCoords), sizeof(FPaperSpriteVertex), VET_Float2));
-		VertexFactory->SetData(NewData);
-	});
+		NewData.PositionComponent = STRUCTMEMBER_VERTEXSTREAMCOMPONENT(InVertexBuffer, FPaperSpriteVertex, Position, VET_Float3);
+		NewData.TangentBasisComponents[0] = STRUCTMEMBER_VERTEXSTREAMCOMPONENT(InVertexBuffer, FPaperSpriteVertex, TangentX, VET_PackedNormal);
+		NewData.TangentBasisComponents[1] = STRUCTMEMBER_VERTEXSTREAMCOMPONENT(InVertexBuffer, FPaperSpriteVertex, TangentZ, VET_PackedNormal);
+		NewData.ColorComponent = STRUCTMEMBER_VERTEXSTREAMCOMPONENT(InVertexBuffer, FPaperSpriteVertex, Color, VET_Color);
+		NewData.TextureCoordinates.Add(FVertexStreamComponent(InVertexBuffer, STRUCT_OFFSET(FPaperSpriteVertex, TexCoords), sizeof(FPaperSpriteVertex), VET_Float2));
+		SetData(NewData);
+	}
+	else
+	{
+		ENQUEUE_UNIQUE_RENDER_COMMAND_TWOPARAMETER(
+			InitPaperSpriteVertexFactory,
+			FPaperSpriteVertexFactory*, VertexFactory, this,
+			const FPaperSpriteVertexBuffer*, VB, InVertexBuffer,
+			{
+				VertexFactory->Init(VB);
+			});
+	}
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -117,41 +122,41 @@ class FPaperSpriteVertexFactoryDummy : public FLocalVertexFactory
 public:
 	void AllocateStuff()
 	{
-		FLocalVertexFactory::DataType Data;
+		FLocalVertexFactory::DataType VertData;
 
-		Data.PositionComponent = FVertexStreamComponent(
+		VertData.PositionComponent = FVertexStreamComponent(
 			&GDummyMaterialSpriteVertexBuffer,
 			STRUCT_OFFSET(FPaperSpriteVertex,Position),
 			sizeof(FPaperSpriteVertex),
 			VET_Float3
 			);
-		Data.TangentBasisComponents[0] = FVertexStreamComponent(
+		VertData.TangentBasisComponents[0] = FVertexStreamComponent(
 			&GDummyMaterialSpriteVertexBuffer,
 			STRUCT_OFFSET(FPaperSpriteVertex,TangentX),
 			sizeof(FPaperSpriteVertex),
 			VET_PackedNormal
 			);
-		Data.TangentBasisComponents[1] = FVertexStreamComponent(
+		VertData.TangentBasisComponents[1] = FVertexStreamComponent(
 			&GDummyMaterialSpriteVertexBuffer,
 			STRUCT_OFFSET(FPaperSpriteVertex,TangentZ),
 			sizeof(FPaperSpriteVertex),
 			VET_PackedNormal
 			);
-		Data.ColorComponent = FVertexStreamComponent(
+		VertData.ColorComponent = FVertexStreamComponent(
 			&GDummyMaterialSpriteVertexBuffer,
 			STRUCT_OFFSET(FPaperSpriteVertex,Color),
 			sizeof(FPaperSpriteVertex),
 			VET_Color
 			);
-		Data.TextureCoordinates.Empty();
-		Data.TextureCoordinates.Add(FVertexStreamComponent(
+		VertData.TextureCoordinates.Empty();
+		VertData.TextureCoordinates.Add(FVertexStreamComponent(
 			&GDummyMaterialSpriteVertexBuffer,
 			STRUCT_OFFSET(FPaperSpriteVertex,TexCoords),
 			sizeof(FPaperSpriteVertex),
 			VET_Float2
 			));
 
-		SetData(Data);
+		SetData(VertData);
 	}
 
 	FPaperSpriteVertexFactoryDummy()

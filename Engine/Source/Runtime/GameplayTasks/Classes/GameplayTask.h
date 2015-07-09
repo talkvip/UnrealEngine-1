@@ -214,7 +214,7 @@ public:
 	FORCEINLINE bool IsSimulating() const { return (bIsSimulating != 0); }
 	FORCEINLINE bool IsPausable() const { return (bIsPausable != 0); }
 	FORCEINLINE uint8 GetPriority() const { return Priority; }
-	FORCEINLINE bool RequiresPriorityOrResourceManagement() const { return bCaresAboutPriority == true || RequiredResources.IsEmpty() == false; }
+	FORCEINLINE bool RequiresPriorityOrResourceManagement() const { return bCaresAboutPriority == true || RequiredResources.IsEmpty() == false || ClaimedResources.IsEmpty() == false; }
 	FORCEINLINE FGameplayResourceSet GetRequiredResources() { return RequiredResources; }
 	FORCEINLINE FGameplayResourceSet GetClaimedResources() { return ClaimedResources; }
 	
@@ -324,7 +324,7 @@ protected:
 
 	TWeakObjectPtr<UGameplayTasksComponent>	TasksComponent;
 
-#if ENABLE_VISUAL_LOG
+#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
 	mutable FString DebugDescription;
 public:
 	const FString& GetDebugDescription() const
@@ -337,7 +337,7 @@ public:
 	}
 	virtual FString GenerateDebugDescription() const;
 	FString GetTaskStateName() const;
-#endif // ENABLE_VISUAL_LOG
+#endif // !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
 };
 
 template <class T>

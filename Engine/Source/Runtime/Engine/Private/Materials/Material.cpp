@@ -32,6 +32,8 @@
 #include "ShaderCompiler.h"
 #include "Materials/MaterialParameterCollection.h"
 #if WITH_EDITOR
+#include "MessageLog.h"
+#include "UObjectToken.h"
 #include "UnrealEd.h"
 #include "SlateBasics.h"  // For AddNotification
 #include "SNotificationList.h"
@@ -267,29 +269,14 @@ public:
 		}
 	}
 
-	virtual float GetDistanceFieldPenumbraScale() const { return DistanceFieldPenumbraScale; }
-
 	// FRenderResource interface.
 	virtual FString GetFriendlyName() const { return Material->GetName(); }
 
 	// Constructor.
 	FDefaultMaterialInstance(UMaterial* InMaterial,bool bInSelected,bool bInHovered):
 		FMaterialRenderProxy(bInSelected, bInHovered),
-		Material(InMaterial),
-		DistanceFieldPenumbraScale(1.0f)
+		Material(InMaterial)
 	{}
-
-	/** Called from the game thread to update DistanceFieldPenumbraScale. */
-	void GameThread_UpdateDistanceFieldPenumbraScale(float NewDistanceFieldPenumbraScale)
-	{
-		ENQUEUE_UNIQUE_RENDER_COMMAND_TWOPARAMETER(
-			UpdateDistanceFieldPenumbraScaleCommand,
-			float*,DistanceFieldPenumbraScale,&DistanceFieldPenumbraScale,
-			float,NewDistanceFieldPenumbraScale,NewDistanceFieldPenumbraScale,
-		{
-			*DistanceFieldPenumbraScale = NewDistanceFieldPenumbraScale;
-		});
-	}
 
 private:
 
@@ -300,9 +287,6 @@ private:
 	}
 
 	UMaterial* Material;
-
-	// maintained by the render thread
-	float DistanceFieldPenumbraScale;
 };
 
 #if WITH_EDITOR
@@ -355,9 +339,11 @@ void UMaterialInterface::InitDefaultMaterials()
 #if WITH_EDITOR
 		GPowerToRoughnessMaterialFunction = LoadObject< UMaterialFunction >( NULL, TEXT("/Engine/Functions/Engine_MaterialFunctions01/Shading/PowerToRoughness.PowerToRoughness"), NULL, LOAD_None, NULL );
 		checkf( GPowerToRoughnessMaterialFunction, TEXT("Cannot load PowerToRoughness") );
+		GPowerToRoughnessMaterialFunction->AddToRoot();
 
 		GConvertFromDiffSpecMaterialFunction = LoadObject< UMaterialFunction >( NULL, TEXT("/Engine/Functions/Engine_MaterialFunctions01/Shading/ConvertFromDiffSpec.ConvertFromDiffSpec"), NULL, LOAD_None, NULL );
 		checkf( GConvertFromDiffSpecMaterialFunction, TEXT("Cannot load ConvertFromDiffSpec") );
+		GConvertFromDiffSpecMaterialFunction->AddToRoot();
 #endif
 
 		for (int32 Domain = 0; Domain < MD_MAX; ++Domain)
@@ -370,6 +356,7 @@ void UMaterialInterface::InitDefaultMaterials()
 					GDefaultMaterials[Domain] = LoadObject<UMaterial>(NULL,GDefaultMaterialNames[Domain],NULL,LOAD_None,NULL);
 					checkf(GDefaultMaterials[Domain] != NULL, TEXT("Cannot load default material '%s'"), GDefaultMaterialNames[Domain]);
 				}
+				GDefaultMaterials[Domain]->AddToRoot();
 			}
 		}
 		bInitialized = true;
@@ -1039,7 +1026,20 @@ bool UMaterial::SetMaterialUsage(bool &bNeedsRecompile, EMaterialUsage Usage, co
 
 			// Mark the package dirty so that hopefully it will be saved with the new usage flag.
 			// This is important because the only way an artist can fix an infinite 'compile on load' scenario is by saving with the new usage flag
-			MarkPackageDirty();
+			if (!MarkPackageDirty())
+			{
+#if WITH_EDITOR
+				// The package could not be marked as dirty as we're loading content in the editor. Add a Map Check error to notify the user.
+				FFormatNamedArguments Arguments;
+				Arguments.Add(TEXT("Material"), FText::FromString(*GetPathName()));
+				Arguments.Add(TEXT("Usage"), FText::FromString(*GetUsageName(Usage)));
+				FMessageLog("MapCheck").Warning()
+					->AddToken(FUObjectToken::Create(this))
+					->AddToken(FTextToken::Create(FText::Format(LOCTEXT("MapCheck_SetMaterialUsage", "Material {Material} was missing the usage flag {Usage}. If the material asset is not re-saved, it may not render correctly when run outside the editor."), Arguments)))
+					->AddToken(FActionToken::Create(LOCTEXT("MapCheck_FixMaterialUsage", "Fix"), LOCTEXT("MapCheck_FixMaterialUsage_Desc", "Click to set the usage flag correctly and mark the asset file as needing to be saved."), FOnActionTokenExecuted::CreateUObject(this, &UMaterial::FixupMaterialUsageAfterLoad), true));
+				FMessageLog("MapCheck").Open(EMessageSeverity::Warning);
+#endif
+			}
 		}
 		else
 		{
@@ -1075,6 +1075,14 @@ bool UMaterial::SetMaterialUsage(bool &bNeedsRecompile, EMaterialUsage Usage, co
 	}
 	return true;
 }
+
+#if WITH_EDITOR
+void UMaterial::FixupMaterialUsageAfterLoad()
+{
+	// All we need to do here is mark the package dirty as the usage itself was set on load.
+	MarkPackageDirty();
+}
+#endif
 
 void UMaterial::GetAllVectorParameterNames(TArray<FName> &OutParameterNames, TArray<FGuid> &OutParameterIds) const
 {
@@ -2405,8 +2413,6 @@ void UMaterial::PropagateDataToMaterialProxy()
 	{
 		if (DefaultMaterialInstances[i])
 		{
-			DefaultMaterialInstances[i]->GameThread_UpdateDistanceFieldPenumbraScale(GetDistanceFieldPenumbraScale());
-
 			UpdateMaterialRenderProxy(*DefaultMaterialInstances[i]);
 		}
 	}
@@ -2851,7 +2857,7 @@ bool UMaterial::HasDuplicateDynamicParameters(const UMaterialExpression* Express
 }
 
 
-void UMaterial::UpdateExpressionDynamicParameterNames(const UMaterialExpression* Expression)
+void UMaterial::UpdateExpressionDynamicParameters(const UMaterialExpression* Expression)
 {
 	const UMaterialExpressionDynamicParameter* DynParam = Cast<UMaterialExpressionDynamicParameter>(Expression);
 	if (DynParam)
@@ -2859,7 +2865,7 @@ void UMaterial::UpdateExpressionDynamicParameterNames(const UMaterialExpression*
 		for (int32 ExpIndex = 0; ExpIndex < Expressions.Num(); ExpIndex++)
 		{
 			UMaterialExpressionDynamicParameter* CheckParam = Cast<UMaterialExpressionDynamicParameter>(Expressions[ExpIndex]);
-			if (CheckParam && CheckParam->CopyDynamicParameterNames(DynParam))
+			if (CheckParam && CheckParam->CopyDynamicParameterProperties(DynParam))
 			{
 #if WITH_EDITOR
 				CheckParam->GraphNode->ReconstructNode();

@@ -102,7 +102,10 @@ public:
 	virtual FSequencerSelection& GetSelection() override;
 
 	/** @return The current view range */
-	FAnimatedRange GetViewRange() const;
+	virtual FAnimatedRange GetViewRange() const override;
+
+	/** Access the user-supplied settings object */
+	USequencerSettings* GetSettings() const { return Settings; }
 
 	bool IsPerspectiveViewportPosessionEnabled() const { return bPerspectiveViewportPossessionEnabled; }
 
@@ -375,6 +378,9 @@ protected:
 	void UpdatePreviewLevelViewportClientFromCameraCut( FLevelEditorViewportClient& InViewportClient, UObject* InCameraObject, bool bNewCameraCut ) const;
 
 private:
+	/** User-supplied settings object for this sequencer */
+	USequencerSettings* Settings;
+
 	TMap< TWeakObjectPtr<UMovieSceneSection>, TSharedRef<FMovieSceneInstance> > MovieSceneSectionToInstanceMap;
 
 	/** Command list for sequencer commands */
@@ -418,6 +424,8 @@ private:
 	TRange<float> TargetViewRange;
 	/** The last time range that was viewed */
 	TRange<float> LastViewRange;
+	/** The view range before zooming */
+	TRange<float> ViewRangeBeforeZoom;
 	/** The amount of autoscroll pan offset that is currently being applied */
 	TOptional<float> AutoscrollOffset;
 	/** Whether or not we are allowing autoscroll */

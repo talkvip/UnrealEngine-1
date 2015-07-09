@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include "ISourceControlState.h"
+
 struct ECollectionShareType
 {
 	enum Type
@@ -95,6 +97,29 @@ struct ECollectionShareType
 		}
 		return NAME_None;
 	}
+
+	static bool IsValidChildType(const Type InParentType, const Type InChildType)
+	{
+		if (InParentType == CST_Local)
+		{
+			// Local collections can only contain other local collections
+			return InChildType == CST_Local;
+		}
+
+		if (InParentType == CST_Private)
+		{
+			// Private collections can only contain local or private collections
+			return InChildType == CST_Local || InChildType == CST_Private;
+		}
+
+		if (InParentType == CST_Shared)
+		{
+			// Shared collections can contain any kind of collection
+			return InChildType == CST_Local || InChildType == CST_Private || InChildType == CST_Shared;
+		}
+
+		return false;
+	}
 };
 
 /** Controls how the collections manager will recurse when performing work against a given collection */
@@ -132,6 +157,11 @@ struct FCollectionNameType
 		return Name == Other.Name && Type == Other.Type;
 	}
 
+	bool operator!=(const FCollectionNameType& Other) const
+	{
+		return !(*this == Other);
+	}
+
 	friend inline uint32 GetTypeHash( const FCollectionNameType& Key )
 	{
 		uint32 Hash = 0;
@@ -142,6 +172,25 @@ struct FCollectionNameType
 
 	FName Name;
 	ECollectionShareType::Type Type;
+};
+
+/** The status information for a collection */
+struct FCollectionStatusInfo
+{
+	/** True if the collection has unsaved changes */
+	bool bIsDirty;
+
+	/** True if the collection is empty */
+	bool bIsEmpty;
+
+	/** True if the collection uses SCC */
+	bool bUseSCC;
+
+	/** Number of objects within the collection (static collections only) */
+	int32 NumObjects;
+
+	/** The current source control state of the collection. Only filled in for those collections that are under source control, but may also be empty if the SCC is unavailable (see bUseSCC) */
+	FSourceControlStatePtr SCCState;
 };
 
 class ICollectionRedirectorFollower

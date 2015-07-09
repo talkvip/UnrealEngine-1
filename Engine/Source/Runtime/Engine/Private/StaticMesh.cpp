@@ -1024,6 +1024,7 @@ FArchive& operator<<(FArchive& Ar, FMeshBuildSettings& BuildSettings)
 	Ar << BuildSettings.bRecomputeTangents;
 	Ar << BuildSettings.bUseMikkTSpace;
 	Ar << BuildSettings.bRemoveDegenerates;
+	Ar << BuildSettings.bBuildAdjacencyBuffer;
 	Ar << BuildSettings.bUseFullPrecisionUVs;
 	Ar << BuildSettings.bGenerateLightmapUVs;
 
@@ -1368,22 +1369,12 @@ bool UStaticMesh::HasValidRenderData() const
 
 FBoxSphereBounds UStaticMesh::GetBounds() const
 {
-	FBoxSphereBounds Bounds(ForceInit);
-	if (RenderData)
-	{
-		Bounds = RenderData->Bounds;
-	}
-	return Bounds;
+	return ExtendedBounds;
 }
 
 FBox UStaticMesh::GetBoundingBox() const
 {
-	FBox BoundingBox(FVector(0,0,0), FVector(0,0,0));
-	if (RenderData != nullptr)
-	{
-		BoundingBox = RenderData->Bounds.GetBox();
-	}
-	return BoundingBox;
+	return ExtendedBounds.GetBox();
 }
 
 float UStaticMesh::GetStreamingTextureFactor(int32 RequestedUVIndex)
@@ -1472,6 +1463,11 @@ void UStaticMesh::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedE
 		GEngine->TriggerStreamingDataRebuild();
 	}
 
+	if (PropertyChangedEvent.MemberProperty && ( (PropertyChangedEvent.MemberProperty->GetFName() == GET_MEMBER_NAME_CHECKED(UStaticMesh, PositiveBoundsExtension) ) || ( PropertyChangedEvent.MemberProperty->GetFName() == GET_MEMBER_NAME_CHECKED(UStaticMesh, NegativeBoundsExtension) ) ))
+	{
+		// Update the extended bounds
+		CalculateExtendedBounds();
+	}
 	AutoLODPixelError = FMath::Max(AutoLODPixelError, 1.0f);
 
 	if (!bAutoComputeLODScreenSize
@@ -1759,6 +1755,29 @@ void UStaticMesh::CacheDerivedData()
 		}
 	}
 }
+
+void UStaticMesh::CalculateExtendedBounds()
+{
+	FBoxSphereBounds Bounds(ForceInit);
+	if (RenderData)
+	{
+		Bounds = RenderData->Bounds;
+	}
+
+	// Convert to Min and Max
+	FVector Min = Bounds.Origin - Bounds.BoxExtent;
+	FVector Max = Bounds.Origin + Bounds.BoxExtent;
+	// Apply bound extensions
+	Min -= NegativeBoundsExtension;
+	Max += PositiveBoundsExtension;
+	// Convert back to Origin, Extent and update SphereRadius
+	Bounds.Origin = (Min + Max) / 2;
+	Bounds.BoxExtent = (Max - Min) / 2;	
+	Bounds.SphereRadius = Bounds.BoxExtent.GetAbsMax();
+
+	ExtendedBounds = Bounds;
+}
+
 #endif // #if WITH_EDITORONLY_DATA
 
 #if WITH_EDITORONLY_DATA
@@ -1940,6 +1959,27 @@ void UStaticMesh::PostLoad()
 		}
 	}
 
+	if (GetLinkerUE4Version() < VER_UE4_BUILD_MESH_ADJ_BUFFER_FLAG_EXPOSED)
+	{
+		FRawMesh TempRawMesh;
+		uint32 TotalIndexCount = 0;
+
+		for (int32 i = 0; i < SourceModels.Num(); ++i)
+		{
+			FRawMeshBulkData* RawMeshBulkData = SourceModels[i].RawMeshBulkData;
+			if (RawMeshBulkData)
+			{
+				RawMeshBulkData->LoadRawMesh(TempRawMesh);
+				TotalIndexCount += TempRawMesh.WedgeIndices.Num();
+			}
+		}
+
+		for (int32 i = 0; i < SourceModels.Num(); ++i)
+		{
+			SourceModels[i].BuildSettings.bBuildAdjacencyBuffer = (TotalIndexCount < 50000);
+		}
+	}
+
 	CacheDerivedData();
 
 	// Only required in an editor build as other builds process this in a different place
@@ -1981,6 +2021,13 @@ void UStaticMesh::PostLoad()
 	{
 		InitResources();
 	}
+
+#if WITH_EDITOR
+	if (GetLinkerUE4Version() < VER_UE4_STATIC_MESH_EXTENDED_BOUNDS)
+	{
+		CalculateExtendedBounds();
+	}
+#endif // #if WITH_EDITOR
 
 	// We want to always have a BodySetup, its used for per-poly collision as well
 	if(BodySetup == NULL)

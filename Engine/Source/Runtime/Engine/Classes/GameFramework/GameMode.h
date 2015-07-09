@@ -373,19 +373,24 @@ public:
 	//=========================================================================
 	// URL Parsing
 	/** Grab the next option from a string. */
-	bool GrabOption( FString& Options, FString& ResultString );
+	DEPRECATED(4.9, "Use UGameplayStatics::GrabOption instead")
+	static bool GrabOption( FString& Options, FString& ResultString );
 
 	/** Break up a key=value pair into its key and value. */
-	void GetKeyValue( const FString& Pair, FString& Key, FString& Value );
+	DEPRECATED(4.9, "Use UGameplayStatics::GetKeyValue instead")
+	static void GetKeyValue( const FString& Pair, FString& Key, FString& Value );
 
 	/* Find an option in the options string and return it. */
-	FString ParseOption( const FString& Options, const FString& InKey );
+	DEPRECATED(4.9, "Use UGameplayStatics::ParseOption instead")
+	static FString ParseOption( FString Options, const FString& InKey );
 
 	/** HasOption - return true if the option is specified on the command line. */
-	bool HasOption( const FString& Options, const FString& InKey );
+	DEPRECATED(4.9, "Use UGameplayStatics::HasOption instead")
+	static bool HasOption( FString Options, const FString& InKey );
 
 	/** Search array of options for ParseString and return the index or CurrentValue if not found*/
-	int32 GetIntOption( const FString& Options, const FString& ParseString, int32 CurrentValue);
+	DEPRECATED(4.9, "Use UGameplayStatics::GetIntOption instead")
+	static int32 GetIntOption( const FString& Options, const FString& ParseString, int32 CurrentValue);
 	//=========================================================================
 
 	/** 
@@ -456,7 +461,7 @@ public:
 	 *
 	 * @return a new player controller for the logged in player, NULL if login failed for any reason
 	 */
-	virtual APlayerController* Login(class UPlayer* NewPlayer, ENetRole RemoteRole, const FString& Portal, const FString& Options, const TSharedPtr<const FUniqueNetId>& UniqueId, FString& ErrorMessage);
+	virtual APlayerController* Login(class UPlayer* NewPlayer, ENetRole InRemoteRole, const FString& Portal, const FString& Options, const TSharedPtr<const FUniqueNetId>& UniqueId, FString& ErrorMessage);
 
 	/** Called after a successful login.  This is the first place it is safe to call replicated functions on the PlayerAController. */
 	virtual void PostLogin( APlayerController* NewPlayer );
@@ -474,7 +479,7 @@ public:
 	 *
 	 * @return PlayerController for the player, NULL if there is any reason this player shouldn't exist or due to some error
 	 */
-	virtual APlayerController* SpawnPlayerController(ENetRole RemoteRole, FVector const& SpawnLocation, FRotator const& SpawnRotation);
+	virtual APlayerController* SpawnPlayerController(ENetRole InRemoteRole, FVector const& SpawnLocation, FRotator const& SpawnRotation);
 
 	/** @Returns true if NewPlayerController may only join the server as a spectator. */
 	UFUNCTION(BlueprintNativeEvent, Category="Game")

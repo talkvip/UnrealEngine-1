@@ -1363,26 +1363,22 @@ void ALandscapeProxy::Destroyed()
 {
 	Super::Destroyed();
 
-	if (GIsEditor)
+	if (GIsEditor && !GetWorld()->IsGameWorld())
 	{
 		ULandscapeInfo::RecreateLandscapeInfo(GetWorld(), false);
-	}
 
-	if (SplineComponent)
-	{
-		SplineComponent->ModifySplines();
-	}
+		if (SplineComponent)
+		{
+			SplineComponent->ModifySplines();
+		}
 
-#if WITH_EDITOR
-	TotalComponentsNeedingGrassMapRender -= NumComponentsNeedingGrassMapRender;
-	NumComponentsNeedingGrassMapRender = 0;
-	TotalTexturesToStreamForVisibleGrassMapRender -= NumTexturesToStreamForVisibleGrassMapRender;
-	NumTexturesToStreamForVisibleGrassMapRender = 0;
-#endif
+		TotalComponentsNeedingGrassMapRender -= NumComponentsNeedingGrassMapRender;
+		NumComponentsNeedingGrassMapRender = 0;
+		TotalTexturesToStreamForVisibleGrassMapRender -= NumTexturesToStreamForVisibleGrassMapRender;
+		NumTexturesToStreamForVisibleGrassMapRender = 0;
+	}
 }
-#endif
 
-#if WITH_EDITOR
 void ALandscapeProxy::GetSharedProperties(ALandscapeProxy* Landscape)
 {
 	if (GIsEditor && Landscape)

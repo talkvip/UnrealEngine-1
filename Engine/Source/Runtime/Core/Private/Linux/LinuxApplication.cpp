@@ -47,15 +47,23 @@ FLinuxApplication* FLinuxApplication::CreateLinuxApplication()
 
 	LinuxApplication = new FLinuxApplication();
 
-	SDLControllerState* ControllerState = LinuxApplication->ControllerStates;
+	int32 ControllerIndex = 0;
+
 	for (int i = 0; i < SDL_NumJoysticks(); ++i)
 	{
 		if (SDL_IsGameController(i))
 		{
-			ControllerState->controller = SDL_GameControllerOpen(i);
-			if (ControllerState++->controller == nullptr)
+			auto Controller = SDL_GameControllerOpen(i);
+			if (Controller == nullptr)
 			{
-				UE_LOG(LogLoad, Warning, TEXT("Could not open gamecontroller %i: %s\n"), i, UTF8_TO_TCHAR(SDL_GetError()));
+				UE_LOG(LogLoad, Warning, TEXT("Could not open gamecontroller %i: %s\n"), i, ANSI_TO_TCHAR(SDL_GetError()) );
+			}
+			else
+			{
+				SDL_JoystickID Id = SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(Controller));
+				LinuxApplication->ControllerStates.Add(Id);
+				LinuxApplication->ControllerStates[Id].Controller = Controller;
+				LinuxApplication->ControllerStates[Id].ControllerIndex = ControllerIndex++;
 			}
 		}
 	}
@@ -78,8 +86,6 @@ FLinuxApplication::FLinuxApplication()
 	bUsingHighPrecisionMouseInput = false;
 	bAllowedToDeferMessageProcessing = true;
 	MouseCaptureWindow = NULL;
-	ControllerStates = new SDLControllerState[SDL_NumJoysticks()];
-	FMemory::Memset(ControllerStates, 0, sizeof(SDLControllerState) * SDL_NumJoysticks());
 
 	fMouseWheelScrollAccel = 1.0f;
 	if (GConfig)
@@ -95,17 +101,18 @@ FLinuxApplication::~FLinuxApplication()
 		GConfig->GetFloat(TEXT("X11.Tweaks"), TEXT("MouseWheelScrollAcceleration"), fMouseWheelScrollAccel, GEngineIni);
 		GConfig->Flush(false, GEngineIni);
 	}
-	delete [] ControllerStates;
 }
 
 void FLinuxApplication::DestroyApplication()
 {
-	for (int i = 0; i < SDL_NumJoysticks(); ++i) {
-		if(ControllerStates[i].controller != NULL)
+	for(auto ControllerIt = ControllerStates.CreateConstIterator(); ControllerIt; ++ControllerIt)
+	{
+		if(ControllerIt.Value().Controller != nullptr)
 		{
-			SDL_GameControllerClose(ControllerStates[i].controller);
+			SDL_GameControllerClose(ControllerIt.Value().Controller);
 		}
 	}
+	ControllerStates.Empty();
 }
 
 TSharedRef< FGenericWindow > FLinuxApplication::MakeWindow()
@@ -413,231 +420,248 @@ void FLinuxApplication::ProcessDeferredMessage( SDL_Event Event )
 	case SDL_CONTROLLERAXISMOTION:
 		{
 			SDL_ControllerAxisEvent caxisEvent = Event.caxis;
-			EControllerButtons::Type analog;
-			float value = ShortToNormalFloat(caxisEvent.value);
+			FGamepadKeyNames::Type Axis = FGamepadKeyNames::Invalid;
+			float AxisValue = ShortToNormalFloat(caxisEvent.value);
+
+			if (!ControllerStates.Contains(caxisEvent.which))
+			{
+				break;
+			}
+
+			SDLControllerState &ControllerState = ControllerStates[caxisEvent.which];
 
 			switch (caxisEvent.axis)
 			{
 			case SDL_CONTROLLER_AXIS_LEFTX:
-				analog = EControllerButtons::LeftAnalogX;
+				Axis = FGamepadKeyNames::LeftAnalogX;
 				if(caxisEvent.value > GAMECONTROLLER_LEFT_THUMB_DEADZONE)
 				{
-					if(!ControllerStates[caxisEvent.which].analogOverThreshold[0])
+					if(!ControllerState.AnalogOverThreshold[0])
 					{
-						MessageHandler->OnControllerButtonPressed(EControllerButtons::LeftStickRight, caxisEvent.which, false);
-						ControllerStates[caxisEvent.which].analogOverThreshold[0] = true;
+						MessageHandler->OnControllerButtonPressed(FGamepadKeyNames::LeftStickRight, ControllerState.ControllerIndex, false);
+						ControllerState.AnalogOverThreshold[0] = true;
 					}
 				}
-				else if(ControllerStates[caxisEvent.which].analogOverThreshold[0])
+				else if(ControllerState.AnalogOverThreshold[0])
 				{
-					MessageHandler->OnControllerButtonReleased(EControllerButtons::LeftStickRight, caxisEvent.which, false);
-					ControllerStates[caxisEvent.which].analogOverThreshold[0] = false;
+					MessageHandler->OnControllerButtonReleased(FGamepadKeyNames::LeftStickRight, ControllerState.ControllerIndex, false);
+					ControllerState.AnalogOverThreshold[0] = false;
 				}
 				if(caxisEvent.value < -GAMECONTROLLER_LEFT_THUMB_DEADZONE)
 				{
-					if(!ControllerStates[caxisEvent.which].analogOverThreshold[1])
+					if(!ControllerState.AnalogOverThreshold[1])
 					{
-						MessageHandler->OnControllerButtonPressed(EControllerButtons::LeftStickLeft, caxisEvent.which, false);
-						ControllerStates[caxisEvent.which].analogOverThreshold[1] = true;
+						MessageHandler->OnControllerButtonPressed(FGamepadKeyNames::LeftStickLeft, ControllerState.ControllerIndex, false);
+						ControllerState.AnalogOverThreshold[1] = true;
 					}
 				}
-				else if(ControllerStates[caxisEvent.which].analogOverThreshold[1])
+				else if(ControllerState.AnalogOverThreshold[1])
 				{
-					MessageHandler->OnControllerButtonReleased(EControllerButtons::LeftStickLeft, caxisEvent.which, false);
-					ControllerStates[caxisEvent.which].analogOverThreshold[1] = false;
+					MessageHandler->OnControllerButtonReleased(FGamepadKeyNames::LeftStickLeft, ControllerState.ControllerIndex, false);
+					ControllerState.AnalogOverThreshold[1] = false;
 				}
 				break;
 			case SDL_CONTROLLER_AXIS_LEFTY:
-				analog = EControllerButtons::LeftAnalogY;
-				value *= -1;
+				Axis = FGamepadKeyNames::LeftAnalogY;
+				AxisValue *= -1;
 				if(caxisEvent.value > GAMECONTROLLER_LEFT_THUMB_DEADZONE)
 				{
-					if(!ControllerStates[caxisEvent.which].analogOverThreshold[2])
+					if(!ControllerState.AnalogOverThreshold[2])
 					{
-						MessageHandler->OnControllerButtonPressed(EControllerButtons::LeftStickDown, caxisEvent.which, false);
-						ControllerStates[caxisEvent.which].analogOverThreshold[2] = true;
+						MessageHandler->OnControllerButtonPressed(FGamepadKeyNames::LeftStickDown, ControllerState.ControllerIndex, false);
+						ControllerState.AnalogOverThreshold[2] = true;
 					}
 				}
-				else if(ControllerStates[caxisEvent.which].analogOverThreshold[2])
+				else if(ControllerState.AnalogOverThreshold[2])
 				{
-					MessageHandler->OnControllerButtonReleased(EControllerButtons::LeftStickDown, caxisEvent.which, false);
-					ControllerStates[caxisEvent.which].analogOverThreshold[2] = false;
+					MessageHandler->OnControllerButtonReleased(FGamepadKeyNames::LeftStickDown, ControllerState.ControllerIndex, false);
+					ControllerState.AnalogOverThreshold[2] = false;
 				}
 				if(caxisEvent.value < -GAMECONTROLLER_LEFT_THUMB_DEADZONE)
 				{
-					if(!ControllerStates[caxisEvent.which].analogOverThreshold[3])
+					if(!ControllerState.AnalogOverThreshold[3])
 					{
-						MessageHandler->OnControllerButtonPressed(EControllerButtons::LeftStickUp, caxisEvent.which, false);
-						ControllerStates[caxisEvent.which].analogOverThreshold[3] = true;
+						MessageHandler->OnControllerButtonPressed(FGamepadKeyNames::LeftStickUp, ControllerState.ControllerIndex, false);
+						ControllerState.AnalogOverThreshold[3] = true;
 					}
 				}
-				else if(ControllerStates[caxisEvent.which].analogOverThreshold[3])
+				else if(ControllerState.AnalogOverThreshold[3])
 				{
-					MessageHandler->OnControllerButtonReleased(EControllerButtons::LeftStickUp, caxisEvent.which, false);
-					ControllerStates[caxisEvent.which].analogOverThreshold[3] = false;
+					MessageHandler->OnControllerButtonReleased(FGamepadKeyNames::LeftStickUp, ControllerState.ControllerIndex, false);
+					ControllerState.AnalogOverThreshold[3] = false;
 				}
 				break;
 			case SDL_CONTROLLER_AXIS_RIGHTX:
-				analog = EControllerButtons::RightAnalogX;
+				Axis = FGamepadKeyNames::RightAnalogX;
 				if(caxisEvent.value > GAMECONTROLLER_RIGHT_THUMB_DEADZONE)
 				{
-					if(!ControllerStates[caxisEvent.which].analogOverThreshold[4])
+					if(!ControllerState.AnalogOverThreshold[4])
 					{
-						MessageHandler->OnControllerButtonPressed(EControllerButtons::RightStickRight, caxisEvent.which, false);
-						ControllerStates[caxisEvent.which].analogOverThreshold[4] = true;
+						MessageHandler->OnControllerButtonPressed(FGamepadKeyNames::RightStickRight, ControllerState.ControllerIndex, false);
+						ControllerState.AnalogOverThreshold[4] = true;
 					}
 				}
-				else if(ControllerStates[caxisEvent.which].analogOverThreshold[4])
+				else if(ControllerState.AnalogOverThreshold[4])
 				{
-					MessageHandler->OnControllerButtonReleased(EControllerButtons::RightStickRight, caxisEvent.which, false);
-					ControllerStates[caxisEvent.which].analogOverThreshold[4] = false;
+					MessageHandler->OnControllerButtonReleased(FGamepadKeyNames::RightStickRight, ControllerState.ControllerIndex, false);
+					ControllerState.AnalogOverThreshold[4] = false;
 				}
 				if(caxisEvent.value < -GAMECONTROLLER_RIGHT_THUMB_DEADZONE)
 				{
-					if(!ControllerStates[caxisEvent.which].analogOverThreshold[5])
+					if(!ControllerState.AnalogOverThreshold[5])
 					{
-						MessageHandler->OnControllerButtonPressed(EControllerButtons::RightStickLeft, caxisEvent.which, false);
-						ControllerStates[caxisEvent.which].analogOverThreshold[5] = true;
+						MessageHandler->OnControllerButtonPressed(FGamepadKeyNames::RightStickLeft, ControllerState.ControllerIndex, false);
+						ControllerState.AnalogOverThreshold[5] = true;
 					}
 				}
-				else if(ControllerStates[caxisEvent.which].analogOverThreshold[5])
+				else if(ControllerState.AnalogOverThreshold[5])
 				{
-					MessageHandler->OnControllerButtonReleased(EControllerButtons::RightStickLeft, caxisEvent.which, false);
-					ControllerStates[caxisEvent.which].analogOverThreshold[5] = false;
+					MessageHandler->OnControllerButtonReleased(FGamepadKeyNames::RightStickLeft, ControllerState.ControllerIndex, false);
+					ControllerState.AnalogOverThreshold[5] = false;
 				}
 				break;
 			case SDL_CONTROLLER_AXIS_RIGHTY:
-				analog = EControllerButtons::RightAnalogY;
-				value *= -1;
+				Axis = FGamepadKeyNames::RightAnalogY;
+				AxisValue *= -1;
 				if(caxisEvent.value > GAMECONTROLLER_RIGHT_THUMB_DEADZONE)
 				{
-					if(!ControllerStates[caxisEvent.which].analogOverThreshold[6])
+					if(!ControllerState.AnalogOverThreshold[6])
 					{
-						MessageHandler->OnControllerButtonPressed(EControllerButtons::RightStickDown, caxisEvent.which, false);
-						ControllerStates[caxisEvent.which].analogOverThreshold[6] = true;
+						MessageHandler->OnControllerButtonPressed(FGamepadKeyNames::RightStickDown, ControllerState.ControllerIndex, false);
+						ControllerState.AnalogOverThreshold[6] = true;
 					}
 				}
-				else if(ControllerStates[caxisEvent.which].analogOverThreshold[6])
+				else if(ControllerState.AnalogOverThreshold[6])
 				{
-					MessageHandler->OnControllerButtonReleased(EControllerButtons::RightStickDown, caxisEvent.which, false);
-					ControllerStates[caxisEvent.which].analogOverThreshold[6] = false;
+					MessageHandler->OnControllerButtonReleased(FGamepadKeyNames::RightStickDown, ControllerState.ControllerIndex, false);
+					ControllerState.AnalogOverThreshold[6] = false;
 				}
 				if(caxisEvent.value < -GAMECONTROLLER_RIGHT_THUMB_DEADZONE)
 				{
-					if(!ControllerStates[caxisEvent.which].analogOverThreshold[7])
+					if(!ControllerState.AnalogOverThreshold[7])
 					{
-						MessageHandler->OnControllerButtonPressed(EControllerButtons::RightStickUp, caxisEvent.which, false);
-						ControllerStates[caxisEvent.which].analogOverThreshold[7] = true;
+						MessageHandler->OnControllerButtonPressed(FGamepadKeyNames::RightStickUp, ControllerState.ControllerIndex, false);
+						ControllerState.AnalogOverThreshold[7] = true;
 					}
 				}
-				else if(ControllerStates[caxisEvent.which].analogOverThreshold[7])
+				else if(ControllerState.AnalogOverThreshold[7])
 				{
-					MessageHandler->OnControllerButtonReleased(EControllerButtons::RightStickUp, caxisEvent.which, false);
-					ControllerStates[caxisEvent.which].analogOverThreshold[7] = false;
+					MessageHandler->OnControllerButtonReleased(FGamepadKeyNames::RightStickUp, ControllerState.ControllerIndex, false);
+					ControllerState.AnalogOverThreshold[7] = false;
 				}
 				break;
 			case SDL_CONTROLLER_AXIS_TRIGGERLEFT:
-				analog = EControllerButtons::LeftTriggerAnalog;
+				Axis = FGamepadKeyNames::LeftTriggerAnalog;
 				if(caxisEvent.value > GAMECONTROLLER_TRIGGER_THRESHOLD)
 				{
-					if(!ControllerStates[caxisEvent.which].analogOverThreshold[8])
+					if(!ControllerState.AnalogOverThreshold[8])
 					{
-						MessageHandler->OnControllerButtonPressed(EControllerButtons::LeftTriggerThreshold, caxisEvent.which, false);
-						ControllerStates[caxisEvent.which].analogOverThreshold[8] = true;
+						MessageHandler->OnControllerButtonPressed(FGamepadKeyNames::LeftTriggerThreshold, ControllerState.ControllerIndex, false);
+						ControllerState.AnalogOverThreshold[8] = true;
 					}
 				}
-				else if(ControllerStates[caxisEvent.which].analogOverThreshold[8])
+				else if(ControllerState.AnalogOverThreshold[8])
 				{
-					MessageHandler->OnControllerButtonReleased(EControllerButtons::LeftTriggerThreshold, caxisEvent.which, false);
-					ControllerStates[caxisEvent.which].analogOverThreshold[8] = false;
+					MessageHandler->OnControllerButtonReleased(FGamepadKeyNames::LeftTriggerThreshold, ControllerState.ControllerIndex, false);
+					ControllerState.AnalogOverThreshold[8] = false;
 				}
 				break;
 			case SDL_CONTROLLER_AXIS_TRIGGERRIGHT:
-				analog = EControllerButtons::LeftTriggerAnalog;
+				Axis = FGamepadKeyNames::RightTriggerAnalog;
 				if(caxisEvent.value > GAMECONTROLLER_TRIGGER_THRESHOLD)
 				{
-					if(!ControllerStates[caxisEvent.which].analogOverThreshold[9])
+					if(!ControllerState.AnalogOverThreshold[9])
 					{
-						MessageHandler->OnControllerButtonPressed(EControllerButtons::RightTriggerThreshold, caxisEvent.which, false);
-						ControllerStates[caxisEvent.which].analogOverThreshold[9] = true;
+						MessageHandler->OnControllerButtonPressed(FGamepadKeyNames::RightTriggerThreshold, ControllerState.ControllerIndex, false);
+						ControllerState.AnalogOverThreshold[9] = true;
 					}
 				}
-				else if(ControllerStates[caxisEvent.which].analogOverThreshold[9])
+				else if(ControllerState.AnalogOverThreshold[9])
 				{
-					MessageHandler->OnControllerButtonReleased(EControllerButtons::RightTriggerThreshold, caxisEvent.which, false);
-					ControllerStates[caxisEvent.which].analogOverThreshold[9] = false;
+					MessageHandler->OnControllerButtonReleased(FGamepadKeyNames::RightTriggerThreshold, ControllerState.ControllerIndex, false);
+					ControllerState.AnalogOverThreshold[9] = false;
 				}
 				break;
 			default:
-				analog = EControllerButtons::Invalid;
 				break;
 			}
 
-			MessageHandler->OnControllerAnalog(analog, caxisEvent.which, value);
+			if (Axis != FGamepadKeyNames::Invalid)
+			{
+				float & ExistingAxisEventValue = ControllerState.AxisEvents.FindOrAdd(Axis);
+				ExistingAxisEventValue = AxisValue;
+			}
 		}
 		break;
 	case SDL_CONTROLLERBUTTONDOWN:
 	case SDL_CONTROLLERBUTTONUP:
 		{
 			SDL_ControllerButtonEvent cbuttonEvent = Event.cbutton;
-			EControllerButtons::Type button;
+			FGamepadKeyNames::Type Button = FGamepadKeyNames::Invalid;
+
+			if (!ControllerStates.Contains(cbuttonEvent.which))
+			{
+				break;
+			}
 
 			switch (cbuttonEvent.button)
 			{
 			case SDL_CONTROLLER_BUTTON_A:
-				button = EControllerButtons::FaceButtonBottom;
+				Button = FGamepadKeyNames::FaceButtonBottom;
 				break;
 			case SDL_CONTROLLER_BUTTON_B:
-				button = EControllerButtons::FaceButtonRight;
+				Button = FGamepadKeyNames::FaceButtonRight;
 				break;
 			case SDL_CONTROLLER_BUTTON_X:
-				button = EControllerButtons::FaceButtonLeft;
+				Button = FGamepadKeyNames::FaceButtonLeft;
 				break;
 			case SDL_CONTROLLER_BUTTON_Y:
-				button = EControllerButtons::FaceButtonTop;
+				Button = FGamepadKeyNames::FaceButtonTop;
 				break;
 			case SDL_CONTROLLER_BUTTON_BACK:
-				button = EControllerButtons::SpecialLeft;
+				Button = FGamepadKeyNames::SpecialLeft;
 				break;
 			case SDL_CONTROLLER_BUTTON_START:
-				button = EControllerButtons::SpecialRight;
+				Button = FGamepadKeyNames::SpecialRight;
 				break;
 			case SDL_CONTROLLER_BUTTON_LEFTSTICK:
-				button = EControllerButtons::LeftStickDown;
+				Button = FGamepadKeyNames::LeftStickDown;
 				break;
 			case SDL_CONTROLLER_BUTTON_RIGHTSTICK:
-				button = EControllerButtons::RightStickDown;
+				Button = FGamepadKeyNames::RightStickDown;
 				break;
 			case SDL_CONTROLLER_BUTTON_LEFTSHOULDER:
-				button = EControllerButtons::LeftShoulder;
+				Button = FGamepadKeyNames::LeftShoulder;
 				break;
 			case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER:
-				button = EControllerButtons::RightShoulder;
+				Button = FGamepadKeyNames::RightShoulder;
 				break;
 			case SDL_CONTROLLER_BUTTON_DPAD_UP:
-				button = EControllerButtons::DPadUp;
+				Button = FGamepadKeyNames::DPadUp;
 				break;
 			case SDL_CONTROLLER_BUTTON_DPAD_DOWN:
-				button = EControllerButtons::DPadDown;
+				Button = FGamepadKeyNames::DPadDown;
 				break;
 			case SDL_CONTROLLER_BUTTON_DPAD_LEFT:
-				button = EControllerButtons::DPadLeft;
+				Button = FGamepadKeyNames::DPadLeft;
 				break;
 			case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:
-				button = EControllerButtons::DPadRight;
+				Button = FGamepadKeyNames::DPadRight;
 				break;
 			default:
-				button = EControllerButtons::Invalid;
 				break;
 			}
 
-			if(cbuttonEvent.type == SDL_CONTROLLERBUTTONDOWN)
+			if (Button != FGamepadKeyNames::Invalid)
 			{
-				MessageHandler->OnControllerButtonPressed(button, cbuttonEvent.which, false);
-			}
-			else
-			{
-				MessageHandler->OnControllerButtonReleased(button, cbuttonEvent.which, false);
+				if(cbuttonEvent.type == SDL_CONTROLLERBUTTONDOWN)
+				{
+					MessageHandler->OnControllerButtonPressed(Button, ControllerStates[cbuttonEvent.which].ControllerIndex, false);
+				}
+				else
+				{
+					MessageHandler->OnControllerButtonReleased(Button, ControllerStates[cbuttonEvent.which].ControllerIndex, false);
+				}
 			}
 		}
 		break;
@@ -937,6 +961,15 @@ void FLinuxApplication::ProcessDeferredEvents( const float TimeDelta )
 
 void FLinuxApplication::PollGameDeviceState( const float TimeDelta )
 {
+	for(auto ControllerIt = ControllerStates.CreateIterator(); ControllerIt; ++ControllerIt)
+	{
+		for(auto Event = ControllerIt.Value().AxisEvents.CreateConstIterator(); Event; ++Event)
+		{
+			MessageHandler->OnControllerAnalog(Event.Key(), ControllerIt.Value().ControllerIndex, Event.Value());
+		}
+		ControllerIt.Value().AxisEvents.Empty();
+	}
+
 	// initialize any externally-implemented input devices (we delay load initialize the array so any plugins have had time to load)
 	if (!bHasLoadedInputPlugins)
 	{

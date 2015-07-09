@@ -2,6 +2,27 @@
 
 #include "SequencerPrivatePCH.h"
 
+USequencerSettings* USequencerSettingsContainer::GetOrCreate(const TCHAR* InName)
+{
+	static const TCHAR* SettingsContainerName = TEXT("SequencerSettingsContainer");
+
+	auto* Outer = FindObject<USequencerSettingsContainer>(GetTransientPackage(), SettingsContainerName);
+	if (!Outer)
+	{
+		Outer = NewObject<USequencerSettingsContainer>(GetTransientPackage(), USequencerSettingsContainer::StaticClass(), SettingsContainerName);
+		Outer->AddToRoot();
+	}
+	
+	USequencerSettings* Inst = FindObject<USequencerSettings>( Outer, InName );
+	if (!Inst)
+	{
+		Inst = NewObject<USequencerSettings>( Outer, USequencerSettings::StaticClass(), InName );
+		Inst->LoadConfig();
+	}
+
+	return Inst;
+}
+
 USequencerSettings::USequencerSettings( const FObjectInitializer& ObjectInitializer )
 	: Super( ObjectInitializer )
 {
@@ -12,6 +33,7 @@ USequencerSettings::USequencerSettings( const FObjectInitializer& ObjectInitiali
 	bSnapSectionTimesToInterval = true;
 	bSnapSectionTimesToSections = true;
 	bSnapPlayTimeToInterval = true;
+	bSnapPlayTimeToDraggedKey = false;
 	CurveValueSnapInterval = 10.0f;
 	bSnapCurveValueToInterval = true;
 	bIsUsingCleanView = false;
@@ -115,6 +137,20 @@ void USequencerSettings::SetSnapPlayTimeToInterval(bool InbSnapPlayTimeToInterva
 	if ( bSnapPlayTimeToInterval != InbSnapPlayTimeToInterval )
 	{
 		bSnapPlayTimeToInterval = InbSnapPlayTimeToInterval;
+		SaveConfig();
+	}
+}
+
+bool USequencerSettings::GetSnapPlayTimeToDraggedKey() const
+{
+	return bSnapPlayTimeToDraggedKey;
+}
+
+void USequencerSettings::SetSnapPlayTimeToDraggedKey(bool InbSnapPlayTimeToDraggedKey)
+{
+	if ( bSnapPlayTimeToDraggedKey != InbSnapPlayTimeToDraggedKey )
+	{
+		bSnapPlayTimeToDraggedKey = InbSnapPlayTimeToDraggedKey;
 		SaveConfig();
 	}
 }

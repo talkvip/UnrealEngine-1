@@ -214,8 +214,11 @@ void UGameplayTask::AddRequiredResourceSet(const TArray<TSubclassOf<UGameplayTas
 {
 	for (auto Resource : RequiredResourceSet)
 	{
-		const uint8 ResourceID = UGameplayTaskResource::GetResourceID(Resource);
-		RequiredResources.AddID(ResourceID);
+		if (Resource)
+		{
+			const uint8 ResourceID = UGameplayTaskResource::GetResourceID(Resource);
+			RequiredResources.AddID(ResourceID);
+		}
 	}
 }
 
@@ -235,7 +238,10 @@ void UGameplayTask::AddClaimedResourceSet(const TArray<TSubclassOf<UGameplayTask
 {
 	for (auto ResourceClass : AdditionalResourcesToClaim)
 	{
-		ClaimedResources.AddID(UGameplayTaskResource::GetResourceID(ResourceClass));
+		if (ResourceClass)
+		{
+			ClaimedResources.AddID(UGameplayTaskResource::GetResourceID(ResourceClass));
+		}
 	}
 }
 
@@ -360,7 +366,7 @@ void UGameplayTask::PauseInTaskQueue()
 	}
 }
 
-#if ENABLE_VISUAL_LOG
+#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
 //----------------------------------------------------------------------//
 // debug
 //----------------------------------------------------------------------//
@@ -378,4 +384,4 @@ FString UGameplayTask::GetTaskStateName() const
 	return Enum->GetEnumName(int32(TaskState));
 }
 
-#endif // ENABLE_VISUAL_LOG
+#endif // !(UE_BUILD_SHIPPING || UE_BUILD_TEST)

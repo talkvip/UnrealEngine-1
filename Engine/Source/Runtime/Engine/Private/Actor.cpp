@@ -1,6 +1,5 @@
 // Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
 
-
 #include "EnginePrivate.h"
 #include "Engine/InputDelegateBinding.h"
 #include "Engine/LevelStreamingPersistent.h"
@@ -27,7 +26,6 @@
 #include "Kismet/GameplayStatics.h"
 #include "PhysicalMaterials/PhysicalMaterial.h"
 
-//DEFINE_LOG_CATEGORY_STATIC(LogActor, Log, All);
 DEFINE_LOG_CATEGORY(LogActor);
 
 DEFINE_STAT(STAT_GetComponentsTime);
@@ -95,6 +93,9 @@ void AActor::InitializeDefaults()
 	bFindCameraComponentWhenViewTarget = true;
 	bAllowReceiveTickEventOnDedicatedServer = true;
 	bRelevantForNetworkReplays = true;
+#if WITH_EDITORONLY_DATA
+	PivotOffset = FVector::ZeroVector;
+#endif
 }
 
 void FActorTickFunction::ExecuteTick(float DeltaTime, enum ELevelTick TickType, ENamedThreads::Type CurrentThread, const FGraphEventRef& MyCompletionGraphEvent)
@@ -302,12 +303,12 @@ bool AActor::TeleportTo( const FVector& DestLocation, const FRotator& DestRotati
 		if (!bNoCheck && (ActorPrimComp->IsCollisionEnabled() || (bCollideWhenPlacing && (GetNetMode() != NM_Client))) )
 		{
 			// Apply the pivot offset to the desired location
-			FVector PivotOffset = GetRootComponent()->Bounds.Origin - PrevLocation;
-			NewLocation = NewLocation + PivotOffset;
+			FVector Offset = GetRootComponent()->Bounds.Origin - PrevLocation;
+			NewLocation = NewLocation + Offset;
 
 			// check if able to find an acceptable destination for this actor that doesn't embed it in world geometry
 			bTeleportSucceeded = GetWorld()->FindTeleportSpot(this, NewLocation, DestRotation);
-			NewLocation = NewLocation - PivotOffset;
+			NewLocation = NewLocation - Offset;
 		}
 
 		if ( bTeleportSucceeded )
@@ -1698,6 +1699,16 @@ void AActor::Destroyed()
 	if( ActorWorld )
 	{
 		ActorWorld->RemoveNetworkActor(this);
+	}
+}
+
+void AActor::TearOff()
+{
+	const ENetMode NetMode = GetNetMode();
+
+	if (NetMode == NM_ListenServer || NetMode == NM_DedicatedServer)
+	{
+		bTearOff = true;
 	}
 }
 

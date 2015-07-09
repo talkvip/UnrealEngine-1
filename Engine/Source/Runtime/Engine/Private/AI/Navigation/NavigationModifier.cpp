@@ -30,6 +30,30 @@ FNavigationLinkBase::FNavigationLinkBase()
 	SupportedAgentsBits = 0xFFFFFFFF;
 }
 
+void FNavigationLinkBase::PostSerialize(const FArchive& Ar)
+{
+	if (Ar.IsLoading() && Ar.UE4Ver() < VER_UE4_NAVIGATION_AGENT_SELECTOR)
+	{
+		SupportedAgents.bSupportsAgent0 = bSupportsAgent0;
+		SupportedAgents.bSupportsAgent1 = bSupportsAgent1;
+		SupportedAgents.bSupportsAgent2 = bSupportsAgent2;
+		SupportedAgents.bSupportsAgent3 = bSupportsAgent3;
+		SupportedAgents.bSupportsAgent4 = bSupportsAgent4;
+		SupportedAgents.bSupportsAgent5 = bSupportsAgent5;
+		SupportedAgents.bSupportsAgent6 = bSupportsAgent6;
+		SupportedAgents.bSupportsAgent7 = bSupportsAgent7;
+		SupportedAgents.bSupportsAgent8 = bSupportsAgent8;
+		SupportedAgents.bSupportsAgent9 = bSupportsAgent9;
+		SupportedAgents.bSupportsAgent10 = bSupportsAgent10;
+		SupportedAgents.bSupportsAgent11 = bSupportsAgent11;
+		SupportedAgents.bSupportsAgent12 = bSupportsAgent12;
+		SupportedAgents.bSupportsAgent13 = bSupportsAgent13;
+		SupportedAgents.bSupportsAgent14 = bSupportsAgent14;
+		SupportedAgents.bSupportsAgent15 = bSupportsAgent15;
+		SupportedAgents.MarkInitialized();
+	}
+}
+
 //----------------------------------------------------------------------//
 // UNavLinkDefinition
 //----------------------------------------------------------------------//
@@ -167,13 +191,23 @@ FAreaNavModifier::FAreaNavModifier(const FBox& Box, const FTransform& LocalToWor
 FAreaNavModifier::FAreaNavModifier(const TArray<FVector>& InPoints, ENavigationCoordSystem::Type CoordType, const FTransform& LocalToWorld, const TSubclassOf<UNavArea> InAreaClass)
 {
 	Init(InAreaClass);
-	SetConvex(InPoints, 0, InPoints.Num(), CoordType, LocalToWorld);
+	SetConvex(InPoints.GetData(), 0, InPoints.Num(), CoordType, LocalToWorld);
 }
 
 FAreaNavModifier::FAreaNavModifier(const TArray<FVector>& InPoints, const int32 FirstIndex, const int32 LastIndex, ENavigationCoordSystem::Type CoordType, const FTransform& LocalToWorld, const TSubclassOf<UNavArea> InAreaClass)
 {
+	check(InPoints.IsValidIndex(FirstIndex) && InPoints.IsValidIndex(LastIndex-1));
+
 	Init(InAreaClass);
-	SetConvex(InPoints, FirstIndex, LastIndex, CoordType, LocalToWorld);
+	SetConvex(InPoints.GetData(), FirstIndex, LastIndex, CoordType, LocalToWorld);
+}
+
+FAreaNavModifier::FAreaNavModifier(const TNavStatArray<FVector>& InPoints, const int32 FirstIndex, const int32 LastIndex, ENavigationCoordSystem::Type CoordType, const FTransform& LocalToWorld, const TSubclassOf<UNavArea> InAreaClass)
+{
+	check(InPoints.IsValidIndex(FirstIndex) && InPoints.IsValidIndex(LastIndex-1));
+
+	Init(InAreaClass);
+	SetConvex(InPoints.GetData(), FirstIndex, LastIndex, CoordType, LocalToWorld);
 }
 
 FAreaNavModifier::FAreaNavModifier(const UBrushComponent* BrushComponent, const TSubclassOf<UNavArea> InAreaClass)
@@ -194,7 +228,7 @@ FAreaNavModifier::FAreaNavModifier(const UBrushComponent* BrushComponent, const 
 	}
 
 	Init(InAreaClass);
-	SetConvex(Verts, 0, Verts.Num(), ENavigationCoordSystem::Unreal, BrushComponent->ComponentToWorld);
+	SetConvex(Verts.GetData(), 0, Verts.Num(), ENavigationCoordSystem::Unreal, BrushComponent->ComponentToWorld);
 }
 
 void FAreaNavModifier::GetCylinder(FCylinderNavAreaData& Data) const
@@ -282,11 +316,11 @@ void FAreaNavModifier::SetBox(const FBox& Box, const FTransform& LocalToWorld)
 	}
 	else
 	{
-		SetConvex(Corners, 0, Corners.Num(), ENavigationCoordSystem::Unreal, FTransform::Identity);
+		SetConvex(Corners.GetData(), 0, Corners.Num(), ENavigationCoordSystem::Unreal, FTransform::Identity);
 	}
 }
 
-void FAreaNavModifier::SetConvex(const TArray<FVector>& InPoints, const int32 FirstIndex, const int32 LastIndex, ENavigationCoordSystem::Type CoordType, const FTransform& LocalToWorld)
+void FAreaNavModifier::SetConvex(const FVector* InPoints, const int32 FirstIndex, const int32 LastIndex, ENavigationCoordSystem::Type CoordType, const FTransform& LocalToWorld)
 {
 	FConvexNavAreaData ConvexData;
 	ConvexData.MinZ = MAX_FLT;

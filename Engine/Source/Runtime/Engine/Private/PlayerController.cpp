@@ -752,7 +752,7 @@ void APlayerController::Possess(APawn* PawnToPossess)
 		SetPawn(PawnToPossess);
 		check(GetPawn() != NULL);
 
-		if (GetPawn() != NULL)
+		if (GetPawn() && GetPawn()->PrimaryActorTick.bStartWithTickEnabled)
 		{
 			GetPawn()->SetActorTickEnabled(true);
 		}
@@ -1717,7 +1717,7 @@ bool APlayerController::GetHitResultUnderCursor(ECollisionChannel TraceChannel, 
 		}
 	}
 
-	if(!bHit)	//If there was no hit we reset the results. This is redundent but helps Blueprint users
+	if(!bHit)	//If there was no hit we reset the results. This is redundant but helps Blueprint users
 	{
 		HitResult = FHitResult();
 	}
@@ -1738,7 +1738,7 @@ bool APlayerController::GetHitResultUnderCursorByChannel(ETraceTypeQuery TraceCh
 		}
 	}
 
-	if(!bHit)	//If there was no hit we reset the results. This is redundent but helps Blueprint users
+	if(!bHit)	//If there was no hit we reset the results. This is redundant but helps Blueprint users
 	{
 		HitResult = FHitResult();
 	}
@@ -1835,127 +1835,66 @@ bool APlayerController::GetHitResultUnderFingerForObjects(ETouchIndex::Type Fing
 
 bool APlayerController::DeprojectMousePositionToWorld(FVector& WorldLocation, FVector& WorldDirection) const
 {
-	bool bSuccessfulDeproject = false;
-
-	ULocalPlayer* LocalPlayer = Cast<ULocalPlayer>(Player);
-	if (LocalPlayer && LocalPlayer->ViewportClient )
+	ULocalPlayer* const LocalPlayer = GetLocalPlayer();
+	if (LocalPlayer && LocalPlayer->ViewportClient)
 	{
 		FVector2D ScreenPosition;
 		if (LocalPlayer->ViewportClient->GetMousePosition(ScreenPosition))
 		{
-			bSuccessfulDeproject = DeprojectScreenPositionToWorld(ScreenPosition.X, ScreenPosition.Y, WorldLocation, WorldDirection);
-		}
-	}
-
-	return bSuccessfulDeproject;
-}
-
-bool APlayerController::DeprojectScreenPositionToWorld(float ScreenX, float ScreenY, FVector& WorldLocation, FVector& WorldDirection) const
-{
-	bool bSuccessfulDeproject = false;
-
-	ULocalPlayer* LocalPlayer = Cast<ULocalPlayer>(Player);
-
-	if (LocalPlayer && LocalPlayer->ViewportClient && LocalPlayer->ViewportClient->Viewport)
-	{
-		// Create a view family for the game viewport
-		FSceneViewFamilyContext ViewFamily(FSceneViewFamily::ConstructionValues(
-			LocalPlayer->ViewportClient->Viewport,
-			GetWorld()->Scene,
-			LocalPlayer->ViewportClient->EngineShowFlags)
-			.SetRealtimeUpdate(true));
-
-		// Calculate a view where the player is to update the streaming from the players start location
-		FVector ViewLocation;
-		FRotator ViewRotation;
-		FSceneView* SceneView = LocalPlayer->CalcSceneView(&ViewFamily, /*out*/ ViewLocation, /*out*/ ViewRotation, LocalPlayer->ViewportClient->Viewport);
-
-		if (SceneView)
-		{
-			const FVector2D ScreenPosition(ScreenX, ScreenY);
-			SceneView->DeprojectFVector2D(ScreenPosition, WorldLocation, WorldDirection);
-
-			bSuccessfulDeproject = true;
-		}
-	}
-
-	return bSuccessfulDeproject;
-}
-
-
-bool APlayerController::ProjectWorldLocationToScreen(FVector WorldLocation, FVector2D& ScreenLocation) const
-{
-	FVector FullScreenLocation;
-	const bool bSuccess = ProjectWorldLocationToScreenWithDistance(WorldLocation, FullScreenLocation);
-	ScreenLocation = FVector2D(FullScreenLocation.X, FullScreenLocation.Y);
-	return bSuccess;
-}
-
-bool APlayerController::ProjectWorldLocationToScreenWithDistance(FVector WorldLocation, FVector& ScreenLocation) const
-{
-	ULocalPlayer* LocalPlayer = Cast<ULocalPlayer>(Player);
-	if (LocalPlayer != NULL && LocalPlayer->ViewportClient != NULL && LocalPlayer->ViewportClient->Viewport != NULL)
-	{
-		// Create a view family for the game viewport
-		FSceneViewFamilyContext ViewFamily( FSceneViewFamily::ConstructionValues(
-			LocalPlayer->ViewportClient->Viewport,
-			GetWorld()->Scene,
-			LocalPlayer->ViewportClient->EngineShowFlags )
-			.SetRealtimeUpdate(true) );
-
-		// Calculate a view where the player is to update the streaming from the players start location
-		FVector ViewLocation;
-		FRotator ViewRotation;
-		FSceneView* SceneView = LocalPlayer->CalcSceneView( &ViewFamily, /*out*/ ViewLocation, /*out*/ ViewRotation, LocalPlayer->ViewportClient->Viewport );
-
-		if (SceneView) 
-		{
-			FVector2D ScreenLocation2D;
-			const bool bSuccess = SceneView->WorldToPixel(WorldLocation, ScreenLocation2D);
-			ScreenLocation = FVector(ScreenLocation2D.X, ScreenLocation2D.Y, FVector::Dist(ViewLocation, WorldLocation));
-			return bSuccess;
+			return UGameplayStatics::DeprojectScreenToWorld(this, ScreenPosition, WorldLocation, WorldDirection);
 		}
 	}
 
 	return false;
 }
 
+bool APlayerController::DeprojectScreenPositionToWorld(float ScreenX, float ScreenY, FVector& WorldLocation, FVector& WorldDirection) const
+{
+	return UGameplayStatics::DeprojectScreenToWorld(this, FVector2D(ScreenX, ScreenY), WorldLocation, WorldDirection);
+}
+
+
+bool APlayerController::ProjectWorldLocationToScreen(FVector WorldLocation, FVector2D& ScreenLocation) const
+{
+	return UGameplayStatics::ProjectWorldToScreen(this, WorldLocation, ScreenLocation);
+}
+
+bool APlayerController::ProjectWorldLocationToScreenWithDistance(FVector WorldLocation, FVector& ScreenLocation) const
+{
+	FVector2D ScreenLoc2D;
+	if (UGameplayStatics::ProjectWorldToScreen(this, WorldLocation, ScreenLoc2D))
+	{
+		// find distance
+		ULocalPlayer const* const LP = GetLocalPlayer();
+		if (LP && LP->ViewportClient)
+		{
+			// get the projection data
+			FSceneViewProjectionData ProjectionData;
+			if (LP->GetProjectionData(LP->ViewportClient->Viewport, eSSP_FULL, /*out*/ ProjectionData))
+			{
+				ScreenLocation = FVector(ScreenLoc2D.X, ScreenLoc2D.Y, FVector::Dist(ProjectionData.ViewOrigin, WorldLocation));
+
+				return true;
+			}
+		}
+	}
+
+	return false;
+}
 
 bool APlayerController::GetHitResultAtScreenPosition(const FVector2D ScreenPosition, const ECollisionChannel TraceChannel, const FCollisionQueryParams& CollisionQueryParams, FHitResult& HitResult) const
 {
 	// Early out if we clicked on a HUD hitbox
-	if( GetHUD() != NULL && GetHUD()->GetHitBoxAtCoordinates(ScreenPosition, true) )
+	if (GetHUD() != NULL && GetHUD()->GetHitBoxAtCoordinates(ScreenPosition, true))
 	{
 		return false;
 	}
 
-	ULocalPlayer* LocalPlayer = Cast<ULocalPlayer>(Player);
-
-	if (LocalPlayer != NULL && LocalPlayer->ViewportClient != NULL && LocalPlayer->ViewportClient->Viewport != NULL)
+	FVector WorldOrigin;
+	FVector WorldDirection;
+	if (UGameplayStatics::DeprojectScreenToWorld(this, ScreenPosition, WorldOrigin, WorldDirection) == true)
 	{
-		UGameViewportClient* ViewportClient = LocalPlayer->ViewportClient;
-
-		// Create a view family for the game viewport
-		FSceneViewFamilyContext ViewFamily( FSceneViewFamily::ConstructionValues(
-			ViewportClient->Viewport,
-			GetWorld()->Scene,
-			ViewportClient->EngineShowFlags)
-			.SetRealtimeUpdate(true) );
-
-
-		// Calculate a view where the player is to update the streaming from the players start location
-		FVector ViewLocation;
-		FRotator ViewRotation;
-		FSceneView* SceneView = LocalPlayer->CalcSceneView(&ViewFamily, /*out*/ ViewLocation, /*out*/ ViewRotation, ViewportClient->Viewport);
-
-		if (SceneView)
-		{
-			FVector WorldOrigin;
-			FVector WorldDirection;
-			SceneView->DeprojectFVector2D(ScreenPosition, WorldOrigin, WorldDirection);
-
-			return GetWorld()->LineTraceSingleByChannel(HitResult, WorldOrigin, WorldOrigin + WorldDirection * HitResultTraceDistance, TraceChannel, CollisionQueryParams);
-		}
+		return GetWorld()->LineTraceSingleByChannel(HitResult, WorldOrigin, WorldOrigin + WorldDirection * HitResultTraceDistance, TraceChannel, CollisionQueryParams);
 	}
 
 	return false;
@@ -1981,33 +1920,12 @@ bool APlayerController::GetHitResultAtScreenPosition(const FVector2D ScreenPosit
 		return false;
 	}
 
-	ULocalPlayer* LocalPlayer = Cast<ULocalPlayer>(Player);
-
-	if (LocalPlayer != NULL && LocalPlayer->ViewportClient != NULL && LocalPlayer->ViewportClient->Viewport != NULL)
+	FVector WorldOrigin;
+	FVector WorldDirection;
+	if (UGameplayStatics::DeprojectScreenToWorld(this, ScreenPosition, WorldOrigin, WorldDirection) == true)
 	{
-		// Create a view family for the game viewport
-		FSceneViewFamilyContext ViewFamily( FSceneViewFamily::ConstructionValues(
-			LocalPlayer->ViewportClient->Viewport,
-			GetWorld()->Scene,
-			LocalPlayer->ViewportClient->EngineShowFlags )
-			.SetRealtimeUpdate(true) );
-
-
-		// Calculate a view where the player is to update the streaming from the players start location
-		FVector ViewLocation;
-		FRotator ViewRotation;
-		FSceneView* SceneView = LocalPlayer->CalcSceneView( &ViewFamily, /*out*/ ViewLocation, /*out*/ ViewRotation, LocalPlayer->ViewportClient->Viewport );
-
-		if (SceneView)
-		{
-			FVector WorldOrigin;
-			FVector WorldDirection;
-			SceneView->DeprojectFVector2D(ScreenPosition, WorldOrigin, WorldDirection);
-
-			FCollisionObjectQueryParams ObjParam(ObjectTypes);
-			
-			return GetWorld()->LineTraceSingleByObjectType(HitResult, WorldOrigin, WorldOrigin + WorldDirection * HitResultTraceDistance, ObjParam, FCollisionQueryParams("ClickableTrace", bTraceComplex));
-		}
+		FCollisionObjectQueryParams const ObjParam(ObjectTypes);
+		return GetWorld()->LineTraceSingleByObjectType(HitResult, WorldOrigin, WorldOrigin + WorldDirection * HitResultTraceDistance, ObjParam, FCollisionQueryParams("ClickableTrace", bTraceComplex));
 	}
 
 	return false;
@@ -2396,7 +2314,6 @@ void APlayerController::SetCinematicMode( bool bInCinematicMode, bool bAffectsMo
 void APlayerController::SetIgnoreMoveInput( bool bNewMoveInput )
 {
 	IgnoreMoveInput = FMath::Max( IgnoreMoveInput + (bNewMoveInput ? +1 : -1), 0 );
-	//`Log("IgnoreMove: " $ IgnoreMoveInput);
 }
 
 void APlayerController::ResetIgnoreMoveInput()
@@ -2412,7 +2329,6 @@ bool APlayerController::IsMoveInputIgnored() const
 void APlayerController::SetIgnoreLookInput( bool bNewLookInput )
 {
 	IgnoreLookInput = FMath::Max( IgnoreLookInput + (bNewLookInput ? +1 : -1), 0 );
-	//`Log("IgnoreLook: " $ IgnoreLookInput);
 }
 
 void APlayerController::ResetIgnoreLookInput()
@@ -2947,7 +2863,6 @@ void APlayerController::ClientForceGarbageCollection_Implementation()
 
 void APlayerController::LevelStreamingStatusChanged(ULevelStreaming* LevelObject, bool bNewShouldBeLoaded, bool bNewShouldBeVisible, bool bNewShouldBlockOnLoad, int32 LODIndex )
 {
-	//`log( "LevelStreamingStatusChanged: " @ LevelObject @ bNewShouldBeLoaded @ bNewShouldBeVisible @ bNewShouldBeVisible );
 	ClientUpdateLevelStreamingStatus(LevelObject->GetWorldAssetPackageFName(),bNewShouldBeLoaded,bNewShouldBeVisible,bNewShouldBlockOnLoad,LODIndex);
 }
 
@@ -3733,6 +3648,11 @@ void APlayerController::SetPlayer( UPlayer* InPlayer )
 	ReceivedPlayer();
 }
 
+ULocalPlayer* APlayerController::GetLocalPlayer() const
+{
+	return Cast<ULocalPlayer>(Player);
+}
+
 void APlayerController::TickPlayerInput(const float DeltaSeconds, const bool bGamePaused)
 {
 	SCOPE_CYCLE_COUNTER(STAT_PC_TickInput);
@@ -4031,7 +3951,10 @@ ASpectatorPawn* APlayerController::SpawnSpectatorPawn()
 				SpawnedSpectator->SetReplicates(false); // Client-side only
 				SpawnedSpectator->PossessedBy(this);
 				SpawnedSpectator->PawnClientRestart();
-				SpawnedSpectator->SetActorTickEnabled(true);
+				if (SpawnedSpectator->PrimaryActorTick.bStartWithTickEnabled)
+				{
+					SpawnedSpectator->SetActorTickEnabled(true);
+				}
 
 				UE_LOG(LogPlayerController, Verbose, TEXT("Spawned spectator %s [server:%d]"), *GetNameSafe(SpawnedSpectator), GetNetMode() < NM_Client);
 			}

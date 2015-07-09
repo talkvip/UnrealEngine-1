@@ -14,8 +14,61 @@
 #include "NotificationManager.h"
 #include "Engine/Selection.h"
 #include "LevelEditor.h"
+#include "MovieSceneBindings.h"
 
 #define LOCTEXT_NAMESPACE "Sequencer"
+
+
+namespace EPuppetObjectType
+{
+	enum Type
+	{
+		/** Puppet actor */
+		Actor,
+	};
+}
+
+
+/**
+ * Stores the relationship between a spawned puppet object (e.g. actor) and it's data descriptor (e.g. blueprint)
+ */
+class FBasePuppetInfo
+{	
+
+public:
+
+	/** @return Gets the type of puppet */
+	virtual EPuppetObjectType::Type GetType() const = 0;
+};
+
+
+/**
+ * Puppet actor info
+ */
+struct FPuppetActorInfo : public FBasePuppetInfo
+{	
+
+public:
+
+	virtual ~FPuppetActorInfo() {}
+
+	/** @return Gets the type of puppet */
+	virtual EPuppetObjectType::Type GetType() const override
+	{
+		return EPuppetObjectType::Actor;
+	}
+
+
+public:
+
+	/** Spawnable guid */
+	FGuid SpawnableGuid;
+
+	/** The actual puppet actor that we are actively managing.  These actors actually live in the editor level
+	    just like any other actor, but we'll directly manage their lifetimes while in the editor */
+	TWeakObjectPtr< class AActor > PuppetActor;	
+};
+
 
 FSequencerActorBindingManager::FSequencerActorBindingManager( TSharedRef<ISequencerObjectChangeListener> InObjectChangeListener, TSharedRef<FSequencer> InSequencer )
 	: PlayMovieSceneNode( nullptr )
@@ -71,7 +124,19 @@ FGuid FSequencerActorBindingManager::FindGuidForObject( const UMovieScene& Movie
 			// When editing within the level editor, make sure we're bound to the level script node which contains data about possessables.
 			if( PlayMovieSceneNode.IsValid() )
 			{
-				ObjectGuid = PlayMovieSceneNode->FindGuidForObject( &Object );
+				UObject* Actor;
+				FString ComponentName;
+				UActorComponent* ComponentObject = Cast<UActorComponent>(&Object);
+				if (ComponentObject != nullptr)
+				{
+					Actor = ComponentObject->GetOuter();
+					ComponentName = ComponentObject->GetName();
+				}
+				else
+				{
+					Actor = &Object;
+				}
+				ObjectGuid = PlayMovieSceneNode->FindGuidForObjectInfo( FMovieSceneBoundObjectInfo(Actor, ComponentName) );
 			}
 		}
 
@@ -260,30 +325,44 @@ void FSequencerActorBindingManager::DestroyAllSpawnedObjects()
 
 bool FSequencerActorBindingManager::CanPossessObject( UObject& Object ) const
 {
-	return Object.IsA<AActor>();
+	return Object.IsA<AActor>() || Object.IsA<UActorComponent>();
 }
 
 void FSequencerActorBindingManager::BindPossessableObject( const FGuid& PossessableGuid, UObject& PossessedObject )
 {
-	 // When editing within the level editor, make sure we're bound to the level script node which contains data about possessables.
-	 const bool bCreateIfNotFound = true;
-	 BindToPlayMovieSceneNode( bCreateIfNotFound );
+	// When editing within the level editor, make sure we're bound to the level script node which contains data about possessables.
+	const bool bCreateIfNotFound = true;
+	BindToPlayMovieSceneNode( bCreateIfNotFound );
 	
-	 //const FString& PossessableName = Object->GetName();
-	 //const FGuid PossessableGuid = FocusedMovieScene->AddPossessable( PossessableName, Object->GetClass() );
-	 
-	 //if (IsShotFilteringOn())
-	 //{
-	 //	 AddUnfilterableObject(PossessableGuid);
-	 // }
-	 
-	 // Bind the object to the handle
-	 TArray< UObject* > Objects;
-	 Objects.Add( &PossessedObject );
-	 PlayMovieSceneNode->BindPossessableToObjects( PossessableGuid, Objects );
-	 
-	 // A possessable was created so we need to respawn its puppet
-	 // SpawnOrDestroyPuppetObjects( FocusedMovieSceneInstance );
+	//const FString& PossessableName = Object->GetName();
+	//const FGuid PossessableGuid = FocusedMovieScene->AddPossessable( PossessableName, Object->GetClass() );
+	
+	//if (IsShotFilteringOn())
+	//{
+	//	AddUnfilterableObject(PossessableGuid);
+	// }
+	
+	// Bind the object to the handle
+
+	UObject* Actor;
+	FString ComponentName;
+	UActorComponent* ComponentObject = Cast<UActorComponent>(&PossessedObject);
+	if (ComponentObject != nullptr)
+	{
+		Actor = ComponentObject->GetOuter();
+		ComponentName = ComponentObject->GetName();
+	}
+	else
+	{
+		Actor = &PossessedObject;
+	}
+
+	TArray< FMovieSceneBoundObjectInfo > ObjectInfos;
+	ObjectInfos.Add( FMovieSceneBoundObjectInfo(Actor, ComponentName) );
+	PlayMovieSceneNode->BindPossessableToObjects( PossessableGuid, ObjectInfos );
+	
+	// A possessable was created so we need to respawn its puppet
+	// SpawnOrDestroyPuppetObjects( FocusedMovieSceneInstance );
 }
 
 void FSequencerActorBindingManager::UnbindPossessableObjects( const FGuid& PossessableGuid )
@@ -310,7 +389,27 @@ void FSequencerActorBindingManager::GetRuntimeObjects( const TSharedRef<FMovieSc
 	
 		if (PlayMovieSceneNode.IsValid())
 		{
-			OutRuntimeObjects = PlayMovieSceneNode->FindBoundObjects( ObjectGuid );
+			for (FMovieSceneBoundObjectInfo& BoundObjectInfo : PlayMovieSceneNode->FindBoundObjectInfos(ObjectGuid))
+			{
+				if (BoundObjectInfo.Tag.IsEmpty() == false)
+				{
+					AActor* Actor = Cast<AActor>(BoundObjectInfo.Object);
+					if (Actor != nullptr)
+					{
+						for (UActorComponent* ActorComponent : Actor->GetComponents())
+						{
+							if (ActorComponent->GetName() == BoundObjectInfo.Tag)
+							{
+								OutRuntimeObjects.Add(ActorComponent);
+							}
+						}
+					}
+				}
+				else
+				{
+					OutRuntimeObjects.Add(BoundObjectInfo.Object);
+				}
+			}
 		}
 	}
 }

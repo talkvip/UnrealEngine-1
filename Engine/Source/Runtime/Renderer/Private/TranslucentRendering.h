@@ -17,13 +17,15 @@ public:
 	struct ContextType 
 	{
 		const FProjectedShadowInfo* TranslucentSelfShadow;
-		bool bSeparateTranslucencyPass;
+		ETranslucencyPassType TranslucenyPassType;
 		bool bSceneColorCopyIsUpToDate;
+		bool bPostAA;
 
-		ContextType(const FProjectedShadowInfo* InTranslucentSelfShadow = NULL, bool bSeparateTranslucencyPassIn = false)
-			: TranslucentSelfShadow(InTranslucentSelfShadow),
-			bSeparateTranslucencyPass(bSeparateTranslucencyPassIn),
-			bSceneColorCopyIsUpToDate(false)
+		ContextType(const FProjectedShadowInfo* InTranslucentSelfShadow = NULL, ETranslucencyPassType InTranslucenyPassType = TPT_NonSeparateTransluceny, bool bPostAAIn = false)
+			: TranslucentSelfShadow(InTranslucentSelfShadow)
+			, TranslucenyPassType(InTranslucenyPassType)
+			, bSceneColorCopyIsUpToDate(false)
+			, bPostAA(bPostAAIn)
 		{}
 	};
 

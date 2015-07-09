@@ -225,6 +225,7 @@ FBodyInstance::FBodyInstance()
 , bAutoWeld(false)
 , bWelded(false)
 , bStartAwake(true)
+, bGenerateWakeEvents(false)
 , bUpdateMassWhenScaleChanges(false)
 , bLockTranslation(true)
 , bLockRotation(true)
@@ -238,7 +239,6 @@ FBodyInstance::FBodyInstance()
 , CustomDOFPlaneNormal(FVector::ZeroVector)
 , COMNudge(ForceInit)
 , MassScale(1.f)
-, MaxAngularVelocity(400.f)
 , DOFConstraint(NULL)
 , WeldParent(NULL)
 , bUseAsyncScene(false)
@@ -265,6 +265,7 @@ FBodyInstance::FBodyInstance()
 , BodyInstancePtr(nullptr)
 #endif
 {
+	MaxAngularVelocity = UPhysicsSettings::Get()->MaxAngularVelocity;
 }
 
 FArchive& operator<<(FArchive& Ar,FBodyInstance& BodyInst)
@@ -273,6 +274,14 @@ FArchive& operator<<(FArchive& Ar,FBodyInstance& BodyInst)
 	{
 		Ar << BodyInst.OwnerComponent;
 		Ar << BodyInst.PhysMaterialOverride;
+	}
+
+	if (Ar.IsLoading() && Ar.UE4Ver() < VER_UE4_MAX_ANGULAR_VELOCITY_DEFAULT)
+	{
+		if(BodyInst.MaxAngularVelocity != 400.f)
+		{
+			BodyInst.bOverrideMaxAngularVelocity = true;
+		}
 	}
 
 	return Ar;
@@ -636,6 +645,7 @@ PxShape* ClonePhysXShape_AssumesLocked(PxShape* PShape)
 	PNewShape->setRestOffset(PShape->getRestOffset());
 	PNewShape->setSimulationFilterData(PShape->getSimulationFilterData());
 	PNewShape->setQueryFilterData(PShape->getQueryFilterData());
+	PNewShape->userData = PShape->userData;
 
 	return PNewShape;
 }
@@ -1062,6 +1072,11 @@ struct FInitBodiesHelper
 			{
 				PNewDynamic->setRigidDynamicFlag(PxRigidDynamicFlag::eKINEMATIC, true);
 			}
+
+			if(Instance->bGenerateWakeEvents)
+			{
+				PNewDynamic->setActorFlag(PxActorFlag::eSEND_SLEEP_NOTIFIES, true);
+			}
 		}
 
 		return PNewDynamic;
@@ -1369,6 +1384,10 @@ struct FInitBodiesHelper
 
 			AddActorsToScene_PhysX_AssumesLocked(PSyncActors, PAsyncActors, PDynamicActors, bDynamicsUseAsync ? PAsyncScene : PSyncScene);
 		}
+
+		PhysScene->FlushDeferredActors();	//For now we do not actually defer over multiple frames. This needs better profiling to determine how useful it actually is.
+
+
 	}
 #endif
 
@@ -1520,7 +1539,7 @@ struct FInitBodiesHelper
 						// Update damping
 						Instance->UpdateDampingProperties();
 
-						Instance->SetMaxAngularVelocity(Instance->MaxAngularVelocity, false);
+						Instance->SetMaxAngularVelocity(Instance->GetMaxAngularVelocity(), false, false);
 
 						Instance->SetMaxDepenetrationVelocity(Instance->bOverrideMaxDepenetrationVelocity ? Instance->MaxDepenetrationVelocity : UPhysicsSettings::Get()->MaxDepenetrationVelocity);
 
@@ -1842,41 +1861,50 @@ bool FBodyInstance::Weld(FBodyInstance* TheirBody, const FTransform& TheirTM)
 
 	ExecuteOnPhysicsReadWrite([&]
 	{
-	SCOPE_CYCLE_COUNTER(STAT_UpdatePhysMats);
+		SCOPE_CYCLE_COUNTER(STAT_UpdatePhysMats);
 
-		WeldParent = this;
+		TheirBody->WeldParent = this;
 
-	UPhysicalMaterial* SimplePhysMat = GetSimplePhysicalMaterial();
-	TArray<UPhysicalMaterial*> ComplexPhysMats = GetComplexPhysicalMaterials();
-	PxMaterial* PSimpleMat = SimplePhysMat->GetPhysXMaterial();
+		UPhysicalMaterial* SimplePhysMat = GetSimplePhysicalMaterial();
+		TArray<UPhysicalMaterial*> ComplexPhysMats = GetComplexPhysicalMaterials();
+		PxMaterial* PSimpleMat = SimplePhysMat->GetPhysXMaterial();
 
-	FShapeData ShapeData;
-	GetFilterData_AssumesLocked(ShapeData);
-	GetShapeFlags_AssumesLocked(ShapeData, ShapeData.CollisionEnabled, BodySetup->GetCollisionTraceFlag() == CTF_UseComplexAsSimple);
+		FShapeData ShapeData;
+		GetFilterData_AssumesLocked(ShapeData);
+		GetShapeFlags_AssumesLocked(ShapeData, ShapeData.CollisionEnabled, BodySetup->GetCollisionTraceFlag() == CTF_UseComplexAsSimple);
 
-	//child body gets placed into the same scenes as parent body
-	if (PxRigidActor* MyBody = RigidActorSync)
-	{
+		//child body gets placed into the same scenes as parent body
+		if (PxRigidActor* MyBody = RigidActorSync)
+		{
 			TheirBody->BodySetup->AddShapesToRigidActor_AssumesLocked(this, MyBody, PST_Sync, Scale3D, PSimpleMat, ComplexPhysMats, ShapeData, RelativeTM, &PNewShapes);
-	}
+			if (TheirBody->bGenerateWakeEvents)
+			{
+				MyBody->setActorFlag(PxActorFlag::eSEND_SLEEP_NOTIFIES, true);
+			}
+		}
 
-	if (PxRigidActor* MyBody = RigidActorAsync)
-	{
+		if (PxRigidActor* MyBody = RigidActorAsync)
+		{
 			TheirBody->BodySetup->AddShapesToRigidActor_AssumesLocked(this, MyBody, PST_Sync, Scale3D, PSimpleMat, ComplexPhysMats, ShapeData, RelativeTM, &PNewShapes);
-	}
+			if (TheirBody->bGenerateWakeEvents)
+			{
+				MyBody->setActorFlag(PxActorFlag::eSEND_SLEEP_NOTIFIES, true);
+			}
+		}
+
+		for (int32 ShapeIdx = 0; ShapeIdx < PNewShapes.Num(); ++ShapeIdx)
+		{
+			PxShape* PShape = PNewShapes[ShapeIdx];
+			ShapeToBodiesMap.Add(PShape, FWeldInfo(TheirBody, RelativeTM));
+		}
 
 
-	for (int32 ShapeIdx = 0; ShapeIdx < PNewShapes.Num(); ++ShapeIdx)
-	{
-		PxShape* PShape = PNewShapes[ShapeIdx];
-		ShapeToBodiesMap.Add(PShape, FWeldInfo(TheirBody, RelativeTM));
-	}
 
-	PostShapeChange();
+		PostShapeChange();
 
-	//remove their body from scenes
-	TermBodyHelper(TheirBody->SceneIndexSync, TheirBody->RigidActorSync, TheirBody);
-	TermBodyHelper(TheirBody->SceneIndexAsync, TheirBody->RigidActorAsync, TheirBody);
+		//remove their body from scenes
+		TermBodyHelper(TheirBody->SceneIndexSync, TheirBody->RigidActorSync, TheirBody);
+		TermBodyHelper(TheirBody->SceneIndexAsync, TheirBody->RigidActorAsync, TheirBody);
 	});
 	
 
@@ -1928,7 +1956,7 @@ void FBodyInstance::UnWeld(FBodyInstance* TheirBI)
 		PostShapeChange();
 	}
 
-		WeldParent = nullptr;
+		TheirBI->WeldParent = nullptr;
 	});
 #endif
 }
@@ -2948,8 +2976,11 @@ void FBodyInstance::SetPhysMaterialOverride( UPhysicalMaterial* NewPhysMaterial 
 	// Save ref to PhysicalMaterial
 	PhysMaterialOverride = NewPhysMaterial;
 
-	// Go through the chain of physical materials and update the NxActor
+	// Go through the chain of physical materials and update the shapes 
 	UpdatePhysicalMaterials();
+
+	// Because physical material has changed, we need to update the mass
+	UpdateMassProperties();
 }
 
 UPhysicalMaterial* FBodyInstance::GetSimplePhysicalMaterial() const
@@ -3326,7 +3357,12 @@ void FBodyInstance::SetAngularVelocity(const FVector& NewAngVel, bool bAddToCurr
 #endif
 }
 
-void FBodyInstance::SetMaxAngularVelocity(float NewMaxAngVel, bool bAddToCurrent)
+float FBodyInstance::GetMaxAngularVelocity() const
+{
+	return bOverrideMaxAngularVelocity ? MaxAngularVelocity : UPhysicsSettings::Get()->MaxAngularVelocity;
+}
+
+void FBodyInstance::SetMaxAngularVelocity(float NewMaxAngVel, bool bAddToCurrent, bool bUpdateOverrideMaxAngularVelocity)
 {
 #if WITH_PHYSX
 	const bool bIsDynamic = ExecuteOnPxRigidDynamicReadWrite(this, [&](PxRigidDynamic* PRigidDynamic)
@@ -3352,6 +3388,12 @@ void FBodyInstance::SetMaxAngularVelocity(float NewMaxAngVel, bool bAddToCurrent
 	{
 		MaxAngularVelocity = NewMaxAngVel;	//doesn't really matter since we are not dynamic, but makes sense that we update this anyway
 	}
+
+	if(bUpdateOverrideMaxAngularVelocity)
+	{
+		bOverrideMaxAngularVelocity = true;
+	}
+	
 #endif
 
 	//@TODO: BOX2D: Implement SetMaxAngularVelocity
@@ -3765,7 +3807,8 @@ bool FBodyInstance::LineTrace(struct FHitResult& OutHit, const FVector& Start, c
 					{
 						for (int HitIndex = 0; HitIndex < NumHits; HitIndex++)
 						{
-							if (PHits[HitIndex].distance < BestHitDistance)
+							PxRaycastHit& Hit = PHits[HitIndex];
+							if (Hit.distance < BestHitDistance)
 							{
 								BestHitDistance = PHits[HitIndex].distance;
 								BestHit = PHits[HitIndex];
@@ -4064,7 +4107,7 @@ FTransform RootSpaceToWeldedSpace(const FBodyInstance* BI, const FTransform& Roo
 
 bool FBodyInstance::OverlapMulti(TArray<struct FOverlapResult>& InOutOverlaps, const class UWorld* World, const FTransform* pWorldToComponent, const FVector& Pos, const FQuat& Quat, ECollisionChannel TestChannel, const struct FComponentQueryParams& Params, const struct FCollisionResponseParams& ResponseParams, const struct FCollisionObjectQueryParams& ObjectQueryParams) const
 {
-	if ( (IsValidBodyInstance() || (WeldParent && WeldParent->IsValidBodyInstance())) == false )
+	if ( !IsValidBodyInstance()  && (!WeldParent || !WeldParent->IsValidBodyInstance()))
 	{
 		UE_LOG(LogCollision, Log, TEXT("FBodyInstance::OverlapMulti : (%s) No physics data"), *GetBodyDebugName());
 		return false;
@@ -4427,10 +4470,8 @@ void FBodyInstance::InitDynamicProperties_AssumesLocked()
 		{
 			UpdateMassProperties();
 			UpdateDampingProperties();
-			SetMaxAngularVelocity(MaxAngularVelocity, false);
+			SetMaxAngularVelocity(GetMaxAngularVelocity(), false, false);
 			SetMaxDepenetrationVelocity(bOverrideMaxDepenetrationVelocity ? MaxDepenetrationVelocity : UPhysicsSettings::Get()->MaxDepenetrationVelocity);
-
-			RigidActor->setLinearVelocity(U2PVector(InitialLinearVelocity));
 		}else
 		{
 #if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
@@ -4444,6 +4485,11 @@ void FBodyInstance::InitDynamicProperties_AssumesLocked()
 				
 			}
 #endif
+		}
+
+		if (ShouldInstanceSimulatingPhysics())
+		{
+			RigidActor->setLinearVelocity(U2PVector(InitialLinearVelocity));
 		}
 
 		float SleepEnergyThresh = RigidActor->getSleepThreshold();

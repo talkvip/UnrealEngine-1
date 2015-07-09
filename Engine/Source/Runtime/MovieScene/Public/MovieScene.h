@@ -2,11 +2,12 @@
 
 #pragma once
 
+#include "MovieSceneBinding.h"
 #include "MovieScene.generated.h"
 
 
 class UBlueprint;
-class UMovieSceneBindingManager;
+class UMovieSceneObjectManager;
 class UMovieSceneSection;
 class UMovieSceneTrack;
 
@@ -25,14 +26,12 @@ struct FMovieSceneSpawnable
 public:
 
 	/** FMovieSceneSpawnable default constructor */
-	FMovieSceneSpawnable()
-	{
-	}
+	FMovieSceneSpawnable() { }
 
 	/** FMovieSceneSpawnable initialization constructor */
 	FMovieSceneSpawnable( const FString& InitName, UClass* InitClass, UObject* InitCounterpartGamePreviewObject );
 
-	/** @return Returns the guid for this possessable */
+	/** @return Returns the guid for this spawnable */
 	const FGuid& GetGuid() const
 	{
 		return Guid;
@@ -45,7 +44,10 @@ public:
 	}
 
 	/** @return Returns the blueprint associated with this spawnable */
-	UClass* GetClass() { return GeneratedClass; }
+	UClass* GetClass()
+	{
+		return GeneratedClass;
+	}
 
 	/** @return	Returns the game preview counterpart object for this spawnable, if it has one. */
 	const FWeakObjectPtr& GetCounterpartGamePreviewObject() const
@@ -76,6 +78,7 @@ private:
 	// @todo sequencer data: Should be editor only
 	FWeakObjectPtr CounterpartGamePreviewObject;
 };
+
 
 /**
  * MovieScenePossessable is a "typed slot" used to allow the MovieScene to control an already-existing object
@@ -133,8 +136,8 @@ private:
 	// possessable object available.
 	UPROPERTY()
 	UClass* PossessedObjectClass;
-
 };
+
 
 /**
  * Editor only data that needs to be saved between sessions for editing but has no runtime purpose
@@ -147,78 +150,6 @@ struct FMovieSceneEditorData
 	/** List of collapsed sequencer nodes.  We store collapsed instead of expanded so that new nodes with no saved state are expanded by default */
 	UPROPERTY()
 	TArray<FString> CollapsedSequencerNodes;
-};
-
-/**
- * A set of tracks bound to runtime objects
- */
-USTRUCT()
-struct FMovieSceneObjectBinding
-{
-	GENERATED_USTRUCT_BODY()
-
-	FMovieSceneObjectBinding()
-	{}
-
-	FMovieSceneObjectBinding( const FGuid& InObjectGuid, const FString& InBindingName, const TArray<UMovieSceneTrack*>& InTracks )
-		: ObjectGuid( InObjectGuid )
-		, BindingName( InBindingName )
-		, Tracks( InTracks )
-	{}
-
-	FMovieSceneObjectBinding( const FGuid& InObjectGuid, const FString& InBindingName )
-		: ObjectGuid( InObjectGuid )
-		, BindingName( InBindingName )
-	{}
-
-	/**
-	 * @return The time range of all tracks in this binding
-	 */
-	TRange<float> GetTimeRange() const;
-
-	/**
-	 * @return The guid of runtime objects in this binding
-	 */
-	const FGuid& GetObjectGuid() const { return ObjectGuid; }
-
-	/**
-	 * @return The display name of the binding
-	 */
-	const FString& GetName() const { return BindingName; } 
-
-	/**
-	 * Adds a new track to this binding
-	 *
-	 * @param NewTrack	The track to add
-	 */
-	void AddTrack( UMovieSceneTrack& NewTrack );
-
-	/**
-	 * Removes a track from this binding
-	 * 
-	 * @param Track	The track to remove
-	 * @return true if the track was successfully removed, false if the track could not be found
-	 */
-	bool RemoveTrack( UMovieSceneTrack& Track );
-
-	/**
-	 * @return All tracks in this binding
-	 */
-	const TArray<UMovieSceneTrack*>& GetTracks() const { return Tracks; }
-
-private:
-
-	/** Object binding guid for runtime objects */
-	UPROPERTY()
-	FGuid ObjectGuid;
-	
-	/** Display name */
-	UPROPERTY()
-	FString BindingName;
-
-	/** All tracks in this binding */
-	UPROPERTY()
-	TArray<UMovieSceneTrack*> Tracks;
 };
 
 
@@ -425,9 +356,19 @@ public:
 	/**
 	 * @return All object bindings.
 	 */
-	const TArray<FMovieSceneObjectBinding>& GetObjectBindings() const
+	const TArray<FMovieSceneBinding>& GetBindings() const
 	{
 		return ObjectBindings;
+	}
+
+	/**
+	 * Get the movie scene's object manager.
+	 *
+	 * @return The object manager.
+	 */
+	TScriptInterface<UMovieSceneObjectManager> GetObjectManager() const
+	{
+		return BindingManager;
 	}
 
 	/**
@@ -455,17 +396,17 @@ public:
 protected:
 
 	/**
-	 * Removes animation data bound to a guid.
+	 * Removes animation data bound to a GUID.
 	 *
 	 * @param Guid The guid bound to animation data to remove
 	 */
-	void RemoveObjectBinding(const FGuid& Guid);
+	void RemoveBinding(const FGuid& Guid);
 
 private:
 
 	/** The object binding manager. */
 	UPROPERTY()
-	TScriptInterface<UMovieSceneBindingManager> BindingManager;
+	TScriptInterface<UMovieSceneObjectManager> BindingManager;
 
 	/**
 	 * Data-only blueprints for all of the objects that we we're able to spawn.
@@ -481,7 +422,7 @@ private:
 
 	/** Tracks bound to possessed or spawned objects */
 	UPROPERTY()
-	TArray<FMovieSceneObjectBinding> ObjectBindings;
+	TArray<FMovieSceneBinding> ObjectBindings;
 
 	/** Master tracks which are not bound to spawned or possessed objects */
 	UPROPERTY()

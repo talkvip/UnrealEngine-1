@@ -46,9 +46,13 @@ public:
 			{
 				case EInviteStatus::Accepted :
 				{
-					if (FriendItem->IsOnline() && FriendItem->IsGameJoinable())
+					if (FriendItem->IsOnline() && (FriendItem->IsGameJoinable() || FriendItem->IsInParty()))
 					{
 						if(CanPerformAction(EFriendActionType::JoinGame))
+						{
+							Actions.Add(EFriendActionType::JoinGame);
+						}
+						else if(FriendsAndChatManager.Pin()->JoinGameAllowed(GetClientId()) && FriendItem->IsInParty())
 						{
 							Actions.Add(EFriendActionType::JoinGame);
 						}
@@ -114,7 +118,7 @@ public:
 			case EFriendActionType::RejectFriendRequest:
 			case EFriendActionType::CancelFriendRequest:
 			{
-				RemoveFriend(EFriendActionType::ToText(ActionType).ToString());
+				RemoveFriend(ActionType);
 				break;
 			}
 			case EFriendActionType::SendFriendRequest : 
@@ -162,7 +166,15 @@ public:
 		{
 			case EFriendActionType::JoinGame:
 			{
-				return FriendsAndChatManager.Pin()->JoinGameAllowed(GetClientId());
+				if(FriendsAndChatManager.Pin()->JoinGameAllowed(GetClientId()))
+				{
+					if(FriendItem->IsInParty())
+					{
+						return FriendItem->CanJoinParty();
+					}
+					return true;
+				}
+				return false;
 			}
 			case EFriendActionType::AcceptFriendRequest:
 			case EFriendActionType::RemoveFriend:
@@ -245,9 +257,9 @@ public:
 
 private:
 
-	void RemoveFriend(const FString& Action) const
+	void RemoveFriend(EFriendActionType::Type Reason) const
 	{
-		FriendsAndChatManager.Pin()->DeleteFriend(FriendItem, Action);
+		FriendsAndChatManager.Pin()->DeleteFriend(FriendItem, Reason);
 	}
 
 	void AcceptFriend() const
@@ -268,6 +280,10 @@ private:
 	void JoinGame()
 	{
 		if (FriendItem->IsGameRequest() || FriendItem->IsGameJoinable())
+		{
+			FriendsAndChatManager.Pin()->AcceptGameInvite(FriendItem);
+		}
+		else if(FriendsAndChatManager.Pin()->JoinGameAllowed(GetClientId()) && FriendItem->CanJoinParty())
 		{
 			FriendsAndChatManager.Pin()->AcceptGameInvite(FriendItem);
 		}

@@ -2553,6 +2553,7 @@ void FBlueprintEditor::ReparentBlueprint_NewParentChosen(UClass* ChosenClass)
 
 			// Ensure that the Blueprint is up-to-date (valid SCS etc.) before compiling
 			EnsureBlueprintIsUpToDate(BlueprintObj);
+			FBlueprintEditorUtils::RefreshAllNodes(GetBlueprintObj());
 			FBlueprintEditorUtils::MarkBlueprintAsModified(BlueprintObj);
 
 			Compile();
@@ -2713,14 +2714,17 @@ void FBlueprintEditor::PostUndo(bool bSuccess)
 
 		// Look at the transaction this function is responding to, see if any object in it has an outermost of the Blueprint
 		const FTransaction* Transaction = GEditor->Trans->GetTransaction(GEditor->Trans->GetQueueLength() - GEditor->Trans->GetUndoCount());
-		TArray<UObject*> TransactionObjects;
-		Transaction->GetTransactionObjects(TransactionObjects);
-		for (UObject* Object : TransactionObjects)
+		if( Transaction != nullptr )
 		{
-			if (Object->GetOutermost() == BlueprintOutermost)
+			TArray<UObject*> TransactionObjects;
+			Transaction->GetTransactionObjects(TransactionObjects);
+			for (UObject* Object : TransactionObjects)
 			{
-				bAffectsBlueprint = true;
-				break;
+				if (Object->GetOutermost() == BlueprintOutermost)
+				{
+					bAffectsBlueprint = true;
+					break;
+				}
 			}
 		}
 
@@ -2970,7 +2974,7 @@ void FBlueprintEditor::OnBlueprintCompiled(UBlueprint* InBlueprint)
 			{
 				if (Node)
 				{
-					auto Widget = Node->NodeWidget.Pin();
+					auto Widget = Node->DEPRECATED_NodeWidget.Pin();
 					if (Widget.IsValid())
 					{
 						Widget->RefreshErrorInfo();
@@ -3968,7 +3972,7 @@ void FBlueprintEditor::OnAddParentNode()
 				int32 NodeSizeY = 15;
 				if( UK2Node* Node = Cast<UK2Node>(SelectedObj))
 				{
-					NodeSizeY += Node->NodeWidget.IsValid() ? static_cast<int32>(Node->NodeWidget.Pin()->GetDesiredSize().Y) : 0;
+					NodeSizeY += Node->DEPRECATED_NodeWidget.IsValid() ? static_cast<int32>(Node->DEPRECATED_NodeWidget.Pin()->GetDesiredSize().Y) : 0;
 				}
 				ParentFunctionNode->NodePosX = FunctionFromNode.Node->NodePosX;
 				ParentFunctionNode->NodePosY = FunctionFromNode.Node->NodePosY + NodeSizeY;

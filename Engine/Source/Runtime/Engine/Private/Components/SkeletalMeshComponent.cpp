@@ -38,6 +38,7 @@ TAutoConsoleVariable<int32> CVarUseParallelAnimationEvaluation(TEXT("a.ParallelA
 
 DECLARE_CYCLE_STAT_EXTERN(TEXT("Anim Instance Spawn Time"), STAT_AnimSpawnTime, STATGROUP_Anim, );
 DEFINE_STAT(STAT_AnimSpawnTime);
+DEFINE_STAT(STAT_PostAnimEvaluation);
 
 class FParallelAnimationEvaluationTask
 {
@@ -256,7 +257,7 @@ void USkeletalMeshComponent::InitAnim(bool bForceReinit)
 		// and it is safe to continue
 		const bool bBlockOnTask = true; // wait on evaluation task so it is safe to continue with Init
 		const bool bPerformPostAnimEvaluation = false; // Skip post evaluation, it would be wasted work
-		IsRunningParallelEvaluation(bBlockOnTask, bPerformPostAnimEvaluation);
+		HandleExistingParallelEvaluationTask(bBlockOnTask, bPerformPostAnimEvaluation);
 
 		bool bBlueprintMismatch = (AnimBlueprintGeneratedClass != NULL) && 
 			(AnimScriptInstance != NULL) && (AnimScriptInstance->GetClass() != AnimBlueprintGeneratedClass);
@@ -663,7 +664,7 @@ static void IntersectBoneIndexArrays(TArray<FBoneIndexType>& Output, const TArra
 
 void USkeletalMeshComponent::FillSpaceBases(const USkeletalMesh* InSkeletalMesh, const TArray<FTransform>& SourceAtoms, TArray<FTransform>& DestSpaceBases) const
 {
-	SCOPE_CYCLE_COUNTER(STAT_SkelComposeTime);
+	ANIM_MT_SCOPE_CYCLE_COUNTER(FillSpaceBases, IsRunningParallelEvaluation());
 
 	if( !InSkeletalMesh )
 	{
@@ -936,7 +937,7 @@ void USkeletalMeshComponent::RecalcRequiredBones(int32 LODIndex)
 
 void USkeletalMeshComponent::EvaluateAnimation(const USkeletalMesh* InSkeletalMesh, UAnimInstance* InAnimInstance, TArray<FTransform>& OutLocalAtoms, TArray<FActiveVertexAnim>& OutVertexAnims, FVector& OutRootBoneTranslation, FBlendedCurve& OutCurve) const
 {
-	SCOPE_CYCLE_COUNTER(STAT_AnimBlendTime);
+	ANIM_MT_SCOPE_CYCLE_COUNTER(SkeletalComponentAnimEvaluate, IsRunningParallelEvaluation());
 
 	if( !InSkeletalMesh )
 	{
@@ -1018,7 +1019,8 @@ void USkeletalMeshComponent::UpdateSlaveComponent()
 
 void USkeletalMeshComponent::PerformAnimationEvaluation(const USkeletalMesh* InSkeletalMesh, UAnimInstance* InAnimInstance, TArray<FTransform>& OutSpaceBases, TArray<FTransform>& OutLocalAtoms, TArray<FActiveVertexAnim>& OutVertexAnims, FVector& OutRootBoneTranslation, FBlendedCurve& OutCurve) const
 {
-	SCOPE_CYCLE_COUNTER(STAT_PerformAnimEvaluation);
+	ANIM_MT_SCOPE_CYCLE_COUNTER(PerformAnimEvaluation, IsRunningParallelEvaluation());
+
 	// Can't do anything without a SkeletalMesh
 	// Do nothing more if no bones in skeleton.
 	if (!InSkeletalMesh || OutSpaceBases.Num() == 0)
@@ -1096,7 +1098,7 @@ void USkeletalMeshComponent::RefreshBoneTransforms(FActorComponentTickFunction* 
 															// will need to wait on an existing task.
 
 	const bool bPerformPostAnimEvaluation = true;
-	if (IsRunningParallelEvaluation(bBlockOnTask, bPerformPostAnimEvaluation))
+	if (HandleExistingParallelEvaluationTask(bBlockOnTask, bPerformPostAnimEvaluation))
 	{
 		return;
 	}
@@ -1178,7 +1180,7 @@ void USkeletalMeshComponent::RefreshBoneTransforms(FActorComponentTickFunction* 
 	if (TickFunction == NULL)
 	{
 		//Since we aren't doing this through the tick system, assume we want the buffer flipped now
-		FlipEditableSpaceBases();
+		FinalizeBoneTransform();
 	}
 }
 
@@ -1188,6 +1190,13 @@ void USkeletalMeshComponent::PostAnimEvaluation(FAnimationEvaluationContext& Eva
 	AnimEvaluationContext.Clear();
 
 	SCOPE_CYCLE_COUNTER(STAT_PostAnimEvaluation);
+	
+	if(AnimScriptInstance)
+	{
+		// curve update happens first
+		AnimScriptInstance->UpdateCurves(EvaluatedCurve);
+	}
+	
 	if (EvaluationContext.bDuplicateToCacheBones)
 	{
 		CachedSpaceBases = GetEditableSpaceBases();
@@ -1236,7 +1245,7 @@ void USkeletalMeshComponent::PostAnimEvaluation(FAnimationEvaluationContext& Eva
 		SCOPE_CYCLE_COUNTER(STAT_UpdateLocalToWorldAndOverlaps);
 
 		// Updated last good bone positions
-		FlipEditableSpaceBases();
+		FinalizeBoneTransform();
 
 		// New bone positions need to be sent to render thread
 		UpdateComponentToWorld();
@@ -1245,12 +1254,6 @@ void USkeletalMeshComponent::PostAnimEvaluation(FAnimationEvaluationContext& Eva
 		UpdateOverlaps();
 	}
 
-	if(AnimScriptInstance)
-	{
-		// curve update happens first
-		AnimScriptInstance->UpdateCurves(EvaluatedCurve);
-		AnimScriptInstance->PostAnimEvaluation();
-	}
 
 	MarkRenderDynamicDataDirty();
 }
@@ -2009,7 +2012,10 @@ bool USkeletalMeshComponent::ComponentIsTouchingSelectionBox(const FBox& InSelBB
 
 		// If the selection box has to encompass all of the component and none of the component's verts failed the intersection test, this component
 		// is consider touching
-		return true;
+		if (bMustEncompassEntireComponent)
+		{
+			return true;
+		}
 	}
 
 	return false;
@@ -2217,7 +2223,7 @@ void USkeletalMeshComponent::RefreshActiveVertexAnims()
 	}
 }
 
-bool USkeletalMeshComponent::IsRunningParallelEvaluation(bool bBlockOnTask, bool bPerformPostAnimEvaluation)
+bool USkeletalMeshComponent::HandleExistingParallelEvaluationTask(bool bBlockOnTask, bool bPerformPostAnimEvaluation)
 {
 	if (IsValidRef(ParallelAnimationEvaluationTask)) // We are already processing eval on another thread
 	{
@@ -2345,4 +2351,14 @@ bool USkeletalMeshComponent::DoCustomNavigableGeometryExport(FNavigableGeometryE
 
 	// skip fallback export of body setup data
 	return false;
+}
+
+void USkeletalMeshComponent::FinalizeBoneTransform() 
+{
+	Super::FinalizeBoneTransform();
+
+	if (AnimScriptInstance)
+	{
+		AnimScriptInstance->PostEvaluateAnimation();
+	}
 }

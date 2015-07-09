@@ -36,14 +36,14 @@ void UObjectBaseUtility::GetPathName( const UObject* StopOuter, FString& ResultS
 {
 	if( this != StopOuter && this != NULL )
 	{
-		UObject* Outer = GetOuter();
-		if ( Outer && Outer != StopOuter )
+		UObject* ObjOuter = GetOuter();
+		if (ObjOuter && ObjOuter != StopOuter )
 		{
-			Outer->GetPathName( StopOuter, ResultString );
+			ObjOuter->GetPathName( StopOuter, ResultString );
 
 			// SUBOBJECT_DELIMITER is used to indicate that this object's outer is not a UPackage
-			if (Outer->GetClass() != UPackage::StaticClass()
-			&&	Outer->GetOuter()->GetClass() == UPackage::StaticClass())
+			if (ObjOuter->GetClass() != UPackage::StaticClass()
+			&& ObjOuter->GetOuter()->GetClass() == UPackage::StaticClass())
 			{
 				ResultString += SUBOBJECT_DELIMITER;
 			}
@@ -115,19 +115,19 @@ UPackage* UObjectBaseUtility::GetOutermost() const
 	UObject* Top = (UObject*)this;
 	for (;;)
 	{
-		UObject* Outer = Top->GetOuter();
-		if (!Outer)
+		UObject* CurrentOuter = Top->GetOuter();
+		if (!CurrentOuter)
 		{
 			return CastChecked<UPackage>(Top);
 		}
-		Top = Outer;
+		Top = CurrentOuter;
 	}
 }
 
 /** 
  * Finds the outermost package and marks it dirty
  */
-void UObjectBaseUtility::MarkPackageDirty() const
+bool UObjectBaseUtility::MarkPackageDirty() const
 {
 	// since transient objects will never be saved into a package, there is no need to mark a package dirty
 	// if we're transient
@@ -157,9 +157,17 @@ void UObjectBaseUtility::MarkPackageDirty() const
 
 				// Always call PackageMarkedDirtyEvent, even when the package is already dirty
 				Package->PackageMarkedDirtyEvent.Broadcast(Package, bIsDirty);
+
+				return true;
+			}
+			else
+			{
+				// notify the caller that the request to mark the package as dirty was suppressed
+				return false;
 			}
 		}
 	}
+	return true;
 }
 
 /**

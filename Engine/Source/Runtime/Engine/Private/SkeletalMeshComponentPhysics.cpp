@@ -36,6 +36,8 @@
 #define LOCTEXT_NAMESPACE "SkeletalMeshComponentPhysics"
 
 
+extern TAutoConsoleVariable<int32> CVarEnableClothPhysics;
+
 void FSkeletalMeshComponentPreClothTickFunction::ExecuteTick(float DeltaTime, enum ELevelTick TickType, ENamedThreads::Type CurrentThread, const FGraphEventRef& MyCompletionGraphEvent)
 {
 	QUICK_SCOPE_CYCLE_COUNTER(FSkeletalMeshComponentPreClothTickFunction_ExecuteTick);
@@ -2169,11 +2171,13 @@ bool USkeletalMeshComponent::CreateClothingActor(int32 AssetIndex, physx::apex::
 	ClothingActor->forcePhysicalLod(1); // 1 will be changed to "GetActivePhysicalLod()" later
 	ClothingActor->setFrozen(false);
 
+#if WITH_CLOTH_COLLISION_DETECTION
 	// process clothing collisions once for the case that this component doesn't move
 	if(bCollideWithEnvironment)
 	{
 		ProcessClothCollisionWithEnvironment();
 	}
+#endif // WITH_CLOTH_COLLISION_DETECTION
 
 	return true;
 }
@@ -2291,7 +2295,7 @@ void USkeletalMeshComponent::ApplyWindForCloth(FClothingActor& ClothingActor)
 
 			physx::PxVec3 WindVelocity(WindDirection.X, WindDirection.Y, WindDirection.Z);
 
-			WindVelocity *= WindUnitAmout;
+			WindVelocity *= WindUnitAmout * WindSpeed;
 			float WindAdaption = rand()%20 * 0.1f; // make range from 0 to 2
 
 			NxParameterized::Interface* ActorDesc = ApexClothingActor->getActorDesc();
@@ -3122,7 +3126,7 @@ void USkeletalMeshComponent::PreClothTick(float DeltaTime)
 	// if physics is disabled on dedicated server, no reason to be here. 
 	if (!bEnablePhysicsOnDedicatedServer && IsRunningDedicatedServer())
 	{
-		FlipEditableSpaceBases();
+		FinalizeBoneTransform();
 		return;
 	}
 
@@ -3490,6 +3494,11 @@ void USkeletalMeshComponent::UpdateClothMorphTarget()
 
 void USkeletalMeshComponent::UpdateClothState(float DeltaTime)
 {
+	if (CVarEnableClothPhysics.GetValueOnGameThread() == 0)
+	{
+		return;
+	}
+
 	// if turned on bClothMorphTarget option
 	if (bClothMorphTarget)
 	{
@@ -3697,6 +3706,11 @@ public:
 
 void USkeletalMeshComponent::PerformTickClothing(float DeltaTime)
 {
+	if (CVarEnableClothPhysics.GetValueOnGameThread() == 0)
+	{
+		return;
+	}
+
 #if WITH_APEX_CLOTHING
 	// animated but bone transforms were not updated because it was not rendered
 	if(PoseTickedThisFrame() && !bRecentlyRendered)
@@ -3730,6 +3744,11 @@ void USkeletalMeshComponent::TickClothing(float DeltaTime)
 void USkeletalMeshComponent::GetUpdateClothSimulationData(TArray<FClothSimulData>& OutClothSimData, USkeletalMeshComponent* OverrideLocalRootComponent)
 {
 #if WITH_APEX_CLOTHING
+
+	if (CVarEnableClothPhysics.GetValueOnAnyThread() == 0)
+	{
+		return;
+	}
 
 	int32 NumClothingActors = ClothingActors.Num();
 

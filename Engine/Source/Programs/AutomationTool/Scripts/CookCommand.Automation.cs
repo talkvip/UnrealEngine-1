@@ -175,6 +175,15 @@ public partial class Project : CommandUtils
                 {
                     CommandletParams += " -createreleaseversion=" + Params.CreateReleaseVersion;
                 }
+                if ( Params.SkipCookingEditorContent)
+                {
+                    CommandletParams += " -skipeditorcontent";
+                }
+                if ( Params.NumCookersToSpawn != 0)
+                {
+                    CommandletParams += " -numcookerstospawn=" + Params.NumCookersToSpawn;
+
+                }
                 if (Params.HasDLCName)
                 {
                     CommandletParams += " -dlcname=" + Params.DLCName;
@@ -227,8 +236,7 @@ public partial class Project : CommandUtils
 					// Delete cooked data (if any) as it may be incomplete / corrupted.
 					Log("Cook failed. Deleting cooked data.");
 					CleanupCookedData(PlatformsToCook.ToList(), Params);
-					AutomationTool.ErrorReporter.Error("Cook failed.", (int)AutomationTool.ErrorCodes.Error_UnknownCookFailure);
-					throw Ex;
+					throw new AutomationException(ErrorCodes.Error_UnknownCookFailure, Ex, "Cook failed.");
 				}
 			}
 		}

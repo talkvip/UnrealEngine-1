@@ -190,7 +190,7 @@ public:
 
 	/** Set color of the light */
 	UFUNCTION(BlueprintCallable, Category="Rendering|Components|Light")
-	void SetLightColor(FLinearColor NewLightColor);
+	void SetLightColor(FLinearColor NewLightColor, bool bSRGB = true);
 
 	UFUNCTION(BlueprintCallable, Category = "Rendering|Components|Light")
 	void SetTemperature(float NewTemperature);
@@ -250,7 +250,7 @@ public:
 	 * @param Bounds - The bounding volume to test.
 	 * @return True if the light affects the bounding volume
 	 */
-	virtual bool AffectsBounds(const FBoxSphereBounds& Bounds) const;
+	virtual bool AffectsBounds(const FBoxSphereBounds& InBounds) const;
 
 	/**
 	 * Return the world-space bounding box of the light's influence.

@@ -1285,7 +1285,7 @@ public:
 	 *
 	 * Doesn't do any transaction tracking.
 	 */
-	virtual void polyUpdateMaster( UModel* Model, int32 iSurf, int32 UpdateTexCoords );
+	virtual void polyUpdateMaster( UModel* Model, int32 iSurf, bool bUpdateTexCoords, bool bOnlyRefreshSurfaceMaterials );
 
 	/**
 	 * Populates a list with all polys that are linked to the specified poly.  The
@@ -1343,6 +1343,11 @@ public:
 	 * @param	bDeselectBSPSurfs			If true, also deselect all BSP surfaces.
 	 */
 	virtual void SelectNone(bool bNoteSelectionChange, bool bDeselectBSPSurfs, bool WarnAboutManyActors=true) {}
+
+	/**
+	 * Deselect all surfaces.
+	 */
+	virtual void DeselectAllSurfaces() {}
 
 	// Bsp Poly selection virtuals from EditorCsg.cpp.
 	virtual void polySelectAll ( UModel* Model );
@@ -2296,6 +2301,11 @@ public:
 	 * Are we playing via the Launcher?
 	 */
 	bool IsPlayingViaLauncher() const { return bPlayUsingLauncher && !bIsPlayWorldQueued; }
+
+	/** 
+	 * Cancel playing via the Launcher
+	 */
+	void CancelPlayingViaLauncher();
 
 	/** @return true if the editor is able to launch PIE with online platform support */
 	bool SupportsOnlinePIE() const;

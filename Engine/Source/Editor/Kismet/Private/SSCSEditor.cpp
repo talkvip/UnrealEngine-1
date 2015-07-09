@@ -1237,7 +1237,7 @@ UActorComponent* FSCSEditorTreeNodeComponent::INTERNAL_GetOverridenComponentTemp
 	const bool BlueprintCanOverrideComponentFromKey = Key.IsValid()
 		&& Blueprint
 		&& Blueprint->ParentClass
-		&& Blueprint->ParentClass->IsChildOf(Key.OwnerClass);
+		&& Blueprint->ParentClass->IsChildOf(Key.GetComponentOwner());
 
 	if (BlueprintCanOverrideComponentFromKey)
 	{
@@ -1875,7 +1875,8 @@ FReply SSCS_RowWidget::HandleOnDragDetected( const FGeometry& MyGeometry, const 
 		TSharedPtr<FSCSEditorTreeNode> FirstNode = SelectedNodePtrs[0];
 		if (FirstNode->GetNodeType() == FSCSEditorTreeNode::ComponentNode)
 		{
-			UBlueprint* Blueprint = FirstNode->GetBlueprint();
+			// Do not use the Blueprint from FirstNode, it may still be referencing the parent.
+			UBlueprint* Blueprint = GetBlueprint();
 			const FName VariableName = FirstNode->GetVariableName();
 			UStruct* VariableScope = (Blueprint != nullptr) ? Blueprint->SkeletonGeneratedClass : nullptr;
 
@@ -3241,6 +3242,7 @@ void SSCSEditor::Construct( const FArguments& InArgs )
 	OnHighlightPropertyInDetailsView = InArgs._OnHighlightPropertyInDetailsView;
 	bUpdatingSelection = false;
 	bHasAddedSceneAndBehaviorComponentSeparator = false;
+	bAllowTreeUpdates = true;
 
 	CommandList = MakeShareable( new FUICommandList );
 	CommandList->MapAction( FGenericCommands::Get().Cut,
@@ -4187,6 +4189,12 @@ void SSCSEditor::UpdateTree(bool bRegenerateTreeNodes)
 {
 	check(SCSTreeWidget.IsValid());
 
+	// Early exit if we're deferring tree updates
+	if(!bAllowTreeUpdates)
+	{
+		return;
+	}
+
 	if(bRegenerateTreeNodes)
 	{
 		// Obtain the set of expandable tree nodes that are currently collapsed
@@ -4611,8 +4619,15 @@ UActorComponent* SSCSEditor::AddNewComponent( UClass* NewComponentClass, UObject
 		Blueprint->Modify();
 		SaveSCSCurrentState(Blueprint->SimpleConstructionScript);
 
+		// Defer Blueprint class regeneration and tree updates if we need to copy object properties from a source template.
+		const bool bMarkBlueprintModified = !ComponentTemplate;
+		if(!bMarkBlueprintModified)
+		{
+			bAllowTreeUpdates = false;
+		}
+		
 		const FName NewVariableName = (Asset ? FName(*FComponentEditorUtils::GenerateValidVariableNameFromAsset(Asset, nullptr)) : NAME_None);
-		NewComponent = AddNewNode(Blueprint->SimpleConstructionScript->CreateNode(NewComponentClass, NewVariableName), Asset, true);
+		NewComponent = AddNewNode(Blueprint->SimpleConstructionScript->CreateNode(NewComponentClass, NewVariableName), Asset, bMarkBlueprintModified);
 
 		if (ComponentTemplate)
 		{
@@ -4621,6 +4636,10 @@ UActorComponent* SSCSEditor::AddNewComponent( UClass* NewComponentClass, UObject
 			FObjectWriter Writer(ComponentTemplate, SavedProperties);
 			FObjectReader(NewComponent, SavedProperties);
 			NewComponent->UpdateComponentToWorld();
+
+			// Wait until here to mark as structurally modified because we don't want any RerunConstructionScript() calls to happen until AFTER we've serialized properties from the source object.
+			bAllowTreeUpdates = true;
+			FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
 		}
 	}
 	else    // EComponentEditorMode::ActorInstance

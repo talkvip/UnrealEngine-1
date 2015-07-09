@@ -35,6 +35,7 @@ struct FProcessedInput
 		MatchedFriends.Empty();
 		NeedsTip = false;
 		FoundMatch = false;
+		ChatChannel = EChatMessageType::Invalid;
 	}
 };
 
@@ -114,6 +115,48 @@ private:
 	TSharedRef<FFriendViewModel> FriendItem;
 };
 
+class FInvalidChatTip : public IChatTip
+{
+public:
+	virtual FText GetTipText() override
+	{
+		if(InvalidReason.IsEmpty())
+		{
+			return LOCTEXT("InvalidChatTip", "Invalid markup");
+		}
+		return InvalidReason;
+	}
+
+	virtual bool IsValidForType(EChatMessageType::Type ChatChannel) override
+	{
+		return true;
+	}
+
+	virtual bool IsEnabled() override
+	{
+		return true;
+	}
+
+	virtual FReply ExecuteTip() override
+	{
+		return FReply::Handled();
+	}
+
+	FInvalidChatTip(FText InInvalidReason)
+	 : InvalidReason(InInvalidReason)
+	{}
+
+	FInvalidChatTip()
+	 : InvalidReason(FText::GetEmpty())
+	{}
+
+	virtual ~FInvalidChatTip(){}
+
+private:
+	FText InvalidReason;
+};
+
+
 class FFriendsChatMarkupServiceImpl
 	: public FFriendsChatMarkupService
 {
@@ -124,7 +167,7 @@ public:
 		ForceDisplayToolTips = !ForceDisplayToolTips;
 		if(ForceDisplayToolTips)
 		{
-			GenerateTips();
+			GenerateDefaultTips();
 		}
 	}
 
@@ -175,6 +218,10 @@ public:
 			else if (ValidatedInput->ChatChannel == EChatMessageType::Custom)
 			{
 				NavigationService->ChangeChatChannel(EChatMessageType::Custom);
+			}
+			else if (ValidatedInput->ChatChannel == EChatMessageType::Empty)
+			{
+				NavigationService->ChangeChatChannel(EChatMessageType::Empty);
 			}
 			else if(ValidatedInput->ChatChannel == EChatMessageType::Invalid)
 			{
@@ -255,7 +302,7 @@ public:
 
 			Args.Add(TEXT("NameStyle"), FText::FromString(HyperlinkStyle));
 
-			FText ValidatedText = FText::Format(NSLOCTEXT("FChatItemViewModel", "DisplayNameAndMessage", "/w <a id=\"UserName\" uid=\"{UniqueID}\" Username=\"{SenderName}\" style=\"{NameStyle}\">{SenderName}</> "), Args);
+			FText ValidatedText = FText::Format(NSLOCTEXT("FFriendsChatMarkupService", "DisplayNameAndMessage", "/w <a id=\"UserName\" uid=\"{UniqueID}\" Username=\"{SenderName}\" style=\"{NameStyle}\">{SenderName}</> "), Args);
 			ValidatedInputString = ValidatedText.ToString();
 			SelectedFriendViewModel = FriendViewModel;
 			ProcessedInput->ValidFriends.Empty();
@@ -326,20 +373,31 @@ private:
 		ChatTipArray.Empty();
 		if(ProcessedInput->ChatChannel == EChatMessageType::Whisper)
 		{
-			for(const auto& Friend : ProcessedInput->ValidFriends)
+			if(ProcessedInput->ValidFriends.Num())
 			{
-				ChatTipArray.Add(MakeShareable(new FFriendChatTip(SharedThis(this), Friend.ToSharedRef())));
+				for(const auto& Friend : ProcessedInput->ValidFriends)
+				{
+					ChatTipArray.Add(MakeShareable(new FFriendChatTip(SharedThis(this), Friend.ToSharedRef())));
+				}
+			}
+			else
+			{
+				ChatTipArray.Add(MakeShareable(new FInvalidChatTip(LOCTEXT("InvalidChatTip_NoFriends", "No matching friends currently online"))));
 			}
 		}
-		else
+		else if(ProcessedInput->ChatChannel != EChatMessageType::Invalid)
 		{
 			for(const auto& ChatTip : CommmonChatTips)
 			{
-				if(ProcessedInput->ChatChannel == EChatMessageType::Invalid || ChatTip->IsValidForType(ProcessedInput->ChatChannel))
+				if(ProcessedInput->ChatChannel == EChatMessageType::Empty || ChatTip->IsValidForType(ProcessedInput->ChatChannel))
 				{
 					ChatTipArray.Add(ChatTip); 
 				}
 			}
+		}
+		else
+		{
+			ChatTipArray.Add(MakeShareable(new FInvalidChatTip()));
 		}
 
 		if(ChatTipArray.Num() > 0)
@@ -347,6 +405,19 @@ private:
 			SelectedChatTip = ChatTipArray[0];
 			SelectedChatIndex = 0;
 		}
+		OnInputUpdated().Broadcast();
+	}
+
+	void GenerateDefaultTips()
+	{
+		SelectedChatTip.Reset();
+		ChatTipArray.Empty();
+		for(const auto& ChatTip : CommmonChatTips)
+		{
+			ChatTipArray.Add(ChatTip); 
+		}
+		SelectedChatTip = ChatTipArray[0];
+		SelectedChatIndex = 0;
 		OnInputUpdated().Broadcast();
 	}
 
@@ -386,6 +457,7 @@ private:
 			{
 				SetSelectedFriend(nullptr);
 				SetValidatedText(InPlainText);
+				NeedsValidation = true;
 			}
 			else
 			{
@@ -444,7 +516,7 @@ private:
 						}
 					}
 				}
-				else
+				else if(ChatType != EChatMessageType::Empty)
 				{
 					ProcessedInput->NeedsTip = false;
 					ProcessedInput->Message = InInputText.RightChop(NavigationToken.Len() + 1);

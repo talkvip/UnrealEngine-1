@@ -11,6 +11,7 @@
 #include "UObject/TlsObjectInitializers.h"
 #include "UObject/UObjectThreadContext.h"
 #include "BlueprintSupport.h" // for FDeferredObjInitializerTracker
+#include "AssetRegistryInterface.h"
 
 DEFINE_LOG_CATEGORY(LogUObjectGlobals);
 
@@ -914,7 +915,7 @@ UPackage* LoadPackageInternal(UPackage* InOuter, const TCHAR* InLongPackageName,
 #endif
 
 	FScopedSlowTask SlowTask(100, FText::Format(NSLOCTEXT("Core", "LoadingPackage_Scope", "Loading Package '{0}'"), FText::FromString(FileToLoad)), ShouldReportProgress());
-	SlowTask.bVisibleOnUI = false;
+	SlowTask.Visibility = ESlowTaskVisibility::Invisible;
 	
 	SlowTask.EnterProgressFrame(10);
 
@@ -955,6 +956,36 @@ UPackage* LoadPackageInternal(UPackage* InOuter, const TCHAR* InLongPackageName,
 			EndLoadAndCopyLocalizationGatherFlag();
 			return Result;
 		}
+
+#if !WITH_EDITOR
+		static auto CVarPreloadDependencies = IConsoleManager::Get().FindConsoleVariable(TEXT("s.PreloadPackageDependencies"));
+		if (CVarPreloadDependencies && CVarPreloadDependencies->GetInt() != 0)
+		{
+			if (Result->PackageFlags & PKG_ProcessingDependencies)
+			{
+				// We've currently already processing the dependencies of this package, so there is a circular dependency
+				EndLoad();
+				return nullptr;
+			}
+
+			auto AssetRegistry = IAssetRegistryInterface::GetPtr();
+
+			if (AssetRegistry)
+			{
+				TArray<FName> PackageDependencies;
+				FName PackageName(InLongPackageName);
+
+				AssetRegistry->GetDependencies(PackageName, PackageDependencies);
+
+				Result->PackageFlags |= PKG_ProcessingDependencies;
+				for (auto Dependency : PackageDependencies)
+				{
+					LoadPackage(InOuter, *Dependency.ToString(), LoadFlags);
+				}
+				Result->PackageFlags &= ~PKG_ProcessingDependencies;
+			}
+		}
+#endif
 
 		// If we are loading a package for diff'ing, set the package flag
 		if(LoadFlags & LOAD_ForDiff)
@@ -2305,7 +2336,7 @@ void FObjectInitializer::PostConstructInit()
 #if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
 	if (!FUObjectThreadContext::Get().PostInitPropertiesCheck.Num() || (FUObjectThreadContext::Get().PostInitPropertiesCheck.Pop() != Obj))
 	{
-		UE_LOG(LogUObjectGlobals, Fatal, TEXT("%s failed to route PostInitProperties"), *Obj->GetClass()->GetName() );
+		UE_LOG(LogUObjectGlobals, Fatal, TEXT("%s failed to route PostInitProperties. Call Super::PostInitProperties() in %s::PostInitProperties()."), *Obj->GetClass()->GetName(), *Obj->GetClass()->GetName());
 	}
 	// Check if all TSubobjectPtr properties have been initialized.
 	if (!Obj->HasAnyFlags(RF_NeedLoad))
@@ -2963,10 +2994,18 @@ UObject* FObjectInitializer::CreateDefaultSubobject(UObject* Outer, FName Subobj
 			const EObjectFlags SubobjectFlags = Outer->GetMaskedFlags(RF_PropagateToSubObjects);
 			const bool bOwnerArchetypeIsNotNative = !Outer->GetArchetype()->GetClass()->HasAnyClassFlags(CLASS_Native | CLASS_Intrinsic);
 			const bool bOwnerTemplateIsNotCDO = ObjectArchetype != nullptr && ObjectArchetype != Outer->GetClass()->GetDefaultObject(false) && !Outer->HasAnyFlags(RF_ClassDefaultObject);
-			//if (StaticFindObjectFast(OverrideClass, Outer, SubobjectFName) != nullptr)
-			//{
-			//	UE_LOG(LogClass, Fatal, TEXT("Default subobject %s %s already exists for %s."), *OverrideClass->GetName(), *SubobjectFName.ToString(), *Outer->GetFullName());
-			//}
+#if !UE_BUILD_SHIPPING
+			// Guard against constructing the same subobject multiple times.
+			// We only need to check the name as ConstructObject would fail anyway if an object of the same name but different class already existed.
+			if (ConstructedSubobjects.Find(SubobjectFName) != INDEX_NONE)
+			{
+				UE_LOG(LogClass, Fatal, TEXT("Default subobject %s %s already exists for %s."), *OverrideClass->GetName(), *SubobjectFName.ToString(), *Outer->GetFullName());
+			}
+			else
+			{
+				ConstructedSubobjects.Add(SubobjectFName);
+			}
+#endif
 			Result = StaticConstructObject_Internal(OverrideClass, Outer, SubobjectFName, SubobjectFlags);
 			if (!bIsTransient && (bOwnerArchetypeIsNotNative || bOwnerTemplateIsNotCDO))
 			{

@@ -549,6 +549,12 @@ public:
 	 */
 	virtual bool UpdateLODStatus();
 
+	/**
+	 * Finalize bone transform of this current tick
+	 * After this function, any query to bone transform should be latest of the data
+	 */
+	virtual void FinalizeBoneTransform();
+
 	/** Initialize the LOD entries for the component */
 	void InitLODInfos();
 
@@ -574,12 +580,12 @@ public:
 	/** Get the number of space bases */
 	int32 GetNumSpaceBases() const { return GetSpaceBases().Num(); }
 
-	/** Flip the editable space base buffer */
-	void FlipEditableSpaceBases();
-
 	void SetSpaceBaseDoubleBuffering(bool bInDoubleBufferedBlendSpaces);
 
 protected:
+
+	/** Flip the editable space base buffer */
+	void FlipEditableSpaceBases();
 
 	/** Track whether we still need to flip to recently modified buffer */
 	bool bNeedToFlipSpaceBaseBuffers;
@@ -741,6 +747,7 @@ public:
 	 * @return true if child (strictly, not same). false otherwise
 	 * Note - will return false if ChildBoneIndex is the same as ParentBoneIndex ie. must be strictly a child.
 	 */
+	UFUNCTION(BlueprintCallable, Category="Components|SkinnedMesh")
 	bool BoneIsChildOf(FName BoneName, FName ParentBoneName) const;
 
 	/** 
@@ -899,7 +906,7 @@ public:
 	* 
 	* @param bRecentlyRendered : true if at least one SkinnedMeshComponent on this Actor has been rendered in the last second.
 	* @param MaxDistanceFactor : Largest SkinnedMeshComponent of this Actor drawn on screen. */
-	void AnimUpdateRateSetParams(uint8 UpdateRateShift, float DeltaTime, const bool & bRecentlyRendered, const float& MaxDistanceFactor, const bool & bPlayingRootMotion);
+	void AnimUpdateRateSetParams(uint8 UpdateRateShift, float DeltaTime, const bool & bInRecentlyRendered, const float& InMaxDistanceFactor, const bool & bPlayingRootMotion);
 
 	virtual bool IsPlayingRootMotion(){ return false; }
 

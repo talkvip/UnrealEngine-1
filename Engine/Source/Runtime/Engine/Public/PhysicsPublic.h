@@ -252,6 +252,15 @@ private:
 	/** Array of commands waiting to execute once simulation is done */
 	TArray<FPhysPendingCommand> PendingCommands;
 };
+namespace SleepEvent
+{
+	enum Type
+	{
+		SET_Wakeup,
+		SET_Sleep
+	};
+
+}
 
 /** Container object for a physics engine 'scene'. */
 
@@ -321,6 +330,8 @@ public:
 	 *	@param SceneType - The scene type to add the actor to
 	 */
 	void DeferRemoveActor(FBodyInstance* OwningInstance, PxActor* Actor, EPhysicsSceneType SceneType);
+
+	void AddPendingSleepingEvent(PxActor* Actor, SleepEvent::Type SleepEventType, int32 SceneType);
 #endif
 
 private:
@@ -369,7 +380,7 @@ private:
 	/** Dispatcher for CPU tasks */
 	class PxCpuDispatcher*			CPUDispatcher;
 	/** Simulation event callback object */
-	class FPhysXSimEventCallback*			SimEventCallback;
+	class FPhysXSimEventCallback*			SimEventCallback[PST_MAX];
 #if WITH_VEHICLE
 	/** Vehicle scene */
 	class FPhysXVehicleManager*			VehicleManager;
@@ -413,7 +424,7 @@ public:
 	ENGINE_API void StartFrame();
 
 	/** Ends a frame */
-	ENGINE_API void EndFrame(ULineBatchComponent* LineBatcher);
+	ENGINE_API void EndFrame(ULineBatchComponent* InLineBatcher);
 
 	/** Starts cloth Simulation*/
 	ENGINE_API void StartCloth();
@@ -598,7 +609,7 @@ private:
 
 	/** Fetch results from simulation and get the active transforms. Make sure to lock before calling this function as the fetch and data you use must be treated as an atomic operation */
 	void UpdateActiveTransforms(uint32 SceneType);
-	void RemoveActiveBody(FBodyInstance* BodyInstance, uint32 SceneType);
+	void RemoveActiveBody_AssumesLocked(FBodyInstance* BodyInstance, uint32 SceneType);
 
 #endif
 
@@ -624,6 +635,10 @@ private:
 
 	/** Map from SkeletalMeshComponent UniqueID to a pointer to the collision disable table inside its PhysicsAsset */
 	TMap< uint32, TMap<struct FRigidBodyIndexPair, bool>* >		CollisionDisableTableLookup;
+
+#if WITH_PHYSX
+	TMap<PxActor*, SleepEvent::Type> PendingSleepEvents[PST_MAX];
+#endif
 };
 
 /**

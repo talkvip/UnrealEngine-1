@@ -35,7 +35,9 @@ public class TranslationEditor : ModuleRules
 				"SourceControl",
                 "MessageLog",
                 "Documentation",
+                "Localization",
                 "LocalizationService",
+                "LocalizationDashboard",
 			}
 		);
 
@@ -51,8 +53,6 @@ public class TranslationEditor : ModuleRules
 			new string[] {
 				"WorkspaceMenuStructure",
 				"DesktopPlatform",
-				"SourceControl",
-                "LocalizationService",
 			}
 		);
 	}

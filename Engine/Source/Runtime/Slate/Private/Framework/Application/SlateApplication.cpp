@@ -13,6 +13,8 @@
 #include "ToolboxModule.h"
 #include "TabCommands.h"
 
+#define SLATE_HAS_WIDGET_REFLECTOR !UE_BUILD_SHIPPING || PLATFORM_DESKTOP
+
 extern SLATECORE_API TOptional<FShortRect> GSlateScissorRect;
 
 class FEventRouter
@@ -1027,6 +1029,8 @@ void FSlateApplication::DrawWindowAndChildren( const TSharedRef<SWindow>& Window
 			}
 		}
 
+#if SLATE_HAS_WIDGET_REFLECTOR
+
 		// The widget reflector may want to paint some additional stuff as part of the Widget introspection that it performs.
 		// For example: it may draw layout rectangles for hovered widgets.
 		const bool bVisualizeLayoutUnderCursor = DrawWindowArgs.WidgetsUnderCursor.IsValid();
@@ -1043,6 +1047,8 @@ void FSlateApplication::DrawWindowAndChildren( const TSharedRef<SWindow>& Window
 		{
 			MaxLayerId = WidgetReflector->VisualizeCursorAndKeys( WindowElementList, MaxLayerId );
 		}
+
+#endif
 
 		// Draw the child windows
 		const TArray< TSharedRef<SWindow> >& WindowChildren = WindowToDraw->GetChildWindows();
@@ -1133,8 +1139,12 @@ void FSlateApplication::PrivateDrawWindows( TSharedPtr<SWindow> DrawOnlyThisWind
 {
 	check(Renderer.IsValid());
 
+#if SLATE_HAS_WIDGET_REFLECTOR
 	// Is user expecting visual feedback from the Widget Reflector?
 	const bool bVisualizeLayoutUnderCursor = WidgetReflectorPtr.IsValid() && WidgetReflectorPtr.Pin()->IsVisualizingLayoutUnderCursor();
+#else
+	const bool bVisualizeLayoutUnderCursor = false;
+#endif
 
 	FWidgetPath WidgetsUnderCursor = bVisualizeLayoutUnderCursor
 		? WidgetsUnderCursorLastEvent.ToWidgetPath()
@@ -2851,6 +2861,7 @@ void FSlateApplication::SpawnToolTip( const TSharedRef<IToolTip>& InToolTip, con
 			NewToolTipWindow->MoveWindowTo( DesiredToolTipLocation );
 		}
 
+		NewToolTipWindow->SetOpacity(0.0f);
 
 		// Show the window
 		NewToolTipWindow->ShowWindow();
@@ -3840,6 +3851,7 @@ bool FSlateApplication::ProcessKeyDownEvent( FKeyEvent& InKeyEvent )
 	{
 		LastUserInteractionTimeForThrottling = LastUserInteractionTime;
 
+#if SLATE_HAS_WIDGET_REFLECTOR
 		// If we are inspecting, pressing ESC exits inspection mode.
 		if ( InKeyEvent.GetKey() == EKeys::Escape )
 		{
@@ -3853,6 +3865,7 @@ bool FSlateApplication::ProcessKeyDownEvent( FKeyEvent& InKeyEvent )
 					return Reply.IsEventHandled();
 			}
 		}
+#endif
 
 #if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
 		// Ctrl+Shift+~ summons the Toolbox.
@@ -4166,7 +4179,7 @@ bool FSlateApplication::ProcessMouseButtonDownEvent( const TSharedPtr< FGenericW
 				}
 
 #if PLATFORM_MAC
-				if (WidgetsUnderCursor.TopLevelWindow.IsValid())
+				if (bNeedToActivateWindow && WidgetsUnderCursor.TopLevelWindow.IsValid())
 				{
 					// Clicking on a context menu should not activate anything
 					// @todo: This needs to be updated when we have window type in SWindow and we no longer have to guess if WidgetsUnderCursor.TopLevelWindow is a menu
@@ -4732,18 +4745,17 @@ bool FSlateApplication::ProcessMouseMoveEvent( FPointerEvent& MouseEvent, bool b
 			DragDropWindowPtr = nullptr;
 		}
 
-		// check the drag-drop operation for a cursor switch (on Windows, the OS thinks the mouse is
-		// captured so we wont get QueryCursor calls for drag/drops internal to the Slate application)
-		FCursorReply CursorResult = DragDropContent->OnCursorQuery();
-		if (CursorResult.IsEventHandled())
+		// Don't update the cursor for the platform if we don't have a valid cursor on this platform
+		if ( PlatformApplication->Cursor.IsValid() )
 		{
-			// Query was handled, so we should set the cursor.
-			PlatformApplication->Cursor->SetType(CursorResult.GetCursorType());
-		}
-		else
-		{
-			// reset the cursor to default for drag-drops
-			PlatformApplication->Cursor->SetType( EMouseCursor::Default );
+			FCursorReply CursorReply = DragDropContent->OnCursorQuery();
+			if ( !CursorReply.IsEventHandled() )
+			{
+				// Set the default cursor when there isn't an active window under the cursor and the mouse isn't captured
+				CursorReply = FCursorReply::Cursor(EMouseCursor::Default);
+			}
+
+			ProcessCursorReply(CursorReply);
 		}
 	}
 	else
@@ -4761,74 +4773,6 @@ bool FSlateApplication::OnCursorSet()
 {
 	QueryCursor();
 	return true;
-}
-
-FKey TranslateControllerButtonToKey( EControllerButtons::Type Button )
-{
-	FKey Key = EKeys::Invalid;
-
-	switch ( Button )
-	{
-	case EControllerButtons::LeftAnalogY: Key = EKeys::Gamepad_LeftY; break;
-	case EControllerButtons::LeftAnalogX: Key = EKeys::Gamepad_LeftX; break;
-
-	case EControllerButtons::RightAnalogY: Key = EKeys::Gamepad_RightY; break;
-	case EControllerButtons::RightAnalogX: Key = EKeys::Gamepad_RightX; break;
-
-	case EControllerButtons::LeftTriggerAnalog: Key = EKeys::Gamepad_LeftTriggerAxis; break;
-	case EControllerButtons::RightTriggerAnalog: Key = EKeys::Gamepad_RightTriggerAxis; break;
-
-	case EControllerButtons::FaceButtonBottom: Key = EKeys::Gamepad_FaceButton_Bottom; break;
-	case EControllerButtons::FaceButtonRight: Key = EKeys::Gamepad_FaceButton_Right; break;
-	case EControllerButtons::FaceButtonLeft: Key = EKeys::Gamepad_FaceButton_Left; break;
-	case EControllerButtons::FaceButtonTop: Key = EKeys::Gamepad_FaceButton_Top; break;
-
-	case EControllerButtons::LeftShoulder: Key = EKeys::Gamepad_LeftShoulder; break;
-	case EControllerButtons::RightShoulder: Key = EKeys::Gamepad_RightShoulder; break;
-	case EControllerButtons::SpecialLeft: Key = EKeys::Gamepad_Special_Left; break;
-	case EControllerButtons::SpecialRight: Key = EKeys::Gamepad_Special_Right; break;
-	case EControllerButtons::LeftThumb: Key = EKeys::Gamepad_LeftThumbstick; break;
-	case EControllerButtons::RightThumb: Key = EKeys::Gamepad_RightThumbstick; break;
-	case EControllerButtons::LeftTriggerThreshold: Key = EKeys::Gamepad_LeftTrigger; break;
-	case EControllerButtons::RightTriggerThreshold: Key = EKeys::Gamepad_RightTrigger; break;
-
-	case EControllerButtons::DPadUp: Key = EKeys::Gamepad_DPad_Up; break;
-	case EControllerButtons::DPadDown: Key = EKeys::Gamepad_DPad_Down; break;
-	case EControllerButtons::DPadLeft: Key = EKeys::Gamepad_DPad_Left; break;
-	case EControllerButtons::DPadRight: Key = EKeys::Gamepad_DPad_Right; break;
-
-	case EControllerButtons::LeftStickUp: Key = EKeys::Gamepad_LeftStick_Up; break;
-	case EControllerButtons::LeftStickDown: Key = EKeys::Gamepad_LeftStick_Down; break;
-	case EControllerButtons::LeftStickLeft: Key = EKeys::Gamepad_LeftStick_Left; break;
-	case EControllerButtons::LeftStickRight: Key = EKeys::Gamepad_LeftStick_Right; break;
-
-	case EControllerButtons::RightStickUp: Key = EKeys::Gamepad_RightStick_Up; break;
-	case EControllerButtons::RightStickDown: Key = EKeys::Gamepad_RightStick_Down; break;
-	case EControllerButtons::RightStickLeft: Key = EKeys::Gamepad_RightStick_Left; break;
-	case EControllerButtons::RightStickRight: Key = EKeys::Gamepad_RightStick_Right; break;
-
-	case EControllerButtons::Touch0: Key = EKeys::Steam_Touch_0; break;
-	case EControllerButtons::Touch1: Key = EKeys::Steam_Touch_1; break;
-	case EControllerButtons::Touch2: Key = EKeys::Steam_Touch_2; break;
-	case EControllerButtons::Touch3: Key = EKeys::Steam_Touch_3; break;
-	case EControllerButtons::BackLeft: Key = EKeys::Steam_Back_Left; break;
-	case EControllerButtons::BackRight: Key = EKeys::Steam_Back_Right; break;
-
-	case EControllerButtons::GlobalMenu: Key = EKeys::Global_Menu; break;
-	case EControllerButtons::GlobalView: Key = EKeys::Global_View; break;
-	case EControllerButtons::GlobalPause: Key = EKeys::Global_Pause; break;
-	case EControllerButtons::GlobalPlay: Key = EKeys::Global_Play; break;
-	case EControllerButtons::GlobalBack: Key = EKeys::Global_Back; break;
-
-	case EControllerButtons::AndroidBack: Key = EKeys::Android_Back; break;
-	case EControllerButtons::AndroidVolumeUp: Key = EKeys::Android_Volume_Up; break;
-	case EControllerButtons::AndroidVolumeDown: Key = EKeys::Android_Volume_Down; break;
-	case EControllerButtons::AndroidMenu: Key = EKeys::Android_Menu; break;
-
-	case EControllerButtons::Invalid: Key = EKeys::Invalid; break;
-	}
-
-	return Key;
 }
 
 bool FSlateApplication::AttemptNavigation(const FNavigationEvent& NavigationEvent, const FNavigationReply& NavigationReply, const FArrangedWidget& BoundaryWidget)
@@ -4890,9 +4834,11 @@ bool FSlateApplication::AttemptNavigation(const FNavigationEvent& NavigationEven
 	return false;
 }
 
-bool FSlateApplication::OnControllerAnalog( EControllerButtons::Type Button, int32 ControllerId, float AnalogValue )
+bool FSlateApplication::OnControllerAnalog( FGamepadKeyNames::Type KeyName, int32 ControllerId, float AnalogValue )
 {
-	FKey Key = TranslateControllerButtonToKey(Button);
+	FKey Key(KeyName);
+	check(Key.IsValid());
+
 	int32 UserIndex = GetUserIndexForController(ControllerId);
 	
 	FAnalogInputEvent AnalogInputEvent(Key, PlatformApplication->GetModifierKeys(), UserIndex, false, 0, 0, AnalogValue);
@@ -4900,9 +4846,11 @@ bool FSlateApplication::OnControllerAnalog( EControllerButtons::Type Button, int
 	return ProcessAnalogInputEvent(AnalogInputEvent);
 }
 
-bool FSlateApplication::OnControllerButtonPressed( EControllerButtons::Type Button, int32 ControllerId, bool IsRepeat )
+bool FSlateApplication::OnControllerButtonPressed( FGamepadKeyNames::Type KeyName, int32 ControllerId, bool IsRepeat )
 {
-	FKey Key = TranslateControllerButtonToKey(Button);
+	FKey Key(KeyName);
+	check(Key.IsValid());
+
 	int32 UserIndex = GetUserIndexForController(ControllerId);
 
 	FKeyEvent KeyEvent(Key, PlatformApplication->GetModifierKeys(), UserIndex, IsRepeat, 0, 0);
@@ -4910,9 +4858,11 @@ bool FSlateApplication::OnControllerButtonPressed( EControllerButtons::Type Butt
 	return ProcessKeyDownEvent(KeyEvent);
 }
 
-bool FSlateApplication::OnControllerButtonReleased( EControllerButtons::Type Button, int32 ControllerId, bool IsRepeat )
+bool FSlateApplication::OnControllerButtonReleased( FGamepadKeyNames::Type KeyName, int32 ControllerId, bool IsRepeat )
 {
-	FKey Key = TranslateControllerButtonToKey(Button);
+	FKey Key(KeyName);
+	check(Key.IsValid());
+
 	int32 UserIndex = GetUserIndexForController(ControllerId);
 	
 	FKeyEvent KeyEvent(Key, PlatformApplication->GetModifierKeys(),UserIndex, IsRepeat,  0, 0);
@@ -5547,10 +5497,10 @@ TSharedRef<FSlateApplication> FSlateApplication::InitializeAsStandaloneApplicati
 }
 
 
-TSharedRef<FSlateApplication> FSlateApplication::InitializeAsStandaloneApplication(const TSharedRef< class FSlateRenderer >& PlatformRenderer, const TSharedRef<class GenericApplication>& PlatformApplication)
+TSharedRef<FSlateApplication> FSlateApplication::InitializeAsStandaloneApplication(const TSharedRef< class FSlateRenderer >& PlatformRenderer, const TSharedRef<class GenericApplication>& InPlatformApplication)
 {
 	// create the platform slate application (what FSlateApplication::Get() returns)
-	TSharedRef<FSlateApplication> Slate = FSlateApplication::Create(PlatformApplication);
+	TSharedRef<FSlateApplication> Slate = FSlateApplication::Create(InPlatformApplication);
 
 	// initialize renderer
 	FSlateApplication::Get().InitializeRenderer(PlatformRenderer);
@@ -5575,3 +5525,5 @@ void FSlateApplication::SetWidgetReflector(const TSharedRef<IWidgetReflector>& W
 
 	WidgetReflectorPtr = WidgetReflector;
 }
+
+#undef SLATE_HAS_WIDGET_REFLECTOR

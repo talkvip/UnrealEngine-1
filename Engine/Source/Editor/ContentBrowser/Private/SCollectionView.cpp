@@ -10,6 +10,7 @@
 #include "ObjectTools.h"
 #include "SourcesViewWidgets.h"
 #include "ContentBrowserModule.h"
+#include "ISourceControlModule.h"
 #include "SExpandableArea.h"
 #include "SSearchBox.h"
 
@@ -67,11 +68,20 @@ void SCollectionView::Construct( const FArguments& InArgs )
 	bAllowCollectionDrag = InArgs._AllowCollectionDrag;
 	bDraggedOver = false;
 
+	bQueueCollectionItemsUpdate = false;
+	bQueueSCCRefresh = true;
+
 	FCollectionManagerModule& CollectionManagerModule = FCollectionManagerModule::GetModule();
 	CollectionManagerModule.Get().OnCollectionCreated().AddSP( this, &SCollectionView::HandleCollectionCreated );
 	CollectionManagerModule.Get().OnCollectionRenamed().AddSP( this, &SCollectionView::HandleCollectionRenamed );
 	CollectionManagerModule.Get().OnCollectionReparented().AddSP( this, &SCollectionView::HandleCollectionReparented );
 	CollectionManagerModule.Get().OnCollectionDestroyed().AddSP( this, &SCollectionView::HandleCollectionDestroyed );
+	CollectionManagerModule.Get().OnCollectionUpdated().AddSP( this, &SCollectionView::HandleCollectionUpdated );
+	CollectionManagerModule.Get().OnAssetsAdded().AddSP( this, &SCollectionView::HandleAssetsAddedToCollection );
+	CollectionManagerModule.Get().OnAssetsRemoved().AddSP( this, &SCollectionView::HandleAssetsRemovedFromCollection );
+
+	ISourceControlModule::Get().RegisterProviderChanged(FSourceControlProviderChanged::FDelegate::CreateSP(this, &SCollectionView::HandleSourceControlProviderChanged));
+	SourceControlStateChangedDelegateHandle = ISourceControlModule::Get().GetProvider().RegisterSourceControlStateChanged_Handle(FSourceControlStateChanged::FDelegate::CreateSP(this, &SCollectionView::HandleSourceControlStateChanged));
 
 	Commands = TSharedPtr< FUICommandList >(new FUICommandList);
 	CollectionContextMenu = MakeShareable(new FCollectionContextMenu( SharedThis(this) ));
@@ -225,41 +235,126 @@ void SCollectionView::Construct( const FArguments& InArgs )
 
 void SCollectionView::HandleCollectionCreated( const FCollectionNameType& Collection )
 {
-	UpdateCollectionItems();
+	bQueueCollectionItemsUpdate = true;
 }
 
 void SCollectionView::HandleCollectionRenamed( const FCollectionNameType& OriginalCollection, const FCollectionNameType& NewCollection )
 {
-	// If the original collection was expanded, we want to pass that expansion state onto its new entry
-	bool bWasExpanded = false;
-	{
-		TSharedPtr<FCollectionItem> OriginalCollectionItem = AvailableCollections.FindRef(OriginalCollection);
-		if (OriginalCollectionItem.IsValid())
-		{
-			bWasExpanded = CollectionTreePtr->IsItemExpanded(OriginalCollectionItem);
-		}
-	}
+	bQueueCollectionItemsUpdate = true;
 
-	UpdateCollectionItems();
-
-	if (bWasExpanded)
+	// Rename the item in-place so we can maintain its expansion and selection states correctly once the view is refreshed on the next Tick
+	TSharedPtr<FCollectionItem> CollectionItem = AvailableCollections.FindRef(OriginalCollection);
+	if (CollectionItem.IsValid())
 	{
-		TSharedPtr<FCollectionItem> NewCollectionItem = AvailableCollections.FindRef(NewCollection);
-		if (NewCollectionItem.IsValid())
-		{
-			CollectionTreePtr->SetItemExpansion(NewCollectionItem, true);
-		}
+		CollectionItem->CollectionName = NewCollection.Name;
+		CollectionItem->CollectionType = NewCollection.Type;
 	}
 }
 
 void SCollectionView::HandleCollectionReparented( const FCollectionNameType& Collection, const TOptional<FCollectionNameType>& OldParent, const TOptional<FCollectionNameType>& NewParent )
 {
-	UpdateCollectionItems();
+	bQueueCollectionItemsUpdate = true;
 }
 
 void SCollectionView::HandleCollectionDestroyed( const FCollectionNameType& Collection )
 {
-	UpdateCollectionItems();
+	bQueueCollectionItemsUpdate = true;
+}
+
+void SCollectionView::HandleCollectionUpdated( const FCollectionNameType& Collection )
+{
+	TSharedPtr<FCollectionItem> CollectionItemToUpdate = AvailableCollections.FindRef(Collection);
+	if (CollectionItemToUpdate.IsValid())
+	{
+		bQueueSCCRefresh = true;
+		UpdateCollectionItemStatus(CollectionItemToUpdate.ToSharedRef());
+	}
+}
+
+void SCollectionView::HandleAssetsAddedToCollection( const FCollectionNameType& Collection, const TArray<FName>& AssetsAdded )
+{
+	HandleCollectionUpdated(Collection);
+}
+
+void SCollectionView::HandleAssetsRemovedFromCollection( const FCollectionNameType& Collection, const TArray<FName>& AssetsRemoved )
+{
+	HandleCollectionUpdated(Collection);
+}
+
+void SCollectionView::HandleSourceControlProviderChanged(ISourceControlProvider& OldProvider, ISourceControlProvider& NewProvider)
+{
+	OldProvider.UnregisterSourceControlStateChanged_Handle(SourceControlStateChangedDelegateHandle);
+	SourceControlStateChangedDelegateHandle = NewProvider.RegisterSourceControlStateChanged_Handle(FSourceControlStateChanged::FDelegate::CreateSP(this, &SCollectionView::HandleSourceControlStateChanged));
+	
+	bQueueSCCRefresh = true;
+	HandleSourceControlStateChanged();
+}
+
+void SCollectionView::HandleSourceControlStateChanged()
+{
+	// Update the status of each collection
+	for (const auto& AvailableCollectionInfo : AvailableCollections)
+	{
+		UpdateCollectionItemStatus(AvailableCollectionInfo.Value.ToSharedRef());
+	}
+}
+
+void SCollectionView::UpdateCollectionItemStatus( const TSharedRef<FCollectionItem>& CollectionItem )
+{
+	FCollectionManagerModule& CollectionManagerModule = FCollectionManagerModule::GetModule();
+
+	TOptional<ECollectionItemStatus> NewStatus;
+
+	FCollectionStatusInfo StatusInfo;
+	if (CollectionManagerModule.Get().GetCollectionStatusInfo(CollectionItem->CollectionName, CollectionItem->CollectionType, StatusInfo))
+	{
+		// Test the SCC state first as this should take priority when reporting the status back to the user
+		if (StatusInfo.bUseSCC)
+		{
+			if (StatusInfo.SCCState.IsValid() && StatusInfo.SCCState->IsSourceControlled())
+			{
+				if (StatusInfo.SCCState->IsCheckedOutOther())
+				{
+					NewStatus = ECollectionItemStatus::IsCheckedOutByAnotherUser;
+				}
+				else if (StatusInfo.SCCState->IsConflicted())
+				{
+					NewStatus = ECollectionItemStatus::IsConflicted;
+				}
+				else if (!StatusInfo.SCCState->IsCurrent())
+				{
+					NewStatus = ECollectionItemStatus::IsOutOfDate;
+				}
+				else if (StatusInfo.SCCState->IsModified())
+				{
+					NewStatus = ECollectionItemStatus::HasLocalChanges;
+				}
+			}
+			else
+			{
+				NewStatus = ECollectionItemStatus::IsMissingSCCProvider;
+			}
+		}
+
+		// Not set by the SCC status, so check just use the local state
+		if (!NewStatus.IsSet())
+		{
+			if (StatusInfo.bIsDirty)
+			{
+				NewStatus = ECollectionItemStatus::HasLocalChanges;
+			}
+			else if (StatusInfo.bIsEmpty)
+			{
+				NewStatus = ECollectionItemStatus::IsUpToDateAndEmpty;
+			}
+			else
+			{
+				NewStatus = ECollectionItemStatus::IsUpToDateAndPopulated;
+			}
+		}
+	}
+
+	CollectionItem->CurrentStatus = NewStatus.Get(ECollectionItemStatus::IsUpToDateAndEmpty);
 }
 
 void SCollectionView::UpdateCollectionItems()
@@ -299,8 +394,10 @@ void SCollectionView::UpdateCollectionItems()
 					continue;
 				}
 
-				TSharedPtr<FCollectionItem> CollectionItem = MakeShareable(new FCollectionItem(Collection.Name, Collection.Type));
+				TSharedRef<FCollectionItem> CollectionItem = MakeShareable(new FCollectionItem(Collection.Name, Collection.Type));
 				OutAvailableCollections.Add(Collection, CollectionItem);
+
+				SCollectionView::UpdateCollectionItemStatus(CollectionItem);
 
 				if (InParentCollectionItem.IsValid())
 				{
@@ -347,6 +444,8 @@ void SCollectionView::UpdateCollectionItems()
 	// Restore selection and expansion
 	SetSelectedCollections(SelectedCollections, false);
 	SetExpandedCollections(ExpandedCollections);
+
+	bQueueSCCRefresh = true;
 }
 
 void SCollectionView::UpdateFilteredCollectionItems()
@@ -609,6 +708,42 @@ void SCollectionView::LoadSettings(const FString& IniFilename, const FString& In
 	}
 }
 
+void SCollectionView::Tick( const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime )
+{
+	SCompoundWidget::Tick(AllottedGeometry, InCurrentTime, InDeltaTime);
+
+	if (bQueueCollectionItemsUpdate)
+	{
+		bQueueCollectionItemsUpdate = false;
+		UpdateCollectionItems();
+	}
+
+	if (bQueueSCCRefresh && ISourceControlModule::Get().IsEnabled())
+	{
+		bQueueSCCRefresh = false;
+
+		FCollectionManagerModule& CollectionManagerModule = FCollectionManagerModule::GetModule();
+
+		TArray<FString> CollectionFilesToRefresh;
+		for (const auto& AvailableCollectionInfo : AvailableCollections)
+		{
+			FCollectionStatusInfo StatusInfo;
+			if (CollectionManagerModule.Get().GetCollectionStatusInfo(AvailableCollectionInfo.Value->CollectionName, AvailableCollectionInfo.Value->CollectionType, StatusInfo))
+			{
+				if (StatusInfo.bUseSCC && StatusInfo.SCCState.IsValid() && StatusInfo.SCCState->IsSourceControlled())
+				{
+					CollectionFilesToRefresh.Add(StatusInfo.SCCState->GetFilename());
+				}
+			}
+		}
+
+		if (CollectionFilesToRefresh.Num() > 0)
+		{
+			ISourceControlModule::Get().QueueStatusUpdate(CollectionFilesToRefresh);
+		}
+	}
+}
+
 FReply SCollectionView::OnKeyDown( const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent )
 {
 	if( Commands->ProcessCommandBindings( InKeyEvent ) )
@@ -677,7 +812,7 @@ FReply SCollectionView::MakeAddCollectionMenu()
 
 	CollectionContextMenu->UpdateProjectSourceControl();
 
-	CollectionContextMenu->MakeNewCollectionSubMenu(MenuBuilder);
+	CollectionContextMenu->MakeNewCollectionSubMenu(MenuBuilder, TOptional<FCollectionNameType>());
 
 	FSlateApplication::Get().PushMenu(
 		AsShared(),
@@ -707,7 +842,7 @@ EVisibility SCollectionView::GetAddCollectionButtonVisibility() const
 	return (bAllowCollectionButtons && ( !CollectionsExpandableAreaPtr.IsValid() || CollectionsExpandableAreaPtr->IsExpanded() ) ) ? EVisibility::Visible : EVisibility::Collapsed;
 }
 
-void SCollectionView::CreateCollectionItem( ECollectionShareType::Type CollectionType )
+void SCollectionView::CreateCollectionItem( ECollectionShareType::Type CollectionType, TOptional<FCollectionNameType> ParentCollection )
 {
 	if ( ensure(CollectionType != ECollectionShareType::CST_All) )
 	{
@@ -720,6 +855,19 @@ void SCollectionView::CreateCollectionItem( ECollectionShareType::Type Collectio
 
 		// Adding a new collection now, so clear any filter we may have applied
 		SearchBoxPtr->SetText(FText::GetEmpty());
+
+		if ( ParentCollection.IsSet() )
+		{
+			TSharedPtr<FCollectionItem> ParentCollectionItem = AvailableCollections.FindRef(ParentCollection.GetValue());
+			if ( ParentCollectionItem.IsValid() )
+			{
+				ParentCollectionItem->ChildCollections.Add(NewItem);
+				NewItem->ParentCollection = ParentCollectionItem;
+
+				// Make sure the parent is expanded so we can see its newly added child item
+				CollectionTreePtr->SetItemExpansion(ParentCollectionItem, true);
+			}
+		}
 
 		// Mark the new collection for rename and that it is new so it will be created upon successful rename
 		NewItem->bRenaming = true;
@@ -1239,8 +1387,16 @@ bool SCollectionView::CollectionNameChangeCommit( const TSharedPtr< FCollectionI
 	if ( CollectionItem->bNewCollection )
 	{
 		CollectionItem->bNewCollection = false;
+		
+		// Cache this here as CreateCollection will invalidate the current parent pointer
+		TOptional<FCollectionNameType> NewCollectionParentKey;
+		TSharedPtr<FCollectionItem> ParentCollectionItem = CollectionItem->ParentCollection.Pin();
+		if ( ParentCollectionItem.IsValid() )
+		{
+			NewCollectionParentKey = FCollectionNameType(ParentCollectionItem->CollectionName, ParentCollectionItem->CollectionType);
+		}
 
-		// If we can canceled the name change when creating a new asset, we want to silently remove it
+		// If we canceled the name change when creating a new asset, we want to silently remove it
 		if ( !bChangeConfirmed )
 		{
 			AvailableCollections.Remove(FCollectionNameType(CollectionItem->CollectionName, CollectionItem->CollectionType));
@@ -1256,6 +1412,12 @@ bool SCollectionView::CollectionNameChangeCommit( const TSharedPtr< FCollectionI
 
 			OutWarningMessage = FText::Format( LOCTEXT("CreateCollectionFailed", "Failed to create the collection. {0}"), CollectionManagerModule.Get().GetLastError());
 			return false;
+		}
+
+		if ( NewCollectionParentKey.IsSet() )
+		{
+			// Try and set the parent correctly (if this fails for any reason, the collection will still be added, but will just appear at the root)
+			CollectionManagerModule.Get().ReparentCollection(NewNameFinal, CollectionType, NewCollectionParentKey->Name, NewCollectionParentKey->Type);
 		}
 	}
 	else
@@ -1305,22 +1467,17 @@ bool SCollectionView::CollectionNameChangeCommit( const TSharedPtr< FCollectionI
 
 bool SCollectionView::CollectionVerifyRenameCommit(const TSharedPtr< FCollectionItem >& CollectionItem, const FString& NewName, const FSlateRect& MessageAnchor, FText& OutErrorMessage)
 {
-	const FName NewNameFinal = *NewName;
-
 	// If the new name is the same as the old name, consider this to be unchanged, and accept it.
-	if (CollectionItem->CollectionName == NewNameFinal)
+	if (CollectionItem->CollectionName.ToString() == NewName)
 	{
 		return true;
 	}
 
 	FCollectionManagerModule& CollectionManagerModule = FCollectionManagerModule::GetModule();
 
-	if (CollectionManagerModule.Get().CollectionExists(NewNameFinal, ECollectionShareType::CST_All))
+	if (!CollectionManagerModule.Get().IsValidCollectionName(NewName, ECollectionShareType::CST_Shared))
 	{
-		// This collection already exists, inform the user and continue
-		OutErrorMessage = FText::Format(LOCTEXT("RenameCollectionAlreadyExists", "A collection already exists with the name '{0}'."), FText::FromName(NewNameFinal));
-
-		// Return false to indicate that the user should enter a new name
+		OutErrorMessage = CollectionManagerModule.Get().GetLastError();
 		return false;
 	}
 

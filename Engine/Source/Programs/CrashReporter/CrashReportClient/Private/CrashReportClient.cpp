@@ -37,7 +37,7 @@ FCrashReportClient::FCrashReportClient(const FPlatformErrorReport& InErrorReport
 	}
 	else if( !DiagnosticText.IsEmpty() )
 	{
-		DiagnosticText = FCrashReportUtil::FormatDiagnosticText( DiagnosticText, GetCrashDescription().MachineId, GetCrashDescription().EpicAccountId, GetCrashDescription().UserName );
+		FormattedDiagnosticText = FCrashReportUtil::FormatDiagnosticText( DiagnosticText, GetCrashDescription().MachineId, GetCrashDescription().EpicAccountId, GetCrashDescription().UserName );
 	}
 }
 
@@ -51,8 +51,20 @@ FCrashReportClient::~FCrashReportClient()
 	}
 }
 
+FReply FCrashReportClient::CloseWithoutSending()
+{
+	GIsRequestingExit = true;
+	return FReply::Handled();
+}
+
 FReply FCrashReportClient::Submit()
 {
+	if (ErrorReport.HasFilesToUpload())
+	{
+		// Send analytics.
+		GetCrashDescription().SendAnalytics();
+	}
+
 	bSendData = true;
 	StoreCommentAndUpload();
 	bShouldWindowBeHidden = true;
@@ -80,7 +92,7 @@ FReply FCrashReportClient::CopyCallstack()
 
 FText FCrashReportClient::GetDiagnosticText() const
 {
-	return DiagnosticText;
+	return FormattedDiagnosticText;
 }
 
 void FCrashReportClient::UserCommentChanged(const FText& Comment, ETextCommit::Type CommitType)
@@ -117,6 +129,12 @@ EVisibility FCrashReportClient::IsThrobberVisible() const
 void FCrashReportClient::AllowToBeContacted_OnCheckStateChanged( ECheckBoxState NewRadioState )
 {
 	FCrashReportClientConfig::Get().SetAllowToBeContacted( NewRadioState == ECheckBoxState::Checked );
+
+	// Refresh PII based on the bAllowToBeContacted flag.
+	GetCrashDescription().UpdateIDs();
+
+	// Update diagnostics text.
+	FormattedDiagnosticText = FCrashReportUtil::FormatDiagnosticText( DiagnosticText, GetCrashDescription().MachineId, GetCrashDescription().EpicAccountId, GetCrashDescription().UserName );
 }
 
 void FCrashReportClient::SendLogFile_OnCheckStateChanged( ECheckBoxState NewRadioState )
@@ -131,7 +149,7 @@ void FCrashReportClient::StartTicker()
 
 void FCrashReportClient::StoreCommentAndUpload()
 {
-	// Call upload even if the report is empty: pending reports will be sent if any
+	// Write user's comment
 	ErrorReport.SetUserComment( UserComment, FCrashReportClientConfig::Get().GetAllowToBeContacted() );
 	StartTicker();
 }
@@ -171,9 +189,15 @@ FString FCrashReportClient::GetCrashedAppName() const
 	return GetCrashDescription().GameName;
 }
 
+FString FCrashReportClient::GetCrashDirectory() const
+{
+	return ErrorReport.GetReportDirectory();
+}
+
 void FCrashReportClient::FinalizeDiagnoseReportWorker( FText ReportText )
 {
-	DiagnosticText = FCrashReportUtil::FormatDiagnosticText( ReportText, GetCrashDescription().MachineId, GetCrashDescription().EpicAccountId, GetCrashDescription().UserName );
+	DiagnosticText = ReportText;
+	FormattedDiagnosticText = FCrashReportUtil::FormatDiagnosticText( ReportText, GetCrashDescription().MachineId, GetCrashDescription().EpicAccountId, GetCrashDescription().UserName );
 
 	auto DiagnosticsFilePath = ErrorReport.GetReportDirectory() / FCrashReportClientConfig::Get().GetDiagnosticsFilename();
 	Uploader.LocalDiagnosisComplete(FPaths::FileExists(DiagnosticsFilePath) ? DiagnosticsFilePath : TEXT(""));

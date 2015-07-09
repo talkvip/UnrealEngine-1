@@ -325,8 +325,12 @@ void UEditorEngine::polySetAndClearPolyFlags(UModel *Model, uint32 SetBits, uint
 			{
 				Model->ModifySurf( i, UpdateMaster );
 				Poly.PolyFlags = NewFlags;
-				if( UpdateMaster )
-					polyUpdateMaster( Model, i, 0 );
+				if (UpdateMaster)
+				{
+					const bool bUpdateTexCoords = false;
+					const bool bOnlyRefreshSurfaceMaterials = false;
+					polyUpdateMaster(Model, i, bUpdateTexCoords, bOnlyRefreshSurfaceMaterials);
+				}
 			}
 		}
 	}
@@ -352,7 +356,8 @@ void UEditorEngine::polyUpdateMaster
 (
 	UModel*	Model,
 	int32  	iSurf,
-	int32		UpdateTexCoords
+	bool	bUpdateTexCoords,
+	bool	bOnlyRefreshSurfaceMaterials
 )
 {
 	FBspSurf &Surf = Model->Surfs[iSurf];
@@ -373,37 +378,42 @@ void UEditorEngine::polyUpdateMaster
 		// Use transform cached when the geometry was last built, in case the current Actor transform has changed since then
 		// (e.g. because Auto Update BSP is disabled)
 		ActorLocation = Brush->OwnerLocationWhenLastBuilt;
-		ActorPrePivot = Brush->OwnerPrepivotWhenLastBuilt;
 		ActorScale = Brush->OwnerScaleWhenLastBuilt;
-		ActorRotation = -Brush->OwnerRotationWhenLastBuilt;
+		ActorRotation = Brush->OwnerRotationWhenLastBuilt;
 	}
 	else
 	{
 		// No cached owner transform, so use the current one
 		ActorLocation = Actor->GetActorLocation();
-		ActorPrePivot = Actor->GetPrePivot();
 		ActorScale = Actor->GetActorScale();
-		ActorRotation = -Actor->GetActorRotation();
+		ActorRotation = Actor->GetActorRotation();
 	}
 
-	for( int32 iEdPoly = Surf.iBrushPoly; iEdPoly < Brush->Polys->Element.Num(); iEdPoly++ )
+	const FRotationMatrix RotationMatrix(ActorRotation);
+
+	for (int32 iEdPoly = Surf.iBrushPoly; iEdPoly < Brush->Polys->Element.Num(); iEdPoly++)
 	{
 		FPoly& MasterEdPoly = Brush->Polys->Element[iEdPoly];
-		if( iEdPoly==Surf.iBrushPoly || MasterEdPoly.iLink==Surf.iBrushPoly )
+		if (iEdPoly == Surf.iBrushPoly || MasterEdPoly.iLink == Surf.iBrushPoly)
 		{
-			MasterEdPoly.Material  = Surf.Material;
+			MasterEdPoly.Material = Surf.Material;
 			MasterEdPoly.PolyFlags = Surf.PolyFlags & ~(PF_NoEdit);
 
-			if( UpdateTexCoords )
+			if (bUpdateTexCoords)
 			{
-				MasterEdPoly.Base = ActorRotation.RotateVector(Model->Points[Surf.pBase] - ActorLocation) / ActorScale + ActorPrePivot;
-				MasterEdPoly.TextureU = ActorRotation.RotateVector(Model->Vectors[Surf.vTextureU]) * ActorScale;
-				MasterEdPoly.TextureV = ActorRotation.RotateVector(Model->Vectors[Surf.vTextureV]) * ActorScale;
+				MasterEdPoly.Base = RotationMatrix.InverseTransformVector(Model->Points[Surf.pBase] - ActorLocation) / ActorScale;
+				MasterEdPoly.TextureU = RotationMatrix.InverseTransformVector(Model->Vectors[Surf.vTextureU]) * ActorScale;
+				MasterEdPoly.TextureV = RotationMatrix.InverseTransformVector(Model->Vectors[Surf.vTextureV]) * ActorScale;
 			}
 		}
 	}
 
 	Model->InvalidSurfaces = true;
+
+	if (bOnlyRefreshSurfaceMaterials)
+	{
+		Model->bOnlyRebuildMaterialIndexBuffers = true;
+	}
 }
 
 
@@ -1460,7 +1470,9 @@ void UEditorEngine::polyTexPan(UModel *Model,int32 PanU,int32 PanV,int32 Absolut
 			Model->Points[Surf.pBase] += PanU * (TextureU / TextureU.SizeSquared());
 			Model->Points[Surf.pBase] += PanV * (TextureV / TextureV.SizeSquared());
 
-			polyUpdateMaster(Model,SurfaceIndex,1);
+			const bool bUpdateTexCoords = true;
+			const bool bOnlyRefreshSurfaceMaterials = true;
+			polyUpdateMaster(Model, SurfaceIndex, bUpdateTexCoords, bOnlyRefreshSurfaceMaterials);
 		}
 	}
 }
@@ -1487,7 +1499,9 @@ void UEditorEngine::polyTexScale( UModel* Model, float UU, float UV, float VU, f
 			Model->Vectors[Poly->vTextureV] = OriginalU * VU + OriginalV * VV;
 
 			// Update generating brush poly.
-			polyUpdateMaster( Model, i, 1 );
+			const bool bUpdateTexCoords = true;
+			const bool bOnlyRefreshSurfaceMaterials = true;
+			polyUpdateMaster(Model, i, bUpdateTexCoords, bOnlyRefreshSurfaceMaterials);
 		}
 	}
 }

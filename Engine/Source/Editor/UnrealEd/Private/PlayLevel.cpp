@@ -92,10 +92,6 @@ void UEditorEngine::EndPlayMap()
 	// Enable screensavers when ending PIE.
 	EnableScreenSaver( true );
 
-	// Move SelectedActors and SelectedComponents object back to the transient package.
-	GetSelectedActors()->Rename(nullptr, GetTransientPackage(), REN_DoNotDirty | REN_DontCreateRedirectors | REN_NonTransactional);
-	GetSelectedComponents()->Rename(nullptr,GetTransientPackage(), REN_DoNotDirty | REN_DontCreateRedirectors | REN_NonTransactional);
-
 	// Make a list of all the actors that should be selected
 	TArray<UObject *> SelectedActors;
 	if ( ActorsThatWereSelected.Num() > 0 )
@@ -1494,6 +1490,12 @@ struct FInternalPlayLevelUtils
 		{
 			UBlueprint* Blueprint = *BlueprintIt;
 
+			// ignore up-to-date BPs
+			if (Blueprint->IsUpToDate())
+			{
+				continue;
+			}
+
 			// do not try to recompile BPs that have not changed since they last failed to compile, so don't check Blueprint->IsUpToDate()
 			const bool bIsDirtyAndShouldBeRecompiled = Blueprint->IsPossiblyDirty();
 			if (!FBlueprintEditorUtils::IsDataOnlyBlueprint(Blueprint)
@@ -2436,6 +2438,14 @@ bool UEditorEngine::CreatePIEWorldFromLogin(FWorldContext& PieWorldContext, EPla
 	}
 }
 
+void UEditorEngine::CancelPlayingViaLauncher()
+{
+	if (LauncherWorker.IsValid())
+	{
+		LauncherWorker->Cancel();
+	}
+}
+
 bool UEditorEngine::SupportsOnlinePIE() const
 {
 	if (bOnlinePIEEnabled && PIELogins.Num() > 0)
@@ -2743,11 +2753,6 @@ UGameInstance* UEditorEngine::CreatePIEGameInstance(int32 PIEInstance, bool bInS
 		}
 	}
 
-	// Move SelectedActors global object to the PIE package for the duration of the PIE session.
-	// This will stop any transactions on it from being saved during PIE.
-	GetSelectedActors()->Rename(nullptr, GWorld->GetOutermost(), REN_DoNotDirty | REN_DontCreateRedirectors | REN_NonTransactional);
-	GetSelectedComponents()->Rename(nullptr, GWorld->GetOutermost(), REN_DoNotDirty | REN_DontCreateRedirectors | REN_NonTransactional);
-
 	// For play in editor, this is the viewport widget where the game is being displayed
 	TSharedPtr<SViewport> PieViewportWidget;
 
@@ -2852,10 +2857,18 @@ UGameInstance* UEditorEngine::CreatePIEGameInstance(int32 PIEInstance, bool bInS
 				FOnSwitchWorldHack OnWorldSwitch = FOnSwitchWorldHack::CreateUObject( this, &UEditorEngine::OnSwitchWorldForSlatePieWindow );
 				PieWindow->SetOnWorldSwitchHack( OnWorldSwitch );
 
-				if (PlayInSettings->PIEAlwaysOnTop && FSlateApplication::Get().GetActiveTopLevelWindow().IsValid())
-					FSlateApplication::Get().AddWindowAsNativeChild(PieWindow, FSlateApplication::Get().GetActiveTopLevelWindow().ToSharedRef(), true);
+				// Mac does not support parenting, do not keep on top
+#if PLATFORM_MAC
+				FSlateApplication::Get().AddWindow(PieWindow);
+#else
+				TSharedRef<SWindow, ESPMode::NotThreadSafe> MainWindow = FModuleManager::LoadModuleChecked<IMainFrameModule>(TEXT("MainFrame")).GetParentWindow().ToSharedRef();
+				if (PlayInSettings->PIEAlwaysOnTop)
+				{
+					FSlateApplication::Get().AddWindowAsNativeChild(PieWindow, MainWindow, true);
+				}
 				else
 					FSlateApplication::Get().AddWindow(PieWindow);
+#endif
 
 				TSharedRef<SOverlay> ViewportOverlayWidgetRef = SNew(SOverlay);
 

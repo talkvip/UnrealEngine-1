@@ -1109,7 +1109,7 @@ public:
 	/* Helper function to look at both IsMasked and IsDitheredLODTransition to determine if it writes every pixel */
 	ENGINE_API bool WritesEveryPixel() const
 	{
-		return !IsMasked() && !IsDitheredLODTransition();
+		return !IsMasked() && !IsDitheredLODTransition() && !IsWireframe();
 	}
 
 	/** 
@@ -1341,7 +1341,6 @@ public:
 	virtual bool GetVectorValue(const FName ParameterName, FLinearColor* OutValue, const FMaterialRenderContext& Context) const = 0;
 	virtual bool GetScalarValue(const FName ParameterName, float* OutValue, const FMaterialRenderContext& Context) const = 0;
 	virtual bool GetTextureValue(const FName ParameterName,const UTexture** OutValue, const FMaterialRenderContext& Context) const = 0;
-	virtual float GetDistanceFieldPenumbraScale() const { return 1.0f; }
 	bool IsSelected() const { return bSelected; }
 	bool IsHovered() const { return bHovered; }
 

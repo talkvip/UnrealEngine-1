@@ -936,18 +936,19 @@ void FProjectedShadowInfo::GatherDynamicMeshElements(FSceneRenderer& Renderer, F
 		FViewInfo* FoundView = NULL;
 		bool bVisibleInAnyView = false;
 
-		for (int32 ViewIndex = 0;ViewIndex < Renderer.Views.Num();ViewIndex++)
+		for (int32 ViewIndex = 0, Count = Renderer.Views.Num(); ViewIndex < Count; ViewIndex++)
 		{
 			FViewInfo* CheckView = &Renderer.Views[ViewIndex];
 			const FVisibleLightViewInfo& VisibleLightViewInfo = CheckView->VisibleLightInfos[LightSceneInfo->Id];
 			FPrimitiveViewRelevance ViewRel = VisibleLightViewInfo.ProjectedShadowViewRelevanceMap[ShadowId];
 
+			// we need to iterate through all
 			bVisibleInAnyView |= VisibleLightViewInfo.ProjectedShadowVisibilityMap[ShadowId];
 
 			if (ViewRel.bShadowRelevance)
 			{
 				FoundView = CheckView;
-				break;
+				// we could ealy out for this but it would break bVisibleInAnyView
 			}
 		}
 
@@ -1341,7 +1342,10 @@ void FSceneRenderer::CreatePerObjectProjectedShadow(
 	for (int32 ChildIndex = 1; ChildIndex < ShadowGroupPrimitives.Num(); ChildIndex++)
 	{
 		const FPrimitiveSceneInfo* ShadowChild = ShadowGroupPrimitives[ChildIndex];
-		OriginalBounds = OriginalBounds + ShadowChild->Proxy->GetBounds();
+		if (ShadowChild->Proxy->CastsDynamicShadow())
+		{
+			OriginalBounds = OriginalBounds + ShadowChild->Proxy->GetBounds();
+		}
 	}
 	FSceneRenderTargets& SceneContext = FSceneRenderTargets::Get(RHICmdList);
 	

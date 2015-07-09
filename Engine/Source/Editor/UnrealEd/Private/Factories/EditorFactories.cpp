@@ -269,58 +269,6 @@ UObject* UMaterialParameterCollectionFactoryNew::FactoryCreateNew(UClass* Class,
 	ULevelFactory.
 ------------------------------------------------------------------------------*/
 
-/**
- * Iterates over an object's properties making sure that any UObjectProperty properties
- * that refer to non-nullptr actors refer to valid actors.
- *
- * @return		false if no object references were nullptr'd out, true otherwise.
- */
-static bool ForceValidActorRefs(UStruct* Struct, uint8* Data)
-{
-	bool bChangedObjectPointer = false;
-
-	//@todo DB: Optimize this!!
-	for( TFieldIterator<UProperty> PropertyIt(Struct); PropertyIt; ++PropertyIt )
-	{
-		for( int32 i=0; i<PropertyIt->ArrayDim; i++ )
-		{
-			uint8* Value = PropertyIt->ContainerPtrToValuePtr<uint8>(Data, i);
-			UObjectPropertyBase* Prop = Cast<UObjectPropertyBase>(*PropertyIt);
-			if(Prop)
-			{
-				UObject* Obj = Prop->GetObjectPropertyValue(Value);
-				AActor* SearchActor = Cast<AActor>(Obj);
-				if( SearchActor && !Obj->HasAnyFlags(RF_ArchetypeObject|RF_ClassDefaultObject) )
-				{
-					bool bFound = false;
-					for( FActorIterator ActorIt(SearchActor->GetWorld()); ActorIt; ++ActorIt )
-					{
-						AActor* Actor = *ActorIt;
-						if( Actor == SearchActor )
-						{
-							bFound = true;
-							break;
-						}
-					}
-					
-					if( !bFound )
-					{
-						UE_LOG(LogEditorFactories, Log,  TEXT("Usurped %s"), *Obj->GetClass()->GetName() );
-						Prop->SetObjectPropertyValue(Value, nullptr);
-						bChangedObjectPointer = true;
-					}
-				}
-			}
-			else if( Cast<UStructProperty>(*PropertyIt) )
-			{
-				bChangedObjectPointer |= ForceValidActorRefs( ((UStructProperty*)*PropertyIt)->Struct, Value );
-			}
-		}
-	}
-
-	return bChangedObjectPointer;
-}
-
 ULevelFactory::ULevelFactory(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 {
@@ -792,7 +740,9 @@ UObject* ULevelFactory::FactoryCreateText
 
 							CurrentLevel->MarkPackageDirty();
 
-							GEditor->polyUpdateMaster( CurrentLevel->Model, i, 1 );
+							const bool bUpdateTexCoords = true;
+							const bool bOnlyRefreshSurfaceMaterials = false;
+							GEditor->polyUpdateMaster(CurrentLevel->Model, i, bUpdateTexCoords, bOnlyRefreshSurfaceMaterials);
 						}
 					}
 				}
@@ -827,13 +777,13 @@ UObject* ULevelFactory::FactoryCreateText
 
 	// Pass 1: Sort out all the properties on the individual actors
 	bool bIsMoveToStreamingLevel =(FCString::Stricmp(Type, TEXT("move")) == 0);
-	for( FActorIterator It(World); It; ++It )
+	for (auto& ActorMapElement : NewActorMap)
 	{
-		AActor* Actor = *It;
+		AActor* Actor = ActorMapElement.Key;
 
 		// Import properties if the new actor is 
 		bool		bActorChanged = false;
-		FString*	PropText = NewActorMap.Find(Actor);
+		FString*	PropText = &(ActorMapElement.Value); 
 		if( PropText )
 		{
 			if ( Actor->ShouldImport(PropText, bIsMoveToStreamingLevel) )
@@ -869,20 +819,6 @@ UObject* ULevelFactory::FactoryCreateText
 			else
 			{
 				FBSPOps::RebuildBrush( Brush->Brush );
-			}
-		}
-
-		// Make sure all references to actors are valid.
-		// if they don't belong to same level
-		UWorld * ActorWorld = Actor->GetTypedOuter<UWorld>();
-		if( ActorWorld != World )
-		{
-			const bool bFixedUpObjectRefs = ForceValidActorRefs( Actor->GetClass(), (uint8*)Actor );
-
-			// Aactor references were fixed up, so treat the actor as having been changed.
-			if ( bFixedUpObjectRefs )
-			{
-				bActorChanged = true;
 			}
 		}
 
@@ -1505,7 +1441,7 @@ UObject* UModelFactory::FactoryCreateText
 			{
 				FVector TempPrePivot(0.f);
 				GetFVECTOR 	(StrPtr,TempPrePivot);
-				TempOwner->SetPrePivot(TempPrePivot);
+				TempOwner->SetPivotOffset(TempPrePivot);
 			}
 			else if (FParse::Command(&StrPtr,TEXT("LOCATION"	))) 
 			{
@@ -4357,12 +4293,8 @@ UObject* UTextureFactory::FactoryCreateBinary
 		// Update with new settings, which should disable streaming...
 		ExistingTexture2D->UpdateResource();
 	}
-
-	if (ExistingTexture)
-	{
-		// Release the existing resource so the new texture can get a fresh one. 
-		ExistingTexture->ReleaseResource();
-	}
+	
+	FTextureReferenceReplacer RefReplacer(ExistingTexture);
 
 	UTexture* Texture = ImportTexture(Class, InParent, Name, Flags, Type, Buffer, BufferEnd, Warn);
 
@@ -4378,6 +4310,9 @@ UObject* UTextureFactory::FactoryCreateBinary
 		FEditorDelegates::OnAssetPostImport.Broadcast( this, nullptr );
 		return nullptr;
 	}
+
+	//Replace the reference for the new texture with the existing one so that all current users still have valid references.
+	RefReplacer.Replace(Texture);
 
 	// Start with the value that the loader suggests.
 	CompressionSettings = Texture->CompressionSettings;
@@ -5614,6 +5549,12 @@ UReimportFbxStaticMeshFactory::UReimportFbxStaticMeshFactory(const FObjectInitia
 	ImportPriority = DefaultImportPriority - 1;
 }
 
+bool UReimportFbxStaticMeshFactory::FactoryCanImport(const FString& Filename)
+{
+	// Return false, we are a reimport only factory
+	return false;
+}
+
 bool UReimportFbxStaticMeshFactory::CanReimport( UObject* Obj, TArray<FString>& OutFilenames )
 {	
 	UStaticMesh* Mesh = Cast<UStaticMesh>(Obj);
@@ -5728,6 +5669,10 @@ EReimportResult::Type UReimportFbxStaticMeshFactory::Reimport( UObject* Obj )
 				(UNavCollision*)StaticDuplicateObject(Mesh->NavCollision, GetTransientPackage(), nullptr) :
 				nullptr;
 
+			// preserve extended bound settings
+			const FVector PositiveBoundsExtension = Mesh->PositiveBoundsExtension;
+			const FVector NegativeBoundsExtension = Mesh->NegativeBoundsExtension;
+
 			if (FFbxImporter->ReimportStaticMesh(Mesh, ImportData))
 			{
 				UE_LOG(LogEditorFactories, Log, TEXT("-- imported successfully") );
@@ -5744,6 +5689,10 @@ EReimportResult::Type UReimportFbxStaticMeshFactory::Reimport( UObject* Obj )
 					Mesh->NavCollision = NavCollision;
 					NavCollision->Rename(NULL, Mesh, REN_DontCreateRedirectors | REN_DoNotDirty);
 				}
+
+				// Restore bounds extension settings
+				Mesh->PositiveBoundsExtension = PositiveBoundsExtension;
+				Mesh->NegativeBoundsExtension = NegativeBoundsExtension;
 
 				// Try to find the outer package so we can dirty it up
 				if (Mesh->GetOuter())
@@ -5794,6 +5743,12 @@ UReimportFbxSkeletalMeshFactory::UReimportFbxSkeletalMeshFactory(const FObjectIn
 
 	bCreateNew = false;
 	bText = false;
+}
+
+bool UReimportFbxSkeletalMeshFactory::FactoryCanImport(const FString& Filename)
+{
+	// Return false, we are a reimport only factory
+	return false;
 }
 
 bool UReimportFbxSkeletalMeshFactory::CanReimport( UObject* Obj, TArray<FString>& OutFilenames )
@@ -5966,6 +5921,12 @@ UReimportFbxAnimSequenceFactory::UReimportFbxAnimSequenceFactory(const FObjectIn
 
 	bCreateNew = false;
 	bText = false;
+}
+
+bool UReimportFbxAnimSequenceFactory::FactoryCanImport(const FString& Filename)
+{
+	// Return false, we are a reimport only factory
+	return false;
 }
 
 bool UReimportFbxAnimSequenceFactory::CanReimport( UObject* Obj, TArray<FString>& OutFilenames )

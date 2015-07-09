@@ -458,7 +458,6 @@ UBrushComponent::UBrushComponent(const FObjectInitializer& ObjectInitializer)
 	AlwaysLoadOnClient = false;
 	AlwaysLoadOnServer = false;
 	bUseAsOccluder = true;
-	bRequiresCustomLocation = true;
 	bUseEditorCompositing = true;
 	bCanEverAffectNavigation = true;
 }
@@ -518,27 +517,6 @@ FBoxSphereBounds UBrushComponent::CalcBounds(const FTransform& LocalToWorld) con
 	}
 }
 
-FVector UBrushComponent::GetCustomLocation() const
-{
-	const FVector LocationWithPivot = ComponentToWorld.GetLocation();
-	const FVector LocationNoPivot = LocationWithPivot + ComponentToWorld.TransformVector(PrePivot);
-
-	return LocationNoPivot;
-}
-
-FTransform UBrushComponent::CalcNewComponentToWorld(const FTransform& NewRelativeTransform, const USceneComponent* Parent) const
-{
-	FTransform CompToWorld = Super::CalcNewComponentToWorld(NewRelativeTransform, Parent);
-
-	const FVector LocationNoPivot = CompToWorld.GetLocation();
-	const FVector LocationWithPivot = LocationNoPivot + CompToWorld.TransformVector(-PrePivot);
-
-	CompToWorld.SetLocation(LocationWithPivot);
-
-	return CompToWorld;
-}
-
-
 void UBrushComponent::GetUsedMaterials( TArray<UMaterialInterface*>& OutMaterials ) const
 {
 #if WITH_EDITOR
@@ -566,6 +544,14 @@ void UBrushComponent::PostLoad()
 	{
 		BrushBodySetup->bGenerateMirroredCollision = false;
 	}
+
+#if WITH_EDITOR
+	AActor* Owner = GetOwner();
+	if (Owner)
+	{
+		Owner->SetPivotOffset(PrePivot_DEPRECATED);
+	}
+#endif
 }
 
 

@@ -542,6 +542,24 @@ enum EUnrealEngineObjectUE4Version
 	VER_UE4_CHARACTER_MOVEMENT_ADD_BRAKING_FRICTION,
 	// Removed TTransArrays from UModel
 	VER_UE4_BSP_UNDO_FIX,
+	// Added default value to dynamic parameter.
+	VER_UE4_DYNAMIC_PARAMETER_DEFAULT_VALUE,
+	// Added ExtendedBounds to StaticMesh
+	VER_UE4_STATIC_MESH_EXTENDED_BOUNDS,
+	// Added non-linear blending to anim transitions, deprecating old types
+	VER_UE4_ADDED_NON_LINEAR_TRANSITION_BLENDS,
+	// AO Material Mask texture
+	VER_UE4_AO_MATERIAL_MASK,
+	// Replaced navigation agents selection with single structure
+	VER_UE4_NAVIGATION_AGENT_SELECTOR,
+	// Mesh particle collisions consider particle size.
+	VER_UE4_MESH_PARTICLE_COLLISIONS_CONSIDER_PARTICLE_SIZE,
+	// Adjacency buffer building no longer automatically handled based on triangle count, user-controlled
+	VER_UE4_BUILD_MESH_ADJ_BUFFER_FLAG_EXPOSED,
+	// Change the default max angular velocity
+	VER_UE4_MAX_ANGULAR_VELOCITY_DEFAULT,
+	// Build Adjacency index buffer for clothing tessellation
+	VER_UE4_APEX_CLOTH_TESSELLATION,
 	// -----<new versions can be added before this line>-------------------------------------------------
 	// - this needs to be the last line (see note below)
 	VER_UE4_AUTOMATIC_VERSION_PLUS_ONE,

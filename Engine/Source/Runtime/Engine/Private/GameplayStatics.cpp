@@ -672,7 +672,7 @@ UParticleSystemComponent* UGameplayStatics::SpawnEmitterAttached(UParticleSystem
 		{
 			UE_LOG(LogScript, Warning, TEXT("UGameplayStatics::SpawnEmitterAttached: NULL AttachComponent specified!"));
 		}
-		else
+		else if (AttachToComponent->GetWorld() != NULL && AttachToComponent->GetWorld()->GetNetMode() != NM_DedicatedServer)
 		{
 			PSC = CreateParticleSystem(EmitterTemplate, AttachToComponent->GetWorld(), AttachToComponent->GetOwner(), bAutoDestroy);
 
@@ -1597,6 +1597,131 @@ int32 UGameplayStatics::GrassOverlappingSphereCount(UObject* WorldContextObject,
 	}
 
 	return Count;
+}
+
+
+bool UGameplayStatics::DeprojectScreenToWorld(APlayerController const* Player, const FVector2D& ScreenPosition, FVector& WorldPosition, FVector& WorldDirection)
+{
+	ULocalPlayer* const LP = Player ? Player->GetLocalPlayer() : nullptr;
+	if (LP && LP->ViewportClient)
+	{
+		// get the projection data
+		FSceneViewProjectionData ProjectionData;
+		if (LP->GetProjectionData(LP->ViewportClient->Viewport, eSSP_FULL, /*out*/ ProjectionData))
+		{
+			FMatrix const InvViewProjMatrix = ProjectionData.ComputeViewProjectionMatrix().InverseFast();
+			FSceneView::DeprojectScreenToWorld(ScreenPosition, ProjectionData.GetConstrainedViewRect(), InvViewProjMatrix, /*out*/ WorldPosition, /*out*/ WorldDirection);
+			return true;
+		}
+	}
+
+	// something went wrong, zero things and return false
+	WorldPosition = FVector::ZeroVector;
+	WorldDirection = FVector::ZeroVector;
+	return false;
+}
+
+bool UGameplayStatics::ProjectWorldToScreen(APlayerController const* Player, const FVector& WorldPosition, FVector2D& ScreenPosition)
+{
+	ULocalPlayer* const LP = Player ? Player->GetLocalPlayer() : nullptr;
+	if (LP && LP->ViewportClient)
+	{
+		// get the projection data
+		FSceneViewProjectionData ProjectionData;
+		if (LP->GetProjectionData(LP->ViewportClient->Viewport, eSSP_FULL, /*out*/ ProjectionData))
+		{
+			FMatrix const ViewProjectionMatrix = ProjectionData.ComputeViewProjectionMatrix();
+			return FSceneView::ProjectWorldToScreen(WorldPosition, ProjectionData.GetConstrainedViewRect(), ViewProjectionMatrix, ScreenPosition);
+		}
+	}
+
+	ScreenPosition = FVector2D::ZeroVector;
+	return false;
+}
+
+bool UGameplayStatics::GrabOption( FString& Options, FString& Result )
+{
+	FString QuestionMark(TEXT("?"));
+
+	if( Options.Left(1).Equals(QuestionMark, ESearchCase::CaseSensitive) )
+	{
+		// Get result.
+		Result = Options.Mid(1, MAX_int32);
+		if (Result.Contains(QuestionMark, ESearchCase::CaseSensitive))
+		{
+			Result = Result.Left(Result.Find(QuestionMark, ESearchCase::CaseSensitive));
+		}
+
+		// Update options.
+		Options = Options.Mid(1, MAX_int32);
+		if (Options.Contains(QuestionMark, ESearchCase::CaseSensitive))
+		{
+			Options = Options.Mid(Options.Find(QuestionMark, ESearchCase::CaseSensitive), MAX_int32);
+		}
+		else
+		{
+			Options = FString();
+		}
+
+		return true;
+	}
+
+	return false;
+}
+
+void UGameplayStatics::GetKeyValue( const FString& Pair, FString& Key, FString& Value )
+{
+	const int32 EqualSignIndex = Pair.Find(TEXT("="), ESearchCase::CaseSensitive);
+	if( EqualSignIndex != INDEX_NONE )
+	{
+		Key = Pair.Left(EqualSignIndex);
+		Value = Pair.Mid(EqualSignIndex + 1, MAX_int32);
+	}
+	else
+	{
+		Key = Pair;
+		Value = TEXT("");
+	}
+}
+
+FString UGameplayStatics::ParseOption( FString Options, const FString& Key )
+{
+	FString ReturnValue;
+	FString Pair, PairKey, PairValue;
+	while( GrabOption( Options, Pair ) )
+	{
+		GetKeyValue( Pair, PairKey, PairValue );
+		if (Key == PairKey)
+		{
+			ReturnValue = MoveTemp(PairValue);
+			break;
+		}
+	}
+	return ReturnValue;
+}
+
+bool UGameplayStatics::HasOption( FString Options, const FString& Key )
+{
+	FString Pair, PairKey, PairValue;
+	while( GrabOption( Options, Pair ) )
+	{
+		GetKeyValue( Pair, PairKey, PairValue );
+		if (Key == PairKey)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+int32 UGameplayStatics::GetIntOption( const FString& Options, const FString& Key, int32 DefaultValue)
+{
+	const FString InOpt = ParseOption( Options, Key );
+	if ( !InOpt.IsEmpty() )
+	{
+		return FCString::Atoi(*InOpt);
+	}
+	return DefaultValue;
 }
 
 #undef LOCTEXT_NAMESPACE

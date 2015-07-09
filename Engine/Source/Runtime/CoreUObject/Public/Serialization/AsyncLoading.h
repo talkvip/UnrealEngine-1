@@ -97,6 +97,14 @@ struct FAsyncPackage
 	*/
 	void Cancel();
 
+	/**
+	* Set the package that spawned this package as a dependency.
+	*/
+	void SetDependencyRootPackage(FAsyncPackage* InDependencyRootPackage)
+	{
+		DependencyRootPackage = InDependencyRootPackage;
+	}
+
 private:
 
 	struct FCompletionCallback
@@ -126,6 +134,8 @@ private:
 	TArray<FAsyncPackage*> PendingImportedPackages;
 	/** Referenced imports - list of packages we need until we finish loading this package. */
 	TArray<FAsyncPackage*> ReferencedImports;
+	/** Root package if this package was loaded as a dependency of another. NULL otherwise */
+	FAsyncPackage* DependencyRootPackage;
 	/** Number of references to this package from other packages in the dependency tree. */
 	FThreadSafeCounter	DependencyRefCount;
 	/** Current index into linkers import table used to spread creation over several frames				*/
@@ -218,7 +228,7 @@ public:
 	*
 	* @return true if we finished calling PostLoad on all loaded objects and no new ones were created, false otherwise
 	*/
-	EAsyncPackageState::Type PostLoadDeferredObjects(double InTickStartTime, bool bUseTimeLimit, float& InOutTimeLimit);
+	EAsyncPackageState::Type PostLoadDeferredObjects(double InTickStartTime, bool bInUseTimeLimit, float& InOutTimeLimit);
 
 private:
 	/**

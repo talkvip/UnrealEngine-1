@@ -390,6 +390,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Animation")
 	virtual APawn* TryGetPawnOwner() const;
 
+	// Are we being evaluated on a worker thread
+	bool IsRunningParallelEvaluation() const;
+
 public:
 	/** Returns the owning actor of this AnimInstance */
 	UFUNCTION(BlueprintCallable, Category = "Animation")
@@ -408,6 +411,10 @@ public:
 	/** Executed when the Animation is updated */
 	UFUNCTION(BlueprintImplementableEvent)
 	void BlueprintUpdateAnimation(float DeltaTimeX);
+
+	/** Executed after the Animation is evaluated */
+	UFUNCTION(BlueprintImplementableEvent)
+	void BlueprintPostEvaluateAnimation();
 
 	bool CanTransitionSignature() const;
 	
@@ -506,9 +513,9 @@ public:
 	* AnimMontage native C++ interface
 	********************************************************************************************* */
 public:	
-	void Montage_SetEndDelegate(FOnMontageEnded & OnMontageEnded, UAnimMontage * Montage = NULL);
+	void Montage_SetEndDelegate(FOnMontageEnded & InOnMontageEnded, UAnimMontage * Montage = NULL);
 	
-	void Montage_SetBlendingOutDelegate(FOnMontageBlendingOutStarted & OnMontageBlendingOut, UAnimMontage* Montage = NULL);
+	void Montage_SetBlendingOutDelegate(FOnMontageBlendingOutStarted & InOnMontageBlendingOut, UAnimMontage* Montage = NULL);
 	
 	/** Get pointer to BlendingOutStarted delegate for Montage.
 	If Montage reference is NULL, it will pick the first active montage found. */
@@ -776,24 +783,29 @@ public:
 	// Updates the montage data used for evaluation based on the current playing montages
 	void UpdateMontageEvaluationData();
 
-	//@TODO: Better comments
-	virtual void EvaluateAnimation(struct FPoseContext& Output);
-	virtual void PostAnimEvaluation() {}
-
+	// Animation phase trigger
+	// start with initialize
+	// update happens in every tick
+	// evaluate happens when condition is met - i.e. depending on your skeletalmeshcomponent update flag
+	// post eval happens after evaluation is done
+	// uninitialize happens when owner is unregistered
 	void InitializeAnimation();
 	void UpdateAnimation(float DeltaSeconds);
+	void EvaluateAnimation(struct FPoseContext& Output);
+	void PostEvaluateAnimation();
 	void UninitializeAnimation();
 
+	// the below functions are the native overrides for each phase
 	// Native initialization override point
 	virtual void NativeInitializeAnimation();
-
 	// Native update override point
 	virtual void NativeUpdateAnimation(float DeltaSeconds);
-
 	// Native evaluate override point.
 	// @return true if this function is implemented, false otherwise.
 	// Note: the node graph will not be evaluated if this function returns true
 	virtual bool NativeEvaluateAnimation(FPoseContext& Output);
+	// Native Post Evaluate override point
+	virtual void NativePostEvaluateAnimation();
 
 	// Sets up a native transition delegate between states with PrevStateName and NextStateName, in the state machine with name MachineName.
 	// Note that a transition already has to exist for this to succeed

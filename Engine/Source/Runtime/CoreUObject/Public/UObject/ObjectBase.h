@@ -107,7 +107,7 @@ enum EPackageFlags
 	PKG_DisallowLazyLoading			= 0x00080000,	// Set if the archive serializing this package cannot use lazy loading
 	PKG_PlayInEditor				= 0x00100000,	// Set if the package was created for the purpose of PIE
 	PKG_ContainsScript				= 0x00200000,	// Package is allowed to contain UClass objects
-//	PKG_Unused						= 0x00400000,
+	PKG_ProcessingDependencies		= 0x00400000,
 //	PKG_Unused						= 0x00800000,
 //	PKG_Unused						= 0x01000000,	
 	PKG_StoreCompressed				= 0x02000000,	// Package is being stored compressed, requires archive support for compression
@@ -993,6 +993,9 @@ namespace UM
 
 		/// [StructMetadata] Indicates that the struct has a custom make node (and what the path to the BlueprintCallable UFunction is) that should be used instead of the default MakeStruct node.  
 		HasNativeMake,
+
+		/// [StructMetadata] Pins in Make and Break nodes are hidden by default.
+		HiddenByDefault,
 	};
 
 	// Metadata usable in UPROPERTY for customizing the behavior when displaying the property in a property panel
@@ -1203,7 +1206,7 @@ namespace UM
 		/// [FunctionMetadta] Used by BlueprintCallable functions to indicate which parameter is used to determine the World that the operation is occurring within.
 		WorldContext,
 
-		/// [FunctionMetadta] Used only by static BlueprintPure functions (with one return param and exactly one input param) from BlueprintLibrary.
+		/// [FunctionMetadta] Used only by static BlueprintPure functions from BlueprintLibrary. A cast node will be automatically added for the return type and the type of the first parameter of the function.
 		BlueprintAutocast,
 	};
 

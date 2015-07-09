@@ -71,7 +71,6 @@ public class Launch : ModuleRules
             DynamicallyLoadedModuleNames.AddRange(
                 new string[] {
 			        "SlateRHIRenderer",
-					"HeadMountedDisplay"
 		        }
             );
         }
@@ -129,7 +128,6 @@ public class Launch : ModuleRules
 			DynamicallyLoadedModuleNames.AddRange(
 				new string[] {
 					"AutomationController",
-					"AutomationWorker",
 					"AutomationWindow",
 					"ProfilerClient",
 					"Toolbox",
@@ -183,7 +181,7 @@ public class Launch : ModuleRules
 
         if (Target.Platform == UnrealTargetPlatform.HTML5 )
         {
-            PrivateDependencyModuleNames.Add("HTML5Audio");
+			PrivateDependencyModuleNames.Add("ALAudio");
 			if (Target.Architecture == "-win32")
 			{
                 PrivateDependencyModuleNames.Add("HTML5Win32");

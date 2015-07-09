@@ -250,6 +250,7 @@ struct FViewMatrices
 		return GetInvProjMatrix() * GetInvViewMatrix();
 	}
 
+	// @return in radians (horizontal,vertical)
 	FVector2D GetHalfFieldOfViewPerAxis() const
 	{
 		const FMatrix ClipToView = GetInvProjNoAAMatrix();
@@ -633,14 +634,16 @@ public:
 	 */
 	FVector Deproject(const FPlane& ScreenPoint) const;
 
-	/** transforms 2D screen coordinates into a 3D world-space origin and direction 
+	/** 
+	 * Transforms 2D screen coordinates into a 3D world-space origin and direction 
 	 * @param ScreenPos - screen coordinates in pixels
 	 * @param out_WorldOrigin (out) - world-space origin vector
 	 * @param out_WorldDirection (out) - world-space direction vector
 	 */
 	void DeprojectFVector2D(const FVector2D& ScreenPos, FVector& out_WorldOrigin, FVector& out_WorldDirection) const;
 
-	/** transforms 2D screen coordinates into a 3D world-space origin and direction 
+	/** 
+	 * Transforms 2D screen coordinates into a 3D world-space origin and direction 
 	 * @param ScreenPos - screen coordinates in pixels
 	 * @param ViewRect - view rectangle
 	 * @param InvViewMatrix - inverse view matrix
@@ -649,6 +652,18 @@ public:
 	 * @param out_WorldDirection (out) - world-space direction vector
 	 */
 	static void DeprojectScreenToWorld(const FVector2D& ScreenPos, const FIntRect& ViewRect, const FMatrix& InvViewMatrix, const FMatrix& InvProjMatrix, FVector& out_WorldOrigin, FVector& out_WorldDirection);
+
+	/** Overload to take a single combined view projection matrix. */
+	static void DeprojectScreenToWorld(const FVector2D& ScreenPos, const FIntRect& ViewRect, const FMatrix& InvViewProjMatrix, FVector& out_WorldOrigin, FVector& out_WorldDirection);
+
+	/** 
+	 * Transforms 3D world-space origin into 2D screen coordinates
+	 * @param WorldPosition - the 3d world point to transform
+	 * @param ViewRect - view rectangle
+	 * @param ViewProjectionMatrix - combined view projection matrix
+	 * @param out_ScreenPos (out) - screen coordinates in pixels
+	 */
+	static bool ProjectWorldToScreen(const FVector& WorldPosition, const FIntRect& ViewRect, const FMatrix& ViewProjectionMatrix, FVector2D& out_ScreenPos);
 
 	inline FVector GetViewRight() const { return ViewMatrices.ViewMatrix.GetColumn(0); }
 	inline FVector GetViewUp() const { return ViewMatrices.ViewMatrix.GetColumn(1); }
@@ -688,7 +703,7 @@ public:
 	void UpdateViewMatrix();
 
 	/** Setup defaults and depending on view position (postprocess volumes) */
-	void StartFinalPostprocessSettings(FVector ViewLocation);
+	void StartFinalPostprocessSettings(FVector InViewLocation);
 
 	/**
 	 * custom layers can be combined with the existing settings

@@ -38,7 +38,6 @@ struct FCrashReportClientConfig
 	}
 
 	void SetAllowToBeContacted( bool bNewValue );
-
 	void SetSendLogFile( bool bNewValue );
 
 protected:
@@ -48,7 +47,11 @@ protected:
 	/** Filename to use when saving diagnostics report, if generated locally. */
 	FString DiagnosticsFilename;
 
-	/** Whether the user allowed us to be contacted. */
+	/**
+	 *	Whether the user allowed us to be contacted. 
+	 *	If true the following properties are retrieved from the system: UserName (for non-launcher build) and EpicAccountID.
+	 *	Otherwise they will be empty.
+	 */
 	bool bAllowToBeContacted;
 
 	/** Whether the user allowed us to send the log file. */

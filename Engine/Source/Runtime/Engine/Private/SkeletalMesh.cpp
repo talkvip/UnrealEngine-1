@@ -2301,7 +2301,12 @@ void USkeletalMesh::Serialize( FArchive& Ar )
 	for ( int32 LODIndex = 0; LODIndex < ImportedResource->LODModels.Num(); ++LODIndex )
 	{
 		FStaticLODModel& LODModel = ImportedResource->LODModels[ LODIndex ];
-		if ( !LODModel.AdjacencyMultiSizeIndexContainer.IsIndexBufferValid() )
+
+		if ( !LODModel.AdjacencyMultiSizeIndexContainer.IsIndexBufferValid()
+#if WITH_APEX_CLOTHING
+		|| (Ar.IsLoading() && Ar.UE4Ver() < VER_UE4_APEX_CLOTH_TESSELLATION && LODModel.HasApexClothData())
+#endif // WITH_APEX_CLOTHING
+			)
 		{
 			TArray<FSoftSkinVertex> Vertices;
 			FMultiSizeIndexContainerData IndexData;
@@ -2501,8 +2506,19 @@ void USkeletalMesh::CalculateInvRefMatrices()
 				RefBases[b] = RefBases[b] * RefBases[Parent];
 			}
 
+			FVector XAxis, YAxis, ZAxis;
+
+			RefBases[b].GetScaledAxes(XAxis, YAxis, ZAxis);
+			if(	XAxis.IsNearlyZero(SMALL_NUMBER) &&
+				YAxis.IsNearlyZero(SMALL_NUMBER) &&
+				ZAxis.IsNearlyZero(SMALL_NUMBER))
+			{
+				// this is not allowed, warn them 
+				UE_LOG(LogSkeletalMesh, Warning, TEXT("Reference Pose for joint (%s) includes NIL matrix. Zero scale isn't allowed on ref pose. "), *RefSkeleton.GetBoneName(b).ToString());
+			}
+
 			// Precompute inverse so we can use from-refpose-skin vertices.
-			RefBasesInvMatrix[b] = RefBases[b].InverseFast(); 
+			RefBasesInvMatrix[b] = RefBases[b].Inverse(); 
 		}
 
 #if WITH_EDITORONLY_DATA
@@ -3792,7 +3808,7 @@ void ASkeletalMeshActor::PreviewSetAnimPosition(FName SlotName, int32 ChannelInd
 		SkeletalMeshComponent->RefreshSlaveComponents();
 		SkeletalMeshComponent->UpdateComponentToWorld();
 	}
-	SkeletalMeshComponent->FlipEditableSpaceBases();
+	SkeletalMeshComponent->FinalizeBoneTransform();
 }
 
 

@@ -3,6 +3,7 @@
 #include "WebBrowserPrivatePCH.h"
 #include "WebBrowserWindow.h"
 #include "WebBrowserByteResource.h"
+#include "WebBrowserPopupFeatures.h"
 #include "WebJSScripting.h"
 #include "RHI.h"
 
@@ -12,6 +13,15 @@
 // Needed for character code definitions
 #include <Carbon/Carbon.h>
 #include <AppKit/NSEvent.h>
+#endif
+
+#if PLATFORM_WINDOWS
+#include "WindowsCursor.h"
+typedef FWindowsCursor FPlatformCursor;
+#elif PLATFORM_MAC
+#include "MacCursor.h"
+typedef FMacCursor FPlatformCursor;
+#else
 #endif
 
 FWebBrowserWindow::FWebBrowserWindow(FIntPoint InViewportSize, FString InUrl, TOptional<FString> InContentsToLoad, bool InShowErrorMessage, bool InThumbMouseButtonNavigation, bool InUseTransparency)
@@ -40,7 +50,7 @@ FWebBrowserWindow::FWebBrowserWindow(FIntPoint InViewportSize, FString InUrl, TO
 
 FWebBrowserWindow::~FWebBrowserWindow()
 {
-	CloseBrowser();
+	CloseBrowser(true);
 
 	if (FSlateApplication::IsInitialized() && FSlateApplication::Get().GetRenderer().IsValid() && UpdatableTexture != nullptr)
 	{
@@ -425,11 +435,11 @@ bool FWebBrowserWindow::SupportsNewWindows()
 	return OnCreateWindow().IsBound() ? true : false;
 }
 
-bool FWebBrowserWindow::RequestCreateWindow( const TSharedRef<IWebBrowserWindow>& NewBrowserWindow )
+bool FWebBrowserWindow::RequestCreateWindow( const TSharedRef<IWebBrowserWindow>& NewBrowserWindow, const TSharedPtr<IWebBrowserPopupFeatures>& BrowserPopupFeatures )
 {
 	if(OnCreateWindow().IsBound())
 	{
-		return OnCreateWindow().Execute(TWeakPtr<IWebBrowserWindow>(NewBrowserWindow));
+		return OnCreateWindow().Execute(TWeakPtr<IWebBrowserWindow>(NewBrowserWindow), TWeakPtr<IWebBrowserPopupFeatures>(BrowserPopupFeatures));
 	}
 	return false;
 }
@@ -669,15 +679,11 @@ void FWebBrowserWindow::SetHandler(CefRefPtr<FWebBrowserHandler> InHandler)
 	}
 }
 
-void FWebBrowserWindow::CloseBrowser()
+void FWebBrowserWindow::CloseBrowser(bool bForce)
 {
-	bIsClosing = true;
 	if (IsValid())
 	{
-		Scripting->UnbindCefBrowser();
-		InternalCefBrowser->GetHost()->CloseBrowser(false);
-		InternalCefBrowser = nullptr;
-		Handler = nullptr;
+		InternalCefBrowser->GetHost()->CloseBrowser(bForce);
 	}
 }
 
@@ -780,10 +786,27 @@ void FWebBrowserWindow::OnPaint(CefRenderHandler::PaintElementType Type, const C
 void FWebBrowserWindow::OnCursorChange(CefCursorHandle CefCursor, CefRenderHandler::CursorType Type, const CefCursorInfo& CustomCursorInfo)
 {
 	switch (Type) {
+		// Map the basic 3 cursor types directly to Slate types on all platforms
 		case CT_NONE:
 			Cursor = EMouseCursor::None;
 			break;
+		case CT_POINTER:
+			Cursor = EMouseCursor::Default;
+			break;
 		case CT_IBEAM:
+			Cursor = EMouseCursor::TextEditBeam;
+			break;
+		#if PLATFORM_WINDOWS || PLATFORM_MAC
+		// Platform specific support for native cursor types
+		default:
+			{
+				FPlatformCursor* PlatformCursor = (FPlatformCursor*)FSlateApplication::Get().GetPlatformCursor().Get();
+				PlatformCursor->SetCustomShape(CefCursor);
+				Cursor = EMouseCursor::Custom;
+			}
+			break;
+		#else
+		// Map to closest Slate equivalent on platforms where native cursors are not available.
 		case CT_VERTICALTEXT:
 			Cursor = EMouseCursor::TextEditBeam;
 			break;
@@ -837,12 +860,11 @@ void FWebBrowserWindow::OnCursorChange(CefCursorHandle CefCursor, CefRenderHandl
 		case CT_NODROP:
 			Cursor = EMouseCursor::SlashedCircle;
 			break;
-		case CT_POINTER:
 		default:
 			Cursor = EMouseCursor::Default;
 			break;
+		#endif
 	}
-
 	// Tell Slate to update the cursor now
 	FSlateApplication::Get().QueryCursor();
 }
@@ -1048,35 +1070,6 @@ void FWebBrowserWindow::UnbindUObject(const FString& Name, UObject* Object, bool
 	Scripting->UnbindUObject(Name, Object, bIsPermanent);
 }
 
-bool FWebBrowserWindow::OnQuery(int64 QueryId, const CefString& Request, bool Persistent, CefRefPtr<CefMessageRouterBrowserSide::Callback> Callback)
-{
-	if (OnJSQueryReceived().IsBound())
-	{
-		FString QueryString = Request.ToWString().c_str();
-		FJSQueryResultDelegate Delegate = FJSQueryResultDelegate::CreateLambda(
-			[Callback] (int ErrorCode, FString Message)
-			{
-				CefString MessageString = *Message;
-				if (ErrorCode == 0)
-				{
-					Callback->Success(MessageString);
-				}
-				else
-				{
-					Callback->Failure(ErrorCode, MessageString);
-				}
-			}
-		);
-		return OnJSQueryReceived().Execute(QueryId, QueryString, Persistent, Delegate);
-	}
-	return false;
-}
-
-void FWebBrowserWindow::OnQueryCanceled(int64 QueryId)
-{
-	OnJSQueryCanceled().ExecuteIfBound(QueryId);
-}
-
 bool FWebBrowserWindow::OnCefBeforePopup(const CefString& Target_Url, const CefString& Target_Frame_Name)
 {
 	if (OnBeforePopup().IsBound())
@@ -1087,6 +1080,23 @@ bool FWebBrowserWindow::OnCefBeforePopup(const CefString& Target_Url, const CefS
 	}
 
 	return false;
+}
+
+void FWebBrowserWindow::OnBrowserClosing()
+{
+	bIsClosing = true;
+}
+
+void FWebBrowserWindow::OnBrowserClosed()
+{
+	if(OnCloseWindow().IsBound())
+	{
+		OnCloseWindow().Execute(TWeakPtr<IWebBrowserWindow>(SharedThis(this)));
+	}
+
+	Scripting->UnbindCefBrowser();
+	InternalCefBrowser = nullptr;
+	Handler = nullptr;
 }
 
 #endif

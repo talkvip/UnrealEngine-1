@@ -44,6 +44,10 @@ public:
 	bool Load(FText& OutError);
 	/** Saves this collection to SourceFilename. If false, OutError is a human readable warning depicting the error. */
 	bool Save(FText& OutError);
+	/** Updates this collection to ensure it's the latest version from source control. If false, OutError is a human readable warning depicting the error. */
+	bool Update(FText& OutError);
+	/** Merge the contents of NewCollection into this collection. Returns true if there were changes to merge, or false if the collections were identical. */
+	bool Merge(const FCollection& NewCollection);
 	/** Deletes the source file for this collection. If false, OutError is a human readable warning depicting the error. */
 	bool DeleteSourceFile(FText& OutError);
 
@@ -61,6 +65,12 @@ public:
 	bool IsObjectInCollection(FName ObjectPath) const;
 	/** Returns true when the specified redirector is in the collection. Static collections only. */
 	bool IsRedirectorInCollection(FName ObjectPath) const;
+
+	/** Get the status info for this collection */
+	FCollectionStatusInfo GetStatusInfo() const;
+
+	/** Does this collection contain unsaved changes? */
+	bool IsDirty() const;
 
 	/** Returns true if the collection contains rules instead of a flat list */
 	bool IsDynamic() const;
@@ -86,6 +96,9 @@ public:
 	/** Returns the file version of the collection */
 	FORCEINLINE ECollectionVersion::Type GetCollectionVersion() const { return FileVersion; }
 
+	/** Get the source filename of this collection */
+	FORCEINLINE const FString& GetSourceFilename() const { return SourceFilename; }
+
 private:
 	/** Generates the header pairs for the collection file. */
 	void SaveHeaderPairs(TMap<FString,FString>& OutHeaderPairs) const;
@@ -99,9 +112,11 @@ private:
 	bool LoadHeaderPairs(const TMap<FString,FString>& InHeaderPairs);
 
 	/** Merges the assets from the specified collection with this collection */
-	void MergeWithCollection(const FCollection& Other);
-	/** Gets the object differences between collections A and B */
-	void GetObjectDifferencesFromDisk(TArray<FName>& ObjectsAdded, TArray<FName>& ObjectsRemoved);
+	bool MergeWithCollection(const FCollection& Other);
+	/** Gets the object differences between object set A (base) and B (new) */
+	static void GetObjectDifferences(const TSet<FName>& BaseSet, const TSet<FName>& NewSet, TArray<FName>& ObjectsAdded, TArray<FName>& ObjectsRemoved);
+	/** Gets the object differences between what we have in memory, and what we loaded from disk */
+	void GetObjectDifferencesFromDisk(TArray<FName>& ObjectsAdded, TArray<FName>& ObjectsRemoved) const;
 	/** Checks the shared collection out from source control so it may be saved. If false, OutError is a human readable warning depicting the error. */
 	bool CheckoutCollection(FText& OutError);
 	/** Checks the shared collection in to source control after it is saved. If false, OutError is a human readable warning depicting the error. */

@@ -384,7 +384,7 @@ void USkeletalMeshComponent::BlendInPhysics()
 	// If we don't have or want any physics, we do nothing.
 	if( Bodies.Num() > 0 )
 	{
-		IsRunningParallelEvaluation(/*bBlockOnTask = */ true, /*bPerformPostAnimEvaluation =*/ true);
+		HandleExistingParallelEvaluationTask(/*bBlockOnTask = */ true, /*bPerformPostAnimEvaluation =*/ true);
 		// start parallel work
 		check(!IsValidRef(ParallelAnimationEvaluationTask));
 
@@ -420,16 +420,19 @@ void USkeletalMeshComponent::CompleteParallelBlendPhysics()
 {
 	Exchange(AnimEvaluationContext.LocalAtoms, AnimEvaluationContext.bDoInterpolation ? CachedLocalAtoms : LocalAtoms);
 		
-		// Update Child Transform - The above function changes bone transform, so will need to update child transform
-		UpdateChildTransforms();
-
-		// animation often change overlap. 
-		UpdateOverlaps();
-
-		// New bone positions need to be sent to render thread
-		MarkRenderDynamicDataDirty();
 
 	FlipEditableSpaceBases();
+
+	// Update Child Transform - The above function changes bone transform, so will need to update child transform
+	UpdateChildTransforms();
+
+	// animation often change overlap. 
+	UpdateOverlaps();
+
+	// New bone positions need to be sent to render thread
+	MarkRenderDynamicDataDirty();
+
+	FinalizeBoneTransform();
 
 	ParallelAnimationEvaluationTask.SafeRelease();
 	ParallelBlendPhysicsCompletionTask.SafeRelease();

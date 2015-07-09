@@ -19,8 +19,19 @@ namespace ESequencerCurveVisibility
 	};
 }
 
+/** Empty class used to house multiple named USequencerSettings */
+UCLASS()
+class USequencerSettingsContainer : public UObject
+{
+public:
+	GENERATED_BODY()
+
+	/** Get or create a settings object for the specified name */
+	static USequencerSettings* GetOrCreate(const TCHAR* InName);
+};
+
 /** Serializable options for sequencer. */
-UCLASS(config=EditorPerProjectUserSettings)
+UCLASS(config=EditorPerProjectUserSettings, PerObjectConfig)
 class USequencerSettings : public UObject
 {
 public:
@@ -63,6 +74,11 @@ public:
 	bool GetSnapPlayTimeToInterval() const;
 	/** Sets whether or not to snap the play time to the interval while scrubbing. */
 	void SetSnapPlayTimeToInterval(bool InbSnapPlayTimeToInterval);
+
+	/** Gets whether or not to snap the play time to the dragged key. */
+	bool GetSnapPlayTimeToDraggedKey() const;
+	/** Sets whether or not to snap the play time to the dragged key. */
+	void SetSnapPlayTimeToDraggedKey(bool InbSnapPlayTimeToDraggedKey);
 
 	/** Gets the snapping interval for curve values. */
 	float GetCurveValueSnapInterval() const;
@@ -129,6 +145,9 @@ protected:
 
 	UPROPERTY( config )
 	bool bSnapPlayTimeToInterval;
+
+	UPROPERTY( config )
+	bool bSnapPlayTimeToDraggedKey;
 
 	UPROPERTY( config )
 	float CurveValueSnapInterval;

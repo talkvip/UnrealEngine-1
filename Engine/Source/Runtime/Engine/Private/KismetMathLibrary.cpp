@@ -584,6 +584,11 @@ float UKismetMathLibrary::MakePulsatingValue(float InCurrentTime, float InPulses
 	return FMath::MakePulsatingValue((double)InCurrentTime, InPulsesPerSecond, InPhase);
 }
 
+float UKismetMathLibrary::FixedTurn(float InCurrent, float InDesired, float InDeltaRate)
+{
+	return FMath::FixedTurn(InCurrent, InDesired, InDeltaRate);
+}
+
 float UKismetMathLibrary::RandomFloat()
 {
 	return FMath::FRand();
@@ -681,7 +686,12 @@ float UKismetMathLibrary::FInterpTo_Constant(float Current, float Target, float 
 FVector UKismetMathLibrary::Multiply_VectorFloat(FVector A, float B)
 {
 	return A * B;
-}	
+}
+
+FVector UKismetMathLibrary::Multiply_VectorInt(FVector A, int32 B)
+{
+	return A * (float)B;
+}
 
 FVector UKismetMathLibrary::Multiply_VectorVector(FVector A, FVector B)
 {
@@ -697,8 +707,20 @@ FVector UKismetMathLibrary::Divide_VectorFloat(FVector A, float B)
 		return FVector::ZeroVector;
 	}
 
-	return A/B;
-}	
+	return A / B;
+}
+
+FVector UKismetMathLibrary::Divide_VectorInt(FVector A, int32 B)
+{
+	if (B == 0)
+	{
+		//@TODO: EXCEPTION: Throw script exception 
+		FFrame::KismetExecutionMessage(TEXT("Divide by zero: Divide_VectorInt"), ELogVerbosity::Warning);
+		return FVector::ZeroVector;
+	}
+
+	return A / (float)B;
+}
 
 FVector UKismetMathLibrary::Divide_VectorVector(FVector A, FVector B)
 {
@@ -723,6 +745,11 @@ FVector UKismetMathLibrary::Add_VectorFloat(FVector A, float B)
 	return A + B;
 }	
 
+FVector UKismetMathLibrary::Add_VectorInt(FVector A, int32 B)
+{
+	return A + (float)B;
+}
+
 FVector UKismetMathLibrary::Subtract_VectorVector(FVector A, FVector B)
 {
 	return A - B;
@@ -731,7 +758,12 @@ FVector UKismetMathLibrary::Subtract_VectorVector(FVector A, FVector B)
 FVector UKismetMathLibrary::Subtract_VectorFloat(FVector A, float B)
 {
 	return A - B;
-}	
+}
+
+FVector UKismetMathLibrary::Subtract_VectorInt(FVector A, int32 B)
+{
+	return A - (float)B;
+}
 
 FVector UKismetMathLibrary::LessLess_VectorRotator(FVector A, FRotator B)
 {
@@ -952,11 +984,16 @@ bool UKismetMathLibrary::EqualEqual_RotatorRotator(FRotator A, FRotator B, float
 bool UKismetMathLibrary::NotEqual_RotatorRotator(FRotator A, FRotator B, float ErrorTolerance)
 {
 	return !A.Equals(B, ErrorTolerance);
-}	
+}
 
 FRotator UKismetMathLibrary::Multiply_RotatorFloat(FRotator A, float B)
 {
 	return A * B;
+}
+
+FRotator UKismetMathLibrary::Multiply_RotatorInt(FRotator A, int32 B)
+{
+	return A * (float)B;
 }	
 
 FRotator UKismetMathLibrary::ComposeRotators(FRotator A, FRotator B)
@@ -969,8 +1006,7 @@ FRotator UKismetMathLibrary::ComposeRotators(FRotator A, FRotator B)
 
 FRotator UKismetMathLibrary::NegateRotator( FRotator A )
 {
-	FQuat AQuat = FQuat(A);
-	return FRotator(AQuat.Inverse());
+	return A.GetInverse();
 }
 
 void UKismetMathLibrary::GetAxes(FRotator A, FVector& X, FVector& Y, FVector& Z)
@@ -1125,6 +1161,21 @@ FTransform UKismetMathLibrary::TInterpTo(const FTransform& Current, const FTrans
 
 	return TLerp(Current, Target, Alpha);
 }
+
+bool UKismetMathLibrary::EqualEqual_TransformTransform(const FTransform& A, const FTransform& B)
+{
+	return NearlyEqual_TransformTransform(A, B);
+}
+
+bool UKismetMathLibrary::NearlyEqual_TransformTransform(const FTransform& A, const FTransform& B, float LocationTolerance, float RotationTolerance, float Scale3DTolerance)
+{
+	return 
+		FTransform::AreRotationsEqual(A, B, RotationTolerance) && 
+		FTransform::AreTranslationsEqual(A, B, LocationTolerance) && 
+		FTransform::AreScale3DsEqual(A, B, Scale3DTolerance);
+}
+
+
 
 FVector2D UKismetMathLibrary::Add_Vector2DVector2D(FVector2D A, FVector2D B)
 {
@@ -1403,6 +1454,18 @@ FDateTime UKismetMathLibrary::UtcNow( )
 }
 
 
+bool UKismetMathLibrary::DateTimeFromIsoString(FString IsoString, FDateTime& Result)
+{
+	return FDateTime::ParseIso8601(*IsoString, Result);
+}
+
+
+bool UKismetMathLibrary::DateTimeFromString(FString DateTimeString, FDateTime& Result)
+{
+	return FDateTime::Parse(DateTimeString, Result);
+}
+
+
 /* Timespan functions
  *****************************************************************************/
 
@@ -1599,6 +1662,12 @@ FTimespan UKismetMathLibrary::TimespanZeroValue( )
 }
 
 
+bool UKismetMathLibrary::TimespanFromString(FString TimespanString, FTimespan& Result)
+{
+	return FTimespan::Parse(TimespanString, Result);
+}
+
+
 /* K2 Utilities
  *****************************************************************************/
 
@@ -1735,7 +1804,7 @@ FVector UKismetMathLibrary::GetUpVector(FRotator InRot)
 	return FRotationMatrix(InRot).GetScaledAxis( EAxis::Z );
 }
 
-FRotator UKismetMathLibrary::MakeRot(float Pitch, float Yaw, float Roll)
+FRotator UKismetMathLibrary::MakeRotator(float Roll, float Pitch, float Yaw)
 {
 	return FRotator(Pitch,Yaw,Roll);
 }
@@ -1791,7 +1860,7 @@ FRotator UKismetMathLibrary::MakeRotFromZY(const FVector& Z, const FVector& Y)
 }
 
 
-void UKismetMathLibrary::BreakRot(FRotator InRot, float& Pitch, float& Yaw, float& Roll)
+void UKismetMathLibrary::BreakRotator(FRotator InRot, float& Roll, float& Pitch, float& Yaw)
 {
 	Pitch = InRot.Pitch;
 	Yaw = InRot.Yaw;

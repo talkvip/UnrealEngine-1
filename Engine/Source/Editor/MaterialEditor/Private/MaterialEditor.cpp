@@ -2993,7 +2993,7 @@ UMaterialExpression* FMaterialEditor::CreateNewMaterialExpression(UClass* NewExp
 		UMaterialExpressionDynamicParameter* DynamicExpression = Cast<UMaterialExpressionDynamicParameter>(NewExpression);
 		if (DynamicExpression)
 		{
-			DynamicExpression->UpdateDynamicParameterNames();
+			DynamicExpression->UpdateDynamicParameterProperties();
 		}
 
 		Material->AddExpressionParameter(NewExpression, Material->EditorParameters);
@@ -3375,6 +3375,12 @@ void FMaterialEditor::PasteNodesHere(const FVector2D& Location)
 				FunctionOutput->ConditionallyGenerateId(true);
 				FunctionOutput->ValidateName();
 			}
+
+			UMaterialExpressionMaterialFunctionCall* FunctionCall = Cast<UMaterialExpressionMaterialFunctionCall>( NewExpression );
+			if( FunctionCall )
+			{
+				FunctionCall->UpdateFromFunctionResource();
+			}
 		}
 		else if (UMaterialGraphNode_Comment* CommentNode = Cast<UMaterialGraphNode_Comment>(Node))
 		{
@@ -3552,9 +3558,9 @@ void FMaterialEditor::NotifyPostChange( const FPropertyChangedEvent& PropertyCha
 				{
 					Material->UpdateExpressionParameterName(SelectedNode->MaterialExpression);
 				}
-				else if (NameOfPropertyThatChanged == FName(TEXT("ParamNames")))
+				else if (SelectedNode->MaterialExpression->IsA(UMaterialExpressionDynamicParameter::StaticClass()))
 				{
-					Material->UpdateExpressionDynamicParameterNames(SelectedNode->MaterialExpression);
+					Material->UpdateExpressionDynamicParameters(SelectedNode->MaterialExpression);
 				}
 				else
 				{

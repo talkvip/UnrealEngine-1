@@ -9,6 +9,8 @@
 #include "KismetCompiler.h"
 #include "GraphEditorSettings.h"
 
+#include "ObjectEditorUtils.h"
+
 #define LOCTEXT_NAMESPACE "K2Node"
 
 // File-Scoped Globals
@@ -627,6 +629,12 @@ void UK2Node::ReconstructSinglePin(UEdGraphPin* NewPin, UEdGraphPin* OldPin, ERe
 
 void UK2Node::RewireOldPinsToNewPins(TArray<UEdGraphPin*>& InOldPins, TArray<UEdGraphPin*>& InNewPins)
 {
+	// No need to attempt anything if there are no new pins
+	if (InNewPins.Num() == 0)
+	{
+		return;
+	}
+
 	// Rewire any connection to pins that are matched by name (O(N^2) right now)
 	//@TODO: Can do moderately smart things here if only one pin changes name by looking at it's relative position, etc...,
 	// rather than just failing to map it and breaking the links
@@ -832,28 +840,72 @@ void FOptionalPinManager::RebuildPropertyList(TArray<FOptionalPinFromProperty>& 
 	// Rebuild the property list
 	Properties.Empty();
 
+	// find all "bOverride_" properties
+	TMap<FName, UProperty*> OverridesMap;
+	const FString OverridePrefix(TEXT("bOverride_"));
 	for (TFieldIterator<UProperty> It(SourceStruct, EFieldIteratorFlags::IncludeSuper); It; ++It)
 	{
 		UProperty* TestProperty = *It;
-
-		if (CanTreatPropertyAsOptional(TestProperty))
+		if (CanTreatPropertyAsOptional(TestProperty) && TestProperty->GetName().StartsWith(OverridePrefix))
 		{
-			FOptionalPinFromProperty* Record = new (Properties) FOptionalPinFromProperty;
-			Record->PropertyName = TestProperty->GetFName();
-			Record->PropertyFriendlyName = UEditorEngine::GetFriendlyName(TestProperty, SourceStruct);
-			Record->PropertyTooltip = TestProperty->GetToolTipText();
-
-			// Get the defaults
-			GetRecordDefaults(TestProperty, *Record);
-
-			// If this is a refresh, propagate the old visibility
-			if (Record->bCanToggleVisibility)
+			FString OriginalName = TestProperty->GetName();
+			if (OriginalName.RemoveFromStart(OverridePrefix) && !OriginalName.IsEmpty())
 			{
-				if (bool* pShowHide = OldVisibility.Find(Record->PropertyName))
-				{
-					Record->bShowPin = *pShowHide;
-				}
+				OverridesMap.Add(FName(*OriginalName), TestProperty);
 			}
+		}
+	}
+
+	// handle regular properties
+	for (TFieldIterator<UProperty> It(SourceStruct, EFieldIteratorFlags::IncludeSuper); It; ++It)
+	{
+		UProperty* TestProperty = *It;
+		if (CanTreatPropertyAsOptional(TestProperty) && !TestProperty->GetName().StartsWith(OverridePrefix))
+		{
+			FName CategoryName = NAME_None;
+#if WITH_EDITOR
+			CategoryName = FObjectEditorUtils::GetCategoryFName(TestProperty);
+#endif //WITH_EDITOR
+
+			UProperty* OverrideProperty = nullptr;
+			if (OverridesMap.RemoveAndCopyValue(TestProperty->GetFName(), OverrideProperty) && OverrideProperty)
+			{
+				RebuildProperty(OverrideProperty, CategoryName, Properties, SourceStruct, OldVisibility);
+			}
+			RebuildProperty(TestProperty, CategoryName, Properties, SourceStruct, OldVisibility);
+		}
+	}
+
+	// add remaining "bOverride_" properties
+	for (auto Pair : OverridesMap)
+	{
+		UProperty* TestProperty = Pair.Value;
+
+		FName CategoryName = NAME_None;
+#if WITH_EDITOR
+		CategoryName = FObjectEditorUtils::GetCategoryFName(TestProperty);
+#endif //WITH_EDITOR
+
+		RebuildProperty(TestProperty, CategoryName, Properties, SourceStruct, OldVisibility);
+	}
+}
+
+void FOptionalPinManager::RebuildProperty(UProperty* TestProperty, FName CategoryName, TArray<FOptionalPinFromProperty>& Properties, UStruct* SourceStruct, TMap<FName, bool>& OldVisibility)
+{
+	FOptionalPinFromProperty* Record = new (Properties)FOptionalPinFromProperty;
+	Record->PropertyName = TestProperty->GetFName();
+	Record->PropertyFriendlyName = UEditorEngine::GetFriendlyName(TestProperty, SourceStruct);
+	Record->PropertyTooltip = TestProperty->GetToolTipText();
+	Record->CategoryName = CategoryName;
+	// Get the defaults
+	GetRecordDefaults(TestProperty, *Record);
+
+	// If this is a refresh, propagate the old visibility
+	if (Record->bCanToggleVisibility)
+	{
+		if (bool* pShowHide = OldVisibility.Find(Record->PropertyName))
+		{
+			Record->bShowPin = *pShowHide;
 		}
 	}
 }

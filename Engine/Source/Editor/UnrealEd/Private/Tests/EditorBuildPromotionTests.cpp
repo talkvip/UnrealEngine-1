@@ -712,7 +712,7 @@ namespace EditorBuildPromotionTestUtils
 		//If we are running with -NullRHI then we have to skip this step.
 		if (GUsingNullRHI)
 		{
-			UE_LOG(LogEditorBuildPromotionTests, Warning, TEXT("SKIPPED Build Lighting Step.  You're currently running with -NullRHI."));
+			UE_LOG(LogEditorBuildPromotionTests, Log, TEXT("SKIPPED Build Lighting Step.  You're currently running with -NullRHI."));
 			return;
 		}
 
@@ -1815,7 +1815,7 @@ namespace BuildPromotionTestHelper
 	else \
 	{ \
 		SkippedTests.Add(FString::Printf(TEXT("Importing Workflow: Importing %s. (No file path)"),TEXT(#ImportSetting))); \
-		UE_LOG(LogEditorBuildPromotionTests, Warning, TEXT("No asset import path set for %s"), TEXT(#ImportSetting)); \
+		UE_LOG(LogEditorBuildPromotionTests, Log, TEXT("No asset import path set for %s"), TEXT(#ImportSetting)); \
 	} \
 	TagPreviousLogs(TEXT(#ImportSetting)); \
 }
@@ -1939,7 +1939,7 @@ namespace BuildPromotionTestHelper
 				} 
 				else 
 				{ 
-					UE_LOG(LogEditorBuildPromotionTests, Warning, TEXT("No asset import path set for OtherAssetsToImport.  Index: %i"), i);
+					UE_LOG(LogEditorBuildPromotionTests, Log, TEXT("No asset import path set for OtherAssetsToImport.  Index: %i"), i);
 				}
 				TagPreviousLogs(FString::Printf(TEXT("OtherAssetsToImport #%i"),i+1));
 			}
@@ -2496,7 +2496,14 @@ namespace BuildPromotionTestHelper
 			else
 			{
 				SkippedTests.Add(TEXT("All Blueprint tests. (Missing a required mesh or particle system)"));
-				UE_LOG(LogEditorBuildPromotionTests, Warning, TEXT("SKIPPING BLUEPRINT TESTS.  Invalid or missing FirstMeshPath or SecondMeshPath in AutomationTestSettings, or particle system was not created."));
+				if (FirstMeshPath.IsEmpty() || SecondMeshPath.IsEmpty())
+				{
+					UE_LOG(LogEditorBuildPromotionTests, Log, TEXT("SKIPPING BLUEPRINT TESTS.  FirstMeshPath or SecondMeshPath not configured in AutomationTestSettings."));
+				}
+				else
+				{
+					UE_LOG(LogEditorBuildPromotionTests, Warning, TEXT("SKIPPING BLUEPRINT TESTS.  Invalid FirstMeshPath or SecondMeshPath in AutomationTestSettings, or particle system was not created."));
+				}
 			}
 			
 			return true;
@@ -3769,6 +3776,7 @@ bool FBuildPromotionSettingsTest::RunTest(const FString& Parameters)
 
 	UE_LOG(LogEditorBuildPromotionTests, Display, TEXT("Sent PIE keyboard shortcut"));
 
+	ADD_LATENT_AUTOMATION_COMMAND(FWaitLatentCommand(3.f));
 	ADD_LATENT_AUTOMATION_COMMAND(FSettingsCheckForPIECommand());
 	ADD_LATENT_AUTOMATION_COMMAND(FLogTestResultCommand(&ExecutionInfo));
 

@@ -3,10 +3,19 @@
 #include "MovieScenePrivatePCH.h"
 #include "MovieSceneInstance.h"
 
+
 FMovieSceneInstance::FMovieSceneInstance( UMovieScene& InMovieScene )
 	: MovieScene( &InMovieScene )
 {
+	TimeRange = MovieScene->GetTimeRange();
 }
+
+
+TScriptInterface<UMovieSceneObjectManager> FMovieSceneInstance::GetObjectManager() const
+{
+	return MovieScene.Get()->GetObjectManager();
+}
+
 
 void FMovieSceneInstance::SaveState()
 {
@@ -22,6 +31,7 @@ void FMovieSceneInstance::SaveState()
 	}
 }
 
+
 void FMovieSceneInstance::RestoreState()
 {
 	TMap<FGuid, FMovieSceneObjectBindingInstance>::TIterator ObjectIt = ObjectBindingInstances.CreateIterator();
@@ -35,6 +45,7 @@ void FMovieSceneInstance::RestoreState()
 		}
 	}
 }
+
 
 void FMovieSceneInstance::Update( float Position, float LastPosition, class IMovieScenePlayer& Player )
 {
@@ -64,8 +75,11 @@ void FMovieSceneInstance::Update( float Position, float LastPosition, class IMov
 	}
 }
 
+
 void FMovieSceneInstance::RefreshInstance( IMovieScenePlayer& Player )
 {
+	TimeRange = MovieScene->GetTimeRange();
+
 	UMovieSceneTrack* ShotTrack = MovieScene->GetShotTrack();
 
 	TSharedRef<FMovieSceneInstance> ThisInstance = AsShared();
@@ -99,10 +113,10 @@ void FMovieSceneInstance::RefreshInstance( IMovieScenePlayer& Player )
 
 	TSet< FGuid > FoundObjectBindings;
 	// Get all tracks for each object binding and create instances for them if needed
-	const TArray<FMovieSceneObjectBinding>& ObjectBindings = MovieScene->GetObjectBindings();
+	const TArray<FMovieSceneBinding>& ObjectBindings = MovieScene->GetBindings();
 	for( int32 BindingIndex = 0; BindingIndex < ObjectBindings.Num(); ++BindingIndex )
 	{
-		const FMovieSceneObjectBinding& ObjectBinding = ObjectBindings[BindingIndex];
+		const FMovieSceneBinding& ObjectBinding = ObjectBindings[BindingIndex];
 
 		// Create an instance for this object binding
 		FMovieSceneObjectBindingInstance& BindingInstance = ObjectBindingInstances.FindOrAdd( ObjectBinding.GetObjectGuid() );
@@ -132,6 +146,15 @@ void FMovieSceneInstance::RefreshInstance( IMovieScenePlayer& Player )
 		}
 	}
 }
+
+
+struct FTrackInstanceEvalSorter
+{
+	bool operator()( const TSharedPtr<IMovieSceneTrackInstance> A, const TSharedPtr<IMovieSceneTrackInstance> B ) const
+	{
+		return A->EvalOrder() > B->EvalOrder();
+	}
+};
 
 
 void FMovieSceneInstance::RefreshInstanceMap( const TArray<UMovieSceneTrack*>& Tracks, const TArray<UObject*>& RuntimeObjects, FMovieSceneInstanceMap& TrackInstances, IMovieScenePlayer& Player  )
@@ -178,4 +201,7 @@ void FMovieSceneInstance::RefreshInstanceMap( const TArray<UMovieSceneTrack*>& T
 			It.RemoveCurrent();
 		}
 	}
+
+	// Sort based on evaluation order
+	TrackInstances.ValueSort(FTrackInstanceEvalSorter());
 }

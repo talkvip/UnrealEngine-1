@@ -26,7 +26,8 @@ FRuntimeAssetCacheFilesystemBackend::FRuntimeAssetCacheFilesystemBackend()
 
 bool FRuntimeAssetCacheFilesystemBackend::RemoveCacheEntry(const FName Bucket, const TCHAR* CacheKey)
 {
-	return IFileManager::Get().Delete(CacheKey);
+	FString Path = FPaths::Combine(*PathToRAC, *Bucket.ToString(), CacheKey);
+	return IFileManager::Get().Delete(*Path);
 }
 
 bool FRuntimeAssetCacheFilesystemBackend::ClearCache()

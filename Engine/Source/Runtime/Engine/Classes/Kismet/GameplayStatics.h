@@ -157,7 +157,7 @@ class ENGINE_API UGameplayStatics : public UBlueprintFunctionLibrary
 	UFUNCTION(BlueprintPure, Category="Game", meta=(WorldContext="WorldContextObject") )
 	static class AGameState* GetGameState(UObject* WorldContextObject);
 
-	UFUNCTION(BlueprintPure, meta=(DisplayName = "GetClass"), Category="Utilities")
+	UFUNCTION(BlueprintPure, meta=(DisplayName = "GetClass", DeterminesOutputType = "Object"), Category="Utilities")
 	static class UClass *GetObjectClass(const UObject *Object);
 
 	/**
@@ -560,5 +560,68 @@ class ENGINE_API UGameplayStatics : public UBlueprintFunctionLibrary
 	*/
 	UFUNCTION(BlueprintCallable, Category = "Foliage", meta = (WorldContext = "WorldContextObject", UnsafeDuringActorConstruction = "true"))
 	static int32 GrassOverlappingSphereCount(UObject* WorldContextObject, const UStaticMesh* StaticMesh, FVector CenterPosition, float Radius);
+
+	/** 
+	 * Transforms the given 2D screen space coordinate into a 3D world-space point and direction
+	 * @param Player			Deproject using this player's view.
+	 * @param ScreenPosition	2D screen space to deproject
+	 * @param WorldPosition		(out) Corresponding 3D position in world space
+	 * @param WorldDirection	(out) World space direction vector away from the camera at the given 2d poiunt
+	 */
+	UFUNCTION(BlueprintPure, Category = "Utilities", meta = (Keywords = "unproject"))
+	static bool DeprojectScreenToWorld(APlayerController const* Player, const FVector2D& ScreenPosition, FVector& WorldPosition, FVector& WorldDirection);
+
+	/** 
+	 * Transforms the given 3D world-space point into a its 2D screen space coordinate. 
+	 * @param Player			Project using this player's view.
+	 * @param WorldPosition		World position to project.
+	 * @param ScreenPosition	(out) Corresponding 2D position in screen space
+	 */
+	UFUNCTION(BlueprintPure, Category = "Utilities")
+	static bool ProjectWorldToScreen(APlayerController const* Player, const FVector& WorldPosition, FVector2D& ScreenPosition);
+
+	// Utility functions for interacting with Options strings
+
+	//=========================================================================
+	// URL Parsing
+
+	static bool GrabOption( FString& Options, FString& ResultString );
+
+	/** 
+	 * Break up a key=value pair into its key and value. 
+	 * @param Pair			The string containing a pair to split apart.
+	 * @param Key			(out) Key portion of Pair. If no = in string will be the same as Pair.
+	 * @param Value			(out) Value portion of Pair. If no = in string will be empty.
+	 */
+	UFUNCTION(BlueprintPure, Category="Game Options")
+	static void GetKeyValue( const FString& Pair, FString& Key, FString& Value );
+
+	/** 
+	 * Find an option in the options string and return it.
+	 * @param Options		The string containing the options.
+	 * @param Key			The key to find the value of in Options.
+	 * @return				The value associated with Key if Key found in Options string.
+	 */
+	UFUNCTION(BlueprintPure, Category="Game Options")
+	static FString ParseOption( FString Options, const FString& Key );
+
+	/** 
+	 * Returns whether a key exists in an options string.
+	 * @param Options		The string containing the options.
+	 * @param Key			The key to determine if it exists in Options.
+	 * @return				Whether Key was found in Options.
+	 */
+	UFUNCTION(BlueprintPure, Category="Game Options")
+	static bool HasOption( FString Options, const FString& InKey );
+
+	/** 
+	 * Find an option in the options string and return it as an integer.
+	 * @param Options		The string containing the options.
+	 * @param Key			The key to find the value of in Options.
+	 * @return				The value associated with Key as an integer if Key found in Options string, otherwise DefaultValue.
+	 */
+	UFUNCTION(BlueprintPure, Category="Game Options")
+	static int32 GetIntOption( const FString& Options, const FString& Key, int32 DefaultValue);
+
 };
 

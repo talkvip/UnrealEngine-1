@@ -903,9 +903,17 @@ bool UAbilitySystemComponent::TryActivateAbility(FGameplayAbilitySpecHandle Abil
 	{
 		if (bAllowRemoteActivation)
 		{
-			// No prediction key, server will assign a server-generated key
-			ServerTryActivateAbility(AbilityToActivate, Spec->InputPressed, FPredictionKey());
-			return true;
+			if (Ability->CanActivateAbility(AbilityToActivate, ActorInfo, nullptr, nullptr, &FailureTags))
+			{
+				// No prediction key, server will assign a server-generated key
+				ServerTryActivateAbility(AbilityToActivate, Spec->InputPressed, FPredictionKey());
+				return true;
+			}
+			else
+			{
+				NotifyAbilityFailed(AbilityToActivate, Ability, FailureTags);
+				return false;
+			}
 		}
 
 		ABILITY_LOG(Log, TEXT("Can't activate ServerOnly or ServerInitiated ability %s when not the server."), *Ability->GetName());
@@ -1774,7 +1782,8 @@ void UAbilitySystemComponent::BindToInputComponent(UInputComponent* InputCompone
 void UAbilitySystemComponent::BindAbilityActivationToInputComponent(UInputComponent* InputComponent, FGameplayAbiliyInputBinds BindInfo)
 {
 	UEnum* EnumBinds = BindInfo.GetBindEnum();
-	BlockedAbilityBindings.SetNumZeroed(EnumBinds->NumEnums());
+
+	SetBlockAbilityBindingsArray(BindInfo);
 
 	for(int32 idx=0; idx < EnumBinds->NumEnums(); ++idx)
 	{
@@ -1821,6 +1830,12 @@ void UAbilitySystemComponent::BindAbilityActivationToInputComponent(UInputCompon
 	{
 		GenericConfirmInputID = BindInfo.ConfirmTargetInputID;
 	}
+}
+
+void UAbilitySystemComponent::SetBlockAbilityBindingsArray(FGameplayAbiliyInputBinds BindInfo)
+{
+	UEnum* EnumBinds = BindInfo.GetBindEnum();
+	BlockedAbilityBindings.SetNumZeroed(EnumBinds->NumEnums());
 }
 
 void UAbilitySystemComponent::AbilityLocalInputPressed(int32 InputID)

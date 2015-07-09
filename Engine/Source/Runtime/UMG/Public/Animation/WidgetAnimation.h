@@ -23,6 +23,10 @@ struct FWidgetAnimationBinding
 	UPROPERTY()
 	FGuid AnimationGuid;
 
+	// @todo sequencer: gmp: UMG integration
+	//UPROPERTY()
+	FGuid AnimationId;
+
 public:
 	/**
 	 * Locates a runtime object to animate from the provided tree of widgets

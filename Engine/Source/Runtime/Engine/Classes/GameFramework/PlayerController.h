@@ -466,18 +466,18 @@ public:
 	bool GetHitResultUnderFingerForObjects(ETouchIndex::Type FingerIndex, const  TArray<TEnumAsByte<EObjectTypeQuery> > & ObjectTypes, bool bTraceComplex, FHitResult& HitResult) const;
 
 	/** Convert current mouse 2D position to World Space 3D position and direction. Returns false if unable to determine value. **/
-	UFUNCTION(BlueprintCallable, Category="Game|Player", meta=(DisplayName="ConvertMouseLocationToWorldSpace"))
+	UFUNCTION(BlueprintCallable, Category = "Game|Player", meta = (DisplayName = "ConvertMouseLocationToWorldSpace", Keywords = "deproject"))
 	bool DeprojectMousePositionToWorld(FVector& WorldLocation, FVector& WorldDirection) const;
 
 	/** Convert current mouse 2D position to World Space 3D position and direction. Returns false if unable to determine value. **/
-	UFUNCTION(BlueprintCallable, Category = "Game|Player", meta = (DisplayName = "ConvertScreenLocationToWorldSpace"))
+	UFUNCTION(BlueprintCallable, Category = "Game|Player", meta = (DisplayName = "ConvertScreenLocationToWorldSpace", Keywords = "deproject"))
 	bool DeprojectScreenPositionToWorld(float ScreenX, float ScreenY, FVector& WorldLocation, FVector& WorldDirection) const;
 
 	/**
 	 * Convert a World Space 3D position into a 2D Screen Space position.
 	 * @return true if the world coordinate was successfully projected to the screen.
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Game|Player", meta = ( DisplayName = "ConvertWorldLocationToScreenLocation" ))
+	UFUNCTION(BlueprintCallable, Category = "Game|Player", meta = (DisplayName = "ConvertWorldLocationToScreenLocation", Keywords = "project"))
 	bool ProjectWorldLocationToScreen(FVector WorldLocation, FVector2D& ScreenLocation) const;
 
 	/**
@@ -1013,15 +1013,24 @@ public:
 	UFUNCTION(reliable, server, WithValidation)
 	void ServerToggleAILogging();
 
-	/** Add Pitch (look up) input */
+	/**
+	 * Add Pitch (look up) input. This value is multiplied by InputPitchScale.
+	 * @param Val Amount to add to Pitch. This value is multiplied by InputPitchScale.
+	 */
 	UFUNCTION(BlueprintCallable, Category="Game|Player", meta=(Keywords="up down"))
 	virtual void AddPitchInput(float Val);
 
-	/** Add Yaw (turn) input */
+	/**
+	 * Add Yaw (turn) input. This value is multiplied by InputYawScale.
+	 * @param Val Amount to add to Yaw. This value is multiplied by InputYawScale.
+	 */
 	UFUNCTION(BlueprintCallable, Category="Game|Player", meta=(Keywords="left right turn"))
 	virtual void AddYawInput(float Val);
 
-	/** Add Roll input */
+	/**
+	 * Add Roll input. This value is multiplied by InputRollScale.
+	 * @param Val Amount to add to Roll. This value is multiplied by InputRollScale.
+	 */
 	UFUNCTION(BlueprintCallable, Category="Game|Player")
 	virtual void AddRollInput(float Val);
 
@@ -1171,7 +1180,10 @@ public:
 	virtual bool InputMotion(const FVector& Tilt, const FVector& RotationRate, const FVector& Gravity, const FVector& Acceleration);
 
 	/** Associate a new UPlayer with this PlayerController. */
-	virtual void SetPlayer(UPlayer* Player);
+	virtual void SetPlayer(UPlayer* InPlayer);
+
+	/** Returns the ULocalPlayer for this controller if it exists, or null otherwise */
+	class ULocalPlayer* GetLocalPlayer() const;
 
 	/**
 	 * Called client-side to smoothly interpolate received TargetViewRotation (result is in BlendedTargetViewRotation)

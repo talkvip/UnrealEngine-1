@@ -1,143 +1,143 @@
 ﻿// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
 using System;
-using System.Collections.Generic;
-using System.Text.RegularExpressions;
+using Ionic.Zip;
+using System.IO;
+using System.Web;
+using System.Net;
 using System.Linq;
 using System.Text;
-using System.IO;
 using AutomationTool;
 using UnrealBuildTool;
-using System.Diagnostics;
 using System.Threading;
-using Ionic.Zip;
+using System.Diagnostics;
+using System.Threading.Tasks;
+using System.Collections.Generic;
+using System.Security.Cryptography;
+using System.Text.RegularExpressions;
+
 
 public class HTML5Platform : Platform
 {
-    public HTML5Platform()
+	public HTML5Platform()
 		: base(UnrealTargetPlatform.HTML5)
 	{
 	}
 
 	public override void Package(ProjectParams Params, DeploymentContext SC, int WorkingCL)
 	{
-        Log("Package {0}", Params.RawProjectPath);
-        
-        string PackagePath = Path.Combine(Path.GetDirectoryName(Params.RawProjectPath), "Binaries", "HTML5");
-        if (!Directory.Exists(PackagePath))
-        {
-            Directory.CreateDirectory(PackagePath);
-        }
-        string FinalDataLocation = Path.Combine(PackagePath, Params.ShortProjectName) + ".data";
+		Log("Package {0}", Params.RawProjectPath);
+		
+		string PackagePath = Path.Combine(Path.GetDirectoryName(Params.RawProjectPath), "Binaries", "HTML5");
+		if (!Directory.Exists(PackagePath))
+		{
+			Directory.CreateDirectory(PackagePath);
+		}
+		string FinalDataLocation = Path.Combine(PackagePath, Params.ShortProjectName) + ".data";
 
-        var ConfigCache = new UnrealBuildTool.ConfigCacheIni(UnrealTargetPlatform.HTML5, "Engine", Path.GetDirectoryName(Params.RawProjectPath), CommandUtils.CombinePaths(CommandUtils.CmdEnv.LocalRoot, "Engine"));
+		var ConfigCache = new UnrealBuildTool.ConfigCacheIni(UnrealTargetPlatform.HTML5, "Engine", Path.GetDirectoryName(Params.RawProjectPath), CommandUtils.CombinePaths(CommandUtils.CmdEnv.LocalRoot, "Engine"));
 
-        if (HTMLPakAutomation.CanCreateMapPaks(Params))
-        {
-            HTMLPakAutomation PakAutomation = new HTMLPakAutomation(Params, SC);
+		if (HTMLPakAutomation.CanCreateMapPaks(Params))
+		{
+			HTMLPakAutomation PakAutomation = new HTMLPakAutomation(Params, SC);
 
-            // Create Necessary Paks. 
-            PakAutomation.CreateEnginePak();
-            PakAutomation.CreateGamePak();
-            PakAutomation.CreateContentDirectoryPak();
+			// Create Necessary Paks. 
+			PakAutomation.CreateEnginePak();
+			PakAutomation.CreateGamePak();
+			PakAutomation.CreateContentDirectoryPak();
 
-            // Create Emscripten Package from Necessary Paks. - This will be the VFS. 
-            PakAutomation.CreateEmscriptenDataPackage(PackagePath, FinalDataLocation);
+			// Create Emscripten Package from Necessary Paks. - This will be the VFS. 
+			PakAutomation.CreateEmscriptenDataPackage(PackagePath, FinalDataLocation);
 
-            // Create All Map Paks which  will be downloaded on the fly. 
-            PakAutomation.CreateMapPak();
+			// Create All Map Paks which  will be downloaded on the fly. 
+			PakAutomation.CreateMapPak();
 
-            // Create Delta Paks if setup.
-            List<string> Paks = new List<string>();
-            ConfigCache.GetArray("/Script/HTML5PlatformEditor.HTML5TargetSettings", "LevelTransitions", out Paks);
+			// Create Delta Paks if setup.
+			List<string> Paks = new List<string>();
+			ConfigCache.GetArray("/Script/HTML5PlatformEditor.HTML5TargetSettings", "LevelTransitions", out Paks);
 
-            if (Paks != null)
-            {
-                foreach (var Pak in Paks)
-                {
-                    var Matched = Regex.Matches(Pak, "\"[^\"]+\"", RegexOptions.IgnoreCase);
-                    string MapFrom = Path.GetFileNameWithoutExtension(Matched[0].ToString().Replace("\"", ""));
-                    string MapTo = Path.GetFileNameWithoutExtension(Matched[1].ToString().Replace("\"", ""));
-                    PakAutomation.CreateDeltaMapPaks(MapFrom, MapTo);
-                }
-            }
-        }
-        else
-        {
-            // we need to operate in the root
-            using (new PushedDirectory(Path.Combine(Params.BaseStageDirectory, "HTML5")))
-            {
-                string PythonPath = HTML5SDKInfo.PythonPath();
-                string PackagerPath = HTML5SDKInfo.EmscriptenPackager();
+			if (Paks != null)
+			{
+				foreach (var Pak in Paks)
+				{
+					var Matched = Regex.Matches(Pak, "\"[^\"]+\"", RegexOptions.IgnoreCase);
+					string MapFrom = Path.GetFileNameWithoutExtension(Matched[0].ToString().Replace("\"", ""));
+					string MapTo = Path.GetFileNameWithoutExtension(Matched[1].ToString().Replace("\"", ""));
+					PakAutomation.CreateDeltaMapPaks(MapFrom, MapTo);
+				}
+			}
+		}
+		else
+		{
+			// we need to operate in the root
+			string PythonPath = HTML5SDKInfo.Python();
+			string PackagerPath = HTML5SDKInfo.EmscriptenPackager();
 
-                string CmdLine = string.Format("\"{0}\" \"{1}\" --preload . --js-output=\"{1}.js\"", PackagerPath, FinalDataLocation);
-                RunAndLog(CmdEnv, PythonPath, CmdLine);
-            }
-        }
+			using (new PushedDirectory(Path.Combine(Params.BaseStageDirectory, "HTML5")))
+			{
+				string CmdLine = string.Format("\"{0}\" \"{1}\" --preload . --js-output=\"{1}.js\"", PackagerPath, FinalDataLocation);
+				RunAndLog(CmdEnv, PythonPath, CmdLine);
+			}
+		}
 
-        // copy the "Executable" to the package directory
-        string GameExe = Path.GetFileNameWithoutExtension(Params.ProjectGameExeFilename);
-        if (Params.ClientConfigsToBuild[0].ToString() != "Development")
-        {
-            GameExe += "-HTML5-" + Params.ClientConfigsToBuild[0].ToString();
-        }
-        GameExe += ".js";
+		// copy the "Executable" to the package directory
+		string GameExe = Path.GetFileNameWithoutExtension(Params.ProjectGameExeFilename);
+		if (Params.ClientConfigsToBuild[0].ToString() != "Development")
+		{
+			GameExe += "-HTML5-" + Params.ClientConfigsToBuild[0].ToString();
+		}
+		GameExe += ".js";
 			
         // ensure the ue4game binary exists, if applicable
         string FullGameExePath = Path.Combine(Path.GetDirectoryName(Params.ProjectGameExeFilename), GameExe);
         if (!SC.IsCodeBasedProject && !FileExists_NoExceptions(FullGameExePath))
         {
 	        Log("Failed to find game application " + FullGameExePath);
-	        AutomationTool.ErrorReporter.Error("Stage Failed.", (int)AutomationTool.ErrorCodes.Error_MissingExecutable);
-	        throw new AutomationException("Could not find application {0}. You may need to build the UE4 project with your target configuration and platform.", FullGameExePath);
+	        throw new AutomationException(ErrorCodes.Error_MissingExecutable, "Stage Failed. Could not find application {0}. You may need to build the UE4 project with your target configuration and platform.", FullGameExePath);
         }
 
-        if (Path.Combine(Path.GetDirectoryName(Params.ProjectGameExeFilename), GameExe) != Path.Combine(PackagePath, GameExe))
-        {
-            File.Copy(Path.Combine(Path.GetDirectoryName(Params.ProjectGameExeFilename), GameExe), Path.Combine(PackagePath, GameExe), true);
-            File.Copy(Path.Combine(Path.GetDirectoryName(Params.ProjectGameExeFilename), GameExe) + ".mem", Path.Combine(PackagePath, GameExe) + ".mem", true);
+		if (Path.Combine(Path.GetDirectoryName(Params.ProjectGameExeFilename), GameExe) != Path.Combine(PackagePath, GameExe))
+		{
+			File.Copy(Path.Combine(Path.GetDirectoryName(Params.ProjectGameExeFilename), GameExe), Path.Combine(PackagePath, GameExe), true);
+			File.Copy(Path.Combine(Path.GetDirectoryName(Params.ProjectGameExeFilename), GameExe) + ".mem", Path.Combine(PackagePath, GameExe) + ".mem", true);
 			File.Copy(Path.Combine(Path.GetDirectoryName(Params.ProjectGameExeFilename), GameExe) + ".symbols", Path.Combine(PackagePath, GameExe) + ".symbols", true);
-        }
+		}
 
-        File.SetAttributes(Path.Combine(PackagePath, GameExe), FileAttributes.Normal);
-        File.SetAttributes(Path.Combine(PackagePath, GameExe) + ".mem", FileAttributes.Normal);
+		File.SetAttributes(Path.Combine(PackagePath, GameExe), FileAttributes.Normal);
+		File.SetAttributes(Path.Combine(PackagePath, GameExe) + ".mem", FileAttributes.Normal);
 		File.SetAttributes(Path.Combine(PackagePath, GameExe) + ".symbols", FileAttributes.Normal);
 
 
-        // put the HTML file to the package directory
+		// put the HTML file to the package directory
+		string TemplateFileName = "GameX.html.template"; 
+		string TemplateFile = Path.Combine(CombinePaths(CmdEnv.LocalRoot, "Engine"), "Build", "HTML5", TemplateFileName);
+		string OutputFile = Path.Combine(PackagePath, (Params.ClientConfigsToBuild[0].ToString() != "Development" ? (Params.ShortProjectName + "-HTML5-" + Params.ClientConfigsToBuild[0].ToString()) : Params.ShortProjectName)) + ".html";
 
-        bool UseExperimentalTemplate = false;
-        ConfigCache.GetBool("/Script/HTML5PlatformEditor.HTML5TargetSettings", "UseExperimentalTemplate", out UseExperimentalTemplate);
-        string TemplateFileName = UseExperimentalTemplate ? "GameX.html.template" : "Game.html.template";
+		// find Heap Size.
+		ulong HeapSize;
 
-        string TemplateFile = Path.Combine(CombinePaths(CmdEnv.LocalRoot, "Engine"), "Build", "HTML5", TemplateFileName);
-        string OutputFile = Path.Combine(PackagePath, (Params.ClientConfigsToBuild[0].ToString() != "Development" ? (Params.ShortProjectName + "-HTML5-" + Params.ClientConfigsToBuild[0].ToString()) : Params.ShortProjectName)) + ".html";
+		int ConfigHeapSize = 0;
+		// Valuer set by Editor UI
+		var bGotHeapSize = ConfigCache.GetInt32("/Script/HTML5PlatformEditor.HTML5TargetSettings", "HeapSize" + Params.ClientConfigsToBuild[0].ToString(), out ConfigHeapSize);
 
-        // find Heap Size.
-        ulong HeapSize;
+		// Fallback if the previous method failed
+		if (!bGotHeapSize && !ConfigCache.GetInt32("BuildSettings", "HeapSize" + Params.ClientConfigsToBuild[0].ToString(), out ConfigHeapSize)) // in Megs.
+		{
+			// we couldn't find a per config heap size, look for a common one.
+			if (!ConfigCache.GetInt32("BuildSettings", "HeapSize", out ConfigHeapSize))
+			{
+				ConfigHeapSize = Params.IsCodeBasedProject ? 1024 : 512;
+				Log("Could not find Heap Size setting in .ini for Client config {0}", Params.ClientConfigsToBuild[0].ToString());
+			}
+		}
 
-        int ConfigHeapSize = 0;
-        // Valuer set by Editor UI
-        var bGotHeapSize = ConfigCache.GetInt32("/Script/HTML5PlatformEditor.HTML5TargetSettings", "HeapSize" + Params.ClientConfigsToBuild[0].ToString(), out ConfigHeapSize);
-
-        // Fallback if the previous method failed
-        if (!bGotHeapSize && !ConfigCache.GetInt32("BuildSettings", "HeapSize" + Params.ClientConfigsToBuild[0].ToString(), out ConfigHeapSize)) // in Megs.
-        {
-            // we couldn't find a per config heap size, look for a common one.
-            if (!ConfigCache.GetInt32("BuildSettings", "HeapSize", out ConfigHeapSize))
-            {
-                ConfigHeapSize = Params.IsCodeBasedProject ? 1024 : 512;
-                Log("Could not find Heap Size setting in .ini for Client config {0}", Params.ClientConfigsToBuild[0].ToString());
-            }
-        }
-
-        HeapSize = (ulong)ConfigHeapSize * 1024L * 1024L; // convert to bytes.
-        Log("Setting Heap size to {0} Mb ", ConfigHeapSize);
+		HeapSize = (ulong)ConfigHeapSize * 1024L * 1024L; // convert to bytes.
+		Log("Setting Heap size to {0} Mb ", ConfigHeapSize);
 
 
-        GenerateFileFromTemplate(TemplateFile, OutputFile, Params.ShortProjectName, Params.ClientConfigsToBuild[0].ToString(), Params.StageCommandline, !Params.IsCodeBasedProject, HeapSize);
+		GenerateFileFromTemplate(TemplateFile, OutputFile, Params.ShortProjectName, Params.ClientConfigsToBuild[0].ToString(), Params.StageCommandline, !Params.IsCodeBasedProject, HeapSize);
 
-        string JSDir = Path.Combine(CombinePaths(CmdEnv.LocalRoot, "Engine"), "Build", "HTML5");
-        string OutDir = PackagePath;
+		string JSDir = Path.Combine(CombinePaths(CmdEnv.LocalRoot, "Engine"), "Build", "HTML5");
+		string OutDir = PackagePath;
 
 		// Gather utlity .js files and combine into one file
 		string[] UtilityJavaScriptFiles = Directory.GetFiles(JSDir, "*.js");
@@ -149,22 +149,23 @@ public class HTML5Platform : Platform
 			File.AppendAllText(DestinationFile, Data);
 		}
 
-		// Compress all files. 
-
+		// Compress all files. These are independent tasks which can be threaded. 
+		Task[] CompressionTasks = new Task[6];
 		//data file.
-		CompressFile(FinalDataLocation,FinalDataLocation + ".gz");
+		CompressionTasks[0] = Task.Factory.StartNew( () => CompressFile(FinalDataLocation, FinalDataLocation + ".gz"));		
 		// data file .js driver.
-		CompressFile(FinalDataLocation + ".js" , FinalDataLocation + ".js.gz");
+		CompressionTasks[1] = Task.Factory.StartNew( () => CompressFile(FinalDataLocation + ".js" , FinalDataLocation + ".js.gz"));
 		// main js.
-		CompressFile(Path.Combine(PackagePath, GameExe), Path.Combine(PackagePath, GameExe) + ".gz");
+		CompressionTasks[2] = Task.Factory.StartNew(() => CompressFile(Path.Combine(PackagePath, GameExe), Path.Combine(PackagePath, GameExe) + ".gz"));
 		// mem init file.
-		CompressFile(Path.Combine(PackagePath, GameExe) + ".mem", Path.Combine(PackagePath, GameExe) + ".mem.gz");
+		CompressionTasks[3] = Task.Factory.StartNew(() => CompressFile(Path.Combine(PackagePath, GameExe) + ".mem", Path.Combine(PackagePath, GameExe) + ".mem.gz"));
 		// symbols file.
-		CompressFile(Path.Combine(PackagePath, GameExe) + ".symbols", Path.Combine(PackagePath, GameExe) + ".symbols.gz");
+		CompressionTasks[4] = Task.Factory.StartNew(() => CompressFile(Path.Combine(PackagePath, GameExe) + ".symbols", Path.Combine(PackagePath, GameExe) + ".symbols.gz"));
 		// Utility 
-		CompressFile(OutDir + "/Utility.js", OutDir + "/Utility.js.gz");
+		CompressionTasks[5] = Task.Factory.StartNew(() => CompressFile(OutDir + "/Utility.js", OutDir + "/Utility.js.gz"));
 
-        PrintRunTime();
+		Task.WaitAll(CompressionTasks);
+		PrintRunTime();
 	}
 
 	void CompressFile(string Source, string Destination)
@@ -202,10 +203,10 @@ public class HTML5Platform : Platform
 		}
 	}
 
-    public override bool RequiresPackageToDeploy
-    {
-        get { return true; }
-    }
+	public override bool RequiresPackageToDeploy
+	{
+		get { return true; }
+	}
 
 
 	protected void GenerateFileFromTemplate(string InTemplateFile, string InOutputFile, string InGameName, string InGameConfiguration, string InArguments, bool IsContentOnly, ulong HeapSize)
@@ -243,7 +244,7 @@ public class HTML5Platform : Platform
 					for (int i = 0; i < Arguments.Length - 1; ++i)
 					{
 						ArgumentString += "'";
-			   		    ArgumentString += Arguments[i];
+						ArgumentString += Arguments[i];
 						ArgumentString += "'";
 						ArgumentString += ",' ',";
 					}
@@ -332,55 +333,18 @@ public class HTML5Platform : Platform
 			}	
 		}
 
+		UploadToS3(SC);
 	}
 
 	public override ProcessResult RunClient(ERunOptions ClientRunFlags, string ClientApp, string ClientCmdLine, ProjectParams Params)
 	{
 		// look for browser
-		var ConfigCache = new UnrealBuildTool.ConfigCacheIni(UnrealTargetPlatform.HTML5, "Engine", Path.GetDirectoryName(Params.RawProjectPath), CombinePaths(CmdEnv.LocalRoot, "Engine"));
-		bool ok = false;
-		List<string> Devices;
-		string browserPath = "";
-		string DeviceName = Params.Device.Split('@')[1];
-		DeviceName = DeviceName.Substring(0, DeviceName.LastIndexOf(" on "));
-
-		if (ConfigCache.GetArray("/Script/HTML5PlatformEditor.HTML5SDKSettings", "DeviceMap", out Devices))
-		{
-			foreach (var Dev in Devices)
-			{
-				var Matched = Regex.Match(Dev, "\\(DeviceName=\"(.*)\",DevicePath=\\(FilePath=\"(.*)\"\\)\\)", RegexOptions.IgnoreCase);
-				if (Matched.Success && Matched.Groups[1].ToString() == DeviceName)
-				{
-					browserPath = Matched.Groups[2].ToString();
-					ok = true;
-					break;
-				}
-			}
-		}
-
-		if (!ok && HTML5SDKInfo.bAllowFallbackSDKSettings)
-		{
-			string DeviceSection;
-
-			if (Utils.IsRunningOnMono)
-			{
-				DeviceSection = "HTML5DevicesMac";
-			}
-			else
-			{
-				DeviceSection = "HTML5DevicesWindows";
-			}
-
-			ok = ConfigCache.GetString(DeviceSection, DeviceName, out browserPath);
-		}
-
-		if (!ok)
-		{
-			throw new System.Exception("Incorrect browser configuration in HTML5Engine.ini ");
-		}
+		string BrowserPath = Params.Device.Replace("HTML5@", "");
 
 		// open the webpage
 		Int32 ServerPort = 8000;
+
+		var ConfigCache = new UnrealBuildTool.ConfigCacheIni(UnrealTargetPlatform.HTML5, "Engine", Path.GetDirectoryName(Params.RawProjectPath), CombinePaths(CmdEnv.LocalRoot, "Engine"));
 		ConfigCache.GetInt32("/Script/HTML5PlatformEditor.HTML5TargetSettings", "DeployServerPort", out ServerPort);
 		string WorkingDirectory = Path.GetDirectoryName(ClientApp);
 		string url = Path.GetFileName(ClientApp) +".html";
@@ -404,12 +368,12 @@ public class HTML5Platform : Platform
 		}
 		else
 		{
-			url = String.Format("http://{2}:{0}/{1}", ServerPort, url, Environment.MachineName);
+			url = String.Format("http://localhost:{0}/{1}", ServerPort, url);
 		}
 
 		// Check HTML5LaunchHelper source for command line args
 
-		var LowerBrowserPath = browserPath.ToLower();
+		var LowerBrowserPath = BrowserPath.ToLower();
 		var ProfileDirectory = Path.Combine(Utils.GetUserSettingDirectory(), "UE4_HTML5", "user");
 
 		string BrowserCommandline = url; 
@@ -423,13 +387,12 @@ public class HTML5Platform : Platform
 			BrowserCommandline += "  " +  String.Format("-no-remote -profile \"{0}\"", Path.Combine(ProfileDirectory, "firefox"));
 		}
 
-		string LauncherArguments = string.Format( " -Browser=\"{0}\" + -BrowserCommandLine=\"{1}\" -ServerPort=\"{2}\" -ServerRoot=\"{3}\" ", new object[] { browserPath,BrowserCommandline,ServerPort,WorkingDirectory });
+		string LauncherArguments = string.Format(" -Browser=\"{0}\" + -BrowserCommandLine=\"{1}\" -ServerPort=\"{2}\" -ServerRoot=\"{3}\" ", new object[] { BrowserPath, BrowserCommandline, ServerPort, WorkingDirectory });
 
 		var LaunchHelperPath = CombinePaths(CmdEnv.LocalRoot, "Engine/Binaries/DotNET/HTML5LaunchHelper.exe");
 		ProcessResult BrowserProcess = Run(LaunchHelperPath, LauncherArguments, null, ClientRunFlags | ERunOptions.NoWaitForExit);
 	
 		return BrowserProcess;
-
 	}
 
 	public override string GetCookPlatform(bool bDedicatedServer, bool bIsClientOnly, string CookFlavor)
@@ -437,27 +400,27 @@ public class HTML5Platform : Platform
 		return "HTML5";
 	}
 
-    public override string GetCookExtraCommandLine(ProjectParams Params)
-    {
-        return HTMLPakAutomation.CanCreateMapPaks(Params) ? " -GenerateDependenciesForMaps " : ""; 
-    }
+	public override string GetCookExtraCommandLine(ProjectParams Params)
+	{
+		return HTMLPakAutomation.CanCreateMapPaks(Params) ? " -GenerateDependenciesForMaps " : ""; 
+	}
 
-    public override List<string> GetCookExtraMaps()
-    {
-        var Maps = new List<string>();
-        Maps.Add("/Engine/Maps/Entry");
-        return Maps; 
-    }
+	public override List<string> GetCookExtraMaps()
+	{
+		var Maps = new List<string>();
+		Maps.Add("/Engine/Maps/Entry");
+		return Maps; 
+	}
 
 	public override bool DeployPakInternalLowerCaseFilenames()
 	{
 		return false;
 	}
 
-    public override PakType RequiresPak(ProjectParams Params)
-    {
-        return HTMLPakAutomation.CanCreateMapPaks(Params) ? PakType.Never : PakType.Always;
-    }
+	public override PakType RequiresPak(ProjectParams Params)
+	{
+		return HTMLPakAutomation.CanCreateMapPaks(Params) ? PakType.Never : PakType.Always;
+	}
 
 	public override string GetPlatformPakCommandLine()
 	{
@@ -493,4 +456,132 @@ public class HTML5Platform : Platform
 		return ExecutableNames;
 	}
 	#endregion
+
+#region AMAZON S3 
+	public void UploadToS3(DeploymentContext SC)
+	{
+		ConfigCacheIni Ini = new ConfigCacheIni(SC.StageTargetPlatform.PlatformType, "Engine", Path.GetDirectoryName(SC.RawProjectPath));
+		bool Upload = false;
+
+		string KeyId = "";
+		string AccessKey = "";
+		string BucketName = "";
+		string FolderName = "";
+
+		if (Ini.GetBool("/Script/HTML5PlatformEditor.HTML5TargetSettings", "UploadToS3", out Upload))
+		{
+			if (!Upload)
+				return;
+		}
+		else
+		{
+			return; 
+		}
+		bool AmazonIdentity = Ini.GetString("/Script/HTML5PlatformEditor.HTML5TargetSettings", "S3KeyID", out KeyId) &&
+								Ini.GetString("/Script/HTML5PlatformEditor.HTML5TargetSettings", "S3SecretAccessKey", out AccessKey) &&
+								Ini.GetString("/Script/HTML5PlatformEditor.HTML5TargetSettings", "S3BucketName", out BucketName) &&
+								Ini.GetString("/Script/HTML5PlatformEditor.HTML5TargetSettings", "S3FolderName", out FolderName);
+
+		if ( !AmazonIdentity )
+		{
+			Log("Amazon S3 Incorrectly configured"); 
+			return; 
+		}
+
+		if ( FolderName == "" )
+		{
+			FolderName = SC.ShortProjectName;
+		}
+
+		List<Task> UploadTasks = new List<Task>();
+		foreach(KeyValuePair<string, string> Entry in SC.ArchivedFiles)
+		{
+			FileInfo Info = new FileInfo(Entry.Key);
+			UploadTasks.Add (Task.Factory.StartNew(() => UploadToS3Worker(Info,KeyId,AccessKey,BucketName,FolderName))); 
+		}
+
+		Task.WaitAll(UploadTasks.ToArray());
+		Log("Upload Tasks finished.");
+	}
+
+	private static IDictionary<string, string> MimeTypeMapping = new Dictionary<string, string>(StringComparer.InvariantCultureIgnoreCase) 
+		{
+			{ ".html", "text/html"},
+			{ ".js.gz", "application/x-javascript" },  // upload compressed javascript. 
+			{ ".data.gz", "appication/octet-stream"}
+		}; 
+
+	public void UploadToS3Worker(FileInfo Info, string KeyId, string AccessKey, string BucketName, string FolderName )
+	{
+			Log(" Uploading " + Info.Name); 
+
+			// force upload files even if the timestamps haven't changed. 
+			string TimeStamp = string.Format("{0:r}", DateTime.UtcNow);
+			string ContentType = ""; 
+			if (MimeTypeMapping.ContainsKey(Info.Extension))
+			{
+				ContentType = MimeTypeMapping[Info.Extension];
+			}
+			else 
+			{
+				// default
+				ContentType = "application/octet-stream";
+			}
+
+		
+			// URL to put things. 
+			string URL = "http://" + BucketName + ".s3.amazonaws.com/" + FolderName + "/" + Info.Name;
+
+			HttpWebRequest Request = (HttpWebRequest)WebRequest.Create(URL); 
+
+			// Upload. 
+			Request.Method = "PUT";
+			Request.Headers["x-amz-date"] = TimeStamp;
+			Request.Headers["x-amz-acl"] = "public-read"; // we probably want to make public read by default. 
+
+			// set correct content encoding for compressed javascript. 
+			if ( Info.Extension == ".gz")
+			{
+				Request.Headers["Content-Encoding"] = "gzip";
+			}
+
+			Request.ContentType = ContentType;
+			Request.ContentLength = Info.Length;
+
+			//http://docs.aws.amazon.com/AmazonS3/latest/dev/RESTAuthentication.html
+			// Find Base64Encoded data. 
+			UTF8Encoding EncodingMethod = new UTF8Encoding();
+			HMACSHA1 Signature = new HMACSHA1 { Key = EncodingMethod.GetBytes(AccessKey) };
+			// don't change this string.
+			string RequestString = "PUT\n\n" + ContentType + "\n\nx-amz-acl:public-read\nx-amz-date:" + TimeStamp + "\n/"+ BucketName + "/" + FolderName + "/" + Info.Name; 
+			Byte[] ComputedHash = Signature.ComputeHash(EncodingMethod.GetBytes(RequestString));
+			var Base64Encoded = Convert.ToBase64String(ComputedHash);
+			
+			// final amz auth header. 
+			Request.Headers["Authorization"] = "AWS " + KeyId + ":" + Base64Encoded;
+
+			try
+			{
+				// may fail for really big stuff. YMMV. May need Multi part approach, we will see. 
+				Byte[] FileData = File.ReadAllBytes(Info.FullName);
+				var requestStream = Request.GetRequestStream();
+				requestStream.Write(FileData, 0, FileData.Length);
+				requestStream.Close();
+
+				using (var response = Request.GetResponse() as HttpWebResponse)
+				{
+					var reader = new StreamReader(response.GetResponseStream());
+					reader.ReadToEnd();
+				}
+			}
+			catch (Exception ex)
+			{
+				Log("Could not connect to S3, incorrect S3 Keys? " + ex.ToString());
+				throw ex;
+			}
+
+			Log(Info.Name + " has been uploaded " ); 
+	}
+
+#endregion 
 }

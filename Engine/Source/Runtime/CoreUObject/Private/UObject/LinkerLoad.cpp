@@ -2739,7 +2739,7 @@ void FLinkerLoad::LoadAllObjects( bool bForcePreload )
 {
 #if WITH_EDITOR
 	FScopedSlowTask SlowTask(ExportMap.Num(), NSLOCTEXT("Core", "LinkerLoad_LoadingObjects", "Loading Objects"), ShouldReportProgress());
-	SlowTask.bVisibleOnUI = false;
+	SlowTask.Visibility = ESlowTaskVisibility::Invisible;
 #endif
 
 #if USE_DEFERRED_DEPENDENCY_CHECK_VERIFICATION_TESTS
@@ -3520,16 +3520,22 @@ UObject* FLinkerLoad::CreateExport( int32 Index )
 			Export.bExportLoadFailed = true;
 
 			// otherwise, return NULL and let the calling code determine what to do
-			FString OuterName = Export.OuterIndex.IsNull() ? LinkerRoot->GetFullName() : GetFullImpExpName(Export.OuterIndex);
+			const FString OuterName = Export.OuterIndex.IsNull() ? LinkerRoot->GetFullName() : GetFullImpExpName(Export.OuterIndex);
+
+			FFormatNamedArguments Arguments;
+			Arguments.Add(TEXT("ObjectName"), FText::FromName(Export.ObjectName));
+			Arguments.Add(TEXT("OuterName"), FText::FromString(OuterName));
+
 			if (ParentRedirector)
 			{
-				UE_LOG(LogLinker, Warning, TEXT("CreateExport: Failed to load Outer for resource because it is a redirector '%s': %s"), *Export.ObjectName.ToString(), *OuterName);
+				LoadErrors.Warning(FText::Format(LOCTEXT("CreateExportFailedToLoadOuterIsRedirector", "CreateExport: Failed to load Outer for resource because it is a redirector '{ObjectName}': {OuterName}"), Arguments));
 			}
 			else
 			{
-				UE_LOG(LogLinker, Warning, TEXT("CreateExport: Failed to load Outer for resource '%s': %s"), *Export.ObjectName.ToString(), *OuterName);
+				LoadErrors.Warning(FText::Format(LOCTEXT("CreateExportFailedToLoadOuter", "CreateExport: Failed to load Outer for resource '{ObjectName}': {OuterName}"), Arguments));
 			}
-			return NULL;
+
+			return nullptr;
 		}
 
 		// Find the Archetype object for the one we are loading.

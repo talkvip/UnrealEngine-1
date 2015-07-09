@@ -1,6 +1,7 @@
 // Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
 
 #include "AIModulePrivate.h"
+#include "Engine/Canvas.h"
 #include "DebugRenderSceneProxy.h"
 #include "EnvironmentQuery/EQSRenderingComponent.h"
 #include "EnvironmentQuery/EQSQueryResultSourceInterface.h"
@@ -268,6 +269,12 @@ void FEQSSceneProxy::DrawDebugLabels(UCanvas* Canvas, APlayerController* PC)
 	if ( !ActorOwner
 		 || (ActorOwner->IsSelected() == false && bDrawOnlyWhenSelected == true)
 		 || (QueryDataSource && QueryDataSource->GetShouldDebugDrawLabels() == false))
+	{
+		return;
+	}
+
+	// little hacky test but it's the only way to remove text rendering from bad worlds, when using UDebugDrawService for it
+	if (Canvas && Canvas->SceneView && Canvas->SceneView->Family && Canvas->SceneView->Family->Scene && Canvas->SceneView->Family->Scene->GetWorld() != ActorOwner->GetWorld())
 	{
 		return;
 	}

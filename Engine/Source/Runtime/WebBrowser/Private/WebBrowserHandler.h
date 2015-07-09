@@ -11,7 +11,6 @@
 #pragma push_macro("OVERRIDE")
 #undef OVERRIDE // cef headers provide their own OVERRIDE macro
 #include "include/cef_client.h"
-#include "include/wrapper/cef_message_router.h"
 #pragma pop_macro("OVERRIDE")
 
 #if PLATFORM_WINDOWS
@@ -20,6 +19,7 @@
 
 
 class FWebBrowserWindow;
+class FWebBrowserPopupFeatures;
 
 
 /**
@@ -33,7 +33,6 @@ class FWebBrowserHandler
 	, public CefRenderHandler
 	, public CefRequestHandler
 	, public CefKeyboardHandler
-	, public CefMessageRouterBrowserSide::Handler
 {
 public:
 
@@ -55,6 +54,16 @@ public:
 	 * @param InBrowserWindow The parent browser window.
 	 */
 	void SetBrowserWindowParent(TSharedPtr<FWebBrowserWindow> InBrowserWindow);
+
+	/**
+	 * Sets the browser window features and settings for popups which will be passed along when creating the new window.
+	 *
+	 * @param InPopupFeatures The popup features and settings for the window.
+	 */
+	void SetPopupFeatures(const TSharedPtr<FWebBrowserPopupFeatures>& InPopupFeatures)
+	{
+		BrowserPopupFeatures = InPopupFeatures;
+	}
 
 	/** Sets whether to show messages on loading errors. */
 	void SetShowErrorMessage(bool InShowErrorMessage)
@@ -115,6 +124,7 @@ public:
 	// CefLifeSpanHandler Interface
 
 	virtual void OnAfterCreated(CefRefPtr<CefBrowser> Browser) override;
+	virtual bool DoClose(CefRefPtr<CefBrowser> Browser) override;
 	virtual void OnBeforeClose(CefRefPtr<CefBrowser> Browser) override;
 	virtual bool OnBeforePopup(CefRefPtr<CefBrowser> Browser, 
 		CefRefPtr<CefFrame> Frame, 
@@ -173,19 +183,6 @@ public:
 		CefRefPtr<CefRequest> Request,
 		bool IsRedirect) override;
 	virtual CefRefPtr<CefResourceHandler> GetResourceHandler( CefRefPtr<CefBrowser> Browser, CefRefPtr< CefFrame > Frame, CefRefPtr<CefRequest> Request ) override;
-public:
-	// CefMessageRouterBrowserSide::Handler Interface
-	
-	virtual bool OnQuery(CefRefPtr<CefBrowser> Browser,
-		CefRefPtr<CefFrame> Frame,
-		int64 QueryId,
-		const CefString& Request,
-		bool Persistent,
-		CefRefPtr<CefMessageRouterBrowserSide::Callback> Callback) override;
-
-	virtual void OnQueryCanceled(CefRefPtr<CefBrowser> Browser,
-		CefRefPtr<CefFrame> Frame,
-		int64 QueryId) override;
 
 public:
 	// CefKeyboardHandler interface
@@ -201,11 +198,11 @@ private:
 	/** Weak Pointer to the parent web browser window */
 	TWeakPtr<FWebBrowserWindow> BrowserWindowParentPtr;
 
+	/** Stores popup window features and settings */
+	TSharedPtr<FWebBrowserPopupFeatures> BrowserPopupFeatures;
+
 	/** Whether to show an error message in case of loading errors. */
 	bool ShowErrorMessage;
-
-	/** The message router is used as a part of a generic message api between Javascript in the render process and the application process */
-	CefRefPtr<CefMessageRouterBrowserSide> MessageRouter;
 
 	// Include the default reference counting implementation.
 	IMPLEMENT_REFCOUNTING(FWebBrowserHandler);

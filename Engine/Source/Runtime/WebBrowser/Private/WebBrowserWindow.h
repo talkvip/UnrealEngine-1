@@ -115,7 +115,7 @@ public:
 	virtual void Reload() override;
 	virtual void StopLoad() override;
 	virtual void ExecuteJavascript(const FString& Script) override;
-	virtual void CloseBrowser() override;
+	virtual void CloseBrowser(bool bForce) override;
 	virtual void BindUObject(const FString& Name, UObject* Object, bool bIsPermanent = true) override;
 	virtual void UnbindUObject(const FString& Name, UObject* Object = nullptr, bool bIsPermanent = true) override;
 
@@ -149,16 +149,6 @@ public:
 		return NeedsRedrawEvent;
 	}
 	
-	virtual FONJSQueryReceived& OnJSQueryReceived() override
-	{
-		return JSQueryReceivedDelegate;
-	}
-
-	virtual FONJSQueryCanceled& OnJSQueryCanceled() override
-	{
-		return JSQueryCanceledDelegate;
-	}
-
 	virtual FOnBeforeBrowse& OnBeforeBrowse() override
 	{
 		return BeforeBrowseDelegate;
@@ -172,6 +162,11 @@ public:
 	virtual FOnCreateWindow& OnCreateWindow() override
 	{
 		return CreateWindowDelegate;
+	}
+
+	virtual FOnCloseWindow& OnCloseWindow() override
+	{
+		return CloseWindowDelegate;
 	}
 
 	virtual FCursorReply OnCursorQuery( const FGeometry& MyGeometry, const FPointerEvent& CursorEvent ) override
@@ -261,25 +256,6 @@ private:
 	bool OnProcessMessageReceived(CefRefPtr<CefBrowser> Browser, CefProcessId SourceProcess, CefRefPtr<CefProcessMessage> Message);
 
 	/**
-	 * Called when JavaScript code sends a message to the UE process.
-	 * Needs to return true or false to tell CEF wether the query is being handled by user code or not.
-	 *
-	 * @param QueryId A unique id for the query. Used to refer to it in OnQueryCanceled.
-	 * @param Request The query string itself as passed in from the JS code.
-	 * @param Persistent Is this a persistent query or not. If not, client code expects the callback to be invoked only once, wheras persistent queries are terminated by invoking Failure, Success can be invoked multiple times until then.
-	 * @param Callback A handle to pass data back to the JS code. 
-	 */
-	bool OnQuery(int64 QueryId, const CefString& Request, bool Persistent, CefRefPtr<CefMessageRouterBrowserSide::Callback> Callback);
-
-	/**
-	 * Called when an outstanding query has been canceled eother explicitly from JS code or implicitly by navigating away from the page containing the code.
-	 * Will only be called if OnQuery has previously returned true for the same QueryId.
-	 *
-	 * @param QueryId A unique id for the query. A handler should use it to locate and remove any handlers that might be in flight.
-	 */
-	void OnQueryCanceled(int64 QueryId);
-	
-	/**
 	 * Called before browser navigation.
 	 *
 	 * @param Browser The CefBrowser for this window.
@@ -306,13 +282,28 @@ private:
 	 * @return true if window creation functionality was provided, false otherwise.  If false, RequestCreateWindow() will always return false.
 	 */
 	bool SupportsNewWindows();
-	
+
 	/** Called when the browser requests a new UI window
 	 *
 	 * @param NewBrowserWindow The web browser window to display in the new UI window.
+	 * @param BrowserPopupFeatures The popup features and settings for the browser window.
 	 * @return true if the UI window was created, false otherwise.
 	 */
-	bool RequestCreateWindow(const TSharedRef<IWebBrowserWindow>& NewBrowserWindow);
+	bool RequestCreateWindow(const TSharedRef<IWebBrowserWindow>& NewBrowserWindow, const TSharedPtr<IWebBrowserPopupFeatures>& BrowserPopupFeatures);
+	
+	//bool SupportsCloseWindows();
+	//bool RequestCloseWindow(const TSharedRef<IWebBrowserWindow>& BrowserWindow);
+
+
+	/**
+	 * Called once the browser begins closing procedures.
+	 */
+	void OnBrowserClosing();
+	
+	/**
+	 * Called once the browser is closed.
+	 */
+	void OnBrowserClosed();
 
 public:
 
@@ -428,14 +419,14 @@ private:
 	/** Delegate for overriding Url contents. */
 	FOnLoadUrl LoadUrlDelegate;
 
-	FONJSQueryReceived JSQueryReceivedDelegate;
-	FONJSQueryCanceled JSQueryCanceledDelegate;
-
 	/** Delegate for notifying that a popup window is attempting to open. */
 	FOnBeforePopupDelegate BeforePopupDelegate;
 	
 	/** Delegate for handaling requests to create new windows. */
 	FOnCreateWindow CreateWindowDelegate;
+
+	/** Delegate for handaling requests to close new windows that were created. */
+	FOnCloseWindow CloseWindowDelegate;
 
 	/** Tracks the current mouse cursor */
 	EMouseCursor::Type Cursor;

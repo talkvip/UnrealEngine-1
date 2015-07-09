@@ -90,7 +90,7 @@ enum EMaterialDomain
 	MD_LightFunction UMETA(DisplayName="Light Function"),
 	/** The material will be used in a custom post process pass. */
 	MD_PostProcess UMETA(DisplayName="Post Process"),
-	/** The material wwill be used for UMG or Slate UI */
+	/** The material will be used for UMG or Slate UI */
 	MD_UI UMETA(DisplayName="User Interface"),
 
 	MD_MAX
@@ -341,7 +341,7 @@ private:
 public:
 
 	/** If BlendMode is BLEND_Masked, the surface is not rendered where OpacityMask < OpacityMaskClipValue. */
-	UPROPERTY(EditAnywhere, Category=Material)
+	UPROPERTY(EditAnywhere, Category=Material, AdvancedDisplay)
 	float OpacityMaskClipValue;
 
 	/** Adds to world position in the vertex shader. */
@@ -393,14 +393,14 @@ public:
 	FScalarMaterialInput PixelDepthOffset;
 
 	/** Indicates that the material should be rendered in the SeparateTranslucency Pass (not affected by DOF, requires bAllowSeparateTranslucency to be set in .ini). */
-	UPROPERTY(EditAnywhere, Category=Translucency, meta=(DisplayName = "Separate Translucency"))
+	UPROPERTY(EditAnywhere, Category=Translucency, meta=(DisplayName = "Separate Translucency"), AdvancedDisplay)
 	uint32 bEnableSeparateTranslucency:1;
 
 	/**
 	 * Indicates that the material should be rendered using responsive anti-aliasing. Improves sharpness of small moving particles such as sparks.
 	 * Only use for small moving features because it will cause aliasing of the background.
 	 */
-	UPROPERTY(EditAnywhere, Category=Translucency, meta=(DisplayName = "Responsive AA"))
+	UPROPERTY(EditAnywhere, Category=Translucency, meta=(DisplayName = "Responsive AA"), AdvancedDisplay)
 	uint32 bEnableResponsiveAA:1;
 
 	/** SSR on translucency */
@@ -469,7 +469,7 @@ public:
 	float TranslucentShadowStartOffset;
 
 	/** Whether to draw on top of opaque pixels even if behind them. This only has meaning for translucency. */
-	UPROPERTY(EditAnywhere, Category=Translucency)
+	UPROPERTY(EditAnywhere, Category=Translucency, AdvancedDisplay)
 	uint32 bDisableDepthTest:1;
 
 	/** Whether to generate spherical normals for particles that use this material. */
@@ -480,7 +480,7 @@ public:
 	 * Whether the material takes a tangent space normal or a world space normal as input.
 	 * (TangentSpace requires extra instructions but is often more convenient).
 	 */
-	UPROPERTY(EditAnywhere, Category=Material)
+	UPROPERTY(EditAnywhere, Category=Material, AdvancedDisplay)
 	uint32 bTangentSpaceNormal:1;
 
 	/**
@@ -674,9 +674,9 @@ public:
 	UPROPERTY()
 	uint32 bCanMaskedBeAssumedOpaque : 1;
 
- 	/** true if Material is masked and uses custom opacity */
- 	UPROPERTY()
- 	uint32 bIsMasked_DEPRECATED:1;
+	/** true if Material is masked and uses custom opacity */
+	UPROPERTY()
+	uint32 bIsMasked_DEPRECATED:1;
 
 	/** true if Material is the preview material used in the material editor. */
 	UPROPERTY(transient, duplicatetransient)
@@ -882,6 +882,14 @@ private:
 	/** to share code for PostLoad() and PostEditChangeProperty(), and UMaterialInstance::InitResources(), needs to be refactored */
 	void PropagateDataToMaterialProxy();
 
+#if WITH_EDITOR
+	/** Marks the material's package dirty in order to make a material usage change set during map load persistent. 
+	  * This couldn't be done during map load as loading cannot mark packages dirty. Invoked manually by the user 
+	  * from the Map Check message log.
+	  */
+	void FixupMaterialUsageAfterLoad();
+#endif
+
 public:
 
 	/** @return the name of the given usage flag. */
@@ -988,6 +996,42 @@ public:
 			if (ExpressionPtr)
 			{
 				OutExpressions.Add(ExpressionPtr);
+			}
+		}
+	}
+
+	/** Get all expressions of the requested type, recursing through any function expressions in the material */
+	template<typename ExpressionType>
+	void GetAllExpressionsInMaterialAndFunctionsOfType(TArray<ExpressionType*>& OutExpressions) const
+	{
+		for (UMaterialExpression* Expression : Expressions)
+		{
+			ExpressionType* ExpressionOfType = Cast<ExpressionType>(Expression);
+			if (ExpressionOfType)
+			{
+				OutExpressions.Add(ExpressionOfType);
+			}
+
+			UMaterialExpressionMaterialFunctionCall* ExpressionFunctionCall = Cast<UMaterialExpressionMaterialFunctionCall>(Expression);
+			if (ExpressionFunctionCall && ExpressionFunctionCall->MaterialFunction)
+			{
+				TArray<UMaterialFunction*> Functions;
+				Functions.Add(ExpressionFunctionCall->MaterialFunction);
+
+				ExpressionFunctionCall->MaterialFunction->GetDependentFunctions(Functions);
+
+				// Handle nested functions
+				for (UMaterialFunction* Function : Functions)
+				{
+					for (UMaterialExpression* FunctionExpression : Function->FunctionExpressions)
+					{
+						ExpressionType* FunctionExpressionOfType = Cast<ExpressionType>(FunctionExpression);
+						if (FunctionExpressionOfType)
+						{
+							OutExpressions.Add(FunctionExpressionOfType);
+						}
+					}
+				}
 			}
 		}
 	}
@@ -1110,12 +1154,12 @@ public:
 	ENGINE_API virtual bool HasDuplicateDynamicParameters(const UMaterialExpression* Expression);
 
 	/**
-	 * Iterate through all of the expression nodes and fix up changed names on
-	 * matching dynamic parameters when a name change occurs.
+	 * Iterate through all of the expression nodes and fix up changed properties on
+	 * matching dynamic parameters when a change occurs.
 	 *
 	 * @param	Expression	The expression dynamic parameter.
 	 */
-	ENGINE_API virtual void UpdateExpressionDynamicParameterNames(const UMaterialExpression* Expression);
+	ENGINE_API virtual void UpdateExpressionDynamicParameters(const UMaterialExpression* Expression);
 
 	/**
 	 * Get the name of a parameter.

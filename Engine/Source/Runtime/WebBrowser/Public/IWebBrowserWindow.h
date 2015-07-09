@@ -10,7 +10,7 @@ struct FPointerEvent;
 class FReply;
 class FCursorReply;
 class FSlateShaderResource;
-
+class IWebBrowserPopupFeatures;
 
 enum class EWebBrowserDocumentState
 {
@@ -19,8 +19,6 @@ enum class EWebBrowserDocumentState
 	Loading,
 	NoDocument
 };
-
-DECLARE_DELEGATE_TwoParams(FJSQueryResultDelegate, int, FString);
 
 /**
  * Interface for dealing with a Web Browser window
@@ -203,9 +201,13 @@ public:
 
 	/** Execute Javascript on the page. */
 	virtual void ExecuteJavascript(const FString& Script) = 0;
-	
-	/** Close this window so that it can no longer be used. */
-	virtual void CloseBrowser() = 0;
+
+	/**
+	 * Close this window so that it can no longer be used.
+	 *
+	 * @param bForce Designates whether the web browser close should be forced.
+	 */
+	virtual void CloseBrowser(bool bForce) = 0;
 
 	/** 
 	 * Expose a UObject instance to the browser runtime.
@@ -249,15 +251,6 @@ public:
 	DECLARE_EVENT(IWebBrowserWindow, FOnNeedsRedraw)
 	virtual FOnNeedsRedraw& OnNeedsRedraw() = 0;
 	
-	/** A delegate that is invoked when JS code sends a query to the front end. The result delegate cand either be executed immediately or saved and executed later (multiple times if the boolean peristent argument is true). 
-	 * The arguments are an integer error code (0 for success) and a reply string. If you need pass more complex data to the JS code, you will have to pack the data in some way (such as JSON encoding it). */
-	DECLARE_DELEGATE_RetVal_FourParams(bool, FONJSQueryReceived, int64, FString, bool, FJSQueryResultDelegate)
-	virtual FONJSQueryReceived& OnJSQueryReceived() = 0;
-
-	/** A delegate that is invoked when an outstanding query is canceled. Implement this if you are saving delegates passed to OnQueryReceived. */
-	DECLARE_DELEGATE_OneParam(FONJSQueryCanceled, int64)
-	virtual FONJSQueryCanceled& OnJSQueryCanceled() = 0;
-	
 	/** A delegate that is invoked prior to browser navigation. */
 	DECLARE_DELEGATE_RetVal_TwoParams(bool, FOnBeforeBrowse, const FString& /*Url*/, bool /*bIsRedirect*/)
 	virtual FOnBeforeBrowse& OnBeforeBrowse() = 0;
@@ -270,9 +263,13 @@ public:
 	DECLARE_DELEGATE_RetVal_TwoParams(bool, FOnBeforePopupDelegate, FString, FString);
 	virtual FOnBeforePopupDelegate& OnBeforePopup() = 0;
 
-	/** A delegate this is invoked when an existing browser requests creation of a new browser window. */
-	DECLARE_DELEGATE_RetVal_OneParam(bool, FOnCreateWindow, const TWeakPtr<IWebBrowserWindow>& /*NewBrowserWindow*/)
+	/** A delegate that is invoked when an existing browser requests creation of a new browser window. */
+	DECLARE_DELEGATE_RetVal_TwoParams(bool, FOnCreateWindow, const TWeakPtr<IWebBrowserWindow>& /*NewBrowserWindow*/, const TWeakPtr<IWebBrowserPopupFeatures>& /* PopupFeatures*/)
 	virtual FOnCreateWindow& OnCreateWindow() = 0;
+
+	/** A delegate that is invoked when closing created popup windows. */
+	DECLARE_DELEGATE_RetVal_OneParam(bool, FOnCloseWindow, const TWeakPtr<IWebBrowserWindow>& /*BrowserWindow*/)
+	virtual FOnCloseWindow& OnCloseWindow() = 0;
 
 protected:
 

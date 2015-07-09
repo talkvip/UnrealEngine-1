@@ -92,6 +92,7 @@ void SAssetView::Construct( const FArguments& InArgs )
 	CollectionManagerModule.Get().OnAssetsAdded().AddSP( this, &SAssetView::OnAssetsAddedToCollection );
 	CollectionManagerModule.Get().OnAssetsRemoved().AddSP( this, &SAssetView::OnAssetsRemovedFromCollection );
 	CollectionManagerModule.Get().OnCollectionRenamed().AddSP( this, &SAssetView::OnCollectionRenamed );
+	CollectionManagerModule.Get().OnCollectionUpdated().AddSP( this, &SAssetView::OnCollectionUpdated );
 
 	// Listen for when assets are loaded or changed to update item data
 	FCoreUObjectDelegates::OnAssetLoaded.AddSP(this, &SAssetView::OnAssetLoaded);
@@ -146,6 +147,8 @@ void SAssetView::Construct( const FArguments& InArgs )
 	bCanShowRealTimeThumbnails = InArgs._CanShowRealTimeThumbnails;
 
 	bCanShowDevelopersFolder = InArgs._CanShowDevelopersFolder;
+
+	bCanShowCollections = InArgs._CanShowCollections;
 
 	bPreloadAssetsForContextMenu = InArgs._PreloadAssetsForContextMenu;
 
@@ -2117,6 +2120,12 @@ void SAssetView::OnCollectionRenamed( const FCollectionNameType& OriginalCollect
 	}
 }
 
+void SAssetView::OnCollectionUpdated( const FCollectionNameType& Collection )
+{
+	// A collection has changed in some way, so we need to refresh our backend list
+	RequestSlowFullListRefresh();
+}
+
 void SAssetView::OnAssetRenamed(const FAssetData& AssetData, const FString& OldObjectPath)
 {
 	// Remove the old asset, if it exists
@@ -2381,6 +2390,19 @@ TSharedRef<SWidget> SAssetView::GetViewButtonContent()
 			NAME_None,
 			EUserInterfaceActionType::ToggleButton
 			);
+
+		MenuBuilder.AddMenuEntry(
+			LOCTEXT("ShowCollectionOption", "Show Collections"),
+			LOCTEXT("ShowCollectionOptionToolTip", "Show the collections list in the view."),
+			FSlateIcon(),
+			FUIAction(
+			FExecuteAction::CreateSP( this, &SAssetView::ToggleShowCollections ),
+			FCanExecuteAction::CreateSP( this, &SAssetView::IsToggleShowCollectionsAllowed ),
+			FIsActionChecked::CreateSP( this, &SAssetView::IsShowingCollections )
+			),
+			NAME_None,
+			EUserInterfaceActionType::ToggleButton
+			);
 	}
 	MenuBuilder.EndSection();
 
@@ -2532,6 +2554,23 @@ bool SAssetView::IsToggleShowDevelopersFolderAllowed() const
 bool SAssetView::IsShowingDevelopersFolder() const
 {
 	return GetDefault<UContentBrowserSettings>()->GetDisplayDevelopersFolder();
+}
+
+void SAssetView::ToggleShowCollections()
+{
+	const bool bDisplayCollections = GetDefault<UContentBrowserSettings>()->GetDisplayCollections();
+	GetMutableDefault<UContentBrowserSettings>()->SetDisplayCollections( !bDisplayCollections );
+	GetMutableDefault<UContentBrowserSettings>()->PostEditChange();
+}
+
+bool SAssetView::IsToggleShowCollectionsAllowed() const
+{
+	return bCanShowCollections;
+}
+
+bool SAssetView::IsShowingCollections() const
+{
+	return GetDefault<UContentBrowserSettings>()->GetDisplayCollections();
 }
 
 void SAssetView::SetCurrentViewType(EAssetViewType::Type NewType)
@@ -3274,7 +3313,7 @@ FReply SAssetView::OnDraggingAssetItem( const FGeometry& MyGeometry, const FPoin
 		{
 			// are we dragging some folders?
 			TArray<FString> SelectedFolders = GetSelectedFolders();
-			if(SelectedFolders.Num() > 0)
+			if(SelectedFolders.Num() > 0 && SourcesData.Collections.Num() == 0)
 			{
 				return FReply::Handled().BeginDragDrop(FAssetPathDragDropOp::New(SelectedFolders));
 			}

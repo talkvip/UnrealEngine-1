@@ -12,6 +12,7 @@ public class LocalizationDashboard : ModuleRules
 				"Core",
                 "CoreUObject",
                 "PropertyEditor",
+                "Localization"
 			}
 		);
 
@@ -29,6 +30,7 @@ public class LocalizationDashboard : ModuleRules
                 "MainFrame",
                 "SourceControl",
                 "SharedSettingsWidgets",
+                "Localization",
                 "LocalizationService"
 			}
 		);
@@ -46,5 +48,13 @@ public class LocalizationDashboard : ModuleRules
 				"Editor/LocalizationDashboard/Public",
 			}
 		);
+
+        CircularlyReferencedDependentModules.AddRange(
+            new string[]
+			{
+                 "MainFrame",
+                 "TranslationEditor"
+			}
+            );
 	}
 }

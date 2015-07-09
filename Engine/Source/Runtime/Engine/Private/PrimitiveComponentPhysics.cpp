@@ -298,12 +298,20 @@ void UPrimitiveComponent::SetPhysicsLinearVelocity(FVector NewVel, bool bAddToCu
 
 FVector UPrimitiveComponent::GetPhysicsLinearVelocity(FName BoneName)
 {
-	FBodyInstance* BI = GetBodyInstance(BoneName);
-	if(BI != NULL)
+	if (FBodyInstance* BI = GetBodyInstance(BoneName))
 	{
 		return BI->GetUnrealWorldVelocity();
 	}
 	return FVector(0,0,0);
+}
+
+FVector UPrimitiveComponent::GetPhysicsLinearVelocityAtPoint(FVector Point, FName BoneName)
+{
+	if (FBodyInstance* BI = GetBodyInstance(BoneName))
+	{
+		return BI->GetUnrealWorldVelocityAtPoint(Point);
+	}
+	return FVector(0, 0, 0);
 }
 
 void UPrimitiveComponent::SetAllPhysicsLinearVelocity(FVector NewVel,bool bAddToCurrent)
@@ -347,6 +355,16 @@ FVector UPrimitiveComponent::GetCenterOfMass(FName BoneName)
 	}
 
 	return FVector::ZeroVector;
+}
+
+void UPrimitiveComponent::SetCenterOfMass(FVector CenterOfMassOffset, FName BoneName)
+{
+	if (FBodyInstance* ComponentBodyInstance = GetBodyInstance(BoneName))
+	{
+		WarnInvalidPhysicsOperations(LOCTEXT("SetCenterOfMass", "SetCenterOfMass"), nullptr);
+		ComponentBodyInstance->COMNudge = CenterOfMassOffset;
+		ComponentBodyInstance->UpdateMassProperties();
+	}
 }
 
 void UPrimitiveComponent::SetAllPhysicsAngularVelocity(FVector const& NewAngVel, bool bAddToCurrent)
@@ -448,7 +466,7 @@ void UPrimitiveComponent::SetMassScale(FName BoneName, float InMassScale)
 {
 	if (FBodyInstance* BI = GetBodyInstance(BoneName))
 	{
-		WarnInvalidPhysicsOperations(LOCTEXT("SetMassScale", "SetMassScale"), BI);
+		WarnInvalidPhysicsOperations(LOCTEXT("SetMassScale", "SetMassScale"), nullptr);
 		BI->SetMassScale(InMassScale);
 	}
 }
@@ -466,6 +484,17 @@ float UPrimitiveComponent::GetMassScale(FName BoneName /*= NAME_None*/) const
 void UPrimitiveComponent::SetAllMassScale(float InMassScale)
 {
 	SetMassScale(NAME_None, InMassScale);
+}
+
+void UPrimitiveComponent::SetMassOverrideInKg(FName BoneName, float MassInKg, bool bOverrideMass)
+{
+	if (FBodyInstance* BI = GetBodyInstance(BoneName))
+	{
+		WarnInvalidPhysicsOperations(LOCTEXT("SetCenterOfMass", "SetCenterOfMass"), nullptr);
+		BI->bOverrideMass = bOverrideMass;
+		BI->MassInKg = MassInKg;
+		BI->UpdateMassProperties();
+	}
 }
 
 float UPrimitiveComponent::GetMass() const
@@ -844,6 +873,18 @@ float UPrimitiveComponent::GetDistanceToCollision(const FVector& Point, FVector&
 	if(BodyInst != NULL)
 	{
 		return BodyInst->GetDistanceToBody(Point, ClosestPointOnCollision);
+	}
+
+	return -1.f;
+}
+
+float UPrimitiveComponent::GetClosestPointOnCollision(const FVector& Point, FVector& OutPointOnBody, FName BoneName) const
+{
+	OutPointOnBody = Point;
+
+	if (FBodyInstance* BodyInst = GetBodyInstance(BoneName))
+	{
+		return BodyInst->GetDistanceToBody(Point, OutPointOnBody);
 	}
 
 	return -1.f;

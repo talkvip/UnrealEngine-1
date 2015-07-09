@@ -11,6 +11,10 @@
 class UWorld;
 class APlayerController;
 
+/**
+Acts as a game-specific wrapper around the session interface. The game code makes calls to this when it needs to interact with the session interface.
+A game session exists only the server, while running an online game.
+*/
 UCLASS(config=Game, notplaceable)
 class ENGINE_API AGameSession : public AInfo
 {
@@ -151,7 +155,7 @@ class ENGINE_API AGameSession : public AInfo
 	 * @param bJoinViaPresence anyone who can see you can join the game
 	 * @param bJoinViaPresenceFriendsOnly can only friends actively join your game 
 	 */
-	virtual void UpdateSessionJoinability(FName SessionName, bool bPublicSearchable, bool bAllowInvites, bool bJoinViaPresence, bool bJoinViaPresenceFriendsOnly);
+	virtual void UpdateSessionJoinability(FName InSessionName, bool bPublicSearchable, bool bAllowInvites, bool bJoinViaPresence, bool bJoinViaPresenceFriendsOnly);
 
 	/**
 	 * Travel to a session URL (as client) for a given session
@@ -161,7 +165,7 @@ class ENGINE_API AGameSession : public AInfo
 	 *
 	 * @return true if successful, false otherwise
 	 */
-	virtual bool TravelToSession(int32 ControllerId, FName SessionName);
+	virtual bool TravelToSession(int32 ControllerId, FName InSessionName);
 
     /**
      * Does the session require push to talk

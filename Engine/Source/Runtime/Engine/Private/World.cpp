@@ -489,6 +489,11 @@ void UWorld::FinishDestroy()
 		{
 			delete PhysicsScene;
 			PhysicsScene = NULL;
+
+			if(GPhysCommandHandler)
+			{
+				GPhysCommandHandler->Flush();
+			}
 		}
 
 		if (Scene)
@@ -4830,6 +4835,9 @@ UWorld* FSeamlessTravelHandler::Tick()
 				}
 			}
 
+			// Make sure "always loaded" sub-levels are fully loaded
+			LoadedWorld->FlushLevelStreaming(EFlushLevelStreamingType::Visibility);
+			
 			UNavigationSystem::InitializeForWorld(LoadedWorld, FNavigationSystemRunMode::GameMode);
 
 			// Note that AI system will be created only if ai-system-creation conditions are met

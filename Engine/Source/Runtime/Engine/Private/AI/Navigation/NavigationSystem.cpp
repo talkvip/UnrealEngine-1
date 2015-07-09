@@ -160,6 +160,19 @@ FNavHeightfieldSamples::FNavHeightfieldSamples()
 }
 
 //----------------------------------------------------------------------//
+// FNavAgentSelector
+//----------------------------------------------------------------------//
+FNavAgentSelector::FNavAgentSelector() : PackedBits(0x7fffffff)
+{
+}
+
+bool FNavAgentSelector::Serialize(FArchive& Ar)
+{
+	Ar << PackedBits;
+	return true;
+}
+
+//----------------------------------------------------------------------//
 // FNavDataConfig
 //----------------------------------------------------------------------//
 FNavDataConfig::FNavDataConfig(float Radius, float Height)
@@ -2574,9 +2587,10 @@ void UNavigationSystem::UpdateNavOctreeAfterMove(USceneComponent* Comp)
 
 		for (int32 ComponentIndex = 0; ComponentIndex < Components.Num(); ComponentIndex++)
 		{
-			if (Components[ComponentIndex] && !Components[ComponentIndex]->IsA(USceneComponent::StaticClass()))
+			UActorComponent* const Component = Components[ComponentIndex];
+			if (Component && !Cast<USceneComponent>(Component))
 			{
-				UpdateNavOctree(Components[ComponentIndex]);
+				UpdateNavOctree(Component);
 			}
 		}
 
@@ -2871,10 +2885,12 @@ void UNavigationSystem::OnNavigationBoundsUpdated(ANavMeshBoundsVolume* NavVolum
 	}
 
 	FNavigationBoundsUpdateRequest UpdateRequest;
-	UpdateRequest.NavBounds.UniqueID	= NavVolume->GetUniqueID();
-	UpdateRequest.NavBounds.AreaBox		= NavVolume->GetComponentsBoundingBox(true);
-	UpdateRequest.NavBounds.Level		= NavVolume->GetLevel();
-	UpdateRequest.UpdateRequest			= FNavigationBoundsUpdateRequest::Updated;
+	UpdateRequest.NavBounds.UniqueID = NavVolume->GetUniqueID();
+	UpdateRequest.NavBounds.AreaBox = NavVolume->GetComponentsBoundingBox(true);
+	UpdateRequest.NavBounds.Level = NavVolume->GetLevel();
+	UpdateRequest.NavBounds.SupportedAgents = NavVolume->SupportedAgents;
+	
+	UpdateRequest.UpdateRequest = FNavigationBoundsUpdateRequest::Updated;
 	AddNavigationBoundsUpdateRequest(UpdateRequest);
 }
 
@@ -2886,10 +2902,12 @@ void UNavigationSystem::OnNavigationBoundsAdded(ANavMeshBoundsVolume* NavVolume)
 	}
 
 	FNavigationBoundsUpdateRequest UpdateRequest;
-	UpdateRequest.NavBounds.UniqueID	= NavVolume->GetUniqueID();
-	UpdateRequest.NavBounds.AreaBox		= NavVolume->GetComponentsBoundingBox(true);
-	UpdateRequest.NavBounds.Level		= NavVolume->GetLevel();
-	UpdateRequest.UpdateRequest	= FNavigationBoundsUpdateRequest::Added;
+	UpdateRequest.NavBounds.UniqueID = NavVolume->GetUniqueID();
+	UpdateRequest.NavBounds.AreaBox = NavVolume->GetComponentsBoundingBox(true);
+	UpdateRequest.NavBounds.Level = NavVolume->GetLevel();
+	UpdateRequest.NavBounds.SupportedAgents = NavVolume->SupportedAgents;
+
+	UpdateRequest.UpdateRequest = FNavigationBoundsUpdateRequest::Added;
 	AddNavigationBoundsUpdateRequest(UpdateRequest);
 }
 
@@ -2901,10 +2919,12 @@ void UNavigationSystem::OnNavigationBoundsRemoved(ANavMeshBoundsVolume* NavVolum
 	}
 	
 	FNavigationBoundsUpdateRequest UpdateRequest;
-	UpdateRequest.NavBounds.UniqueID	= NavVolume->GetUniqueID();
-	UpdateRequest.NavBounds.AreaBox		= NavVolume->GetComponentsBoundingBox(true);
-	UpdateRequest.NavBounds.Level		= NavVolume->GetLevel();
-	UpdateRequest.UpdateRequest	= FNavigationBoundsUpdateRequest::Removed;
+	UpdateRequest.NavBounds.UniqueID = NavVolume->GetUniqueID();
+	UpdateRequest.NavBounds.AreaBox = NavVolume->GetComponentsBoundingBox(true);
+	UpdateRequest.NavBounds.Level = NavVolume->GetLevel();
+	UpdateRequest.NavBounds.SupportedAgents = NavVolume->SupportedAgents;
+
+	UpdateRequest.UpdateRequest = FNavigationBoundsUpdateRequest::Removed;
 	AddNavigationBoundsUpdateRequest(UpdateRequest);
 }
 
@@ -2989,19 +3009,21 @@ void UNavigationSystem::PerformNavigationBoundsUpdate(const TArray<FNavigationBo
 			{
 				if (ExistingElementId.IsValidId())
 				{
-					FBox ExistingBox = RegisteredNavBounds[ExistingElementId].AreaBox;
-
-					if (!(ExistingBox == Request.NavBounds.AreaBox))
+					const FBox ExistingBox = RegisteredNavBounds[ExistingElementId].AreaBox;
+					const bool bSameArea = (Request.NavBounds.AreaBox == ExistingBox);
+					if (!bSameArea)
 					{
 						UpdatedAreas.Add(ExistingBox);
-						RegisteredNavBounds[ExistingElementId] = Request.NavBounds;
 					}
+
+					// always assign new bounds data, it may have different properties (like supported agents)
+					RegisteredNavBounds[ExistingElementId] = Request.NavBounds;
 				}
 				else
 				{
 					ExistingElementId = RegisteredNavBounds.Add(Request.NavBounds);
 				}
-				
+
 				UpdatedAreas.Add(Request.NavBounds.AreaBox);
 			}
 
@@ -3037,9 +3059,10 @@ void UNavigationSystem::GatherNavigationBounds()
 		if (V != nullptr && !V->IsPendingKill())
 		{
 			FNavigationBounds NavBounds;
-			NavBounds.UniqueID		= V->GetUniqueID();
-			NavBounds.AreaBox		= V->GetComponentsBoundingBox(true);
-			NavBounds.Level			= V->GetLevel();
+			NavBounds.UniqueID = V->GetUniqueID();
+			NavBounds.AreaBox = V->GetComponentsBoundingBox(true);
+			NavBounds.Level = V->GetLevel();
+			NavBounds.SupportedAgents = V->SupportedAgents;
 			RegisteredNavBounds.Add(NavBounds);
 		}
 	}

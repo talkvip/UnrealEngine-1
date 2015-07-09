@@ -893,6 +893,11 @@ bool UPrimitiveComponent::ShouldComponentAddToScene() const
 
 bool UPrimitiveComponent::ShouldCreatePhysicsState() const
 {
+	if (IsBeingDestroyed())
+	{
+		return false;
+	}
+
 	bool bShouldCreatePhysicsState = IsRegistered() && (bAlwaysCreatePhysicsState || IsCollisionEnabled());
 
 #if WITH_EDITOR
@@ -1394,7 +1399,7 @@ bool UPrimitiveComponent::MoveComponentImpl( const FVector& Delta, const FQuat& 
 	if (DeltaSizeSq <= MinMovementDistSq)
 	{
 		// Skip if no vector or rotation.
-		if (NewRotationQuat.Equals(InitialRotationQuat, 1.e-6f))
+		if (NewRotationQuat.Equals(InitialRotationQuat, SCENECOMPONENT_QUAT_TOLERANCE))
 		{
 			// copy to optional output param
 			if (OutHit)
@@ -1691,6 +1696,39 @@ void UPrimitiveComponent::DispatchBlockingHit(AActor& Owner, FHitResult const& B
 	}
 }
 
+void UPrimitiveComponent::DispatchWakeEvents(int32 WakeEvent, FName BoneName)
+{
+	FBodyInstance* RootBI = GetBodyInstance(BoneName, false);
+	if(RootBI)
+	{
+		if(RootBI->bGenerateWakeEvents)
+		{
+			if (WakeEvent == SleepEvent::SET_Wakeup)
+			{
+				OnComponentWake.Broadcast(BoneName);
+			}else
+			{
+				OnComponentSleep.Broadcast(BoneName);
+			}
+		}
+	}
+	
+	//now update children that are welded
+	for(USceneComponent* SceneComp : AttachChildren)
+	{
+		if(UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(SceneComp))
+		{
+			if(FBodyInstance* BI = PrimComp->GetBodyInstance(BoneName, false))
+			{
+				if(BI->WeldParent == RootBI)
+				{
+					PrimComp->DispatchWakeEvents(WakeEvent, BoneName);	
+				}
+			}
+		}
+	}
+}
+
 
 bool UPrimitiveComponent::IsNavigationRelevant() const 
 { 
@@ -1979,13 +2017,14 @@ void UPrimitiveComponent::BeginComponentOverlap(const FOverlapInfo& OtherOverlap
 void UPrimitiveComponent::EndComponentOverlap(const FOverlapInfo& OtherOverlap, bool bDoNotifies, bool bNoNotifySelf)
 {
 	UPrimitiveComponent* OtherComp = OtherOverlap.OverlapInfo.Component.Get();
-
-	AActor* const OtherActor = OtherComp ? OtherComp->GetOwner() : NULL;
-	AActor* const MyActor = GetOwner();
+	if (OtherComp == nullptr)
+	{
+		return;
+	}
 
 	//	UE_LOG(LogActor, Log, TEXT("END OVERLAP! Self=%s SelfComp=%s, Other=%s, OtherComp=%s"), *GetNameSafe(this), *GetNameSafe(MyComp), *GetNameSafe(OtherActor), *GetNameSafe(OtherComp));
 
-	const int32 OtherOverlapIdx = OtherComp ? OtherComp->OverlappingComponents.Find(FOverlapInfo(this, INDEX_NONE)) : INDEX_NONE;
+	const int32 OtherOverlapIdx = OtherComp->OverlappingComponents.Find(FOverlapInfo(this, INDEX_NONE));
 	if (OtherOverlapIdx != INDEX_NONE)
 	{
 		OtherComp->OverlappingComponents.RemoveAtSwap(OtherOverlapIdx, 1, false);
@@ -1995,34 +2034,39 @@ void UPrimitiveComponent::EndComponentOverlap(const FOverlapInfo& OtherOverlap, 
 	if (OverlapIdx != INDEX_NONE)
 	{
 		OverlappingComponents.RemoveAtSwap(OverlapIdx, 1, false);
+
+		if (bDoNotifies)
+		{
+			AActor* const OtherActor = OtherComp->GetOwner();
+			AActor* const MyActor = GetOwner();
+			if (OtherActor)
+			{
+				if (!bNoNotifySelf && IsPrimCompValidAndAlive(this))
+				{
+					OnComponentEndOverlap.Broadcast(OtherActor, OtherComp, OtherOverlap.GetBodyIndex());
+				}
+
+				if (IsPrimCompValidAndAlive(OtherComp))
+				{
+					OtherComp->OnComponentEndOverlap.Broadcast(MyActor, this, INDEX_NONE);
+				}
 	
-		if ((OtherActor != NULL) && bDoNotifies)
-		{
-			if (!bNoNotifySelf && IsPrimCompValidAndAlive(this))
-			{
-				OnComponentEndOverlap.Broadcast(OtherActor, OtherComp, OtherOverlap.GetBodyIndex());
+				// if this was the last touch on the other actor by this actor, notify that we've untouched the actor as well
+				if (MyActor && !MyActor->IsOverlappingActor(OtherActor) )
+				{			
+					if (IsActorValidToNotify(MyActor))
+					{
+						MyActor->NotifyActorEndOverlap(OtherActor);
+						MyActor->OnActorEndOverlap.Broadcast(OtherActor);
+					}
+
+					if (IsActorValidToNotify(OtherActor))
+					{
+						OtherActor->NotifyActorEndOverlap(MyActor);
+						OtherActor->OnActorEndOverlap.Broadcast(MyActor);
+					}
+				}
 			}
-
-			if (IsPrimCompValidAndAlive(OtherComp))
-			{
-				OtherComp->OnComponentEndOverlap.Broadcast(MyActor, this, INDEX_NONE);
-			}
-		}
-	}
-
-	// if this was the last touch on the other actor, notify that we've untouched the actor as well
-	if (bDoNotifies && MyActor && OtherActor && !MyActor->IsOverlappingActor(OtherActor) )
-	{			
-		if (IsActorValidToNotify(MyActor))
-		{
-			MyActor->NotifyActorEndOverlap(OtherActor);
-			MyActor->OnActorEndOverlap.Broadcast(OtherActor);
-		}
-
-		if (IsActorValidToNotify(OtherActor))
-		{
-			OtherActor->NotifyActorEndOverlap(MyActor);
-			OtherActor->OnActorEndOverlap.Broadcast(MyActor);
 		}
 	}
 }
@@ -2365,6 +2409,11 @@ void UPrimitiveComponent::UpdateOverlaps(const TArray<FOverlapInfo>* NewPendingO
 					{
 						EndComponentOverlap(OtherOverlap, bDoNotifies, false);
 					}
+					else
+					{
+						// Remove stale item
+						OverlappingComponents.RemoveSingleSwap(OtherOverlap);
+					}
 				}
 			}
 
@@ -2372,10 +2421,7 @@ void UPrimitiveComponent::UpdateOverlaps(const TArray<FOverlapInfo>* NewPendingO
 			for (auto CompIt = NewOverlappingComponents.CreateIterator(); CompIt; ++CompIt)
 			{
 				const FOverlapInfo& OtherOverlap = *CompIt;
-				if (OtherOverlap.OverlapInfo.Component.IsValid())
-				{
-					BeginComponentOverlap(OtherOverlap, bDoNotifies);
-				}
+				BeginComponentOverlap(OtherOverlap, bDoNotifies);
 			}
 		}
 	}
@@ -2383,12 +2429,12 @@ void UPrimitiveComponent::UpdateOverlaps(const TArray<FOverlapInfo>* NewPendingO
 	{
 		// bGenerateOverlapEvents is false or collision is disabled
 
-		// End all overlaps that exist, in case bGenerateOverlapEvents was true last tick (i.e. was just turned off)
-		// Iterate backwards since EndComponentOverlap will remove items from OverlappingComponents.
-		for (int32 OverlapIdx = OverlappingComponents.Num()-1; OverlapIdx >= 0; --OverlapIdx)
+		if (OverlappingComponents.Num() > 0)
 		{
-			const FOverlapInfo& OtherOverlap = OverlappingComponents[OverlapIdx];
-			if (OtherOverlap.OverlapInfo.Component.IsValid())
+			// End all overlaps that exist, in case bGenerateOverlapEvents was true last tick (i.e. was just turned off)
+			// Make a copy since EndComponentOverlap will remove items from OverlappingComponents.
+			auto OverlapsCopy = OverlappingComponents;
+			for (const FOverlapInfo& OtherOverlap : OverlapsCopy)
 			{
 				EndComponentOverlap(OtherOverlap, bDoNotifies, false);
 			}

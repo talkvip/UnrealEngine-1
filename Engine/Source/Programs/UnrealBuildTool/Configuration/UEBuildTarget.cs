@@ -173,6 +173,8 @@ namespace UnrealBuildTool
 		public bool bUsePrecompiled;
 		public List<string> ForeignPlugins;
 		public string ForceReceiptFileName;
+		public string AssemblyName;
+		public List<string> GameFolders;
 	}
 
 
@@ -476,6 +478,8 @@ namespace UnrealBuildTool
 					TargetName = PossibleTargetName;
 
 					// If a project file was not specified see if we can find one
+					List<string> GameFolders = new List<string>();
+					string AssemblyName = "UE4";
 					string CheckProjectFile = UProjectInfo.GetProjectForTarget(TargetName);
 					if (string.IsNullOrEmpty(CheckProjectFile) == false)
 					{
@@ -500,6 +504,8 @@ namespace UnrealBuildTool
 							// Parse off the path
 							TargetName = Path.GetFileNameWithoutExtension( TargetName );
 						}
+						GameFolders.Add(UnrealBuildTool.GetUProjectPath());
+						AssemblyName = Path.GetFileNameWithoutExtension(UnrealBuildTool.GetUProjectFile());
 					}
 
 					Targets.Add( new TargetDescriptor()
@@ -514,7 +520,9 @@ namespace UnrealBuildTool
 							bPrecompile = bPrecompile,
 							bUsePrecompiled = bUsePrecompiled,
 							ForeignPlugins = ForeignPlugins,
-							ForceReceiptFileName = ForceReceiptFileName
+							ForceReceiptFileName = ForceReceiptFileName,
+							AssemblyName = AssemblyName,
+							GameFolders = GameFolders
 						} );
 					break;
 				}
@@ -529,19 +537,6 @@ namespace UnrealBuildTool
 		public static UEBuildTarget CreateTarget( TargetDescriptor Desc )
 		{
 			UEBuildTarget BuildTarget = null;
-			if( !ProjectFileGenerator.bGenerateProjectFiles )
-			{
-				// Configure the rules compiler
-				string PossibleAssemblyName = Desc.TargetName;
-				if (Desc.bIsEditorRecompile == true)
-				{
-					PossibleAssemblyName += "_EditorRecompile";
-				}
-
-				// Scan the disk to find source files for all known targets and modules, and generate "in memory" project
-				// file data that will be used to determine what to build
-				RulesCompiler.SetAssemblyNameAndGameFolders( PossibleAssemblyName, UEBuildTarget.DiscoverAllGameFolders(), Desc.ForeignPlugins );
-			}
 
 			// Try getting it from the RulesCompiler
 			UEBuildTarget Target = RulesCompiler.CreateTarget(Desc);
@@ -2022,7 +2017,8 @@ namespace UnrealBuildTool
 
 				// Create the source file list (just the one cpp file)
 				List<FileItem> SourceFiles = new List<FileItem>();
-				SourceFiles.Add(FileItem.GetItemByPath(LinkerFixupCPPFilename));
+				var LinkerFixupCPPFileItem = FileItem.GetItemByPath(LinkerFixupCPPFilename);
+				SourceFiles.Add(LinkerFixupCPPFileItem);
 
 				// Create the CPP module
 				var FakeModuleDirectory = Path.GetDirectoryName( LinkerFixupCPPFilename );
@@ -2052,6 +2048,10 @@ namespace UnrealBuildTool
 				{
 					ResponseFile.Create(LinkerFixupHeaderFilenameWithPath, new List<string>());
 					ResponseFile.Create(LinkerFixupCPPFilename, LinkerFixupsFileContents);
+
+					// Update the cached file states so that the linker fixups definitely get rebuilt
+					FileItem.GetItemByPath(LinkerFixupHeaderFilenameWithPath).ResetFileInfo();
+					LinkerFixupCPPFileItem.ResetFileInfo();
 				}
 			}
 		}
@@ -2168,6 +2168,7 @@ namespace UnrealBuildTool
 				InEnableBufferSecurityChecks: true,
 				InFasterWithoutUnity: true,
 				InMinFilesUsingPrecompiledHeaderOverride: 0,
+				InBuildLocallyWithSNDBS: false,
 				InEnableExceptions: false,
 				InEnableShadowVariableWarnings: true,
 				bInBuildSourceFiles: true,
@@ -3211,6 +3212,7 @@ namespace UnrealBuildTool
 							InEnableBufferSecurityChecks: RulesObject.bEnableBufferSecurityChecks,
 							InFasterWithoutUnity: RulesObject.bFasterWithoutUnity,
 							InMinFilesUsingPrecompiledHeaderOverride: RulesObject.MinFilesUsingPrecompiledHeaderOverride,
+							InBuildLocallyWithSNDBS: RulesObject.bBuildLocallyWithSNDBS,
 							InEnableExceptions: RulesObject.bEnableExceptions,
 							InEnableShadowVariableWarnings: RulesObject.bEnableShadowVariableWarnings,
 							bInBuildSourceFiles: bBuildSourceFiles,

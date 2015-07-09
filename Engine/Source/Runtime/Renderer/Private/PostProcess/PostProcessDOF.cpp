@@ -175,7 +175,7 @@ void FRCPassPostProcessDOFSetup::Process(FRenderingCompositePassContext& Context
 
 FPooledRenderTargetDesc FRCPassPostProcessDOFSetup::ComputeOutputDesc(EPassOutputId InPassOutputId) const
 {
-	FPooledRenderTargetDesc Ret = PassInputs[0].GetOutput()->RenderTargetDesc;
+	FPooledRenderTargetDesc Ret = GetInput(ePId_Input0)->GetOutput()->RenderTargetDesc;
 
 //	Ret.Extent = FIntPoint::DivideAndRoundUp(ret.Extent, 2);
 	Ret.Extent /= 2;
@@ -340,7 +340,7 @@ void FRCPassPostProcessDOFRecombine::Process(FRenderingCompositePassContext& Con
 
 FPooledRenderTargetDesc FRCPassPostProcessDOFRecombine::ComputeOutputDesc(EPassOutputId InPassOutputId) const
 {
-	FPooledRenderTargetDesc Ret = PassInputs[0].GetOutput()->RenderTargetDesc;
+	FPooledRenderTargetDesc Ret = GetInput(ePId_Input0)->GetOutput()->RenderTargetDesc;
 
 	Ret.Reset();
 	Ret.DebugName = TEXT("DOFRecombine");
@@ -356,7 +356,7 @@ FPooledRenderTargetDesc FRCPassPostProcessDOFRecombine::ComputeOutputDesc(EPassO
 
 // Convert f-stop and focal distance into projected size in half resolution pixels.
 // Setup depth based blur.
-static FVector CircleDofCoc(const FRenderingCompositePassContext& Context)
+static FVector4 CircleDofCoc(const FRenderingCompositePassContext& Context)
 {
 	// Convert FOV to focal length,
 	// 
@@ -386,7 +386,7 @@ static FVector CircleDofCoc(const FRenderingCompositePassContext& Context)
 
 	// Scale so that APS-C 24.576 mm = full frame.
 	// Convert mm to pixels.
-	float Width = (float)Context.GetViewport().Size().X;
+	float Width = (float)Context.View.ViewRect.Width();
 	Radius = Radius * Width * (1.0f/24.576f);
 
 	// Convert diameter to radius at half resolution (algorithm radius is at half resolution).
@@ -403,10 +403,11 @@ static FVector CircleDofCoc(const FRenderingCompositePassContext& Context)
 
 	// The DepthOfFieldDepthBlurAmount = km at which depth blur is 50%.
 	// Need to convert to cm here.
-	return FVector(
+	return FVector4(
 		Radius, 
 		1.0f/(Context.View.FinalPostProcessSettings.DepthOfFieldDepthBlurAmount * 100000.0),
-		Context.View.FinalPostProcessSettings.DepthOfFieldDepthBlurRadius * Width / 1920.0f);
+		Context.View.FinalPostProcessSettings.DepthOfFieldDepthBlurRadius * Width / 1920.0f,
+		Width / 1920.0f);
 }
 
 /** Encapsulates the Circle DOF setup pixel shader. */
@@ -575,7 +576,7 @@ void FRCPassPostProcessCircleDOFSetup::Process(FRenderingCompositePassContext& C
 
 FPooledRenderTargetDesc FRCPassPostProcessCircleDOFSetup::ComputeOutputDesc(EPassOutputId InPassOutputId) const
 {
-	FPooledRenderTargetDesc Ret = PassInputs[0].GetOutput()->RenderTargetDesc;
+	FPooledRenderTargetDesc Ret = GetInput(ePId_Input0)->GetOutput()->RenderTargetDesc;
 
 	//	Ret.Extent = FIntPoint::DivideAndRoundUp(ret.Extent, 2);
 	Ret.Extent /= 2;
@@ -763,7 +764,7 @@ void FRCPassPostProcessCircleDOFDilate::Process(FRenderingCompositePassContext& 
 
 FPooledRenderTargetDesc FRCPassPostProcessCircleDOFDilate::ComputeOutputDesc(EPassOutputId InPassOutputId) const
 {
-	FPooledRenderTargetDesc Ret = PassInputs[0].GetOutput()->RenderTargetDesc;
+	FPooledRenderTargetDesc Ret = GetInput(ePId_Input0)->GetOutput()->RenderTargetDesc;
 
 	//	Ret.Extent = FIntPoint::DivideAndRoundUp(ret.Extent, 2);
 	Ret.Extent /= 2;
@@ -983,7 +984,7 @@ void FRCPassPostProcessCircleDOF::Process(FRenderingCompositePassContext& Contex
 
 FPooledRenderTargetDesc FRCPassPostProcessCircleDOF::ComputeOutputDesc(EPassOutputId InPassOutputId) const
 {
-	FPooledRenderTargetDesc Ret = PassInputs[0].GetOutput()->RenderTargetDesc;
+	FPooledRenderTargetDesc Ret = GetInput(ePId_Input0)->GetOutput()->RenderTargetDesc;
 
 	Ret.Extent.X = FMath::Max(1, Ret.Extent.X);
 	Ret.Extent.Y = FMath::Max(1, Ret.Extent.Y);
@@ -1154,7 +1155,7 @@ void FRCPassPostProcessCircleDOFRecombine::Process(FRenderingCompositePassContex
 
 FPooledRenderTargetDesc FRCPassPostProcessCircleDOFRecombine::ComputeOutputDesc(EPassOutputId InPassOutputId) const
 {
-	FPooledRenderTargetDesc Ret = PassInputs[0].GetOutput()->RenderTargetDesc;
+	FPooledRenderTargetDesc Ret = GetInput(ePId_Input0)->GetOutput()->RenderTargetDesc;
 
 	Ret.Reset();
 	Ret.DebugName = TEXT("CircleDOFRecombine");

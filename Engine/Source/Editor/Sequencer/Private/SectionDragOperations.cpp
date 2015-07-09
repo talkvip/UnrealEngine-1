@@ -14,6 +14,12 @@
 /** How many pixels near the mouse has to be before snapping occurs */
 const float PixelSnapWidth = 10.f;
 
+FSequencerDragOperation::FSequencerDragOperation( FSequencer& InSequencer )
+	: Sequencer(InSequencer)
+{
+	Settings = Sequencer.GetSettings();
+}
+
 void FSequencerDragOperation::BeginTransaction( UMovieSceneSection& Section, const FText& TransactionDesc )
 {
 	// Begin an editor transaction and mark the section as transactional so it's state will be saved
@@ -475,6 +481,8 @@ void FMoveKeys::OnDrag( const FPointerEvent& MouseEvent, const FVector2D& LocalM
 			}
 		}
 
+		float PrevNewKeyTime = FLT_MAX;
+
 		for( FSelectedKey SelectedKey : SelectedKeys )
 		{
 			UMovieSceneSection* Section = SelectedKey.Section;
@@ -498,6 +506,21 @@ void FMoveKeys::OnDrag( const FPointerEvent& MouseEvent, const FVector2D& LocalM
 			{
 				Section->SetStartTime( NewKeyTime );
 			}
+
+			if (PrevNewKeyTime == FLT_MAX)
+			{
+				PrevNewKeyTime = NewKeyTime;
+			}
+			else if (!FMath::IsNearlyEqual(NewKeyTime, PrevNewKeyTime))
+			{
+				PrevNewKeyTime = -FLT_MAX;
+			}
+		}
+
+		// Snap the play time to the new dragged key time if all the keyframes were dragged to the same time
+		if (Settings->GetSnapPlayTimeToDraggedKey() && PrevNewKeyTime != FLT_MAX && PrevNewKeyTime != -FLT_MAX)
+		{
+			Sequencer.SetGlobalTime(PrevNewKeyTime);
 		}
 	}
 }

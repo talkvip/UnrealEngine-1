@@ -453,6 +453,14 @@ void FParamsChangedHelper::EditCreateDelegates(UK2Node_CreateDelegate* CallSite)
 }
 
 //////////////////////////////////////
+// FUCSComponentId
+
+FUCSComponentId::FUCSComponentId(const UK2Node_AddComponent* UCSNode)
+	: GraphNodeGuid(UCSNode->NodeGuid)
+{
+}
+
+//////////////////////////////////////
 // FBlueprintEditorUtils
 
 void FBlueprintEditorUtils::RefreshAllNodes(UBlueprint* Blueprint)
@@ -1180,7 +1188,8 @@ struct FEditoronlyBlueprintHelper
 			{
 				if (bLogWhy)
 				{
-					UE_LOG(LogBlueprint, Warning, TEXT("FEditoronlyBlueprintHelper::ShouldBeFixed"));
+					const FString UnwantedType = GetNameSafe(VarDesc.VarType.PinSubCategoryObject.Get());
+					UE_LOG(LogBlueprint, Warning, TEXT("FEditoronlyBlueprintHelper::ShouldBeFixed. [%s] Unwanted type '%s' in variable '%s'"), *Blueprint->GetName(), *UnwantedType, *VarDesc.FriendlyName);
 				}
 				return true;
 			}
@@ -1197,13 +1206,36 @@ struct FEditoronlyBlueprintHelper
 			{
 				for (const auto Pin : Node->Pins)
 				{
-					if (Pin && (IsUnwantedType(Pin->PinType) || IsUnwantedDefaultObject(Pin->DefaultObject)))
+					if (Pin)
 					{
-						if (bLogWhy)
+						const bool bUnwantedType = IsUnwantedType(Pin->PinType);
+						const bool bUnwantedDefaultObject = IsUnwantedDefaultObject(Pin->DefaultObject);
+						if (bUnwantedType || bUnwantedDefaultObject)
 						{
-							UE_LOG(LogBlueprint, Warning, TEXT("FEditoronlyBlueprintHelper::ShouldBeFixed"));
+							if (bLogWhy)
+							{
+								const FString ReasonPrefix = FString::Printf(TEXT("FEditoronlyBlueprintHelper::ShouldBeFixed. [%s]"), *Blueprint->GetName());
+								const FString PinName = Pin->GetDisplayName().ToString();
+								const FString PinNodeName = Pin->GetOwningNode()->GetNodeTitle(ENodeTitleType::ListView).ToString();
+								if (bUnwantedType)
+								{
+									const FString UnwantedType = GetNameSafe(Pin->PinType.PinSubCategoryObject.Get());
+									UE_LOG(LogBlueprint, Warning, TEXT("%s Unwanted type '%s' on pin '%s' on node '%s'"), *ReasonPrefix, *UnwantedType, *PinName, *PinNodeName);
+								}
+								else if (bUnwantedDefaultObject)
+								{
+									const FString UnwantedDefaultObject = GetNameSafe(Pin->DefaultObject);
+									UE_LOG(LogBlueprint, Warning, TEXT("%s Unwanted default object '%s' on pin '%s' on node '%s'"), *ReasonPrefix, *UnwantedDefaultObject, *PinName, *PinNodeName);
+								}
+								else
+								{
+									ensureMsg(false, TEXT("Can not describe why the blueprint should be fixed."));
+									UE_LOG(LogBlueprint, Warning, TEXT("%s Unknown reason. Pin '%s' on node '%s'"), *ReasonPrefix, *PinName, *PinNodeName);
+								}
+							}
+
+							return true;
 						}
-						return true;
 					}
 				}
 			}
@@ -1374,8 +1406,14 @@ static void RemoveStaleFunctions(UBlueprintGeneratedClass* Class, UBlueprint* Bl
 
 		while (Fn)
 		{
-			Class->RemoveFunctionFromFunctionMap(*Fn);
-			Fn->Rename(nullptr, OrphanedClass, RenFlags);
+			UFunction* Function = *Fn;
+			Class->RemoveFunctionFromFunctionMap(Function);
+			Function->Rename(nullptr, OrphanedClass, RenFlags);
+
+			// invalidate this package's reference to this function, so 
+			// subsequent packages that import it will treat it as if it didn't 
+			// exist (because data-only blueprints shouldn't have functions)
+			FLinkerLoad::InvalidateExport(Function); 
 			++Fn;
 		}
 	}
@@ -3815,7 +3853,7 @@ UEdGraph* FBlueprintEditorUtils::GetDelegateSignatureGraphByName(UBlueprint* Blu
 }
 
 // Gets a list of pins that should hidden for a given function
-void FBlueprintEditorUtils::GetHiddenPinsForFunction(UEdGraph const* Graph, UFunction const* Function, TSet<FString>& HiddenPins)
+void FBlueprintEditorUtils::GetHiddenPinsForFunction(UEdGraph const* Graph, UFunction const* Function, TSet<FString>& HiddenPins, TSet<FString>* OutInternalPins)
 {
 	check(Function != NULL);
 	TMap<FName, FString>* MetaData = UMetaData::GetMapForObject(Function);	
@@ -3835,6 +3873,15 @@ void FBlueprintEditorUtils::GetHiddenPinsForFunction(UEdGraph const* Graph, UFun
 			else if (Key == NAME_HidePin)
 			{
 				HiddenPins.Add(It.Value());
+			}
+			else if (Key == FBlueprintMetadata::MD_InternalUseParam)
+			{
+				HiddenPins.Add(It.Value());
+
+				if (OutInternalPins != nullptr)
+				{
+					OutInternalPins->Add(It.Value());
+				}
 			}
 			else if(Key == FBlueprintMetadata::MD_ExpandEnumAsExecs)
 			{
@@ -4125,6 +4172,11 @@ void FBlueprintEditorUtils::RenameComponentMemberVariable(UBlueprint* Blueprint,
 	{
 		Blueprint->Modify();
 
+		// Update the name
+		const FName OldName = Node->VariableName;
+		Node->Modify();
+		Node->VariableName = NewName;
+
 		// Rename Inheritable Component Templates
 		{
 			const FComponentKey Key(Node);
@@ -4136,16 +4188,11 @@ void FBlueprintEditorUtils::RenameComponentMemberVariable(UBlueprint* Blueprint,
 				if (InheritableComponentHandler && InheritableComponentHandler->GetOverridenComponentTemplate(Key))
 				{
 					InheritableComponentHandler->Modify();
-					InheritableComponentHandler->RenameTemplate(Key, NewName);
+					InheritableComponentHandler->RefreshTemplateName(Key);
 					InheritableComponentHandler->MarkPackageDirty();
 				}
 			}
 		}
-
-		// Update the name
-		const FName OldName = Node->VariableName;
-		Node->Modify();
-		Node->VariableName = NewName;
 
 		Node->NameWasModified();
 
@@ -6124,6 +6171,32 @@ bool FBlueprintEditorUtils::IsSCSComponentProperty(UObjectProperty* MemberProper
 		}
 	}
 	return false;
+}
+
+UActorComponent* FBlueprintEditorUtils::FindUCSComponentTemplate(const FComponentKey& ComponentKey)
+{
+	UActorComponent* FoundTemplate = nullptr;
+	if (ComponentKey.IsValid() && ComponentKey.IsUCSKey())
+	{
+		UBlueprint* Blueprint = Cast<UBlueprint>(ComponentKey.GetComponentOwner()->ClassGeneratedBy);
+		check(Blueprint != nullptr);
+
+		if (UEdGraph* UCSGraph = FBlueprintEditorUtils::FindUserConstructionScript(Blueprint))
+		{
+			TArray<UK2Node_AddComponent*> ComponentNodes;
+			UCSGraph->GetNodesOfClass<UK2Node_AddComponent>(ComponentNodes);
+
+			for (UK2Node_AddComponent* UCSNode : ComponentNodes)
+			{
+				if (UCSNode->NodeGuid == ComponentKey.GetAssociatedGuid())
+				{
+					FoundTemplate = UCSNode->GetTemplateFromNode();
+					break;
+				}
+			}
+		}
+	}
+	return FoundTemplate;
 }
 
 /** Temporary fix for cut-n-paste error that failed to carry transactional flags */

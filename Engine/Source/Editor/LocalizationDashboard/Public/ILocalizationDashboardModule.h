@@ -5,6 +5,7 @@
 #include "ModuleInterface.h"
 
 class ILocalizationServiceProvider;
+class ULocalizationTarget;
 
 /**
  * Interface for localization dashboard module.
@@ -28,4 +29,6 @@ public:
 	{
 		return FModuleManager::LoadModuleChecked<ILocalizationDashboardModule>("LocalizationDashboard");
 	}
+
+	virtual ULocalizationTarget* GetLocalizationTargetByName(FString TargetName, bool bIsEngineTarget) = 0;
 };

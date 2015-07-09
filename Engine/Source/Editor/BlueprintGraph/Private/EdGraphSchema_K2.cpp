@@ -58,6 +58,7 @@ const FName FBlueprintMetadata::MD_DeprecatedFunction(TEXT("DeprecatedFunction")
 const FName FBlueprintMetadata::MD_DeprecationMessage(TEXT("DeprecationMessage"));
 const FName FBlueprintMetadata::MD_CompactNodeTitle(TEXT("CompactNodeTitle"));
 const FName FBlueprintMetadata::MD_DisplayName(TEXT("DisplayName"));
+const FName FBlueprintMetadata::MD_InternalUseParam(TEXT("InternalUseParam"));
 
 const FName FBlueprintMetadata::MD_ExposeOnSpawn(TEXT("ExposeOnSpawn"));
 const FName FBlueprintMetadata::MD_DefaultToSelf(TEXT("DefaultToSelf"));
@@ -106,6 +107,7 @@ const FName FBlueprintMetadata::MD_ArrayDependentParam(TEXT("ArrayTypeDependentP
 #define LOCTEXT_NAMESPACE "KismetSchema"
 
 UEdGraphSchema_K2::FPinTypeTreeInfo::FPinTypeTreeInfo(const FText& InFriendlyName, const FString& CategoryName, const UEdGraphSchema_K2* Schema, const FText& InTooltip, bool bInReadOnly/*=false*/, FTypesDatabase* TypesDatabase /*=nullptr*/)
+	: PossibleObjectReferenceTypes(0)
 {
 	Init(InFriendlyName, CategoryName, Schema, InTooltip, bInReadOnly, TypesDatabase);
 }
@@ -115,13 +117,16 @@ struct FUnloadedAssetData
 	FStringAssetReference StringAssetReference;
 	FText AssetFriendlyName;
 	FText Tooltip;
+	uint8 PossibleObjectReferenceTypes;
 
 	FUnloadedAssetData()
+		: PossibleObjectReferenceTypes(0)
 	{}
 
-	FUnloadedAssetData(const FAssetData& InAsset)
+	FUnloadedAssetData(const FAssetData& InAsset, uint8 InPossibleObjectReferenceTypes = 0)
 		: StringAssetReference(InAsset.ToStringReference())
 		, AssetFriendlyName(FText::FromString(FName::NameToDisplayString(InAsset.AssetName.ToString(), false)))
+		, PossibleObjectReferenceTypes(InPossibleObjectReferenceTypes)
 	{
 		const FString* TooltipPtr = InAsset.TagsAndValues.Find(TEXT("Tooltip"));
 		Tooltip = FText::FromString((TooltipPtr && !TooltipPtr->IsEmpty()) ? *TooltipPtr : InAsset.ObjectPath.ToString());
@@ -132,10 +137,15 @@ struct FLoadedAssetData
 {
 	FText Tooltip;
 	UObject* Object;
+	uint8 PossibleObjectReferenceTypes;
 
-	FLoadedAssetData() : Object(nullptr) {}
-	FLoadedAssetData(UObject* InObject) 
+	FLoadedAssetData() 
+		: Object(nullptr)
+		, PossibleObjectReferenceTypes(0) {}
+
+	FLoadedAssetData(UObject* InObject, uint8 InPossibleObjectReferenceTypes = 0)
 		: Object(InObject) 
+		, PossibleObjectReferenceTypes(InPossibleObjectReferenceTypes)
 	{
 		UStruct* Struct = Cast<UStruct>(Object);
 		Tooltip = Struct ? Struct->GetToolTipText() : FText::GetEmpty();
@@ -164,149 +174,12 @@ private:
 		}
 	};
 
-	/** Helper function to add an unloaded asset to the children, does no validation on passed data */
-	static void AddUnloadedAsset(const FAssetData& InAsset, const FString& InCategoryName, TArray<FPinTypeTreeInfoPtr>& OutChildren)
-	{
-		const FString* TooltipPtr = InAsset.TagsAndValues.Find(TEXT("Tooltip"));
-		const FString Tooltip = (TooltipPtr && !TooltipPtr->IsEmpty()) ? *TooltipPtr : InAsset.ObjectPath.ToString();
-
-		FPinTypeTreeInfoPtr TypeTreeInfo = MakeShareable(new UEdGraphSchema_K2::FPinTypeTreeInfo(InCategoryName, InAsset.ToStringReference(), FText::FromString(Tooltip)));
-		TypeTreeInfo->FriendlyName = FText::FromString(FName::NameToDisplayString(InAsset.AssetName.ToString(), false));
-		OutChildren.Add(TypeTreeInfo);
-	}
-
-	/**
-	 * Gets a list of variable subtypes that are valid for the specified type
-	 *
-	 * @param	Type			The type to grab subtypes for
-	 * @param	SubtypesList	(out) Upon return, this will be a list of valid subtype objects for the specified type
-	 */
-	static void GetVariableSubtypes(const FString& Type, TArray<UObject*>& OutSubtypesList)
-	{
-		OutSubtypesList.Empty();
-
-		if (Type == UEdGraphSchema_K2::PC_Struct)
-		{
-			// Find script structs marked with "BlueprintType=true" in their metadata, and add to the list
-			for (TObjectIterator<UScriptStruct> StructIt; StructIt; ++StructIt)
-			{
-				UScriptStruct* ScriptStruct = *StructIt;
-				if (UEdGraphSchema_K2::IsAllowableBlueprintVariableType(ScriptStruct))
-				{
-					OutSubtypesList.Add(ScriptStruct);
-				}
-			}
-		}
-		else if (Type == UEdGraphSchema_K2::PC_Class || Type == UEdGraphSchema_K2::PC_AssetClass)
-		{
-			// Generate a list of all potential objects which have "BlueprintType=true" in their metadata
-			for (TObjectIterator<UClass> ClassIt; ClassIt; ++ClassIt)
-			{
-				UClass* CurrentClass = *ClassIt;
-				if (UEdGraphSchema_K2::IsAllowableBlueprintVariableType(CurrentClass) && !CurrentClass->HasAnyClassFlags(CLASS_Deprecated))
-				{
-					OutSubtypesList.Add(CurrentClass);
-				}
-			}
-		}
-		else if (Type == UEdGraphSchema_K2::PC_Object || Type == UEdGraphSchema_K2::PC_Asset)
-		{
-			// Generate a list of all potential objects which have "BlueprintType=true" in their metadata (that aren't interfaces)
-			for (TObjectIterator<UClass> ClassIt; ClassIt; ++ClassIt)
-			{
-				UClass* CurrentClass = *ClassIt;
-				if (!CurrentClass->IsChildOf(UInterface::StaticClass()) && UEdGraphSchema_K2::IsAllowableBlueprintVariableType(CurrentClass) && !CurrentClass->HasAnyClassFlags(CLASS_Deprecated))
-				{
-					OutSubtypesList.Add(CurrentClass);
-				}
-			}
-		}
-		else if (Type == UEdGraphSchema_K2::PC_Interface)
-		{
-			// Generate a list of all potential objects which have "BlueprintType=true" in their metadata (only ones that are interfaces)
-			for (TObjectIterator<UClass> ClassIt; ClassIt; ++ClassIt)
-			{
-				UClass* CurrentClass = *ClassIt;
-				if (CurrentClass->IsChildOf(UInterface::StaticClass()) && UEdGraphSchema_K2::IsAllowableBlueprintVariableType(CurrentClass))
-				{
-					OutSubtypesList.Add(CurrentClass);
-				}
-			}
-		}
-		else if (Type == UEdGraphSchema_K2::PC_Enum)
-		{
-			// Generate a list of all potential enums which have "BlueprintType=true" in their metadata
-			for (TObjectIterator<UEnum> EnumIt; EnumIt; ++EnumIt)
-			{
-				UEnum* CurrentEnum = *EnumIt;
-				if (UEdGraphSchema_K2::IsAllowableBlueprintVariableType(CurrentEnum))
-				{
-					OutSubtypesList.Add(CurrentEnum);
-				}
-			}
-		}
-	}
-
 public:
-	static void FillLoadedTypesDatabase(FTypesDatabase& TypesDatabase)
+	static void FillLoadedTypesDatabase(FTypesDatabase& TypesDatabase, bool bIndexTypesOnly)
 	{
 		// Loaded types
 		TypesDatabase.LoadedTypesMap.Reset();
 
-		//(Type == UEdGraphSchema_K2::PC_Struct)
-		{
-			FTypesDatabase::FLoadedTypesList LoadedTypesList = MakeShareable(new TArray<FLoadedAssetData>());
-			// Find script structs marked with "BlueprintType=true" in their metadata, and add to the list
-			for (TObjectIterator<UScriptStruct> StructIt; StructIt; ++StructIt)
-			{
-				UScriptStruct* ScriptStruct = *StructIt;
-				if (UEdGraphSchema_K2::IsAllowableBlueprintVariableType(ScriptStruct))
-				{
-					LoadedTypesList->Add(FLoadedAssetData(ScriptStruct));
-				}
-			}
-			TypesDatabase.LoadedTypesMap.Add(UEdGraphSchema_K2::PC_Struct, LoadedTypesList);
-		}
-
-		//(Type == UEdGraphSchema_K2::PC_Class || Type == UEdGraphSchema_K2::PC_AssetClass) UEdGraphSchema_K2::PC_Interface
-		{
-			FTypesDatabase::FLoadedTypesList LoadedTypesList = MakeShareable(new TArray<FLoadedAssetData>());
-			FTypesDatabase::FLoadedTypesList InterfaceLoadedTypesList = MakeShareable(new TArray<FLoadedAssetData>());
-			// Generate a list of all potential objects which have "BlueprintType=true" in their metadata
-			for (TObjectIterator<UClass> ClassIt; ClassIt; ++ClassIt)
-			{
-				UClass* CurrentClass = *ClassIt;
-				if (UEdGraphSchema_K2::IsAllowableBlueprintVariableType(CurrentClass) && !CurrentClass->HasAnyClassFlags(CLASS_Deprecated))
-				{
-					LoadedTypesList->Add(FLoadedAssetData(CurrentClass));
-				}
-				
-				if (CurrentClass->IsChildOf(UInterface::StaticClass()) && UEdGraphSchema_K2::IsAllowableBlueprintVariableType(CurrentClass))
-				{
-					InterfaceLoadedTypesList->Add(FLoadedAssetData(CurrentClass));
-				}
-			}
-			TypesDatabase.LoadedTypesMap.Add(UEdGraphSchema_K2::PC_Class, LoadedTypesList);
-			TypesDatabase.LoadedTypesMap.Add(UEdGraphSchema_K2::PC_AssetClass, LoadedTypesList);
-			TypesDatabase.LoadedTypesMap.Add(UEdGraphSchema_K2::PC_Interface, InterfaceLoadedTypesList);
-		}
-
-		//(Type == UEdGraphSchema_K2::PC_Object || Type == UEdGraphSchema_K2::PC_Asset)
-		{
-			FTypesDatabase::FLoadedTypesList LoadedTypesList = MakeShareable(new TArray<FLoadedAssetData>());
-			// Generate a list of all potential objects which have "BlueprintType=true" in their metadata (that aren't interfaces)
-			for (TObjectIterator<UClass> ClassIt; ClassIt; ++ClassIt)
-			{
-				UClass* CurrentClass = *ClassIt;
-				if (!CurrentClass->IsChildOf(UInterface::StaticClass()) && UEdGraphSchema_K2::IsAllowableBlueprintVariableType(CurrentClass) && !CurrentClass->HasAnyClassFlags(CLASS_Deprecated))
-				{
-					LoadedTypesList->Add(FLoadedAssetData(CurrentClass));
-				}
-			}
-			TypesDatabase.LoadedTypesMap.Add(UEdGraphSchema_K2::PC_Object, LoadedTypesList);
-			TypesDatabase.LoadedTypesMap.Add(UEdGraphSchema_K2::PC_Asset, LoadedTypesList);
-		}
-		
 		//(Type == UEdGraphSchema_K2::PC_Enum)
 		{
 			FTypesDatabase::FLoadedTypesList LoadedTypesList = MakeShareable(new TArray<FLoadedAssetData>());
@@ -321,31 +194,61 @@ public:
 			}
 			TypesDatabase.LoadedTypesMap.Add(UEdGraphSchema_K2::PC_Enum, LoadedTypesList);
 		}
+
+		if (!bIndexTypesOnly)
+		{
+			//(Type == UEdGraphSchema_K2::PC_Struct)
+			{
+				FTypesDatabase::FLoadedTypesList LoadedTypesList = MakeShareable(new TArray<FLoadedAssetData>());
+				// Find script structs marked with "BlueprintType=true" in their metadata, and add to the list
+				for (TObjectIterator<UScriptStruct> StructIt; StructIt; ++StructIt)
+				{
+					UScriptStruct* ScriptStruct = *StructIt;
+					if (UEdGraphSchema_K2::IsAllowableBlueprintVariableType(ScriptStruct))
+					{
+						LoadedTypesList->Add(FLoadedAssetData(ScriptStruct));
+					}
+				}
+				TypesDatabase.LoadedTypesMap.Add(UEdGraphSchema_K2::PC_Struct, LoadedTypesList);
+			}
+
+			//(Type == UEdGraphSchema_K2::PC_Class || Type == UEdGraphSchema_K2::PC_AssetClass) UEdGraphSchema_K2::PC_Interface)
+			//(Type == UEdGraphSchema_K2::PC_Object || Type == UEdGraphSchema_K2::PC_Asset)
+			{
+				FTypesDatabase::FLoadedTypesList InterfaceLoadedTypesList = MakeShareable(new TArray<FLoadedAssetData>());
+				FTypesDatabase::FLoadedTypesList AllObjectLoadedTypesList = MakeShareable(new TArray<FLoadedAssetData>());
+
+				// Generate a list of all potential objects which have "BlueprintType=true" in their metadata
+				for (TObjectIterator<UClass> ClassIt; ClassIt; ++ClassIt)
+				{
+					UClass* CurrentClass = *ClassIt;
+					const bool bIsInterface = CurrentClass->IsChildOf(UInterface::StaticClass());
+					const bool bIsBlueprintType = UEdGraphSchema_K2::IsAllowableBlueprintVariableType(CurrentClass);
+					const bool bIsDeprecated = CurrentClass->HasAnyClassFlags(CLASS_Deprecated);
+					if (bIsBlueprintType && !bIsDeprecated)
+					{
+						if (bIsInterface)
+						{
+							InterfaceLoadedTypesList->Add(FLoadedAssetData(CurrentClass));
+						}
+						else
+						{
+							AllObjectLoadedTypesList->Add(FLoadedAssetData(CurrentClass, static_cast<uint8>(EObjectReferenceType::AllTypes)));
+						}
+					}
+				}
+				TypesDatabase.LoadedTypesMap.Add(UEdGraphSchema_K2::AllObjectTypes, AllObjectLoadedTypesList);
+				TypesDatabase.LoadedTypesMap.Add(UEdGraphSchema_K2::PC_Interface, InterfaceLoadedTypesList);
+			}
+		}
 	}
 
-	static void FillUnLoadedTypesDatabase(FTypesDatabase& TypesDatabase)
+	static void FillUnLoadedTypesDatabase(FTypesDatabase& TypesDatabase, bool bIndexTypesOnly)
 	{
 		// Loaded types
 		TypesDatabase.UnLoadedTypesMap.Reset();
 
 		const FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
-
-		{
-			TArray<FAssetData> AssetData;
-			AssetRegistryModule.Get().GetAssetsByClass(UUserDefinedStruct::StaticClass()->GetFName(), AssetData);
-
-			FTypesDatabase::FUnLoadedTypesList UnLoadedTypesList = MakeShareable(new TArray<FUnloadedAssetData>());
-			for (int32 AssetIndex = 0; AssetIndex < AssetData.Num(); ++AssetIndex)
-			{
-				const FAssetData& Asset = AssetData[AssetIndex];
-				if (Asset.IsValid() && !Asset.IsAssetLoaded())
-				{
-					UnLoadedTypesList->Add(FUnloadedAssetData(Asset));
-				}
-			}
-
-			TypesDatabase.UnLoadedTypesMap.Add(UEdGraphSchema_K2::PC_Struct, UnLoadedTypesList);
-		}
 
 		{
 			TArray<FAssetData> AssetData;
@@ -364,58 +267,82 @@ public:
 			TypesDatabase.UnLoadedTypesMap.Add(UEdGraphSchema_K2::PC_Enum, UnLoadedTypesList);
 		}
 
-		//else if (Schema->PC_Object == CategoryName || Schema->PC_Class == CategoryName || Schema->PC_Interface == CategoryName || Schema->PC_Asset == CategoryName || Schema->PC_AssetClass == CategoryName)
+		if (!bIndexTypesOnly)
 		{
-			TArray<FAssetData> AssetData;
-			AssetRegistryModule.Get().GetAssetsByClass(UBlueprint::StaticClass()->GetFName(), AssetData);
-
-			const FString BPInterfaceTypeAllowed(TEXT("BPTYPE_Interface")); 
-			const FString BPNormalTypeAllowed(TEXT("BPTYPE_Normal"));
-
-			FTypesDatabase::FUnLoadedTypesList UnLoadedInterfacesList = MakeShareable(new TArray<FUnloadedAssetData>());
-			FTypesDatabase::FUnLoadedTypesList UnLoadedClassesList = MakeShareable(new TArray<FUnloadedAssetData>());
-
-			for (int32 AssetIndex = 0; AssetIndex < AssetData.Num(); ++AssetIndex)
 			{
-				const FAssetData& Asset = AssetData[AssetIndex];
+				TArray<FAssetData> AssetData;
+				AssetRegistryModule.Get().GetAssetsByClass(UUserDefinedStruct::StaticClass()->GetFName(), AssetData);
 
-				if (Asset.IsValid() && !Asset.IsAssetLoaded())
+				FTypesDatabase::FUnLoadedTypesList UnLoadedTypesList = MakeShareable(new TArray<FUnloadedAssetData>());
+				for (int32 AssetIndex = 0; AssetIndex < AssetData.Num(); ++AssetIndex)
 				{
-					const FString* BlueprintTypeStr = Asset.TagsAndValues.Find("BlueprintType");
-					const bool bNormalBP = BlueprintTypeStr && (*BlueprintTypeStr == BPNormalTypeAllowed);
-					const bool bInterfaceBP = BlueprintTypeStr && (*BlueprintTypeStr == BPInterfaceTypeAllowed);
-
-					if (bNormalBP || bInterfaceBP)
+					const FAssetData& Asset = AssetData[AssetIndex];
+					if (Asset.IsValid() && !Asset.IsAssetLoaded())
 					{
-						uint32 ClassFlags = 0;
-						const FString* ClassFlagsStr = Asset.TagsAndValues.Find("ClassFlags");
-						if (ClassFlagsStr)
-						{
-							ClassFlags = FCString::Atoi(**ClassFlagsStr);
-						}
+						UnLoadedTypesList->Add(FUnloadedAssetData(Asset));
+					}
+				}
 
-						if (!(ClassFlags & CLASS_Deprecated))
+				TypesDatabase.UnLoadedTypesMap.Add(UEdGraphSchema_K2::PC_Struct, UnLoadedTypesList);
+			}
+
+			//else if (Schema->PC_Object == CategoryName || Schema->PC_Class == CategoryName || Schema->PC_Interface == CategoryName || Schema->PC_Asset == CategoryName || Schema->PC_AssetClass == CategoryName)
+			{
+				TArray<FAssetData> AssetData;
+				AssetRegistryModule.Get().GetAssetsByClass(UBlueprint::StaticClass()->GetFName(), AssetData);
+
+				const FString BPInterfaceTypeAllowed(TEXT("BPTYPE_Interface"));
+				const FString BPNormalTypeAllowed(TEXT("BPTYPE_Normal"));
+
+				FTypesDatabase::FUnLoadedTypesList UnLoadedInterfacesList = MakeShareable(new TArray<FUnloadedAssetData>());
+				FTypesDatabase::FUnLoadedTypesList UnLoadedClassesList = MakeShareable(new TArray<FUnloadedAssetData>());
+
+				for (int32 AssetIndex = 0; AssetIndex < AssetData.Num(); ++AssetIndex)
+				{
+					const FAssetData& Asset = AssetData[AssetIndex];
+
+					if (Asset.IsValid() && !Asset.IsAssetLoaded())
+					{
+						const FString* BlueprintTypeStr = Asset.TagsAndValues.Find("BlueprintType");
+						const bool bNormalBP = BlueprintTypeStr && (*BlueprintTypeStr == BPNormalTypeAllowed);
+						const bool bInterfaceBP = BlueprintTypeStr && (*BlueprintTypeStr == BPInterfaceTypeAllowed);
+
+						if (bNormalBP || bInterfaceBP)
 						{
-							if (bNormalBP)
+							uint32 ClassFlags = 0;
+							const FString* ClassFlagsStr = Asset.TagsAndValues.Find("ClassFlags");
+							if (ClassFlagsStr)
 							{
-								UnLoadedClassesList->Add(FUnloadedAssetData(Asset));
+								ClassFlags = FCString::Atoi(**ClassFlagsStr);
 							}
-							else if (bInterfaceBP)
+
+							if (!(ClassFlags & CLASS_Deprecated))
 							{
-								UnLoadedInterfacesList->Add(FUnloadedAssetData(Asset));
+								if (bNormalBP)
+								{
+									UnLoadedClassesList->Add(FUnloadedAssetData(Asset, static_cast<uint8>(EObjectReferenceType::AllTypes)));
+								}
+								else if (bInterfaceBP)
+								{
+									UnLoadedInterfacesList->Add(FUnloadedAssetData(Asset));
+								}
 							}
 						}
 					}
 				}
+				TypesDatabase.UnLoadedTypesMap.Add(UEdGraphSchema_K2::PC_Interface, UnLoadedInterfacesList);
+				TypesDatabase.UnLoadedTypesMap.Add(UEdGraphSchema_K2::AllObjectTypes, UnLoadedClassesList);
 			}
-			TypesDatabase.UnLoadedTypesMap.Add(UEdGraphSchema_K2::PC_Interface, UnLoadedInterfacesList);
-			TypesDatabase.UnLoadedTypesMap.Add(UEdGraphSchema_K2::PC_Object, UnLoadedClassesList);
-			TypesDatabase.UnLoadedTypesMap.Add(UEdGraphSchema_K2::PC_Class, UnLoadedClassesList);
-			TypesDatabase.UnLoadedTypesMap.Add(UEdGraphSchema_K2::PC_Asset, UnLoadedClassesList);
-			TypesDatabase.UnLoadedTypesMap.Add(UEdGraphSchema_K2::PC_AssetClass, UnLoadedClassesList);
 		}
 	}
 
+	/**
+	 * Gathers all valid sub-types (loaded and unloaded) of a passed category and sorts them alphabetically
+	 * @param FriendlyName		Friendly name to be used for the tooltip if there is no available data
+	 * @param CategoryName		Category (type) to find sub-types of
+	 * @param TypesDatabase		Types database
+	 * @param OutChildren		All the gathered children
+	 */
 	static void Gather(const FText& FriendlyName, const FString& CategoryName, FTypesDatabase& TypesDatabase, TArray<FPinTypeTreeInfoPtr>& OutChildren)
 	{
 		FEdGraphPinType LoadedPinSubtype;
@@ -428,7 +355,11 @@ public:
 		{
 			for (auto LoadedAssetData : *LoadedSubTypesPtr->Get())
 			{
-				OutChildren.Add(MakeShareable(new UEdGraphSchema_K2::FPinTypeTreeInfo(LoadedPinSubtype.PinCategory, LoadedAssetData.Object, LoadedAssetData.Tooltip.IsEmpty() ? FriendlyName : LoadedAssetData.Tooltip)));
+				OutChildren.Add(MakeShareable(new UEdGraphSchema_K2::FPinTypeTreeInfo(LoadedPinSubtype.PinCategory
+					, LoadedAssetData.Object
+					, LoadedAssetData.Tooltip.IsEmpty() ? FriendlyName : LoadedAssetData.Tooltip
+					, false
+					, LoadedAssetData.PossibleObjectReferenceTypes)));
 			}
 		}
 
@@ -437,106 +368,16 @@ public:
 		{
 			for (FUnloadedAssetData& It : *UnLoadedSubTypesPtr->Get())
 			{
-				FPinTypeTreeInfoPtr TypeTreeInfo = MakeShareable(new UEdGraphSchema_K2::FPinTypeTreeInfo(It.AssetFriendlyName, CategoryName, It.StringAssetReference, It.Tooltip));
+				FPinTypeTreeInfoPtr TypeTreeInfo = MakeShareable(new UEdGraphSchema_K2::FPinTypeTreeInfo(It.AssetFriendlyName
+					, CategoryName
+					, It.StringAssetReference
+					, It.Tooltip
+					, false
+					, It.PossibleObjectReferenceTypes));
 				OutChildren.Add(TypeTreeInfo);
 			}
 		}
 
-		OutChildren.Sort(FCompareChildren());
-	}
-
-	/**
-	 * Gathers all valid sub-types (loaded and unloaded) of a passed category and sorts them alphabetically
-	 * @param FriendlyName		Friendly name to be used for the tooltip if there is no available data
-	 * @param CategoryName		Category (type) to find sub-types of
-	 * @param Schema			Schema to use
-	 * @param OutChildren		All the gathered children
-	 */
-	static void Gather(const FText& FriendlyName, const FString& CategoryName, const UEdGraphSchema_K2* Schema, TArray<FPinTypeTreeInfoPtr>& OutChildren)
-	{
-		// Gather any loaded subtype children first
-		TArray<UObject*> LoadedSubTypes;
-		GetVariableSubtypes(CategoryName, LoadedSubTypes);
-
-		FEdGraphPinType LoadedPinSubtype;
-		LoadedPinSubtype.PinCategory = (CategoryName == UEdGraphSchema_K2::PC_Enum ? UEdGraphSchema_K2::PC_Byte : CategoryName);
-		LoadedPinSubtype.PinSubCategory = TEXT("");
-		LoadedPinSubtype.PinSubCategoryObject = NULL;
-
-		// Add any loaded subtypes to the children list
-		for (auto it = LoadedSubTypes.CreateIterator(); it; ++it)
-		{
-			FText SubtypeTooltip;
-			UStruct* Struct = Cast<UStruct>(*it);
-			if(Struct != NULL)
-			{
-				SubtypeTooltip = (Struct ? Struct->GetToolTipText() : FriendlyName);
-			}
-			
-			OutChildren.Add( MakeShareable(new UEdGraphSchema_K2::FPinTypeTreeInfo(LoadedPinSubtype.PinCategory, *it, SubtypeTooltip)) );
-		}
-
-		UClass* AssetRegistrySearchClass = nullptr;
-		if(Schema->PC_Struct == CategoryName)
-		{
-			AssetRegistrySearchClass = UUserDefinedStruct::StaticClass();
-		}
-		else if(Schema->PC_Enum == CategoryName)
-		{
-			AssetRegistrySearchClass = UUserDefinedEnum::StaticClass();
-		}
-		else if (Schema->PC_Object == CategoryName || Schema->PC_Class == CategoryName || Schema->PC_Interface == CategoryName || Schema->PC_Asset == CategoryName || Schema->PC_AssetClass == CategoryName)
-		{
-			AssetRegistrySearchClass = UBlueprint::StaticClass();
-		}
-
-		// Gather all assets of the specified class
-		const FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
-		TArray<FAssetData> AssetData;
-		AssetRegistryModule.Get().GetAssetsByClass(AssetRegistrySearchClass->GetFName(), AssetData);
-
-		// Search through all the unloaded assets, filtered by certain rules based on struct/enum or object/class/interface
-		if (Schema->PC_Struct == CategoryName || Schema->PC_Enum == CategoryName)
-		{
-			for (int32 AssetIndex = 0; AssetIndex < AssetData.Num(); ++AssetIndex)
-			{
-				const FAssetData& Asset = AssetData[AssetIndex];
-				if (Asset.IsValid() && !Asset.IsAssetLoaded())
-				{
-					AddUnloadedAsset(Asset, CategoryName, OutChildren);
-				}
-			}
-		}
-		else if (Schema->PC_Object == CategoryName || Schema->PC_Class == CategoryName || Schema->PC_Interface == CategoryName || Schema->PC_Asset == CategoryName || Schema->PC_AssetClass == CategoryName)
-		{
-			const FString BPTypeAllowed = (Schema->PC_Interface == CategoryName)? TEXT("BPTYPE_Interface") : TEXT("BPTYPE_Normal");
-
-			for (int32 AssetIndex = 0; AssetIndex < AssetData.Num(); ++AssetIndex)
-			{
-				const FAssetData& Asset = AssetData[AssetIndex];
-
-				if (Asset.IsValid() && !Asset.IsAssetLoaded())
-				{
-					// Based on the category, only certain Blueprint types are available
-					const FString* BlueprintTypeStr = Asset.TagsAndValues.Find("BlueprintType");
-					if(BlueprintTypeStr && *BlueprintTypeStr == BPTypeAllowed)
-					{
-						uint32 ClassFlags = 0;
-						const FString* ClassFlagsStr = Asset.TagsAndValues.Find("ClassFlags");
-						if(ClassFlagsStr)
-						{
-							ClassFlags = FCString::Atoi(**ClassFlagsStr);
-						}
-
-						// Do not allow deprecated Blueprints to be added
-						if(!(ClassFlags & CLASS_Deprecated))
-						{
-							AddUnloadedAsset(Asset, CategoryName, OutChildren);
-						}
-					}
-				}
-			}
-		}
 		OutChildren.Sort(FCompareChildren());
 	}
 
@@ -623,14 +464,11 @@ void UEdGraphSchema_K2::FPinTypeTreeInfo::Init(const FText& InFriendlyName, cons
 		{
 			FGatherTypesHelper::Gather(InFriendlyName, CategoryName, *TypesDatabase, Children);
 		}
-		else
-		{
-			FGatherTypesHelper::Gather(InFriendlyName, CategoryName, Schema, Children);
-		}
 	}
 }
 
-UEdGraphSchema_K2::FPinTypeTreeInfo::FPinTypeTreeInfo(const FString& CategoryName, UObject* SubCategoryObject, const FText& InTooltip, bool bInReadOnly/*=false*/)
+UEdGraphSchema_K2::FPinTypeTreeInfo::FPinTypeTreeInfo(const FString& CategoryName, UObject* SubCategoryObject, const FText& InTooltip, bool bInReadOnly/*=false*/, uint8 InPossibleObjectReferenceTypes)
+	: PossibleObjectReferenceTypes(InPossibleObjectReferenceTypes)
 {
 	check( !CategoryName.IsEmpty() );
 	check( SubCategoryObject );
@@ -643,22 +481,8 @@ UEdGraphSchema_K2::FPinTypeTreeInfo::FPinTypeTreeInfo(const FString& CategoryNam
 	CachedDescription = GenerateDescription();
 }
 
-UEdGraphSchema_K2::FPinTypeTreeInfo::FPinTypeTreeInfo(const FString& CategoryName, const FStringAssetReference& SubCategoryObject, const FText& InTooltip, bool bInReadOnly)
-{
-	check(!CategoryName.IsEmpty());
-	check(SubCategoryObject.IsValid());
-
-	Tooltip = InTooltip;
-	PinType.PinCategory = CategoryName;
-
-	SubCategoryObjectAssetReference = SubCategoryObject;
-	PinType.PinSubCategoryObject = SubCategoryObjectAssetReference.ResolveObject();
-
-	bReadOnly = bInReadOnly;
-	CachedDescription = GenerateDescription();
-}
-
-UEdGraphSchema_K2::FPinTypeTreeInfo::FPinTypeTreeInfo(const FText& InFriendlyName, const FString& CategoryName, const FStringAssetReference& SubCategoryObject, const FText& InTooltip, bool bInReadOnly)
+UEdGraphSchema_K2::FPinTypeTreeInfo::FPinTypeTreeInfo(const FText& InFriendlyName, const FString& CategoryName, const FStringAssetReference& SubCategoryObject, const FText& InTooltip, bool bInReadOnly, uint8 InPossibleObjectReferenceTypes)
+	: PossibleObjectReferenceTypes(InPossibleObjectReferenceTypes)
 {
 	FriendlyName = InFriendlyName;
 
@@ -763,6 +587,8 @@ const UScriptStruct* UEdGraphSchema_K2::ColorStruct = nullptr;
 
 bool UEdGraphSchema_K2::bGeneratingDocumentation = false;
 int32 UEdGraphSchema_K2::CurrentCacheRefreshID = 0;
+
+const FString UEdGraphSchema_K2::AllObjectTypes(TEXT("ObjectTypes"));
 
 UEdGraphSchema_K2::UEdGraphSchema_K2(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
@@ -2182,10 +2008,14 @@ bool UEdGraphSchema_K2::TryCreateConnection(UEdGraphPin* PinA, UEdGraphPin* PinB
 	return bModified;
 }
 
-struct FAutocastFunctionMap
+struct FAutocastFunctionMap : private FNoncopyable
 {
 private:
+	static FAutocastFunctionMap* AutocastFunctionMap;
+
 	TMap<FString, TWeakObjectPtr<UFunction>> InnerMap;
+	FDelegateHandle OnHotReloadDelegateHandle;
+	FDelegateHandle OnModulesChangedDelegateHandle;
 
 	static FString GenerateTypeData(const FEdGraphPinType& PinType)
 	{
@@ -2198,30 +2028,19 @@ private:
 		return FString::Printf(TEXT("%s;%s"), *GenerateTypeData(InputPinType), *GenerateTypeData(OutputPinType));
 	}
 
-	static bool IsInputParam(const UProperty* Property)
+	static bool IsInputParam(uint64 PropertyFlags)
 	{
 		const uint64 ConstOutParamFlag = CPF_OutParm | CPF_ConstParm;
-		const uint64 IsConstOut = Property ? (Property->PropertyFlags & ConstOutParamFlag) : 0;
-		return Property 
-			&& (CPF_Parm == (Property->PropertyFlags & (CPF_Parm | CPF_ReturnParm)))
+		const uint64 IsConstOut = PropertyFlags & ConstOutParamFlag;
+		return (CPF_Parm == (PropertyFlags & (CPF_Parm | CPF_ReturnParm)))
 			&& ((0 == IsConstOut) || (ConstOutParamFlag == IsConstOut));
-	}
-
-	static int32 GetInputPropertiesNum(const UFunction* Function)
-	{
-		int32 InputPropNum = 0;
-		for (auto Property : TFieldRange<const UProperty>(Function))
-		{
-			InputPropNum += IsInputParam(Property) ? 1 : 0;
-		}
-		return InputPropNum;
 	}
 
 	static const UProperty* GetFirstInputProperty(const UFunction* Function)
 	{
 		for (auto Property : TFieldRange<const UProperty>(Function))
 		{
-			if (IsInputParam(Property))
+			if (Property && IsInputParam(Property->PropertyFlags))
 			{
 				return Property;
 			}
@@ -2248,11 +2067,19 @@ public:
 			&& Function->HasMetaData(BlueprintAutocast)
 			&& Function->HasAllFunctionFlags(FUNC_Static | FUNC_Native | FUNC_Public | FUNC_BlueprintPure)
 			&& Function->GetReturnProperty()
-			&& (1 == GetInputPropertiesNum(Function));
+			&& GetFirstInputProperty(Function);
 	}
 
 	void Refresh()
 	{
+#ifdef SCHEMA_K2_AUTOCASTFUNCTIONMAP_LOG_TIME
+		static_assert(false, "Macro redefinition.");
+#endif
+#define SCHEMA_K2_AUTOCASTFUNCTIONMAP_LOG_TIME 0
+#if SCHEMA_K2_AUTOCASTFUNCTIONMAP_LOG_TIME
+		const auto StartTime = FPlatformTime::Seconds();
+#endif //SCHEMA_K2_AUTOCASTFUNCTIONMAP_LOG_TIME
+
 		InnerMap.Empty();
 		auto Schema = GetDefault<UEdGraphSchema_K2>();
 
@@ -2260,7 +2087,7 @@ public:
 		GetDerivedClasses(UBlueprintFunctionLibrary::StaticClass(), Libraries);
 		for (auto Library : Libraries)
 		{
-			if (Library && (0 != (Library->ClassFlags & CLASS_Native)))
+			if (Library && (CLASS_Native == (Library->ClassFlags & (CLASS_Native | CLASS_Deprecated | CLASS_NewerVersionExists))))
 			{
 				for (auto Function : TFieldRange<UFunction>(Library, EFieldIteratorFlags::ExcludeSuper, EFieldIteratorFlags::ExcludeDeprecated))
 				{
@@ -2271,17 +2098,22 @@ public:
 				}
 			}
 		}
+
+#if SCHEMA_K2_AUTOCASTFUNCTIONMAP_LOG_TIME
+		const auto EndTime = FPlatformTime::Seconds();
+		UE_LOG(LogBlueprint, Warning, TEXT("FAutocastFunctionMap::Refresh took %fs"), EndTime - StartTime);
+#endif //SCHEMA_K2_AUTOCASTFUNCTIONMAP_LOG_TIME
+#undef SCHEMA_K2_AUTOCASTFUNCTIONMAP_LOG_TIME
 	}
 
-	UFunction* Find(const FEdGraphPinType& InputPinType, const FEdGraphPinType& OutputPinType)
+	UFunction* Find(const FEdGraphPinType& InputPinType, const FEdGraphPinType& OutputPinType) const
 	{
-		TWeakObjectPtr<UFunction>* FuncPtr = InnerMap.Find(GenerateCastData(InputPinType, OutputPinType));
+		const TWeakObjectPtr<UFunction>* FuncPtr = InnerMap.Find(GenerateCastData(InputPinType, OutputPinType));
 		return FuncPtr ? FuncPtr->Get() : nullptr;
 	}
 
 	static FAutocastFunctionMap& Get()
 	{
-		static FAutocastFunctionMap* AutocastFunctionMap = nullptr;
 		if (AutocastFunctionMap == nullptr)
 		{
 			AutocastFunctionMap = new FAutocastFunctionMap();
@@ -2291,7 +2123,18 @@ public:
 
 	static void OnProjectHotReloaded(bool bWasTriggeredAutomatically)
 	{
-		Get().Refresh();
+		if (AutocastFunctionMap)
+		{
+			AutocastFunctionMap->Refresh();
+		}
+	}
+
+	static void OnModulesChanged(FName ModuleThatChanged, EModuleChangeReason ReasonForChange)
+	{
+		if (AutocastFunctionMap)
+		{
+			AutocastFunctionMap->Refresh();
+		}
 	}
 
 	FAutocastFunctionMap()
@@ -2299,9 +2142,23 @@ public:
 		Refresh();
 
 		IHotReloadInterface& HotReloadSupport = FModuleManager::LoadModuleChecked<IHotReloadInterface>("HotReload");
-		HotReloadSupport.OnHotReload().AddStatic(&FAutocastFunctionMap::OnProjectHotReloaded);
+		OnHotReloadDelegateHandle = HotReloadSupport.OnHotReload().AddStatic(&FAutocastFunctionMap::OnProjectHotReloaded);
+
+		OnModulesChangedDelegateHandle = FModuleManager::Get().OnModulesChanged().AddStatic(&OnModulesChanged);
+	}
+
+	~FAutocastFunctionMap()
+	{
+		if (auto HotReloadSupport = FModuleManager::GetModulePtr<IHotReloadInterface>("HotReload"))
+		{
+			HotReloadSupport->OnHotReload().Remove(OnHotReloadDelegateHandle);
+		}
+
+		FModuleManager::Get().OnModulesChanged().Remove(OnModulesChangedDelegateHandle); 
 	}
 };
+
+FAutocastFunctionMap* FAutocastFunctionMap::AutocastFunctionMap = nullptr;
 
 bool UEdGraphSchema_K2::SearchForAutocastFunction(const UEdGraphPin* OutputPin, const UEdGraphPin* InputPin, /*out*/ FName& TargetFunction, /*out*/ UClass*& FunctionOwner) const
 {
@@ -2310,206 +2167,15 @@ bool UEdGraphSchema_K2::SearchForAutocastFunction(const UEdGraphPin* OutputPin, 
 	// This includes things like string->int (does it do length, atoi, or what?) that would be autocasts in a traditional scripting language
 
 	TargetFunction = NAME_None;
-
-	const UScriptStruct* InputStructType = Cast<const UScriptStruct>(InputPin->PinType.PinSubCategoryObject.Get());
-	const UScriptStruct* OutputStructType = Cast<const UScriptStruct>(OutputPin->PinType.PinSubCategoryObject.Get());
+	FunctionOwner = nullptr;
 
 	if (OutputPin->PinType.bIsArray != InputPin->PinType.bIsArray)
 	{
-		// We don't autoconvert between arrays and non-arrays.  Those are handled by specialized conversions
+		return false;
 	}
-	else if (OutputPin->PinType.PinCategory == PC_Int)
-	{
-		if (InputPin->PinType.PinCategory == PC_Float)
-		{
-			TargetFunction = TEXT("Conv_IntToFloat");
-		}
-		else if (InputPin->PinType.PinCategory == PC_String)
-		{
-			TargetFunction = TEXT("Conv_IntToString");
-		}
-		else if ((InputPin->PinType.PinCategory == PC_Byte) && (InputPin->PinType.PinSubCategoryObject == NULL))
-		{
-			TargetFunction = TEXT("Conv_IntToByte");
-		}
-		else if (InputPin->PinType.PinCategory == PC_Boolean)
-		{
-			TargetFunction = TEXT("Conv_IntToBool");
-		}
-		else if(InputPin->PinType.PinCategory == PC_Text)
-		{
-			TargetFunction = TEXT("Conv_IntToText");
-		}
-	}
-	else if (OutputPin->PinType.PinCategory == PC_Float)
-	{
-		if (InputPin->PinType.PinCategory == PC_Int)
-		{
-			TargetFunction = TEXT("FTrunc");
-		}
-		else if ((InputPin->PinType.PinCategory == PC_Struct) && (InputStructType == VectorStruct))
-		{
-			TargetFunction = TEXT("Conv_FloatToVector");
-		}
-		else if (InputPin->PinType.PinCategory == PC_String)
-		{
-			TargetFunction = TEXT("Conv_FloatToString");
-		}
-		else if ((InputPin->PinType.PinCategory == PC_Struct) && (InputStructType == LinearColorStruct))
-		{
-			TargetFunction = TEXT("Conv_FloatToLinearColor");
-		}
-		else if(InputPin->PinType.PinCategory == PC_Text)
-		{
-			TargetFunction = TEXT("Conv_FloatToText");
-		}
-	}
-	else if (OutputPin->PinType.PinCategory == PC_Struct)
-	{
-		if (OutputStructType == VectorStruct)
-		{
-			if ((InputPin->PinType.PinCategory == PC_Struct) && (InputStructType == TransformStruct))
-			{
-				TargetFunction = TEXT("Conv_VectorToTransform");
-			}
-			else if ((InputPin->PinType.PinCategory == PC_Struct) && (InputStructType == LinearColorStruct))
-			{
-				TargetFunction = TEXT("Conv_VectorToLinearColor");
-			}
-			else if ((InputPin->PinType.PinCategory == PC_Struct) && (InputStructType == RotatorStruct))
-			{
-				TargetFunction = TEXT("Conv_VectorToRotator");
-			}
-			else if (InputPin->PinType.PinCategory == PC_String)
-			{
-				TargetFunction = TEXT("Conv_VectorToString");
-			}
-			// NOTE: Did you see the note above about unsafe and unclear casts?
-		}
-		else if(OutputStructType == RotatorStruct)
-		{
-			if ((InputPin->PinType.PinCategory == PC_Struct) && (InputStructType == TransformStruct))
-			{
-				TargetFunction = TEXT("MakeTransform");
-			}
-			else if ((InputPin->PinType.PinCategory == PC_Struct) && (InputStructType == VectorStruct))
-			{
-				TargetFunction = TEXT("Conv_RotatorToVector");
-			}
-			else if (InputPin->PinType.PinCategory == PC_String)
-			{
-				TargetFunction = TEXT("Conv_RotatorToString");
-			}
-			// NOTE: Did you see the note above about unsafe and unclear casts?
-		}
-		else if(OutputStructType == LinearColorStruct)
-		{
-			if ((InputPin->PinType.PinCategory == PC_Struct) && (InputStructType == ColorStruct))
-			{
-				TargetFunction = TEXT("Conv_LinearColorToColor");
-			}
-			else if (InputPin->PinType.PinCategory == PC_String)
-			{
-				TargetFunction = TEXT("Conv_ColorToString");
-			}
-			else if ((InputPin->PinType.PinCategory == PC_Struct) && (InputStructType == VectorStruct))
-			{
-				TargetFunction = TEXT("Conv_LinearColorToVector");
-			}
-		}
-		else if(OutputStructType == ColorStruct)
-		{
-			if ((InputPin->PinType.PinCategory == PC_Struct) && (InputStructType == LinearColorStruct))
-			{
-				TargetFunction = TEXT("Conv_ColorToLinearColor");
-			}
-		}
-	}
-	else if (OutputPin->PinType.PinCategory == PC_Boolean)
-	{
-		if (InputPin->PinType.PinCategory == PC_String)
-		{
-			TargetFunction = TEXT("Conv_BoolToString");
-		}
-		else if (InputPin->PinType.PinCategory == PC_Int)
-		{
-			TargetFunction = TEXT("Conv_BoolToInt");
-		}
-		else if (InputPin->PinType.PinCategory == PC_Float)
-		{
-			TargetFunction = TEXT("Conv_BoolToFloat");
-		}
-		else if ((InputPin->PinType.PinCategory == PC_Byte) && (InputPin->PinType.PinSubCategoryObject == NULL))
-		{
-			TargetFunction = TEXT("Conv_BoolToByte");
-		}
-		else if ( InputPin->PinType.PinCategory == PC_Text )
-		{
-			TargetFunction = TEXT("Conv_BoolToText");
-		}
-	}
-	else if (OutputPin->PinType.PinCategory == PC_Byte &&
-			 (OutputPin->PinType.PinSubCategoryObject == NULL || !OutputPin->PinType.PinSubCategoryObject->IsA(UEnum::StaticClass())))
-	{
-		if (InputPin->PinType.PinCategory == PC_String)
-		{
-			TargetFunction = TEXT("Conv_ByteToString");
-		}
-		else if (InputPin->PinType.PinCategory == PC_Int)
-		{
-			TargetFunction = TEXT("Conv_ByteToInt");
-		}
-		else if (InputPin->PinType.PinCategory == PC_Float)
-		{
-			TargetFunction = TEXT("Conv_ByteToFloat");
-		}
-		else if ( InputPin->PinType.PinCategory == PC_Text )
-		{
-			TargetFunction = TEXT("Conv_ByteToText");
-		}
-	}
-	else if (OutputPin->PinType.PinCategory == PC_Name)
-	{
-		if (InputPin->PinType.PinCategory == PC_String)
-		{
-			TargetFunction = TEXT("Conv_NameToString");
-		}
-		else if (InputPin->PinType.PinCategory == PC_Text)
-		{
-			TargetFunction = TEXT("Conv_NameToText");
-		}
-	}
-	else if (OutputPin->PinType.PinCategory == PC_String)
-	{
-		if (InputPin->PinType.PinCategory == PC_Name)
-		{
-			TargetFunction = TEXT("Conv_StringToName");
-		}
-		else if (InputPin->PinType.PinCategory == PC_Int)
-		{
-			TargetFunction = TEXT("Conv_StringToInt");
-		}
-		else if (InputPin->PinType.PinCategory == PC_Float)
-		{
-			TargetFunction = TEXT("Conv_StringToFloat");
-		}
-		else if (InputPin->PinType.PinCategory == PC_Text)
-		{
-			TargetFunction = TEXT("Conv_StringToText");
-		}
-		else
-		{
-			// NOTE: Did you see the note above about unsafe and unclear casts?
-		}
-	}
-	else if (OutputPin->PinType.PinCategory == PC_Text)
-	{
-		if(InputPin->PinType.PinCategory == PC_String)
-		{
-			TargetFunction = TEXT("Conv_TextToString");
-		}
-	}
-	else if ((OutputPin->PinType.PinCategory == PC_Interface) && (InputPin->PinType.PinCategory == PC_Object))
+
+	// SPECIAL CASES, not supported by FAutocastFunctionMap
+	if ((OutputPin->PinType.PinCategory == PC_Interface) && (InputPin->PinType.PinCategory == PC_Object))
 	{
 		UClass const* InputClass = Cast<UClass const>(InputPin->PinType.PinSubCategoryObject.Get());
 
@@ -2537,10 +2203,22 @@ bool UEdGraphSchema_K2::SearchForAutocastFunction(const UEdGraphPin* OutputPin, 
 			TargetFunction = TEXT("GetDisplayName");
 		}
 	}
+	else if (OutputPin->PinType.PinCategory == PC_Struct)
+	{
+		const UScriptStruct* OutputStructType = Cast<const UScriptStruct>(OutputPin->PinType.PinSubCategoryObject.Get());
+		if (OutputStructType == TBaseStructure<FRotator>::Get())
+		{
+			const UScriptStruct* InputStructType = Cast<const UScriptStruct>(InputPin->PinType.PinSubCategoryObject.Get());
+			if ((InputPin->PinType.PinCategory == PC_Struct) && (InputStructType == TBaseStructure<FTransform>::Get()))
+			{
+				TargetFunction = TEXT("MakeTransform");
+			}
+		}
+	}
 
 	if (TargetFunction == NAME_None)
 	{
-		auto AutocastFunctionMap = FAutocastFunctionMap::Get();
+		const auto& AutocastFunctionMap = FAutocastFunctionMap::Get();
 		if (auto Func = AutocastFunctionMap.Find(OutputPin->PinType, InputPin->PinType))
 		{
 			TargetFunction = Func->GetFName();
@@ -3633,6 +3311,7 @@ FText UEdGraphSchema_K2::GetCategoryText(const FString& Category, const bool bFo
 		CategoryDescriptions.Add(PC_Enum, LOCTEXT("EnumCategory","Enum"));
 		CategoryDescriptions.Add(PC_Asset, LOCTEXT("AssetCategory", "Asset ID"));
 		CategoryDescriptions.Add(PC_AssetClass, LOCTEXT("AssetClassCategory", "Class Asset ID"));
+		CategoryDescriptions.Add(AllObjectTypes, LOCTEXT("AllObjectTypes", "Object Types"));
 	}
 
 	if (bForMenu)
@@ -3731,7 +3410,12 @@ FText UEdGraphSchema_K2::TypeToText(const FEdGraphPinType& Type)
 	return PropertyText;
 }
 
-void UEdGraphSchema_K2::GetVariableTypeTree( TArray< TSharedPtr<FPinTypeTreeInfo> >& TypeTree, bool bAllowExec, bool bAllowWildCard ) const
+void UEdGraphSchema_K2::GetVariableTypeTree(TArray< TSharedPtr<FPinTypeTreeInfo> >& TypeTree, bool bAllowExec, bool bAllowWildcard) const
+{
+	GetVariableTypeTreeImpl(TypeTree, bAllowExec, bAllowWildcard, false);
+}
+
+void UEdGraphSchema_K2::GetVariableTypeTreeImpl(TArray< TSharedPtr<FPinTypeTreeInfo> >& TypeTree, bool bAllowExec, bool bAllowWildCard, bool bIndexTypesOnly) const
 {
 #ifdef SCHEMA_K2_GETVARIABLETYPETREE_LOG_TIME
 	static_assert(false, "Macro redefinition.");
@@ -3743,13 +3427,13 @@ void UEdGraphSchema_K2::GetVariableTypeTree( TArray< TSharedPtr<FPinTypeTreeInfo
 #endif //SCHEMA_K2_GETVARIABLETYPETREE_LOG_TIME
 
 	FTypesDatabase TypesDatabase;
-	FGatherTypesHelper::FillLoadedTypesDatabase(TypesDatabase);
+	FGatherTypesHelper::FillLoadedTypesDatabase(TypesDatabase, bIndexTypesOnly);
 
 #if SCHEMA_K2_GETVARIABLETYPETREE_LOG_TIME
 	const auto DatabaseLoadedTime = FPlatformTime::Seconds();
 #endif //SCHEMA_K2_GETVARIABLETYPETREE_LOG_TIME
 
-	FGatherTypesHelper::FillUnLoadedTypesDatabase(TypesDatabase);
+	FGatherTypesHelper::FillUnLoadedTypesDatabase(TypesDatabase, bIndexTypesOnly);
 
 #if SCHEMA_K2_GETVARIABLETYPETREE_LOG_TIME
 	const auto DatabaseUnLoadedTime = FPlatformTime::Seconds();
@@ -3766,16 +3450,18 @@ void UEdGraphSchema_K2::GetVariableTypeTree( TArray< TSharedPtr<FPinTypeTreeInfo
 	TypeTree.Add( MakeShareable( new FPinTypeTreeInfo(GetCategoryText(PC_Boolean, true), PC_Boolean, this, LOCTEXT("BooleanType", "True or false value")) ) );
 	TypeTree.Add( MakeShareable( new FPinTypeTreeInfo(GetCategoryText(PC_Byte, true), PC_Byte, this, LOCTEXT("ByteType", "8 bit number")) ) );
 	TypeTree.Add( MakeShareable( new FPinTypeTreeInfo(GetCategoryText(PC_Int, true), PC_Int, this, LOCTEXT("IntegerType", "Integer number")) ) );
-	TypeTree.Add( MakeShareable( new FPinTypeTreeInfo(GetCategoryText(PC_Float, true), PC_Float, this, LOCTEXT("FloatType", "Floating point number")) ) );
-	TypeTree.Add( MakeShareable( new FPinTypeTreeInfo(GetCategoryText(PC_Name, true), PC_Name, this, LOCTEXT("NameType", "A text name")) ) );
-	TypeTree.Add( MakeShareable( new FPinTypeTreeInfo(GetCategoryText(PC_String, true), PC_String, this, LOCTEXT("StringType", "A text string")) ) );
-	TypeTree.Add( MakeShareable( new FPinTypeTreeInfo(GetCategoryText(PC_Text, true), PC_Text, this, LOCTEXT("TextType", "A localizable text string")) ) );
+	if (!bIndexTypesOnly)
+	{
+		TypeTree.Add(MakeShareable(new FPinTypeTreeInfo(GetCategoryText(PC_Float, true), PC_Float, this, LOCTEXT("FloatType", "Floating point number"))));
+		TypeTree.Add(MakeShareable(new FPinTypeTreeInfo(GetCategoryText(PC_Name, true), PC_Name, this, LOCTEXT("NameType", "A text name"))));
+		TypeTree.Add(MakeShareable(new FPinTypeTreeInfo(GetCategoryText(PC_String, true), PC_String, this, LOCTEXT("StringType", "A text string"))));
+		TypeTree.Add(MakeShareable(new FPinTypeTreeInfo(GetCategoryText(PC_Text, true), PC_Text, this, LOCTEXT("TextType", "A localizable text string"))));
 
-	// Add in special first-class struct types
-	TypeTree.Add( MakeShareable( new FPinTypeTreeInfo(PC_Struct, VectorStruct, LOCTEXT("VectorType", "A 3D vector")) ) );
-	TypeTree.Add( MakeShareable( new FPinTypeTreeInfo(PC_Struct, RotatorStruct, LOCTEXT("RotatorType", "A 3D rotation")) ) );
-	TypeTree.Add( MakeShareable( new FPinTypeTreeInfo(PC_Struct, TransformStruct, LOCTEXT("TransformType", "A 3D transformation, including translation, rotation and 3D scale.")) ) );
-	
+		// Add in special first-class struct types
+		TypeTree.Add(MakeShareable(new FPinTypeTreeInfo(PC_Struct, TBaseStructure<FVector>::Get(), LOCTEXT("VectorType", "A 3D vector"))));
+		TypeTree.Add(MakeShareable(new FPinTypeTreeInfo(PC_Struct, TBaseStructure<FRotator>::Get(), LOCTEXT("RotatorType", "A 3D rotation"))));
+		TypeTree.Add(MakeShareable(new FPinTypeTreeInfo(PC_Struct, TBaseStructure<FTransform>::Get(), LOCTEXT("TransformType", "A 3D transformation, including translation, rotation and 3D scale."))));
+	}
 	// Add wildcard type
 	if (bAllowWildCard)
 	{
@@ -3784,49 +3470,30 @@ void UEdGraphSchema_K2::GetVariableTypeTree( TArray< TSharedPtr<FPinTypeTreeInfo
 
 	FTypesDatabase* TypesDatabasePtr = &TypesDatabase;
 	// Add the types that have subtrees
-	TypeTree.Add( MakeShareable( new FPinTypeTreeInfo(GetCategoryText(PC_Struct, true), PC_Struct, this, LOCTEXT("StructType", "Struct (value) types."), true, TypesDatabasePtr) ) );
-	TypeTree.Add( MakeShareable( new FPinTypeTreeInfo(GetCategoryText(PC_Object, true), PC_Object, this, LOCTEXT("ObjectType", "Object pointer."), true, TypesDatabasePtr) ) );
-	TypeTree.Add( MakeShareable( new FPinTypeTreeInfo(GetCategoryText(PC_Asset, true), PC_Asset, this, LOCTEXT("AssetType", "Asset pointer."), true, TypesDatabasePtr) ) );
-	TypeTree.Add( MakeShareable( new FPinTypeTreeInfo(GetCategoryText(PC_AssetClass, true), PC_AssetClass, this, LOCTEXT("ClassAssetType", "Class asset."), true, TypesDatabasePtr) ) );
-	TypeTree.Add( MakeShareable( new FPinTypeTreeInfo(GetCategoryText(PC_Interface, true), PC_Interface, this, LOCTEXT("InterfaceType", "Interface pointer."), true, TypesDatabasePtr) ) );
-	TypeTree.Add( MakeShareable( new FPinTypeTreeInfo(GetCategoryText(PC_Class, true), PC_Class, this, LOCTEXT("ClassType", "Class pointers."), true, TypesDatabasePtr) ) );
+	if (!bIndexTypesOnly)
+	{
+		TypeTree.Add(MakeShareable(new FPinTypeTreeInfo(GetCategoryText(PC_Struct, true), PC_Struct, this, LOCTEXT("StructType", "Struct (value) types."), true, TypesDatabasePtr)));
+		TypeTree.Add(MakeShareable(new FPinTypeTreeInfo(GetCategoryText(PC_Interface, true), PC_Interface, this, LOCTEXT("InterfaceType", "Interface pointer."), true, TypesDatabasePtr)));
+
+		TypeTree.Add(MakeShareable(new FPinTypeTreeInfo(GetCategoryText(AllObjectTypes, true), AllObjectTypes, this, LOCTEXT("ObjectType", "Object pointer."), true, TypesDatabasePtr)));
+	}
 	TypeTree.Add( MakeShareable( new FPinTypeTreeInfo(GetCategoryText(PC_Enum, true), PC_Enum, this, LOCTEXT("EnumType", "Enumeration types."), true, TypesDatabasePtr) ) );
 
 #if SCHEMA_K2_GETVARIABLETYPETREE_LOG_TIME
 	const auto EndTime = FPlatformTime::Seconds();
 	UE_LOG(LogBlueprint, Log, TEXT("UEdGraphSchema_K2::GetVariableTypeTree times - LoadedTypesDatabase: %f UnLoadedTypesDatabase: %f FPinTypeTreeInfo: %f"), DatabaseLoadedTime - StartTime, DatabaseUnLoadedTime - DatabaseLoadedTime, EndTime - DatabaseUnLoadedTime);
 #endif //SCHEMA_K2_GETVARIABLETYPETREE_LOG_TIME
-
 #undef SCHEMA_K2_GETVARIABLETYPETREE_LOG_TIME
 }
 
 void UEdGraphSchema_K2::GetVariableIndexTypeTree( TArray< TSharedPtr<FPinTypeTreeInfo> >& TypeTree, bool bAllowExec, bool bAllowWildcard ) const
 {
-	// Clear the list
-	TypeTree.Empty();
-
-	if( bAllowExec )
-	{
-		TypeTree.Add( MakeShareable( new FPinTypeTreeInfo(GetCategoryText(PC_Exec, true), PC_Exec, this, LOCTEXT("ExecIndexType", "Execution pin")) ) );
-	}
-
-	TypeTree.Add( MakeShareable( new FPinTypeTreeInfo(GetCategoryText(PC_Boolean, true), PC_Boolean, this, LOCTEXT("BooleanIndexType", "True or false value")) ) );
-	TypeTree.Add( MakeShareable( new FPinTypeTreeInfo(GetCategoryText(PC_Byte, true), PC_Byte, this, LOCTEXT("ByteIndexType", "8 bit number")) ) );
-	TypeTree.Add( MakeShareable( new FPinTypeTreeInfo(GetCategoryText(PC_Int, true), PC_Int, this, LOCTEXT("IntegerIndexType", "Integer number")) ) );
-
-	// Add wildcard type
-	if (bAllowWildcard)
-	{
-		TypeTree.Add( MakeShareable( new FPinTypeTreeInfo(GetCategoryText(PC_Wildcard, true), PC_Wildcard, this, LOCTEXT("WildcardIndexType", "Wildcard type (unspecified).")) ) );
-	}
-
-	// Add the types that have subtrees
-	TypeTree.Add( MakeShareable( new FPinTypeTreeInfo(GetCategoryText(PC_Enum, true), PC_Enum, this, LOCTEXT("EnumIndexType", "Enumeration types."), true) ) );
+	GetVariableTypeTreeImpl(TypeTree, bAllowExec, bAllowWildcard, true);
 }
 
 bool UEdGraphSchema_K2::DoesTypeHaveSubtypes(const FString& Category) const
 {
-	return (Category == PC_Struct) || (Category == PC_Object) || (Category == PC_Asset) || (Category == PC_AssetClass) || (Category == PC_Interface) || (Category == PC_Class) || (Category == PC_Enum);
+	return (Category == PC_Struct) || (Category == PC_Object) || (Category == PC_Asset) || (Category == PC_AssetClass) || (Category == PC_Interface) || (Category == PC_Class) || (Category == PC_Enum) || (Category == AllObjectTypes);
 }
 
 struct FWildcardArrayPinHelper
@@ -5306,7 +4973,7 @@ void UEdGraphSchema_K2::BackwardCompatibilityNodeConversion(UEdGraph* Graph, boo
 
 				if(OldMakeStructNode->StructType->GetName() == TEXT("Rotator"))
 				{
-					MakeNodeFunction = UKismetMathLibrary::StaticClass()->FindFunctionByName(GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, MakeRot));
+					MakeNodeFunction = UKismetMathLibrary::StaticClass()->FindFunctionByName(GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, MakeRotator));
 					OldPinToNewPinMap.Add(TEXT("Rotator"), TEXT("ReturnValue"));
 				}
 				else if(OldMakeStructNode->StructType->GetName() == TEXT("Vector"))
@@ -5387,7 +5054,7 @@ void UEdGraphSchema_K2::BackwardCompatibilityNodeConversion(UEdGraph* Graph, boo
 
 				if(OldBreakStructNode->StructType->GetName() == TEXT("Rotator"))
 				{
-					BreakNodeFunction = UKismetMathLibrary::StaticClass()->FindFunctionByName(GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, BreakRot));
+					BreakNodeFunction = UKismetMathLibrary::StaticClass()->FindFunctionByName(GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, BreakRotator));
 					OldPinToNewPinMap.Add(TEXT("Rotator"), TEXT("InRot"));
 				}
 				else if(OldBreakStructNode->StructType->GetName() == TEXT("Vector"))

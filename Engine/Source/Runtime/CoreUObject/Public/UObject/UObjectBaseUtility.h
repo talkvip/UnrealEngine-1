@@ -6,6 +6,12 @@
 
 #pragma once
 
+#if _MSC_VER == 1900
+	#ifdef PRAGMA_DISABLE_SHADOW_VARIABLE_WARNINGS
+		PRAGMA_DISABLE_SHADOW_VARIABLE_WARNINGS
+	#endif
+#endif
+
 #include "Templates/PointerIsConvertibleFromTo.h"
 
 class COREUOBJECT_API UObjectBaseUtility : public UObjectBase
@@ -222,9 +228,12 @@ public:
 	UPackage* GetOutermost() const;
 
 	/** 
-	 * Finds the outermost package and marks it dirty
+	 * Finds the outermost package and marks it dirty. 
+	 * The editor suppresses this behavior during load as it is against policy to dirty packages simply by loading them.
+	 *
+	 * @return false if the request to mark the package dirty was suppressed by the editor and true otherwise.
 	 */
-	void MarkPackageDirty() const;
+	bool MarkPackageDirty() const;
 
 	/**
 	* Determines whether this object is a template object
@@ -525,4 +534,10 @@ struct FScopeCycleCounterUObject
 	{
 	}
 };
+#endif
+
+#if _MSC_VER == 1900
+	#ifdef PRAGMA_ENABLE_SHADOW_VARIABLE_WARNINGS
+		PRAGMA_ENABLE_SHADOW_VARIABLE_WARNINGS
+	#endif
 #endif

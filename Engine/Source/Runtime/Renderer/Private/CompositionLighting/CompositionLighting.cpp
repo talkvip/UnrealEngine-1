@@ -234,8 +234,7 @@ void FCompositionLighting::ProcessBeforeBasePass(FRHICommandListImmediate& RHICm
 		// Add the passes we want to add to the graph (commenting a line means the pass is not inserted into the graph) ----------
 
 		// decals are before AmbientOcclusion so the decal can output a normal that AO is affected by
-		if (Context.View.Family->EngineShowFlags.Decals &&
-			!Context.View.Family->EngineShowFlags.ShaderComplexity &&
+		if (!Context.View.Family->EngineShowFlags.ShaderComplexity &&
 			IsDBufferEnabled()) 
 		{
 			FRenderingCompositePass* Pass = Context.Graph.RegisterPass(new(FMemStack::Get()) FRCPassPostProcessDeferredDecals(DRS_BeforeBasePass));
@@ -399,10 +398,6 @@ void FCompositionLighting::ProcessAfterLighting(FRHICommandListImmediate& RHICmd
 				FRenderingCompositePass* RecombinePass = Context.Graph.RegisterPass(new(FMemStack::Get()) FRCPassPostProcessSubsurfaceRecombine());
 				RecombinePass->SetInput(ePId_Input0, Pass1);
 				RecombinePass->SetInput(ePId_Input1, PassExtractSpecular);
-				
-				SCOPED_DRAW_EVENT(RHICmdList, CompositionLighting_SSSSS);
-
-				CompositeContext.Process(RecombinePass, TEXT("CompositionLighting_SSSSS"));
 			}
 		}
 

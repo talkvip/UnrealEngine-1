@@ -257,6 +257,84 @@ bool FCollection::Save(FText& OutError)
 	return bSaveSuccessful;
 }
 
+bool FCollection::Update(FText& OutError)
+{
+	if ( !ensure(SourceFilename.Len()) )
+	{
+		OutError = LOCTEXT("Error_Internal", "There was an internal error.");
+		return false;
+	}
+
+	if ( !bUseSCC )
+	{
+		// Not under SCC control, so already up-to-date
+		return true;
+	}
+
+	FScopedSlowTask SlowTask(1.0f, FText::Format(LOCTEXT("UpdatingCollection", "Updating Collection {0}"), FText::FromName(CollectionName )));
+
+	ISourceControlProvider& SourceControlProvider = ISourceControlModule::Get().GetProvider();
+	if ( !ISourceControlModule::Get().IsEnabled() )
+	{
+		OutError = LOCTEXT("Error_SCCDisabled", "Source control is not enabled. Enable source control in the preferences menu.");
+		return false;
+	}
+
+	if ( !SourceControlProvider.IsAvailable() )
+	{
+		OutError = LOCTEXT("Error_SCCNotAvailable", "Source control is currently not available. Check your connection and try again.");
+		return false;
+	}
+
+	const FString AbsoluteFilename = FPaths::ConvertRelativePathToFull(SourceFilename);
+	FSourceControlStatePtr SourceControlState = SourceControlProvider.GetState(AbsoluteFilename, EStateCacheUsage::ForceUpdate);
+
+	// If not at the head revision, sync up
+	if (SourceControlState.IsValid() && !SourceControlState->IsCurrent())
+	{
+		if ( SourceControlProvider.Execute(ISourceControlOperation::Create<FSync>(), AbsoluteFilename) == ECommandResult::Failed )
+		{
+			// Could not sync up with the head revision
+			OutError = FText::Format(LOCTEXT("Error_SCCSync", "Failed to sync collection '{0}' to the head revision."), FText::FromName(CollectionName));
+			return false;
+		}
+
+		// Check to see if the file exists at the head revision
+		if ( IFileManager::Get().FileExists(*SourceFilename) )
+		{
+			// File found! Load it and merge with our local changes
+			FText LoadErrorText;
+			FCollection NewCollection(SourceFilename, false);
+			if ( !NewCollection.Load(LoadErrorText) )
+			{
+				// Failed to load the head revision file so it isn't safe to delete it
+				OutError = FText::Format(LOCTEXT("Error_SCCBadHead", "Failed to load the collection '{0}' at the head revision. {1}"), FText::FromName(CollectionName), LoadErrorText);
+				return false;
+			}
+
+			// Loaded the head revision, now merge up so the files are in a consistent state
+			MergeWithCollection(NewCollection);
+		}
+
+		// Make sure we get a fresh state from the server
+		SourceControlState = SourceControlProvider.GetState(AbsoluteFilename, EStateCacheUsage::ForceUpdate);
+
+		// Got an updated version?
+		if (SourceControlState.IsValid() && !SourceControlState->IsCurrent())
+		{
+			OutError = FText::Format(LOCTEXT("Error_SCCNotCurrent", "Collection '{0}' is not at head revision after sync."), FText::FromName(CollectionName));
+			return false;
+		}
+	}
+
+	return true;
+}
+
+bool FCollection::Merge(const FCollection& NewCollection)
+{
+	return MergeWithCollection(NewCollection);
+}
+
 bool FCollection::DeleteSourceFile(FText& OutError)
 {
 	bool bSuccessfullyDeleted = false;
@@ -345,6 +423,43 @@ bool FCollection::IsRedirectorInCollection(FName ObjectPath) const
 	return DiskSnapshot.ObjectSet.Contains(ObjectPath);
 }
 
+FCollectionStatusInfo FCollection::GetStatusInfo() const
+{
+	FCollectionStatusInfo StatusInfo;
+
+	StatusInfo.bIsDirty = IsDirty();
+	StatusInfo.bIsEmpty = ObjectSet.Num() == 0;
+	StatusInfo.bUseSCC  = bUseSCC;
+
+	StatusInfo.NumObjects = ObjectSet.Num();
+
+	if (bUseSCC && ISourceControlModule::Get().IsEnabled())
+	{
+		ISourceControlProvider& SourceControlProvider = ISourceControlModule::Get().GetProvider();
+		if (SourceControlProvider.IsAvailable())
+		{
+			const FString AbsoluteFilename = FPaths::ConvertRelativePathToFull(SourceFilename);
+			StatusInfo.SCCState = SourceControlProvider.GetState(AbsoluteFilename, EStateCacheUsage::Use);
+		}
+	}
+
+	return StatusInfo;
+}
+
+bool FCollection::IsDirty() const
+{
+	if (ParentCollectionGuid != DiskSnapshot.ParentCollectionGuid)
+	{
+		return true;
+	}
+	
+	TArray<FName> ObjectsAdded;
+	TArray<FName> ObjectsRemoved;
+	GetObjectDifferencesFromDisk(ObjectsAdded, ObjectsRemoved);
+
+	return ObjectsAdded.Num() != 0 || ObjectsRemoved.Num() != 0;
+}
+
 bool FCollection::IsDynamic() const
 {
 	// @todo collection Dynamic collections
@@ -431,56 +546,81 @@ bool FCollection::LoadHeaderPairs(const TMap<FString,FString>& InHeaderPairs)
 	return FileVersion > 0 && FileVersion <= ECollectionVersion::CurrentVersion;
 }
 
-void FCollection::MergeWithCollection(const FCollection& Other)
+bool FCollection::MergeWithCollection(const FCollection& Other)
 {
+	bool bHasChanges = false;
+
 	if ( IsDynamic() )
 	{
 		// @todo collection Merging dynamic collections?
 	}
 	else
 	{
-		// Gather the differences from the file on disk
+		// Work out whether we have any changes compared to the other collection
 		TArray<FName> ObjectsAdded;
 		TArray<FName> ObjectsRemoved;
-		GetObjectDifferencesFromDisk(ObjectsAdded, ObjectsRemoved);
+		GetObjectDifferences(ObjectSet, Other.ObjectSet, ObjectsAdded, ObjectsRemoved);
 
-		// Copy asset list from other collection
-		DiskSnapshot = Other.DiskSnapshot;
-		ObjectSet = DiskSnapshot.ObjectSet;
+		bHasChanges = ParentCollectionGuid != Other.ParentCollectionGuid || ObjectsAdded.Num() > 0 || ObjectsRemoved.Num() > 0;
 
-		// Add the objects that were added before the merge
-		for (const FName& AddedObjectName : ObjectsAdded)
+		if (bHasChanges)
 		{
-			ObjectSet.Add(AddedObjectName);
+			// Gather the differences from the file on disk
+			ObjectsAdded.Reset();
+			ObjectsRemoved.Reset();
+			GetObjectDifferencesFromDisk(ObjectsAdded, ObjectsRemoved);
+
+			// Copy asset list from other collection
+			DiskSnapshot = Other.DiskSnapshot;
+			ObjectSet = DiskSnapshot.ObjectSet;
+
+			ParentCollectionGuid = Other.ParentCollectionGuid;
+
+			// Add the objects that were added before the merge
+			for (const FName& AddedObjectName : ObjectsAdded)
+			{
+				ObjectSet.Add(AddedObjectName);
+			}
+
+			// Remove the objects that were removed before the merge
+			for (const FName& RemovedObjectName : ObjectsRemoved)
+			{
+				ObjectSet.Remove(RemovedObjectName);
+			}
 		}
-
-		// Remove the objects that were removed before the merge
-		for (const FName& RemovedObjectName : ObjectsRemoved)
+		else
 		{
-			ObjectSet.Remove(RemovedObjectName);
+			DiskSnapshot = Other.DiskSnapshot;
+		}
+	}
+
+	return bHasChanges;
+}
+
+void FCollection::GetObjectDifferences(const TSet<FName>& BaseSet, const TSet<FName>& NewSet, TArray<FName>& ObjectsAdded, TArray<FName>& ObjectsRemoved)
+{
+	// Find the objects that were removed compared to the base set
+	for (const FName& BaseObjectName : BaseSet)
+	{
+		if (!NewSet.Contains(BaseObjectName))
+		{
+			ObjectsRemoved.Add(BaseObjectName);
+		}
+	}
+
+	// Find the objects that were added compare to the base set
+	for (const FName& NewObjectName : NewSet)
+	{
+		if (!BaseSet.Contains(NewObjectName))
+		{
+			ObjectsAdded.Add(NewObjectName);
 		}
 	}
 }
 
-void FCollection::GetObjectDifferencesFromDisk(TArray<FName>& ObjectsAdded, TArray<FName>& ObjectsRemoved)
+void FCollection::GetObjectDifferencesFromDisk(TArray<FName>& ObjectsAdded, TArray<FName>& ObjectsRemoved) const
 {
-	// Find the objects that were removed since the disk list
-	for (const FName& DiskObjectName : DiskSnapshot.ObjectSet)
-	{
-		if (!ObjectSet.Contains(DiskObjectName))
-		{
-			ObjectsRemoved.Add(DiskObjectName);
-		}
-	}
-
-	// Find the objects that were added since the disk list
-	for (const FName& MemoryObjectName : ObjectSet)
-	{
-		if (!DiskSnapshot.ObjectSet.Contains(MemoryObjectName))
-		{
-			ObjectsAdded.Add(MemoryObjectName);
-		}
-	}
+	GetObjectDifferences(DiskSnapshot.ObjectSet, ObjectSet, ObjectsAdded, ObjectsRemoved);
 }
 
 bool FCollection::CheckoutCollection(FText& OutError)

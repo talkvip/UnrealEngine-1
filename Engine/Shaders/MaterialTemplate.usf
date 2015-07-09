@@ -68,6 +68,15 @@ struct FMaterialParticleParameters
 	float2 Size;
 };
 
+float4 GetDynamicParameter(FMaterialParticleParameters Parameters, float4 Default)
+{
+	#if PARTICLE_FACTORY
+	return Parameters.DynamicParameter;
+	#else
+	return Default;
+	#endif
+}
+
 /** 
  * Parameters needed by pixel shader material inputs.
  * These are independent of vertex factory.
@@ -143,6 +152,8 @@ struct FMaterialPixelParameters
 	/** Offset applied to the lighting position for translucency, used to break up aliasing artifacts. */
 	half3 LightingPositionOffset;
 
+	float AOMaterialMask;
+
 #if LIGHTMAP_UV_ACCESS
 	float2	LightmapUVs;
 #endif
@@ -190,6 +201,7 @@ FMaterialPixelParameters MakeInitializedMaterialPixelParameters()
 	MPP.Particle.MotionBlurFade = 0;
 	MPP.Particle.Velocity = 0;
 	MPP.LightingPositionOffset = 0;
+	MPP.AOMaterialMask = 0;
 	MPP.Particle.Color = 0;
 	MPP.Particle.PositionAndSize = 0;
 	MPP.Particle.MacroUV = 0;

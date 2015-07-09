@@ -68,11 +68,6 @@ IOnlineUserCloudPtr FOnlineSubsystemGooglePlay::GetUserCloudInterface() const
 	return nullptr;
 }
 
-IOnlineUserCloudPtr FOnlineSubsystemGooglePlay::GetUserCloudInterface(const FString& Key) const
-{
-	return nullptr;
-}
-
 IOnlineLeaderboardsPtr FOnlineSubsystemGooglePlay::GetLeaderboardsInterface() const
 {
 	return LeaderboardsInterface;
@@ -116,7 +111,7 @@ bool FOnlineSubsystemGooglePlay::Init()
 	FPlatformMisc::LowLevelOutputDebugStringf(TEXT("FOnlineSubsystemAndroid::Init"));
 	
 	OnlineAsyncTaskThreadRunnable.Reset(new FOnlineAsyncTaskManagerGooglePlay);
-	OnlineAsyncTaskThread.Reset(FRunnableThread::Create(OnlineAsyncTaskThreadRunnable.Get(), TEXT("OnlineAsyncTaskThread")));
+	OnlineAsyncTaskThread.Reset(FRunnableThread::Create(OnlineAsyncTaskThreadRunnable.Get(), *FString::Printf(TEXT("OnlineAsyncTaskThread %s"), *InstanceName.ToString())));
 
 	IdentityInterface = MakeShareable(new FOnlineIdentityGooglePlay(this));
 	LeaderboardsInterface = MakeShareable(new FOnlineLeaderboardsGooglePlay(this));

@@ -198,21 +198,18 @@ public partial class GUBP : BuildCommand
 		CullNodesForTimeIndex(NodesToDo, TimeIndex);
 		CullNodesForPreflight(NodesToDo, bPreflightBuild);
 
-		BuildNode ExplicitTrigger = null;
+		TriggerNode ExplicitTrigger = null;
 		if (CommanderSetup)
         {
             if (!String.IsNullOrEmpty(ExplicitTriggerName))
             {
-                foreach (BuildNode Node in AllNodes)
+                foreach (TriggerNode Node in AllNodes.OfType<TriggerNode>())
                 {
                     if (Node.Name.Equals(ExplicitTriggerName, StringComparison.InvariantCultureIgnoreCase))
                     {
-                        if (Node.Node.TriggerNode())
-                        {
-                            Node.Node.SetAsExplicitTrigger();
-							ExplicitTrigger = Node;
-                            break;
-                        }
+                        Node.Node.SetAsExplicitTrigger();
+						ExplicitTrigger = Node;
+                        break;
                     }
                 }
                 if (ExplicitTrigger == null)
@@ -224,12 +221,9 @@ public partial class GUBP : BuildCommand
             {
                 if (bSkipTriggers)
                 {
-                    foreach (BuildNode Node in AllNodes)
+                    foreach (TriggerNode Node in AllNodes.OfType<TriggerNode>())
                     {
-                        if (Node.Node.TriggerNode())
-                        {
-                            Node.Node.SetAsExplicitTrigger();
-                        }
+                        Node.Node.SetAsExplicitTrigger();
                     }
                 }
             }
@@ -237,7 +231,7 @@ public partial class GUBP : BuildCommand
 
         List<BuildNode> OrderedToDo = TopologicalSort(NodesToDo, ExplicitTrigger, false, false);
 
-		List<BuildNode> UnfinishedTriggers = FindUnfinishedTriggers(bSkipTriggers, ExplicitTrigger, OrderedToDo);
+		List<TriggerNode> UnfinishedTriggers = FindUnfinishedTriggers(bSkipTriggers, ExplicitTrigger, OrderedToDo);
 
 		PrintNodes(this, OrderedToDo, AllAggregates, UnfinishedTriggers, TimeQuantum);
 
@@ -246,20 +240,40 @@ public partial class GUBP : BuildCommand
 
 		ElectricCommander EC = new ElectricCommander(this);
 
-        string FakeFail = ParseParamValue("FakeFail");
-        if(CommanderSetup)
-        {
-			DoCommanderSetup(EC, AllNodes, AllAggregates, NodesToDo, OrderedToDo, TimeIndex, TimeQuantum, bSkipTriggers, bFake, bFakeEC, CLString, ExplicitTrigger, UnfinishedTriggers, FakeFail, bPreflightBuild);
-        }
-		else if(ParseParam("SaveGraph"))
+		string ShowHistoryParam = ParseParamValue("ShowHistory", null);
+		if(ShowHistoryParam != null)
 		{
-			SaveGraphVisualization(OrderedToDo);
+			BuildNode Node = AllNodes.FirstOrDefault(x => x.Name.Equals(ShowHistoryParam, StringComparison.InvariantCultureIgnoreCase));
+			if(Node == null)
+			{
+				throw new AutomationException("Couldn't find node {0}", ShowHistoryParam);
+			}
+
+			NodeHistory History = FindNodeHistory(Node, CLString, StoreName);
+			if(History == null)
+			{
+				throw new AutomationException("Couldn't get history for {0}", ShowHistoryParam);
+			}
+
+			PrintDetailedChanges(History, P4Env.Changelist);
 		}
-		else if(!ParseParam("ListOnly"))
+		else
 		{
-			ExecuteNodes(EC, OrderedToDo, bFake, bFakeEC, bSaveSharedTempStorage, CLString, StoreName, FakeFail);
+			string FakeFail = ParseParamValue("FakeFail");
+			if(CommanderSetup)
+			{
+				DoCommanderSetup(EC, AllNodes, AllAggregates, OrderedToDo, TimeIndex, TimeQuantum, bSkipTriggers, bFake, bFakeEC, CLString, ExplicitTrigger, UnfinishedTriggers, FakeFail, bPreflightBuild);
+			}
+			else if(ParseParam("SaveGraph"))
+			{
+				SaveGraphVisualization(OrderedToDo);
+			}
+			else if(!ParseParam("ListOnly"))
+			{
+				ExecuteNodes(EC, OrderedToDo, bFake, bFakeEC, bSaveSharedTempStorage, CLString, StoreName, FakeFail);
+			}
 		}
-        PrintRunTime();
+		PrintRunTime();
 	}
 
 	/// <summary>
@@ -282,7 +296,7 @@ public partial class GUBP : BuildCommand
     {
 		if(NodeToDo.ControllingTriggers == null)
 		{
-			NodeToDo.ControllingTriggers = new BuildNode[0];
+			NodeToDo.ControllingTriggers = new TriggerNode[0];
 
 			// Find all the dependencies of this node
 			List<BuildNode> AllDependencies = new List<BuildNode>();
@@ -290,17 +304,13 @@ public partial class GUBP : BuildCommand
 			AllDependencies.AddRange(NodeToDo.PseudoDependencies);
 
 			// Find the immediate trigger controlling this one
-			List<BuildNode> PreviousTriggers = new List<BuildNode>();
+			List<TriggerNode> PreviousTriggers = new List<TriggerNode>();
 			foreach (BuildNode Dependency in AllDependencies)
 			{
 				FindControllingTriggers(Dependency);
 
-				BuildNode PreviousTrigger = null;
-				if(Dependency.Node.TriggerNode())
-				{
-					PreviousTrigger = Dependency;
-				}
-				else if(Dependency.ControllingTriggers.Length > 0)
+				TriggerNode PreviousTrigger = Dependency as TriggerNode;
+				if(PreviousTrigger == null && Dependency.ControllingTriggers.Length > 0)
 				{
 					PreviousTrigger = Dependency.ControllingTriggers.Last();
 				}
@@ -323,7 +333,7 @@ public partial class GUBP : BuildCommand
 			// Update the list of controlling triggers
 			if (PreviousTriggers.Count == 1)
 			{
-				List<BuildNode> ControllingTriggers = new List<BuildNode>();
+				List<TriggerNode> ControllingTriggers = new List<TriggerNode>();
 				ControllingTriggers.AddRange(PreviousTriggers[0].ControllingTriggers);
 				ControllingTriggers.Add(PreviousTriggers[0]);
 				NodeToDo.ControllingTriggers = ControllingTriggers.ToArray();
@@ -395,105 +405,90 @@ public partial class GUBP : BuildCommand
 		}
     }
 
-    static List<P4Connection.ChangeRecord> GetChanges(int LastOutputForChanges, int TopCL, int LastGreen)
+	/// <summary>
+	/// Finds all the source code changes between the given range.
+	/// </summary>
+	/// <param name="MinimumCL">The minimum (inclusive) changelist to include</param>
+	/// <param name="MaximumCL">The maximum (inclusive) changelist to include</param>
+	/// <returns>Lists of changelist records in the given range</returns>
+    static List<P4Connection.ChangeRecord> GetSourceChangeRecords(int MinimumCL, int MaximumCL)
     {
-        List<P4Connection.ChangeRecord> Result = new List<P4Connection.ChangeRecord>();
-        if (TopCL > LastGreen)
+        if (MinimumCL < 1990000)
         {
-            if (LastOutputForChanges > 1990000)
-            {
-                string Cmd = String.Format("{0}@{1},{2} {3}@{4},{5}",
-                    CombinePaths(PathSeparator.Slash, P4Env.BuildRootP4, "...", "Source", "..."), LastOutputForChanges + 1, TopCL,
-                    CombinePaths(PathSeparator.Slash, P4Env.BuildRootP4, "...", "Build", "..."), LastOutputForChanges + 1, TopCL
-                    );
-                List<P4Connection.ChangeRecord> ChangeRecords;
-				if (P4.Changes(out ChangeRecords, Cmd, false, true, LongComment: true))
-                {
-                    foreach (P4Connection.ChangeRecord Record in ChangeRecords)
-                    {
-                        if (!Record.User.Equals("buildmachine", StringComparison.InvariantCultureIgnoreCase))
-                        {
-                            Result.Add(Record);
-                        }
-                    }
-                }
-                else
-                {
-                    throw new AutomationException("Could not get changes; cmdline: p4 changes {0}", Cmd);
-                }
-            }
-            else
-            {
-                throw new AutomationException("That CL looks pretty far off {0}", LastOutputForChanges);
-            }
-        }
-        return Result;
+            throw new AutomationException("That CL looks pretty far off {0}", MinimumCL);
+		}
+
+		// Query the changes from Perforce
+		StringBuilder FileSpec = new StringBuilder();
+		FileSpec.AppendFormat("{0}@{1},{2} ", CombinePaths(PathSeparator.Slash, P4Env.BuildRootP4, "...", "Source", "..."), MinimumCL, MaximumCL);
+		FileSpec.AppendFormat("{0}@{1},{2} ", CombinePaths(PathSeparator.Slash, P4Env.BuildRootP4, "...", "Build", "..."), MinimumCL, MaximumCL);
+
+        List<P4Connection.ChangeRecord> ChangeRecords;
+		if (!P4.Changes(out ChangeRecords, FileSpec.ToString(), false, true, LongComment: true))
+        {
+            throw new AutomationException("Could not get changes; cmdline: p4 changes {0}", FileSpec.ToString());
+		}
+
+		// Filter out all the changes by the buildmachine user; the CIS counter or promoted builds aren't of interest to us.
+		ChangeRecords.RemoveAll(x => x.User.Equals("buildmachine", StringComparison.InvariantCultureIgnoreCase));
+		return ChangeRecords;
     }
 
-    static int PrintChanges(int LastOutputForChanges, int TopCL, int LastGreen)
-    {
-        List<P4Connection.ChangeRecord> ChangeRecords = GetChanges(LastOutputForChanges, TopCL, LastGreen);
-        foreach (P4Connection.ChangeRecord Record in ChangeRecords)
-        {
-            string Summary = Record.Summary.Replace("\r", "\n");
-            if (Summary.IndexOf("\n") > 0)
-            {
-                Summary = Summary.Substring(0, Summary.IndexOf("\n"));
-            }
-            Log("         {0} {1} {2}", Record.CL, Record.UserEmail, Summary);
-        }
-        return TopCL;
-    }
-
-    static void PrintDetailedChanges(NodeHistory History, bool bShowAllChanges = false)
+	/// <summary>
+	/// Print a list of source changes, along with the success state for other builds of this node.
+	/// </summary>
+	/// <param name="History">History for this node</param>
+    static void PrintDetailedChanges(NodeHistory History, int CurrentCL)
     {
         DateTime StartTime = DateTime.UtcNow;
 
-        string Me = String.Format("{0}   <<<< local sync", P4Env.Changelist);
-        int LastOutputForChanges = 0;
-        int LastGreen = History.LastSucceeded;
-        if (bShowAllChanges)
-        {
-            if (History.AllStarted.Count > 0)
-            {
-                LastGreen = History.AllStarted[0];
-            }
-        }
-        foreach (int cl in History.AllStarted)
-        {
-            if (cl < LastGreen)
-            {
-                continue;
-            }
-            if (P4Env.Changelist < cl && Me != "")
-            {
-                LastOutputForChanges = PrintChanges(LastOutputForChanges, P4Env.Changelist, LastGreen);
-                Log("         {0}", Me);
-                Me = "";
-            }
-            string Status = "In Process";
-            if (History.AllSucceeded.Contains(cl))
-            {
-                Status = "ok";
-            }
-            if (History.AllFailed.Contains(cl))
-            {
-                Status = "FAIL";
-            }
-            LastOutputForChanges = PrintChanges(LastOutputForChanges, cl, LastGreen);
-            Log("         {0}   {1}", cl, Status);
-        }
-        if (Me != "")
-        {
-            LastOutputForChanges = PrintChanges(LastOutputForChanges, P4Env.Changelist, LastGreen);
-            Log("         {0}", Me);
-        }
-        double BuildDuration = (DateTime.UtcNow - StartTime).TotalMilliseconds;
-        Log("Took {0}s to get P4 history", BuildDuration / 1000);
+		// Find all the changelists that we're interested in
+		SortedSet<int> BuildChanges = new SortedSet<int>();
+		BuildChanges.UnionWith(History.AllStarted.Where(x => x >= History.LastSucceeded));
+		BuildChanges.Add(CurrentCL);
 
+		// Find all the changelists that we're interested in
+        List<P4Connection.ChangeRecord> ChangeRecords = GetSourceChangeRecords(BuildChanges.First(), BuildChanges.Last());
+
+		// Print all the changes in the set
+		int LastCL = BuildChanges.First();
+		foreach(int BuildCL in BuildChanges)
+		{
+			// Show all the changes in this range
+			foreach(P4Connection.ChangeRecord Record in ChangeRecords.Where(x => x.CL > LastCL && x.CL <= BuildCL))
+			{
+				string[] Lines = Record.Summary.Split(new char[]{ '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+				Log("             {0} {1} {2}", Record.CL, Record.UserEmail, (Lines.Length > 0)? Lines[0] : "");
+			}
+
+			// Show the status of this build
+			string BuildStatus;
+			if(BuildCL == CurrentCL)
+			{
+				BuildStatus = "this sync";
+			}
+            else if (History.AllSucceeded.Contains(BuildCL))
+            {
+				BuildStatus = "built";
+            }
+            else if (History.AllFailed.Contains(BuildCL))
+            {
+				BuildStatus = "FAILED";
+            }
+			else
+			{
+				BuildStatus = "running";
+			}
+			Log(" {0} {1} {2}", (BuildCL == CurrentCL)? ">>>>" : "    ", BuildCL, BuildStatus.ToString());
+
+			// Update the last CL now that we've output this one
+			LastCL = BuildCL;
+		}
+
+        Log("Took {0:0.0}s to get P4 history", (DateTime.UtcNow - StartTime).TotalSeconds);
     }
 
-    void PrintNodes(GUBP bp, List<BuildNode> Nodes, IEnumerable<AggregateNode> Aggregates, List<BuildNode> UnfinishedTriggers, int TimeQuantum)
+    void PrintNodes(GUBP bp, List<BuildNode> Nodes, IEnumerable<AggregateNode> Aggregates, List<TriggerNode> UnfinishedTriggers, int TimeQuantum)
     {
 		AggregateNode[] MatchingAggregates = Aggregates.Where(x => x.Dependencies.All(y => Nodes.Contains(y))).ToArray();
 		if (MatchingAggregates.Length > 0)
@@ -557,11 +552,11 @@ public partial class GUBP : BuildCommand
 			{
 				Builder.Append(" - (Completed)");
 			}
-			if(NodeToDo.Node.TriggerNode())
+			if(NodeToDo is TriggerNode)
 			{
 				Builder.Append(" - (TriggerNode)");
 			}
-			if(NodeToDo.Node.IsSticky())
+			if(NodeToDo.IsSticky)
 			{
 				Builder.Append(" - (Sticky)");
 			}
@@ -603,76 +598,71 @@ public partial class GUBP : BuildCommand
         }
     }
 
-    static void SaveGraphVisualization(List<BuildNode> Nodes)
-    {
-        List<GraphNode> GraphNodes = new List<GraphNode>();
+	/// <summary>
+	/// Exports the build graph as a GEXF file, for visualization in an external tool (eg. Gephi).
+	/// </summary>
+	/// <param name="Nodes">The nodes in the graph</param>
+	static void SaveGraphVisualization(IEnumerable<BuildNode> Nodes)
+	{
+		// Create a graph node for each GUBP node in the graph
+		List<GraphNode> GraphNodes = new List<GraphNode>();
+		Dictionary<BuildNode, GraphNode> NodeToGraphNodeMap = new Dictionary<BuildNode, GraphNode>();
+		foreach(BuildNode Node in Nodes)
+		{
+			GraphNode GraphNode = new GraphNode();
+			GraphNode.Id = NodeToGraphNodeMap.Count;
+			GraphNode.Label = Node.Name;
 
-        Dictionary<BuildNode, GraphNode> NodeToGraphNodeMap = new Dictionary<BuildNode, GraphNode>();
+			NodeToGraphNodeMap.Add(Node, GraphNode);
+			GraphNodes.Add(GraphNode);
+		}
 
-        for (int NodeIndex = 0; NodeIndex < Nodes.Count; ++NodeIndex)
-        {
-            BuildNode Node = Nodes[NodeIndex];
+		// Connect everything together
+		List<GraphEdge> GraphEdges = new List<GraphEdge>();
+		foreach(KeyValuePair<BuildNode, GraphNode> NodeToGraphNodePair in NodeToGraphNodeMap)
+		{
+			foreach (BuildNode Dependency in NodeToGraphNodePair.Key.Dependencies)
+			{
+				GraphNode PrerequisiteFileGraphNode;
+				if (NodeToGraphNodeMap.TryGetValue(Dependency, out PrerequisiteFileGraphNode))
+				{
+					// Connect a file our action is dependent on, to our action itself
+					GraphEdge NewGraphEdge = new GraphEdge();
 
-            GraphNode GraphNode = new GraphNode()
-            {
-                Id = GraphNodes.Count,
-                Label = Node.Name
-            };
-            GraphNodes.Add(GraphNode);
-            NodeToGraphNodeMap.Add(Node, GraphNode);
-        }
+					NewGraphEdge.Id = GraphEdges.Count;
+					NewGraphEdge.Source = PrerequisiteFileGraphNode;
+					NewGraphEdge.Target = NodeToGraphNodePair.Value;
+					NewGraphEdge.Color = new GraphColor() { R = 0.0f, G = 0.0f, B = 0.0f, A = 0.75f };
 
-        // Connect everything together
-        List<GraphEdge> GraphEdges = new List<GraphEdge>();
+					GraphEdges.Add(NewGraphEdge);
+				}
 
-        for (int NodeIndex = 0; NodeIndex < Nodes.Count; ++NodeIndex)
-        {
-            BuildNode Node = Nodes[NodeIndex];
-            GraphNode NodeGraphNode = NodeToGraphNodeMap[Node];
+			}
+			foreach (BuildNode Dependency in NodeToGraphNodePair.Key.PseudoDependencies)
+			{
+				GraphNode PrerequisiteFileGraphNode;
+				if (NodeToGraphNodeMap.TryGetValue(Dependency, out PrerequisiteFileGraphNode))
+				{
+					// Connect a file our action is dependent on, to our action itself
+					GraphEdge NewGraphEdge = new GraphEdge();
 
-            foreach (BuildNode Dep in Node.Dependencies)
-            {
-                GraphNode PrerequisiteFileGraphNode;
-                if (NodeToGraphNodeMap.TryGetValue(Dep, out PrerequisiteFileGraphNode))
-                {
-                    // Connect a file our action is dependent on, to our action itself
-                    GraphEdge NewGraphEdge = new GraphEdge()
-                    {
-                        Id = GraphEdges.Count,
-                        Source = PrerequisiteFileGraphNode,
-                        Target = NodeGraphNode,
-                        Color = new GraphColor() { R = 0.0f, G = 0.0f, B = 0.0f, A = 0.75f }
-                    };
+					NewGraphEdge.Id = GraphEdges.Count;
+					NewGraphEdge.Source = PrerequisiteFileGraphNode;
+					NewGraphEdge.Target = NodeToGraphNodePair.Value;
+					NewGraphEdge.Color = new GraphColor() { R = 0.0f, G = 0.0f, B = 0.0f, A = 0.25f };
 
-                    GraphEdges.Add(NewGraphEdge);
-                }
+					GraphEdges.Add(NewGraphEdge);
+				}
 
-            }
-            foreach (BuildNode Dep in Node.PseudoDependencies)
-            {
-                GraphNode PrerequisiteFileGraphNode;
-                if (NodeToGraphNodeMap.TryGetValue(Dep, out PrerequisiteFileGraphNode))
-                {
-                    // Connect a file our action is dependent on, to our action itself
-                    GraphEdge NewGraphEdge = new GraphEdge()
-                    {
-                        Id = GraphEdges.Count,
-                        Source = PrerequisiteFileGraphNode,
-                        Target = NodeGraphNode,
-                        Color = new GraphColor() { R = 0.0f, G = 0.0f, B = 0.0f, A = 0.25f }
-                    };
+			}
+		}
 
-                    GraphEdges.Add(NewGraphEdge);
-                }
-
-            }
-        }
-
-        string Filename = CommandUtils.CombinePaths(CommandUtils.CmdEnv.LogFolder, "GubpGraph.gexf");
-        Log("Writing graph to {0}", Filename);
-        GraphVisualization.WriteGraphFile(Filename, "GUBP Nodes", GraphNodes, GraphEdges);
-        Log("Wrote graph to {0}", Filename);
-     }
+		// Export the graph definition
+		string Filename = CommandUtils.CombinePaths(CommandUtils.CmdEnv.LogFolder, "GubpGraph.gexf");
+		Log("Writing graph to {0}", Filename);
+		GraphVisualization.WriteGraphFile(Filename, "GUBP Nodes", NodeToGraphNodeMap.Values.ToList(), GraphEdges);
+		Log("Wrote graph to {0}", Filename);
+	 }
 
     static List<int> ConvertCLToIntList(List<string> Strings)
     {
@@ -738,6 +728,15 @@ public partial class GUBP : BuildCommand
             {
                 SortedAgentGroupChains.Add(Chain.Key, TopologicalSort(new HashSet<BuildNode>(Chain.Value), ExplicitTrigger, true, DoNotConsiderCompletion));
             }
+			foreach(KeyValuePair<string, List<BuildNode>> Chain in SortedAgentGroupChains)
+			{
+				string[] ControllingTriggers = Chain.Value.Select(x => x.ControllingTriggerDotName).Distinct().OrderBy(x => x).ToArray();
+				if(ControllingTriggers.Length > 1)
+				{
+					string Triggers = String.Join(", ", ControllingTriggers.Select(x => String.Format("'{0}' ({1})", x, String.Join("+", Chain.Value.Where(y => y.ControllingTriggerDotName == x).Select(y => y.Name)))));
+					throw new AutomationException("Agent sharing group '{0}' has multiple controlling triggers: {1}", Chain.Key, Triggers);
+				}
+			}
             Log("***************Done with recursion");
         }
 
@@ -812,7 +811,7 @@ public partial class GUBP : BuildCommand
                         }
                     }
                 }
-                float Priority = NodeToDo.Node.Priority();
+                float Priority = NodeToDo.Priority;
 
                 if (bReady && BestNode != null)
                 {
@@ -822,11 +821,11 @@ public partial class GUBP : BuildCommand
                     }
                     else if (String.Compare(BestNode.ControllingTriggerDotName, NodeToDo.ControllingTriggerDotName) == 0) //sorted by controlling trigger
                     {
-                        if (BestNode.Node.IsSticky() && !NodeToDo.Node.IsSticky()) //sticky nodes first
+                        if (BestNode.IsSticky && !NodeToDo.IsSticky) //sticky nodes first
                         {
                             bReady = false;
                         }
-                        else if (BestNode.Node.IsSticky() == NodeToDo.Node.IsSticky())
+                        else if (BestNode.IsSticky == NodeToDo.IsSticky)
                         {
                             if (BestPseudoReady && !bPseudoReady)
                             {
@@ -834,8 +833,8 @@ public partial class GUBP : BuildCommand
                             }
                             else if (BestPseudoReady == bPseudoReady)
                             {
-                                bool IamLateTrigger = !DoNotConsiderCompletion && NodeToDo.Node.TriggerNode() && NodeToDo != ExplicitTrigger && !NodeToDo.IsComplete;
-                                bool BestIsLateTrigger = !DoNotConsiderCompletion && BestNode.Node.TriggerNode() && BestNode != ExplicitTrigger && !BestNode.IsComplete;
+                                bool IamLateTrigger = !DoNotConsiderCompletion && (NodeToDo is TriggerNode) && NodeToDo != ExplicitTrigger && !NodeToDo.IsComplete;
+                                bool BestIsLateTrigger = !DoNotConsiderCompletion && (BestNode is TriggerNode) && BestNode != ExplicitTrigger && !BestNode.IsComplete;
                                 if (BestIsLateTrigger && !IamLateTrigger)
                                 {
                                     bReady = false;
@@ -939,7 +938,7 @@ public partial class GUBP : BuildCommand
     {
 		NodeHistory History = null;
 
-        if (!NodeToDo.Node.TriggerNode() && CLString != "")
+        if (!(NodeToDo is TriggerNode) && CLString != "")
         {
             string GameNameIfAny = NodeToDo.Node.GameNameIfAnyForTempStorage();
             string NodeStoreWildCard = StoreName.Replace(CLString, "*") + "-" + NodeToDo.Name;
@@ -949,13 +948,16 @@ public partial class GUBP : BuildCommand
             History.AllSucceeded = ConvertCLToIntList(TempStorage.FindTempStorageManifests(CmdEnv, NodeStoreWildCard + SucceededTempStorageSuffix, false, true, GameNameIfAny));
             History.AllFailed = ConvertCLToIntList(TempStorage.FindTempStorageManifests(CmdEnv, NodeStoreWildCard + FailedTempStorageSuffix, false, true, GameNameIfAny));
 
+			int CL;
+			int.TryParse(CLString, out CL);
+
             if (History.AllFailed.Count > 0)
             {
-                History.LastFailed = History.AllFailed[History.AllFailed.Count - 1];
+                History.LastFailed = History.AllFailed.LastOrDefault(x => x < CL);
             }
             if (History.AllSucceeded.Count > 0)
             {
-                History.LastSucceeded = History.AllSucceeded[History.AllSucceeded.Count - 1];
+                History.LastSucceeded = History.AllSucceeded.LastOrDefault(x => x < CL);
 
                 foreach (int Failed in History.AllFailed)
                 {
@@ -1007,11 +1009,15 @@ public partial class GUBP : BuildCommand
                     Log(System.Diagnostics.TraceEventType.Warning, LogUtils.FormatException(Ex));
                 }
 
-                List<P4Connection.ChangeRecord> ChangeRecords = GetChanges(History.LastSucceeded, LastNonDuplicateFail, History.LastSucceeded);
-                foreach (P4Connection.ChangeRecord Record in ChangeRecords)
-                {
-                    FailCauserEMails = GUBPNode.MergeSpaceStrings(FailCauserEMails, Record.UserEmail);
-                }
+				if(LastNonDuplicateFail > History.LastSucceeded)
+				{
+					List<P4Connection.ChangeRecord> ChangeRecords = GetSourceChangeRecords(History.LastSucceeded + 1, LastNonDuplicateFail);
+					foreach (P4Connection.ChangeRecord Record in ChangeRecords)
+					{
+						FailCauserEMails = GUBPNode.MergeSpaceStrings(FailCauserEMails, Record.UserEmail);
+					}
+				}
+
                 if (!String.IsNullOrEmpty(FailCauserEMails))
                 {
                     NumPeople++;
@@ -1393,7 +1399,7 @@ public partial class GUBP : BuildCommand
 			HashSet<BuildNode> NodesToCull = new HashSet<BuildNode>();
 			foreach(BuildNode NodeToDo in NodesToDo)
 			{
-				if(NodeToDo.Node.TriggerNode() || NodeToDo.ControllingTriggers.Length > 0)
+				if((NodeToDo is TriggerNode) || NodeToDo.ControllingTriggers.Length > 0)
 				{
 					LogVerbose(" Culling {0} due to being downstream of trigger in preflight", NodeToDo.Name);
 					NodesToCull.Add(NodeToDo);
@@ -1516,20 +1522,17 @@ public partial class GUBP : BuildCommand
 		throw new AutomationException("Failed to update the CIS counter after 20 tries.");
 	}
 
-	private List<BuildNode> FindUnfinishedTriggers(bool bSkipTriggers, BuildNode ExplicitTrigger, List<BuildNode> OrdereredToDo)
+	private List<TriggerNode> FindUnfinishedTriggers(bool bSkipTriggers, BuildNode ExplicitTrigger, List<BuildNode> OrdereredToDo)
 	{
 		// find all unfinished triggers, excepting the one we are triggering right now
-		List<BuildNode> UnfinishedTriggers = new List<BuildNode>();
+		List<TriggerNode> UnfinishedTriggers = new List<TriggerNode>();
 		if (!bSkipTriggers)
 		{
-			foreach (BuildNode NodeToDo in OrdereredToDo)
+			foreach (TriggerNode NodeToDo in OrdereredToDo.OfType<TriggerNode>())
 			{
-				if (NodeToDo.Node.TriggerNode() && !NodeToDo.IsComplete)
+				if (!NodeToDo.IsComplete && ExplicitTrigger != NodeToDo)
 				{
-					if (ExplicitTrigger != NodeToDo)
-					{
-						UnfinishedTriggers.Add(NodeToDo);
-					}
+					UnfinishedTriggers.Add(NodeToDo);
 				}
 			}
 		}
@@ -1544,7 +1547,7 @@ public partial class GUBP : BuildCommand
 	{
 		foreach (BuildNode NodeToDo in OrdereredToDo)
 		{
-			if (NodeToDo.Node.TriggerNode() && (NodeToDo.Node.IsSticky() || NodeToDo.IsComplete)) // these sticky triggers are ok, everything is already completed anyway
+			if ((NodeToDo is TriggerNode) && (NodeToDo.IsSticky || NodeToDo.IsComplete)) // these sticky triggers are ok, everything is already completed anyway
 			{
 				continue;
 			}
@@ -1568,7 +1571,7 @@ public partial class GUBP : BuildCommand
 		}
 	}
 
-	private void DoCommanderSetup(ElectricCommander EC, IEnumerable<BuildNode> AllNodes, IEnumerable<AggregateNode> AllAggregates, HashSet<BuildNode> NodesToDo, List<BuildNode> OrdereredToDo, int TimeIndex, int TimeQuantum, bool bSkipTriggers, bool bFake, bool bFakeEC, string CLString, BuildNode ExplicitTrigger, List<BuildNode> UnfinishedTriggers, string FakeFail, bool bPreflightBuild)
+	private void DoCommanderSetup(ElectricCommander EC, IEnumerable<BuildNode> AllNodes, IEnumerable<AggregateNode> AllAggregates, List<BuildNode> OrdereredToDo, int TimeIndex, int TimeQuantum, bool bSkipTriggers, bool bFake, bool bFakeEC, string CLString, TriggerNode ExplicitTrigger, List<TriggerNode> UnfinishedTriggers, string FakeFail, bool bPreflightBuild)
 	{
 		List<BuildNode> SortedNodes = TopologicalSort(new HashSet<BuildNode>(AllNodes), null, SubSort: false, DoNotConsiderCompletion: true);
 		Log("******* {0} GUBP Nodes", SortedNodes.Count);
@@ -1579,24 +1582,20 @@ public partial class GUBP : BuildCommand
 			// remove nodes that have unfinished triggers
 			foreach (BuildNode NodeToDo in OrdereredToDo)
 			{
-				BuildNode ControllingTrigger = (NodeToDo.ControllingTriggers.Length > 0)? NodeToDo.ControllingTriggers.Last() : null;
-				bool bNoUnfinishedTriggers = !UnfinishedTriggers.Contains(ControllingTrigger);
-
-				if (bNoUnfinishedTriggers)
+				if (NodeToDo.ControllingTriggers.Length == 0 || !UnfinishedTriggers.Contains(NodeToDo.ControllingTriggers.Last()))
 				{
 					// if we are triggering, then remove nodes that are not controlled by the trigger or are dependencies of this trigger
-					if (ExplicitTrigger != null)
+					if (ExplicitTrigger != null && ExplicitTrigger != NodeToDo && !ExplicitTrigger.DependsOn(NodeToDo) && !NodeToDo.DependsOn(ExplicitTrigger))
 					{
-						if (ExplicitTrigger != NodeToDo && !ExplicitTrigger.DependsOn(NodeToDo) && !NodeToDo.DependsOn(ExplicitTrigger))
-						{
-							continue; // this wasn't on the chain related to the trigger we are triggering, so it is not relevant
-						}
+						continue; // this wasn't on the chain related to the trigger we are triggering, so it is not relevant
 					}
-					if (bPreflightBuild && !bSkipTriggers && NodeToDo.Node.TriggerNode())
+
+					// in preflight builds, we are either skipping triggers (and running things downstream) or we just stop at triggers and don't make them available for triggering.
+					if (bPreflightBuild && !bSkipTriggers && (NodeToDo is TriggerNode))
 					{
-						// in preflight builds, we are either skipping triggers (and running things downstream) or we just stop at triggers and don't make them available for triggering.
 						continue;
 					}
+
 					FilteredOrdereredToDo.Add(NodeToDo);
 				}
 			}
@@ -1607,7 +1606,7 @@ public partial class GUBP : BuildCommand
 			PrintNodes(this, FilteredOrdereredToDo, AllAggregates, UnfinishedTriggers, TimeQuantum);
 		}
 
-		EC.DoCommanderSetup(AllNodes, AllAggregates, NodesToDo, FilteredOrdereredToDo, SortedNodes, TimeIndex, TimeQuantum, bSkipTriggers, bFake, bFakeEC, CLString, ExplicitTrigger, UnfinishedTriggers, FakeFail);
+		EC.DoCommanderSetup(AllNodes, AllAggregates, FilteredOrdereredToDo, SortedNodes, TimeIndex, TimeQuantum, bSkipTriggers, bFake, bFakeEC, CLString, ExplicitTrigger, UnfinishedTriggers, FakeFail);
 	}
 
 	void ExecuteNodes(ElectricCommander EC, List<BuildNode> OrdereredToDo, bool bFake, bool bFakeEC, bool bSaveSharedTempStorage, string CLString, string StoreName, string FakeFail)
@@ -1669,7 +1668,7 @@ public partial class GUBP : BuildCommand
 
             // this is kinda complicated
             bool SaveSuccessRecords = (IsBuildMachine || bFakeEC) && // no real reason to make these locally except for fakeEC tests
-                (!NodeToDo.Node.TriggerNode() || NodeToDo.Node.IsSticky()); // trigger nodes are run twice, one to start the new workflow and once when it is actually triggered, we will save reconds for the latter
+                (!(NodeToDo is TriggerNode) || NodeToDo.IsSticky); // trigger nodes are run twice, one to start the new workflow and once when it is actually triggered, we will save reconds for the latter
 
             Log("***** Running GUBP Node {0} -> {1} : {2}", NodeToDo.Name, GameNameIfAny, NodeStoreName);
             if (NodeToDo.IsComplete)
@@ -1809,7 +1808,7 @@ public partial class GUBP : BuildCommand
                         Log("");
                         Log("");
                         Log("");
-                        PrintDetailedChanges(History);
+                        PrintDetailedChanges(History, P4Env.Changelist);
                         Log("End changes since last green");
                     }
 

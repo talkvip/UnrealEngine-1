@@ -311,9 +311,11 @@ FSceneView::FSceneView(const FSceneViewInitOptions& InitOptions)
 	// Compute the view projection matrix and its inverse.
 	ViewProjectionMatrix = ViewMatrices.GetViewProjMatrix();
 
+	FMatrix InvProjectionMatrix = ViewMatrices.GetInvProjMatrix();
+
 	// For precision reasons the view matrix inverse is calculated independently.
-	InvViewMatrix = ViewMatrices.ViewMatrix.Inverse();
-	InvViewProjectionMatrix = ViewMatrices.GetInvProjMatrix() * InvViewMatrix;
+	InvViewMatrix = InitOptions.ViewRotationMatrix.GetTransposed() * FTranslationMatrix(InitOptions.ViewOrigin);
+	InvViewProjectionMatrix = InvProjectionMatrix * InvViewMatrix;
 
 	bool bApplyPreViewTranslation = true;
 	bool bViewOriginIsFudged = false;
@@ -340,6 +342,7 @@ FSceneView::FSceneView(const FSceneViewInitOptions& InitOptions)
 
 	/** The view transform, starting from world-space points translated by -ViewOrigin. */
 	FMatrix TranslatedViewMatrix = InitOptions.ViewRotationMatrix;
+	FMatrix InvTranslatedViewMatrix = TranslatedViewMatrix.GetTransposed();
 
 	// Translate world-space so its origin is at ViewOrigin for improved precision.
 	// Note that this isn't exactly right for orthogonal projections (See the above special case), but we still use ViewOrigin
@@ -371,6 +374,7 @@ FSceneView::FSceneView(const FSceneViewInitOptions& InitOptions)
 	{
 		// If not applying PreViewTranslation then we need to use the view matrix directly.
 		TranslatedViewMatrix = ViewMatrices.ViewMatrix;
+		InvTranslatedViewMatrix = InvViewMatrix;
 	}
 
 	// When the view origin is fudged for faux ortho view position the translations don't cancel out.
@@ -383,7 +387,7 @@ FSceneView::FSceneView(const FSceneViewInitOptions& InitOptions)
 	// Compute a transform from view origin centered world-space to clip space.
 	ViewMatrices.TranslatedViewMatrix = TranslatedViewMatrix;
 	ViewMatrices.TranslatedViewProjectionMatrix = TranslatedViewMatrix * ViewMatrices.ProjMatrix;
-	ViewMatrices.InvTranslatedViewProjectionMatrix = ViewMatrices.TranslatedViewProjectionMatrix.Inverse();
+	ViewMatrices.InvTranslatedViewProjectionMatrix = InvProjectionMatrix * InvTranslatedViewMatrix;
 
 	// Compute screen scale factors.
 	// Stereo renders at half horizontal resolution, but compute shadow resolution based on full resolution.
@@ -448,7 +452,8 @@ FSceneView::FSceneView(const FSceneViewInitOptions& InitOptions)
 
 	// OpenGL Gamma space output in GLSL flips Y when rendering directly to the back buffer (so not needed on PC, as we never render directly into the back buffer)
 	auto ShaderPlatform = GShaderPlatformForFeatureLevel[FeatureLevel];
-	static bool bPlatformRequiresReverseCulling = (IsOpenGLPlatform(ShaderPlatform) && !IsPCPlatform(ShaderPlatform));
+	bool bUsingForwardRenderer = (Family && Family->Scene) ? !Family->Scene->ShouldUseDeferredRenderer() : false;
+	bool bPlatformRequiresReverseCulling = (IsOpenGLPlatform(ShaderPlatform) && bUsingForwardRenderer && !IsPCPlatform(ShaderPlatform));
 	static auto* MobileHDRCvar = IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.MobileHDR"));
 	check(MobileHDRCvar);
 	bReverseCulling = (bPlatformRequiresReverseCulling && MobileHDRCvar->GetValueOnAnyThread() == 0) ? !bReverseCulling : bReverseCulling;
@@ -1019,7 +1024,6 @@ void FSceneView::OverridePostProcessSettings(const FPostProcessSettings& Src, fl
 
 		for(uint32 i = 0; i < Count; ++i)
 		{
-			float LocalWeight = Src.WeightedBlendables.Array[i].Weight;
 			UObject* Object = Src.WeightedBlendables.Array[i].Object;
 
 			if(!Object)
@@ -1034,7 +1038,12 @@ void FSceneView::OverridePostProcessSettings(const FPostProcessSettings& Src, fl
 				continue;
 			}
 
-			BlendableInterface->OverrideBlendableSettings(*this, LocalWeight * Weight);
+			float LocalWeight = Src.WeightedBlendables.Array[i].Weight * Weight;
+
+			if(LocalWeight > 0.0f)
+			{
+				BlendableInterface->OverrideBlendableSettings(*this, LocalWeight);
+			}
 		}
 	}
 }
@@ -1256,6 +1265,13 @@ void FSceneView::EndFinalPostprocessSettings(const FSceneViewInitOptions& ViewIn
 	}
 #endif
 
+	if(FinalPostProcessSettings.DepthOfFieldMethod == DOFM_CircleDOF)
+	{
+		// We intentionally don't do the DepthOfFieldFocalRegion as it breaks realism.
+		// Doing this fixes DOF material expression.
+		FinalPostProcessSettings.DepthOfFieldFocalRegion = 0;
+	}
+
 	{
 		static const auto CVar = IConsoleManager::Get().FindTConsoleVariableDataFloat(TEXT("r.ScreenPercentage"));
 
@@ -1372,7 +1388,8 @@ void FSceneView::EndFinalPostprocessSettings(const FSceneViewInitOptions& ViewIn
 			// Disable antialiasing in GammaLDR mode to avoid jittering.
 			|| (SceneViewFeatureLevel == ERHIFeatureLevel::ES2 && MobileHDRCvar->GetValueOnGameThread() == 0)
 			|| (SceneViewFeatureLevel <= ERHIFeatureLevel::ES3_1 && (MSAAValue > 1))
-			|| Family->EngineShowFlags.VisualizeBloom)
+			|| Family->EngineShowFlags.VisualizeBloom
+			|| Family->EngineShowFlags.VisualizeDOF)
 		{
 			FinalPostProcessSettings.AntiAliasingMethod = AAM_None;
 		}

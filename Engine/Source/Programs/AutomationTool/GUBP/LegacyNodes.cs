@@ -37,6 +37,10 @@ partial class GUBP
         {
             return "";
         }
+		public virtual BuildNode GetBuildNode()
+		{
+			return new LegacyNode(this);
+		}
         public virtual void DoBuild(GUBP bp)
         {
             BuildProducts = new List<string>();
@@ -66,7 +70,7 @@ partial class GUBP
 		{
 			return "";
 		}
-        public virtual int AgentMemoryRequirement(GUBP.GUBPBranchConfig BranchConfig)
+        public virtual int AgentMemoryRequirement()
         {
             return 0;
         }
@@ -88,10 +92,6 @@ partial class GUBP
         public virtual float Priority()
         {
             return 100.0f;
-        }
-        public virtual bool TriggerNode()
-        {
-            return false;
         }
         public virtual void SetAsExplicitTrigger()
         {
@@ -361,14 +361,6 @@ partial class GUBP
                     AddBuildProduct(Product);
                 }
                 RemoveOveralppingBuildProducts();
-                if (CommandUtils.IsBuildMachine)
-                {
-                    // Sign everything we built
-					using(TelemetryStopwatch SignStopwatch = new TelemetryStopwatch("SignBuildProducts"))
-					{
-						CodeSign.SignMultipleIfEXEOrDLL(bp, BuildProducts);
-					}
-                }
                 PostBuildProducts(bp);
             }
 			if (Agenda == null || (BuildProducts.Count == 0 && BranchConfig.bForceIncrementalCompile))
@@ -424,11 +416,11 @@ partial class GUBP
         {
             return true;
         }
-		public override int AgentMemoryRequirement(GUBP.GUBPBranchConfig BranchConfig)
+		public override int AgentMemoryRequirement()
         {
 			if (bHasLauncherParam)
             {
-                return base.AgentMemoryRequirement(BranchConfig);
+                return base.AgentMemoryRequirement();
             }
             return 32;
         }
@@ -1227,6 +1219,10 @@ partial class GUBP
 				{
 					UnrealPakExe = CombinePaths(CmdEnv.LocalRoot, "Engine/Binaries/Win64/UnrealPak.exe");
 				}
+				else if (HostPlatform == UnrealTargetPlatform.Linux)
+				{
+					UnrealPakExe = CombinePaths(CmdEnv.LocalRoot, "Engine/Binaries/Linux/UnrealPak");
+				}
 				else
 				{
 					throw new AutomationException("Unknown path to UnrealPak for host platform ({0})", HostPlatform);
@@ -1247,6 +1243,7 @@ partial class GUBP
         UnrealTargetPlatform TargetPlatform;
 		bool WithXp;
 		bool Precompiled; // If true, just builds targets which generate static libraries for the -UsePrecompiled option to UBT. If false, just build those that don't.
+		bool EnhanceAgentRequirements;
 
         public GamePlatformMonolithicsNode(GUBPBranchConfig InBranchConfig, UnrealTargetPlatform InHostPlatform, List<UnrealTargetPlatform> InActivePlatforms, BranchInfo.BranchUProject InGameProj, UnrealTargetPlatform InTargetPlatform, bool InWithXp = false, bool InPrecompiled = false)
             : base(InBranchConfig, InHostPlatform)
@@ -1256,6 +1253,7 @@ partial class GUBP
 			ActivePlatforms = InActivePlatforms;
 			WithXp = InWithXp;
 			Precompiled = InPrecompiled;
+			EnhanceAgentRequirements = BranchConfig.BranchOptions.EnhanceAgentRequirements.Contains(StaticGetFullName(HostPlatform, GameProj, TargetPlatform, WithXp, Precompiled));
 
             if (TargetPlatform == UnrealTargetPlatform.PS4 || TargetPlatform == UnrealTargetPlatform.XboxOne)
             {
@@ -1352,13 +1350,13 @@ partial class GUBP
         {
             return true;
         }
-		public override int AgentMemoryRequirement(GUBP.GUBPBranchConfig BranchConfig)
+		public override int AgentMemoryRequirement()
         {
-			if (BranchConfig.BranchOptions.EnhanceAgentRequirements.Contains(StaticGetFullName(HostPlatform, GameProj, TargetPlatform, WithXp, Precompiled)))
+			if (EnhanceAgentRequirements)
             {
                 return 64;
             }
-            return base.AgentMemoryRequirement(BranchConfig);
+            return base.AgentMemoryRequirement();
         }
         public override int CISFrequencyQuantumShift(GUBP.GUBPBranchConfig BranchConfig)
         {            
@@ -1811,9 +1809,9 @@ partial class GUBP
             BuildProducts = new List<string>();
             SaveRecordOfSuccessAndAddToBuildProducts();
         }
-        public override bool TriggerNode()
+        public override BuildNode GetBuildNode()
         {
-            return true;
+			return new TriggerNode(this);
         }
         public override void SetAsExplicitTrigger()
         {
@@ -2074,6 +2072,7 @@ partial class GUBP
 							!Product.Replace('\\', '/').Contains("/Intermediate/") &&
 							!Product.Replace('\\', '/').Contains("/Engine/Saved/") &&
 							!Product.Replace('\\', '/').Contains("/DerivedDataCache/") &&
+							!Product.EndsWith("build.version", StringComparison.InvariantCultureIgnoreCase) && 
 							!Product.EndsWith(".lib") &&
 							!Product.EndsWith(".a") && 
 							!Product.EndsWith(".bc")
@@ -2270,7 +2269,7 @@ partial class GUBP
         {
             return 10.0f;
         }
-		public override int AgentMemoryRequirement(GUBP.GUBPBranchConfig BranchConfig)
+		public override int AgentMemoryRequirement()
         {
             return bIsMassive ? 32 : 0;
         }
@@ -2894,9 +2893,9 @@ partial class GUBP
 			}		
 			return Result;
 		}
-		public override int AgentMemoryRequirement(GUBP.GUBPBranchConfig BranchConfig)
+		public override int AgentMemoryRequirement()
 		{
-			int Result = base.AgentMemoryRequirement(BranchConfig);
+			int Result = base.AgentMemoryRequirement();
 			if (HostPlatform == UnrealTargetPlatform.Mac)
 			{
 				Result = 32;
@@ -2945,9 +2944,9 @@ partial class GUBP
             }
             return Result;
         }
-		public override int AgentMemoryRequirement(GUBP.GUBPBranchConfig BranchConfig)
+		public override int AgentMemoryRequirement()
         {
-            int Result = base.AgentMemoryRequirement(BranchConfig);
+            int Result = base.AgentMemoryRequirement();
             if(HostPlatform == UnrealTargetPlatform.Mac)
             {
                 Result = 32;

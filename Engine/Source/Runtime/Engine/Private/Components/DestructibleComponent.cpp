@@ -332,11 +332,9 @@ void UDestructibleComponent::CreatePhysicsState()
 	verify( NxParameterized::setParamF32(*ActorParams,"p3BodyDescTemplate.angularDamping", BodyInstance.AngularDamping ) );
 	verify( NxParameterized::setParamF32(*ActorParams,"p3BodyDescTemplate.linearDamping", BodyInstance.LinearDamping ) );
 	const PxTolerancesScale& PScale = GPhysXSDK->getTolerancesScale();
+	
 	PxF32 SleepEnergyThreshold = 0.00005f*PScale.speed*PScale.speed;	// 1/1000 Default, since the speed scale is quite high
-	if (BodyInstance.SleepFamily == ESleepFamily::Sensitive)
-	{
-		SleepEnergyThreshold /= 20.0f;
-	}
+	SleepEnergyThreshold *= BodyInstance.GetSleepThresholdMultiplier();
 	verify( NxParameterized::setParamF32(*ActorParams,"p3BodyDescTemplate.sleepThreshold", SleepEnergyThreshold) );
 //	NxParameterized::setParamF32(*ActorParams,"bodyDescTemplate.sleepDamping", SleepDamping );
 	verify( NxParameterized::setParamF32(*ActorParams,"p3BodyDescTemplate.density", 0.001f*PhysMat->Density) );	// Convert from g/cm^3 to kg/cm^3
@@ -364,6 +362,14 @@ void UDestructibleComponent::CreatePhysicsState()
 	PhysxChunkUserData.Reset(ChunkCount);
 	PhysxChunkUserData.AddZeroed(ChunkCount);
 
+	if(PhysScene->DeferredCommandHandler.HasPendingCommands())
+	{
+		// Lock and flush deferred command handler here to stop any currently pending deletions from affecting new actors.
+		// Only do this if we have any commands to flush to avoid the scene lock if possible
+		SCOPED_SCENE_WRITE_LOCK(PScene);
+		PhysScene->DeferredCommandHandler.Flush();
+	}
+	
 	// Create an APEX NxDestructibleActor from the Destructible asset and actor descriptor
 	ApexDestructibleActor = static_cast<NxDestructibleActor*>(TheDestructibleMesh->ApexDestructibleAsset->createApexActor(*ActorParams, *ApexScene));
 	check(ApexDestructibleActor);
@@ -377,23 +383,23 @@ void UDestructibleComponent::CreatePhysicsState()
 	ApexDestructibleActor->cacheModuleData();
 
 	// BRGTODO : Per-actor LOD setting
-//	ApexDestructibleActor->forcePhysicalLod( DestructibleActor->LOD );
+	//	ApexDestructibleActor->forcePhysicalLod( DestructibleActor->LOD );
 
 	// Start asleep if requested
 	PxRigidDynamic* PRootActor = ApexDestructibleActor->getChunkPhysXActor(0);
 
 
 	//  Put to sleep or wake up only if the component is physics-simulated
-	if (PRootActor != NULL && BodyInstance.bSimulatePhysics)
+	if(PRootActor != NULL && BodyInstance.bSimulatePhysics)
 	{
 		SCOPED_SCENE_WRITE_LOCK(PScene);	//Question, since apex is defer adding actors do we need to lock? Locking the async scene is expensive!
 
 		PRootActor->setActorFlag(PxActorFlag::eDISABLE_GRAVITY, !BodyInstance.bEnableGravity);
 
 		// Sleep/wake up as appropriate
-		if (!BodyInstance.bStartAwake)
+		if(!BodyInstance.bStartAwake)
 		{
-			//ApexDestructibleActor->setChunkPhysXActorAwakeState(0, false);	//TODO: broke during bad integration of apex. Will turn on once new libs are in
+			ApexDestructibleActor->setChunkPhysXActorAwakeState(0, false);
 		}
 	}
 
@@ -454,10 +460,7 @@ void UDestructibleComponent::AddImpulse( FVector Impulse, FName BoneName /*= NAM
 	ExecuteOnPhysicsReadWrite([&]
 	{
 		const int32 ChunkIdx = BoneIdxToChunkIdx(GetBoneIndex(BoneName));
-		if(PxRigidDynamic* Actor = ApexDestructibleActor->getChunkPhysXActor(ChunkIdx))
-		{
-			Actor->addForce(U2PVector(Impulse), bVelChange ? PxForceMode::eVELOCITY_CHANGE : PxForceMode::eIMPULSE);
-		}
+		ApexDestructibleActor->addForce(ChunkIdx, U2PVector(Impulse),  bVelChange ? PxForceMode::eVELOCITY_CHANGE : PxForceMode::eIMPULSE);
 	});
 #endif
 }
@@ -468,10 +471,8 @@ void UDestructibleComponent::AddImpulseAtLocation( FVector Impulse, FVector Posi
 	ExecuteOnPhysicsReadWrite([&]
 	{
 		const int32 ChunkIdx = BoneIdxToChunkIdx(GetBoneIndex(BoneName));
-		if (PxRigidDynamic* Actor = ApexDestructibleActor->getChunkPhysXActor(ChunkIdx))
-		{
-			PxRigidBodyExt::addForceAtPos(*Actor, U2PVector(Impulse), U2PVector(Position), PxForceMode::eIMPULSE);
-		}
+		PxVec3 Location = U2PVector(Position);
+		ApexDestructibleActor->addForce(ChunkIdx, U2PVector(Impulse),  PxForceMode::eIMPULSE);
 	});
 #endif
 }
@@ -482,10 +483,7 @@ void UDestructibleComponent::AddForce( FVector Force, FName BoneName /*= NAME_No
 	ExecuteOnPhysicsReadWrite([&]
 	{
 		const int32 ChunkIdx = BoneIdxToChunkIdx(GetBoneIndex(BoneName));
-		if (PxRigidDynamic* Actor = ApexDestructibleActor->getChunkPhysXActor(ChunkIdx))
-		{
-			Actor->addForce(U2PVector(Force), bAccelChange ? PxForceMode::eACCELERATION : PxForceMode::eFORCE);
-		}
+		ApexDestructibleActor->addForce(ChunkIdx, U2PVector(Force), bAccelChange ? PxForceMode::eACCELERATION : PxForceMode::eFORCE);
 	});
 #endif
 }
@@ -496,10 +494,9 @@ void UDestructibleComponent::AddForceAtLocation( FVector Force, FVector Location
 	ExecuteOnPhysicsReadWrite([&]
 	{
 		int32 ChunkIdx = BoneIdxToChunkIdx(GetBoneIndex(BoneName));
-		if (PxRigidDynamic* Actor = ApexDestructibleActor->getChunkPhysXActor(ChunkIdx))
-		{
-			PxRigidBodyExt::addForceAtPos(*Actor, U2PVector(Force), U2PVector(Location), PxForceMode::eFORCE);
-		}
+		PxVec3 Position = U2PVector(Location);
+
+		ApexDestructibleActor->addForce(ChunkIdx, U2PVector(Force), PxForceMode::eFORCE, &Position);
 	});
 #endif
 }
@@ -845,11 +842,6 @@ FTransform UDestructibleComponent::GetSocketTransform(FName InSocketName, ERelat
 #if WITH_APEX
 void UDestructibleComponent::Pair( int32 ChunkIndex, PxShape* PShape)
 {
-	if(ApexDestructibleActor == nullptr)	//since we do deferred deletion it's possible we've already meant to delete this so ignore any simulation callbacks
-	{
-		return;
-	}
-
 	FDestructibleChunkInfo* CI;
 	FPhysxUserData* UserData;
 
@@ -1319,7 +1311,36 @@ void UDestructibleComponent::WakeRigidBody(FName BoneName /* = NAME_None */)
 	ExecuteOnPhysicsReadWrite([&]
 	{
 		const int32 ChunkIdx = BoneIdxToChunkIdx(GetBoneIndex(BoneName));
-		//ApexDestructibleActor->setChunkPhysXActorAwakeState(ChunkIdx, true); //TODO: broke during bad integration of apex. Will turn on once new libs are in
+		ApexDestructibleActor->setChunkPhysXActorAwakeState(ChunkIdx, true);
+	});
+#endif
+}
+
+void UDestructibleComponent::SetSimulatePhysics(bool bSimulate)
+{
+#if WITH_APEX
+	ExecuteOnPhysicsReadWrite([&]
+	{
+		if(bSimulate)
+		{
+			ApexDestructibleActor->setDynamic();
+		}else
+		{
+			PxRigidDynamic** PActorBuffer = NULL;
+			PxU32 PActorCount = 0;
+			if (ApexDestructibleActor->acquirePhysXActorBuffer(PActorBuffer, PActorCount))
+			{
+				for(uint32 ActorIdx = 0; ActorIdx < PActorCount; ++ActorIdx)
+				{
+					PxRigidDynamic* PActor = PActorBuffer[ActorIdx];
+					if(FDestructibleChunkInfo* ChunkInfo = FPhysxUserData::Get<FDestructibleChunkInfo>(PActor->userData))
+					{
+						ApexDestructibleActor->setChunkPhysXActorAwakeState(ChunkInfo->ChunkIndex, false);
+					}
+				}
+			}
+		}
+		
 	});
 #endif
 }
@@ -1469,6 +1490,13 @@ void UDestructibleComponent::SetCollisionResponseForAllActors(const FCollisionRe
 
 void UDestructibleComponent::SetCollisionResponseForShape(PxShape* Shape, int32 ChunkIdx)
 {
+#if WITH_APEX
+	if(ApexDestructibleActor == nullptr) //since we do deferred deletion it's possible we've already meant to delete this so ignore any simulation callbacks
+	{
+		return;
+	}
+#endif
+
 	// Get collision channel and response
 	PxFilterData PQueryFilterData, PSimFilterData;
 	uint8 MoveChannel = GetCollisionObjectType();

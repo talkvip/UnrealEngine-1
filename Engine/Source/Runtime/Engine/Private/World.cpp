@@ -52,6 +52,7 @@
 	#include "Editor/Kismet/Public/FindInBlueprintManager.h"
 	#include "Editor/UnrealEd/Classes/Editor/UnrealEdTypes.h"
 	#include "Editor/UnrealEd/Classes/Settings/LevelEditorPlaySettings.h"
+	#include "Editor/UnrealEd/Public/HierarchicalLOD.h"
 #endif
 
 #include "MallocProfiler.h"
@@ -114,9 +115,9 @@ FWorldDelegates::FRefreshLevelScriptActionsEvent FWorldDelegates::RefreshLevelSc
 #endif // WITH_EDITOR
 
 UWorld::UWorld( const FObjectInitializer& ObjectInitializer )
-:	UObject(ObjectInitializer)
+: UObject(ObjectInitializer)
 #if WITH_EDITOR
-,	HierarchicalLODBuilder(this)
+, HierarchicalLODBuilder(new FHierarchicalLODBuilder(this))
 #endif
 ,	FeatureLevel(GMaxRHIFeatureLevel)
 , URL(FURL(NULL))
@@ -141,7 +142,7 @@ UWorld::~UWorld()
 	while (AsyncPreRegisterLevelStreamingTasks.GetValue())
 	{
 		FPlatformProcess::Sleep(0.0f);
-	}
+	}	
 }
 
 void UWorld::Serialize( FArchive& Ar )
@@ -515,6 +516,13 @@ void UWorld::FinishDestroy()
 	{
 		delete TimerManager;
 	}
+
+#if WITH_EDITOR
+	if (HierarchicalLODBuilder)
+	{
+		delete HierarchicalLODBuilder;
+	}
+#endif // WITH_EDITOR
 
 	// Remove the PKG_ContainsMap flag from packages that no longer contain a world
 	{
@@ -1533,7 +1541,7 @@ void UWorld::TransferBlueprintDebugReferences(UWorld* NewWorld)
 							UE_LOG(LogWorld, Warning, TEXT("  OldObject path is %s"), *OldTargetObject->GetPathName());
 							UE_LOG(LogWorld, Warning, TEXT("  OldObject class path is %s"), *OldTargetObject->GetClass()->GetPathName());
 
-							ensureMsg(false, TEXT("Failed to find an appropriate object to debug back in the editor world"));
+							ensureMsgf(false, TEXT("Failed to find an appropriate object to debug back in the editor world"));
 						}
 
 						NewTargetObject = NULL;
@@ -3284,11 +3292,6 @@ FDelegateHandle UWorld::AddOnActorSpawnedHandler( const FOnActorSpawned::FDelega
 	return OnActorSpawned.Add(InHandler);
 }
 
-void UWorld::RemoveOnActorSpawnedHandler( const FOnActorSpawned::FDelegate& InHandler )
-{
-	OnActorSpawned.DEPRECATED_Remove(InHandler);
-}
-
 void UWorld::RemoveOnActorSpawnedHandler( FDelegateHandle InHandle )
 {
 	OnActorSpawned.Remove(InHandle);
@@ -4027,6 +4030,7 @@ void UWorld::NotifyControlMessage(UNetConnection* Connection, uint8 MessageType,
 
 bool UWorld::Listen( FURL& InURL )
 {
+#if WITH_SERVER_CODE
 	if( NetDriver )
 	{
 		GEngine->BroadcastNetworkFailure(this, NetDriver, ENetworkFailure::NetDriverAlreadyExists);
@@ -4063,6 +4067,9 @@ bool UWorld::Listen( FURL& InURL )
 
 	NextSwitchCountdown = NetDriver->ServerTravelPause;
 	return true;
+#else
+	return false;
+#endif // WITH_SERVER_CODE
 }
 
 bool UWorld::IsClient()
@@ -4322,9 +4329,10 @@ bool FSeamlessTravelHandler::StartTravel(UWorld* InCurrentWorld, const FURL& InU
 	else
 	{
 		UE_LOG(LogWorld, Log, TEXT("SeamlessTravel to: %s"), *InURL.Map);
-		if (!FPackageName::DoesPackageExist(InURL.Map, InGuid.IsValid() ? &InGuid : NULL))
+		FString MapName = UWorld::RemovePIEPrefix(InURL.Map);
+		if (!FPackageName::DoesPackageExist(MapName, InGuid.IsValid() ? &InGuid : NULL))
 		{
-			UE_LOG(LogWorld, Error, TEXT("Unable to travel to '%s' - file not found"), *InURL.Map);
+			UE_LOG(LogWorld, Error, TEXT("Unable to travel to '%s' - file not found"), *MapName);
 			return false;
 			// @todo: might have to handle this more gracefully to handle downloading (might also need to send GUID and check it here!)
 		}
@@ -5280,7 +5288,7 @@ void UWorld::ServerTravel(const FString& FURL, bool bAbsolute, bool bShouldSkipG
 {
 	if (FURL.Contains(TEXT("%")) )
 	{
-		UE_LOG(LogWorld, Log, TEXT("FURL %s Contains illegal character '%'."), *FURL);
+		UE_LOG(LogWorld, Log, TEXT("FURL %s Contains illegal character '%%'."), *FURL);
 		return;
 	}
 

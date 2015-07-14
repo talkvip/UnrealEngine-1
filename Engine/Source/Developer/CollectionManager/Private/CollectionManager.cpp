@@ -681,7 +681,7 @@ bool FCollectionManager::IsValidCollectionName(const FString& CollectionName, EC
 	return true;
 }
 
-bool FCollectionManager::CreateCollection(FName CollectionName, ECollectionShareType::Type ShareType)
+bool FCollectionManager::CreateCollection(FName CollectionName, ECollectionShareType::Type ShareType, ECollectionStorageMode::Type StorageMode)
 {
 	if (!ensure(ShareType < ECollectionShareType::CST_All))
 	{
@@ -694,7 +694,7 @@ bool FCollectionManager::CreateCollection(FName CollectionName, ECollectionShare
 	const bool bUseSCC = ShouldUseSCC(ShareType);
 	const FString CollectionFilename = GetCollectionFilename(CollectionName, ShareType);
 
-	TSharedRef<FCollection> NewCollection = MakeShareable(new FCollection(CollectionFilename, bUseSCC));
+	TSharedRef<FCollection> NewCollection = MakeShareable(new FCollection(CollectionFilename, bUseSCC, StorageMode));
 	if (!AddCollection(NewCollection, ShareType))
 	{
 		// Failed to add the collection, it already exists
@@ -947,6 +947,12 @@ bool FCollectionManager::AddToCollection(FName CollectionName, ECollectionShareT
 		return false;
 	}
 
+	if ((*CollectionRefPtr)->GetStorageMode() != ECollectionStorageMode::Static)
+	{
+		LastError = LOCTEXT("Error_AddNeedsStaticCollection", "Objects can only be added to static collections.");
+		return false;
+	}
+
 	int32 NumAdded = 0;
 	for (const FName& ObjectPath : ObjectPaths)
 	{
@@ -1020,6 +1026,12 @@ bool FCollectionManager::RemoveFromCollection(FName CollectionName, ECollectionS
 		return false;
 	}
 
+	if ((*CollectionRefPtr)->GetStorageMode() != ECollectionStorageMode::Static)
+	{
+		LastError = LOCTEXT("Error_RemoveNeedsStaticCollection", "Objects can only be removed from static collections.");
+		return false;
+	}
+
 	TArray<FName> RemovedAssets;
 	for (const FName& ObjectPath : ObjectPaths)
 	{
@@ -1061,6 +1073,100 @@ bool FCollectionManager::RemoveFromCollection(FName CollectionName, ECollectionS
 	}
 }
 
+bool FCollectionManager::SetDynamicQueryText(FName CollectionName, ECollectionShareType::Type ShareType, const FString& InQueryText)
+{
+	if (!ensure(ShareType < ECollectionShareType::CST_All))
+	{
+		// Bad share type
+		LastError = LOCTEXT("Error_Internal", "There was an internal error.");
+		return false;
+	}
+
+	const FCollectionNameType CollectionKey(CollectionName, ShareType);
+	TSharedRef<FCollection>* const CollectionRefPtr = AvailableCollections.Find(CollectionKey);
+	if (!CollectionRefPtr)
+	{
+		// Collection doesn't exist
+		LastError = LOCTEXT("Error_DoesntExist", "The collection doesn't exist.");
+		return false;
+	}
+
+	if ((*CollectionRefPtr)->GetStorageMode() != ECollectionStorageMode::Dynamic)
+	{
+		LastError = LOCTEXT("Error_SetNeedsDynamicCollection", "Search queries can only be set on dynamic collections.");
+		return false;
+	}
+
+	(*CollectionRefPtr)->SetDynamicQueryText(InQueryText);
+	
+	if ((*CollectionRefPtr)->Save(LastError))
+	{
+		CollectionFileCaches[ShareType]->IgnoreFileModification((*CollectionRefPtr)->GetSourceFilename());
+
+		CollectionCache.HandleCollectionChanged();
+		CollectionUpdatedEvent.Broadcast(CollectionKey);
+		return true;
+	}
+
+	return false;
+}
+
+bool FCollectionManager::GetDynamicQueryText(FName CollectionName, ECollectionShareType::Type ShareType, FString& OutQueryText) const
+{
+	if (!ensure(ShareType < ECollectionShareType::CST_All))
+	{
+		// Bad share type
+		LastError = LOCTEXT("Error_Internal", "There was an internal error.");
+		return false;
+	}
+
+	const FCollectionNameType CollectionKey(CollectionName, ShareType);
+	const TSharedRef<FCollection>* const CollectionRefPtr = AvailableCollections.Find(CollectionKey);
+	if (!CollectionRefPtr)
+	{
+		// Collection doesn't exist
+		LastError = LOCTEXT("Error_DoesntExist", "The collection doesn't exist.");
+		return false;
+	}
+
+	if ((*CollectionRefPtr)->GetStorageMode() != ECollectionStorageMode::Dynamic)
+	{
+		LastError = LOCTEXT("Error_GetNeedsDynamicCollection", "Search queries can only be got from dynamic collections.");
+		return false;
+	}
+
+	OutQueryText = (*CollectionRefPtr)->GetDynamicQueryText();
+	return true;
+}
+
+bool FCollectionManager::TestDynamicQuery(FName CollectionName, ECollectionShareType::Type ShareType, const ITextFilterExpressionContext& InContext, bool& OutResult) const
+{
+	if (!ensure(ShareType < ECollectionShareType::CST_All))
+	{
+		// Bad share type
+		LastError = LOCTEXT("Error_Internal", "There was an internal error.");
+		return false;
+	}
+
+	const FCollectionNameType CollectionKey(CollectionName, ShareType);
+	const TSharedRef<FCollection>* const CollectionRefPtr = AvailableCollections.Find(CollectionKey);
+	if (!CollectionRefPtr)
+	{
+		// Collection doesn't exist
+		LastError = LOCTEXT("Error_DoesntExist", "The collection doesn't exist.");
+		return false;
+	}
+
+	if ((*CollectionRefPtr)->GetStorageMode() != ECollectionStorageMode::Dynamic)
+	{
+		LastError = LOCTEXT("Error_TestNeedsDynamicCollection", "Search queries can only be tested on dynamic collections.");
+		return false;
+	}
+
+	OutResult = (*CollectionRefPtr)->TestDynamicQuery(InContext);
+	return true;
+}
+
 bool FCollectionManager::EmptyCollection(FName CollectionName, ECollectionShareType::Type ShareType)
 {
 	if (!ensure(ShareType < ECollectionShareType::CST_All))
@@ -1070,20 +1176,33 @@ bool FCollectionManager::EmptyCollection(FName CollectionName, ECollectionShareT
 		return false;
 	}
 
-	TArray<FName> ObjectPaths;
-	if (!GetObjectsInCollection(CollectionName, ShareType, ObjectPaths))
+	const FCollectionNameType CollectionKey(CollectionName, ShareType);
+	const TSharedRef<FCollection>* const CollectionRefPtr = AvailableCollections.Find(CollectionKey);
+	if (!CollectionRefPtr)
 	{
-		// Failed to load collection
+		// Collection doesn't exist
+		LastError = LOCTEXT("Error_DoesntExist", "The collection doesn't exist.");
 		return false;
 	}
-	
-	if (ObjectPaths.Num() == 0)
+
+	if ((*CollectionRefPtr)->IsEmpty())
 	{
-		// Collection already empty
+		// Already empty - nothing to do
 		return true;
 	}
+
+	(*CollectionRefPtr)->Empty();
 	
-	return RemoveFromCollection(CollectionName, ShareType, ObjectPaths);
+	if ((*CollectionRefPtr)->Save(LastError))
+	{
+		CollectionFileCaches[ShareType]->IgnoreFileModification((*CollectionRefPtr)->GetSourceFilename());
+
+		CollectionCache.HandleCollectionChanged();
+		CollectionUpdatedEvent.Broadcast(CollectionKey);
+		return true;
+	}
+
+	return false;
 }
 
 bool FCollectionManager::SaveCollection(FName CollectionName, ECollectionShareType::Type ShareType)
@@ -1117,6 +1236,10 @@ bool FCollectionManager::SaveCollection(FName CollectionName, ECollectionShareTy
 			return true;
 		}
 	}
+	else
+	{
+		LastError = LOCTEXT("Error_DoesntExist", "The collection doesn't exist.");
+	}
 
 	return false;
 }
@@ -1143,6 +1266,10 @@ bool FCollectionManager::UpdateCollection(FName CollectionName, ECollectionShare
 			return true;
 		}
 	}
+	else
+	{
+		LastError = LOCTEXT("Error_DoesntExist", "The collection doesn't exist.");
+	}
 
 	return false;
 }
@@ -1163,8 +1290,36 @@ bool FCollectionManager::GetCollectionStatusInfo(FName CollectionName, ECollecti
 		OutStatusInfo = (*CollectionRefPtr)->GetStatusInfo();
 		return true;
 	}
+	else
+	{
+		LastError = LOCTEXT("Error_DoesntExist", "The collection doesn't exist.");
+	}
 
-	return true;
+	return false;
+}
+
+bool FCollectionManager::GetCollectionStorageMode(FName CollectionName, ECollectionShareType::Type ShareType, ECollectionStorageMode::Type& OutStorageMode) const
+{
+	if (!ensure(ShareType < ECollectionShareType::CST_All))
+	{
+		// Bad share type
+		LastError = LOCTEXT("Error_Internal", "There was an internal error.");
+		return true;
+	}
+
+	const FCollectionNameType CollectionKey(CollectionName, ShareType);
+	const TSharedRef<FCollection>* const CollectionRefPtr = AvailableCollections.Find(CollectionKey);
+	if (CollectionRefPtr)
+	{
+		OutStorageMode = (*CollectionRefPtr)->GetStorageMode();
+		return true;
+	}
+	else
+	{
+		LastError = LOCTEXT("Error_DoesntExist", "The collection doesn't exist.");
+	}
+
+	return false;
 }
 
 bool FCollectionManager::IsObjectInCollection(FName ObjectPath, FName CollectionName, ECollectionShareType::Type ShareType, ECollectionRecursionFlags::Flags RecursionMode) const
@@ -1228,6 +1383,18 @@ bool FCollectionManager::IsValidParentCollection(FName CollectionName, ECollecti
 			bValidParent = false;
 			LastError = FText::Format(LOCTEXT("InvalidParent_InvalidChildType", "A {0} collection cannot contain a {1} collection"), ECollectionShareType::ToText(InCollectionKey.Type), ECollectionShareType::ToText(ShareType));
 			return FCollectionManagerCache::ERecursiveWorkerFlowControl::Stop;
+		}
+
+		const TSharedRef<FCollection>* const CollectionRefPtr = AvailableCollections.Find(InCollectionKey);
+		if (CollectionRefPtr)
+		{
+			const ECollectionStorageMode::Type StorageMode = (*CollectionRefPtr)->GetStorageMode();
+			if (StorageMode == ECollectionStorageMode::Dynamic)
+			{
+				bValidParent = false;
+				LastError = LOCTEXT("InvalidParent_InvalidParentStorageType", "A dynamic collection cannot contain child collections");
+				return FCollectionManagerCache::ERecursiveWorkerFlowControl::Stop;
+			}
 		}
 
 		return FCollectionManagerCache::ERecursiveWorkerFlowControl::Continue;
@@ -1442,7 +1609,7 @@ bool FCollectionManager::TickFileCache(float InDeltaTime)
 						const bool bUseSCC = ShouldUseSCC(ShareType);
 
 						FText LoadErrorText;
-						TSharedRef<FCollection> NewCollection = MakeShareable(new FCollection(GetCollectionFilename(CollectionName, ShareType), bUseSCC));
+						TSharedRef<FCollection> NewCollection = MakeShareable(new FCollection(GetCollectionFilename(CollectionName, ShareType), bUseSCC, ECollectionStorageMode::Static));
 						if (NewCollection->Load(LoadErrorText))
 						{
 							if (AddCollection(NewCollection, ShareType))
@@ -1464,7 +1631,7 @@ bool FCollectionManager::TickFileCache(float InDeltaTime)
 						check(CollectionRefPtr); // We tested AvailableCollections.Contains(...) above, so this shouldn't fail
 
 						FText LoadErrorText;
-						FCollection TempCollection(GetCollectionFilename(CollectionName, ShareType), /*bUseSCC*/false);
+						FCollection TempCollection(GetCollectionFilename(CollectionName, ShareType), /*bUseSCC*/false, ECollectionStorageMode::Static);
 						if (TempCollection.Load(LoadErrorText))
 						{
 							if ((*CollectionRefPtr)->Merge(TempCollection))
@@ -1525,7 +1692,7 @@ void FCollectionManager::LoadCollections()
 			const bool bUseSCC = ShouldUseSCC(ShareType);
 
 			FText LoadErrorText;
-			TSharedRef<FCollection> NewCollection = MakeShareable(new FCollection(Filename, bUseSCC));
+			TSharedRef<FCollection> NewCollection = MakeShareable(new FCollection(Filename, bUseSCC, ECollectionStorageMode::Static));
 			if (NewCollection->Load(LoadErrorText))
 			{
 				AddCollection(NewCollection, ShareType);

@@ -419,7 +419,7 @@ public:
 
 		RenderTargetTexture = NewObject<UTextureRenderTarget2D>();
 		check(RenderTargetTexture);
-		RenderTargetTexture->ClearColor = FLinearColor::Transparent;
+		RenderTargetTexture->ClearColor = FLinearColor::White;
 		RenderTargetTexture->TargetGamma = 1.f;
 		RenderTargetTexture->InitCustomFormat(TargetSize.X, TargetSize.Y, PF_B8G8R8A8, false);
 		RenderTargetResource = RenderTargetTexture->GameThread_GetRenderTargetResource()->GetTextureRenderTarget2DResource();
@@ -778,7 +778,7 @@ void ULandscapeGrassType::PostEditChangeProperty(FPropertyChangedEvent& Property
 	if (GIsEditor)
 	{
 		// Only care current world object
-		for (TActorIterator<ALandscapeProxy> It(GWorld); It; ++It)
+		for (TActorIterator<ALandscapeProxy> It(GetWorld()); It; ++It)
 		{
 			ALandscapeProxy* Proxy = *It;
 			const UMaterialInterface* MaterialInterface = Proxy->LandscapeMaterial;

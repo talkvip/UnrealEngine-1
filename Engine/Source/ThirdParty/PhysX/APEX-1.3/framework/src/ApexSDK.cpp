@@ -55,7 +55,7 @@
 #	if _MSC_VER >= 1800
 	PX_COMPILE_TIME_ASSERT(_MSC_FULL_VER >= 180000000);
 #	elif _MSC_VER >= 1700
-PX_COMPILE_TIME_ASSERT(_MSC_FULL_VER >= 170000000);
+	PX_COMPILE_TIME_ASSERT(_MSC_FULL_VER >= 170000000);
 #	elif _MSC_VER >= 1600
 	PX_COMPILE_TIME_ASSERT(_MSC_FULL_VER >= 160040219);
 #	endif
@@ -1533,6 +1533,12 @@ void ApexSDK::release()
 			imodules[ i ]->notifyReleaseSDK();
 		}
 	}
+
+#ifdef PHYSX_PROFILE_SDK
+#ifdef PX_WINDOWS
+	gProfileZone = NULL;
+#endif
+#endif
 
 	// Now we destroy each module; but we make sure to null out each array element before we call the
 	// actual destruction routine so that the array of avlie/registered modules contains no pointers to deleted objects

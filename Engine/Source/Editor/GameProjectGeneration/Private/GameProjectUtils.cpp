@@ -2274,35 +2274,73 @@ GameProjectUtils::EProjectDuplicateResult GameProjectUtils::DuplicateProjectForU
 		NewDirectoryName = FString::Printf(TEXT("%s - %d"), *BaseDirectoryName, Idx);
 	}
 
-	// Find all the root directory names
-	TArray<FString> RootDirectoryNames;
-	IFileManager::Get().FindFiles(RootDirectoryNames, *(OldDirectoryName / TEXT("*")), false, true);
+	// Recursively find all the files we need to copy, excluding those that are within the directories listed in SourceDirectoriesToSkip
+	struct FGatherFilesToCopyHelper
+	{
+	public:
+		FGatherFilesToCopyHelper(FString InRootSourceDirectory)
+			: RootSourceDirectory(MoveTemp(InRootSourceDirectory))
+		{
+			static const FString RelativeDirectoriesToSkip[] = {
+				TEXT("Binaries"),
+				TEXT("DerivedDataCache"),
+				TEXT("Intermediate"),
+				TEXT("Saved/Autosaves"),
+				TEXT("Saved/Backup"),
+				TEXT("Saved/Cooked"),
+				TEXT("Saved/HardwareSurvey"),
+				TEXT("Saved/Logs"),
+				TEXT("Saved/StagedBuilds"),
+			};
 
-	// Find all the source directories
+			SourceDirectoriesToSkip.Reserve(ARRAY_COUNT(RelativeDirectoriesToSkip));
+			for (const FString& RelativeDirectoryToSkip : RelativeDirectoriesToSkip)
+			{
+				SourceDirectoriesToSkip.Emplace(RootSourceDirectory / RelativeDirectoryToSkip);
+			}
+		}
+
+		void GatherFilesToCopy(TArray<FString>& OutSourceDirectories, TArray<FString>& OutSourceFiles)
+		{
+			GatherFilesToCopy(RootSourceDirectory, OutSourceDirectories, OutSourceFiles);
+		}
+
+	private:
+		void GatherFilesToCopy(const FString& InSourceDirectoryPath, TArray<FString>& OutSourceDirectories, TArray<FString>& OutSourceFiles)
+		{
+			const FString SourceDirectorySearchWildcard = InSourceDirectoryPath / TEXT("*");
+
+			OutSourceDirectories.Emplace(InSourceDirectoryPath);
+
+			TArray<FString> SourceFilenames;
+			IFileManager::Get().FindFiles(SourceFilenames, *SourceDirectorySearchWildcard, true, false);
+
+			OutSourceFiles.Reserve(OutSourceFiles.Num() + SourceFilenames.Num());
+			for (const FString& SourceFilename : SourceFilenames)
+			{
+				OutSourceFiles.Emplace(InSourceDirectoryPath / SourceFilename);
+			}
+
+			TArray<FString> SourceSubDirectoryNames;
+			IFileManager::Get().FindFiles(SourceSubDirectoryNames, *SourceDirectorySearchWildcard, false, true);
+
+			for (const FString& SourceSubDirectoryName : SourceSubDirectoryNames)
+			{
+				const FString SourceSubDirectoryPath = InSourceDirectoryPath / SourceSubDirectoryName;
+				if (!SourceDirectoriesToSkip.Contains(SourceSubDirectoryPath))
+				{
+					GatherFilesToCopy(SourceSubDirectoryPath, OutSourceDirectories, OutSourceFiles);
+				}
+			}
+		}
+
+		FString RootSourceDirectory;
+		TArray<FString> SourceDirectoriesToSkip;
+	};
+
 	TArray<FString> SourceDirectories;
-	SourceDirectories.Add(OldDirectoryName);
-	for(int32 Idx = 0; Idx < RootDirectoryNames.Num(); Idx++)
-	{
-		if(RootDirectoryNames[Idx] != TEXT("Binaries") && RootDirectoryNames[Idx] != TEXT("Intermediate") && RootDirectoryNames[Idx] != TEXT("Saved"))
-		{
-			FString SourceDirectory = OldDirectoryName / RootDirectoryNames[Idx];
-			SourceDirectories.Add(SourceDirectory);
-			IFileManager::Get().FindFilesRecursive(SourceDirectories, *SourceDirectory, TEXT("*"), false, true, false);
-		}
-	}
-
-	// Find all the source files
 	TArray<FString> SourceFiles;
-	for(int32 Idx = 0; Idx < SourceDirectories.Num(); Idx++)
-	{
-		TArray<FString> SourceNames;
-		IFileManager::Get().FindFiles(SourceNames, *(SourceDirectories[Idx] / TEXT("*")), true, false);
-
-		for(int32 NameIdx = 0; NameIdx < SourceNames.Num(); NameIdx++)
-		{
-			SourceFiles.Add(SourceDirectories[Idx] / SourceNames[NameIdx]);
-		}
-	}
+	FGatherFilesToCopyHelper(OldDirectoryName).GatherFilesToCopy(SourceDirectories, SourceFiles);
 
 	// Copy everything
 	bool bCopySucceeded = true;
@@ -3493,60 +3531,16 @@ bool GameProjectUtils::AddSharedContentToProject(const FProjectInformation &InPr
 		{
 			RequiredDetail = EFeaturePackDetailLevel::Standard;
 		}
-		
-		for (int32 iPack = 0; iPack < TemplateDefs->SharedContentPacks.Num(); ++iPack)
-		{
-			FFeaturePackLevelSet EachPack = TemplateDefs->SharedContentPacks[iPack];
-			EFeaturePackDetailLevel EachRequiredDetail = RequiredDetail;
-			
-			if (EachPack.DetailLevels.Num() == 1)
-			{
-				// If theres only only detail level override the requirement with that
-				EachRequiredDetail = EachPack.DetailLevels[0];
-			}
-			else if (EachPack.DetailLevels.Num() == 0) 
-			{
-				// We need at least one level !
-				FFormatNamedArguments Args;
-				Args.Add(TEXT("FullPackFilename"), FText::FromString(EachPack.MountName));
-				OutFailReason = FText::Format(LOCTEXT("NoLevelsDefined", "No detail levels defined in template pack '{FullPackFilename}'."), Args);
-				return false;
-			}
 
-			for (int32 iDetail = 0; iDetail < EachPack.DetailLevels.Num() ; iDetail++)
-			{
-				if (EachPack.DetailLevels[iDetail] == EachRequiredDetail)
-				{
-					// Build the Packname from the mount and detail
-					FString DetailString;
-					UEnum::GetValueAsString(TEXT("/Script/AddContentDialog.EFeaturePackDetailLevel"), EachRequiredDetail, DetailString);
-					
-					FString FullPackFilename = FPaths::FeaturePackDir() + EachPack.MountName +  DetailString + DefaultFeaturePackExtension;
-					if (FPaths::FileExists(FullPackFilename) == false)
-					{
-						FFormatNamedArguments Args;
-						Args.Add(TEXT("FullPackFilename"), FText::FromString(FullPackFilename));
-						OutFailReason = FText::Format(LOCTEXT("CantFindPack", "Cannot find template pack '{FullPackFilename}'."), Args);
-						return false;
-					}
-					TUniquePtr<FFeaturePackContentSource> NewContentSource = MakeUnique<FFeaturePackContentSource>(FullPackFilename, true);
-					if (NewContentSource->IsDataValid() == true)
-					{						
-						FString DestinationFolder = DestFolder;
-						FPaths::NormalizeDirectoryName(DestinationFolder);
-						bool bHasSourceFiles = false;
-						TArray<FString> FilesCopied;
-						NewContentSource->CopyAdditionalFilesToFolder(DestinationFolder, FilesCopied, bHasSourceFiles);						
-					}
-					else
-					{
-						FFormatNamedArguments Args;
-						Args.Add(TEXT("PackName"), FText::FromString(FullPackFilename));
-						OutFailReason = FText::Format(LOCTEXT("PackParseError", "Error parsing template pack '{PackName}'."), Args);
-						return false;
-					}
-				}
-			}
+
+		TUniquePtr<FFeaturePackContentSource> TempFeaturePack = MakeUnique<FFeaturePackContentSource>();
+		bool bCopied = TempFeaturePack->InsertAdditionalResources(TemplateDefs->SharedContentPacks,RequiredDetail, DestFolder,CreatedFiles);
+		if( bCopied == false )
+		{
+			FFormatNamedArguments Args;
+			Args.Add(TEXT("TemplateName"), FText::FromString(SrcFolder));
+			OutFailReason = FText::Format(LOCTEXT("SharedResourceError", "Error adding shared resources for '{TemplateName}'."), Args);
+			return false;		
 		}
 	}
 	return true;

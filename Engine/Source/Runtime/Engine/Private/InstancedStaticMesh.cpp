@@ -984,40 +984,54 @@ void UInstancedStaticMeshComponent::CreateAllInstanceBodies()
 	    const int32 NumBodies = PerInstanceSMData.Num();
 		check(InstanceBodies.Num() == 0);
 		InstanceBodies.SetNumUninitialized(NumBodies);
-    
-	    TArray<FTransform> Transforms;
+
+		// Sanitized array does not contain any nulls
+		TArray<FBodyInstance*> InstanceBodiesSanitized;
+		InstanceBodiesSanitized.Reserve(NumBodies);
+
+		TArray<FTransform> Transforms;
 	    Transforms.Reserve(NumBodies);
     
 	    for (int32 i = 0; i < NumBodies; ++i)
 	    {
-		    InstanceBodies[i] = new FBodyInstance;
-		    FBodyInstance* Instance = InstanceBodies[i];
-			const FTransform InstanceTM = FTransform(PerInstanceSMData[i].Transform) * ComponentToWorld;   
-		    Instance->CopyBodyInstancePropertiesFrom(&BodyInstance);
-		    Instance->InstanceBodyIndex = i; // Set body index 
-		    Instance->bAutoWeld = false;
-    
-		    // make sure we never enable bSimulatePhysics for ISMComps
-		    Instance->bSimulatePhysics = false;
-
-			if(Mobility == EComponentMobility::Movable)
+			const FTransform InstanceTM = FTransform(PerInstanceSMData[i].Transform) * ComponentToWorld;
+			if (InstanceTM.GetScale3D().IsNearlyZero())
 			{
-				Instance->InitBody(BodySetup, InstanceTM, this, PhysScene);
-			}else
+				InstanceBodies[i] = nullptr;
+			}
+			else
 			{
-				Transforms.Add(InstanceTM);
-#if WITH_PHYSX
-				Instance->RigidActorSyncId = i + 1;
+				FBodyInstance* Instance = new FBodyInstance;
 
-				if (GetWorld()->GetPhysicsScene()->HasAsyncScene())
+				InstanceBodiesSanitized.Add(Instance);
+				InstanceBodies[i] = Instance;
+				Instance->CopyBodyInstancePropertiesFrom(&BodyInstance);
+				Instance->InstanceBodyIndex = i; // Set body index 
+				Instance->bAutoWeld = false;
+
+				// make sure we never enable bSimulatePhysics for ISMComps
+				Instance->bSimulatePhysics = false;
+
+				if (Mobility == EComponentMobility::Movable)
 				{
-					Instance->RigidActorAsyncId = Instance->RigidActorSyncId + NumBodies;
+					Instance->InitBody(BodySetup, InstanceTM, this, PhysScene);
 				}
+				else
+				{
+					Transforms.Add(InstanceTM);
+#if WITH_PHYSX
+					Instance->RigidActorSyncId = i + 1;
+
+					if (GetWorld()->GetPhysicsScene()->HasAsyncScene())
+					{
+						Instance->RigidActorAsyncId = Instance->RigidActorSyncId + NumBodies;
+					}
 #endif
+				}
 			}
 	    }
 
-		if (NumBodies > 0 && Mobility == EComponentMobility::Static)
+		if (InstanceBodiesSanitized.Num() > 0 && Mobility == EComponentMobility::Static)
 		{
 			TArray<UBodySetup*> BodySetups;
 			TArray<UPhysicalMaterial*> PhysicalMaterials;
@@ -1028,10 +1042,10 @@ void UInstancedStaticMeshComponent::CreateAllInstanceBodies()
 			PhysicalMaterials.Add(FBodyInstance::GetSimplePhysicalMaterial(&BodyInstance, WeakSelfPtr, TWeakObjectPtr<UBodySetup>(BodySetup)));
 
 			PhysicsSerializer->CreatePhysicsData(BodySetups, PhysicalMaterials);
-			FBodyInstance::InitStaticBodies(InstanceBodies, Transforms, BodySetup, this, GetWorld()->GetPhysicsScene(), PhysicsSerializer);
+			FBodyInstance::InitStaticBodies(InstanceBodiesSanitized, Transforms, BodySetup, this, GetWorld()->GetPhysicsScene(), PhysicsSerializer);
 
-			//Serialize physics data for fast path cooking
-			PhysicsSerializer->SerializePhysics(InstanceBodies, BodySetups, PhysicalMaterials);
+			// Serialize physics data for fast path cooking
+			PhysicsSerializer->SerializePhysics(InstanceBodiesSanitized, BodySetups, PhysicalMaterials);
 		}
 	}
 }
@@ -1041,9 +1055,11 @@ void UInstancedStaticMeshComponent::ClearAllInstanceBodies()
 	QUICK_SCOPE_CYCLE_COUNTER(STAT_UInstancedStaticMeshComponent_ClearAllInstanceBodies);
 	for (int32 i = 0; i < InstanceBodies.Num(); i++)
 	{
-		check(InstanceBodies[i]);
-		InstanceBodies[i]->TermBody();
-		delete InstanceBodies[i];
+		if (InstanceBodies[i])
+		{
+			InstanceBodies[i]->TermBody();
+			delete InstanceBodies[i];
+		}
 	}
 
 	InstanceBodies.Empty();
@@ -1056,7 +1072,10 @@ void UInstancedStaticMeshComponent::CreatePhysicsState()
 
 	FPhysScene* PhysScene = GetWorld()->GetPhysicsScene();
 
-	if (!PhysScene) { return; }
+	if (!PhysScene)
+	{
+		return;
+	}
 
 #if WITH_PHYSX
 	check(Aggregates.Num() == 0);
@@ -1463,11 +1482,34 @@ bool UInstancedStaticMeshComponent::UpdateInstanceTransform(int32 InstanceIndex,
 	{
 		// Physics uses world transform of the instance
 		FTransform WorldTransform = bWorldSpace ? NewInstanceTransform : (LocalTransform * ComponentToWorld);
-		FBodyInstance* InstanceBodyInstance = InstanceBodies[InstanceIndex];
+		FBodyInstance*& InstanceBodyInstance = InstanceBodies[InstanceIndex];
 #if WITH_PHYSX
-		// Update transform.
-		InstanceBodyInstance->SetBodyTransform(WorldTransform, ETeleportType::None);
-		InstanceBodyInstance->UpdateBodyScale(WorldTransform.GetScale3D());
+		if (NewInstanceTransform.GetScale3D().IsNearlyZero())
+		{
+			if (InstanceBodyInstance)
+			{
+				// delete BodyInstance
+				InstanceBodyInstance->TermBody();
+				delete InstanceBodyInstance;
+				InstanceBodyInstance = nullptr;
+			}
+		}
+		else
+		{
+			if (InstanceBodyInstance)
+			{
+				// Update existing BodyInstance
+				InstanceBodyInstance->SetBodyTransform(WorldTransform, ETeleportType::None);
+				InstanceBodyInstance->UpdateBodyScale(WorldTransform.GetScale3D());
+			}
+			else
+			{
+				// create new BodyInstance
+				InstanceBodyInstance = new FBodyInstance();
+				InitInstanceBody(InstanceIndex, InstanceBodyInstance);
+			}
+
+		}
 #endif //WITH_PHYSX
 	}
 
@@ -1574,10 +1616,17 @@ void UInstancedStaticMeshComponent::SetupNewInstanceData(FInstancedStaticMeshIns
 			}
 		}
 
-		FBodyInstance* NewBodyInstance = new FBodyInstance();
-		int32 BodyIndex = InstanceBodies.Insert(NewBodyInstance, InInstanceIndex);
-		check(InInstanceIndex == BodyIndex);
-		InitInstanceBody(BodyIndex, NewBodyInstance);
+		if (InInstanceTransform.GetScale3D().IsNearlyZero())
+		{
+			InstanceBodies.Insert(nullptr, InInstanceIndex);
+		}
+		else
+		{
+			FBodyInstance* NewBodyInstance = new FBodyInstance();
+			int32 BodyIndex = InstanceBodies.Insert(NewBodyInstance, InInstanceIndex);
+			check(InInstanceIndex == BodyIndex);
+			InitInstanceBody(BodyIndex, NewBodyInstance);
+		}
 	}
 }
 

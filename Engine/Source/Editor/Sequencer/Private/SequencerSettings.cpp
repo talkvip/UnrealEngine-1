@@ -26,6 +26,7 @@ USequencerSettings* USequencerSettingsContainer::GetOrCreate(const TCHAR* InName
 USequencerSettings::USequencerSettings( const FObjectInitializer& ObjectInitializer )
 	: Super( ObjectInitializer )
 {
+	bAutoKeyEnabled = false;
 	bIsSnapEnabled = true;
 	TimeSnapInterval = .05f;
 	bSnapKeyTimesToInterval = true;
@@ -40,7 +41,20 @@ USequencerSettings::USequencerSettings( const FObjectInitializer& ObjectInitiali
 	bAutoScrollEnabled = true;
 	bShowCurveEditor = false;
 	bShowCurveEditorCurveToolTips = true;
-	CurveVisibility = ESequencerCurveVisibility::AllCurves;
+}
+
+bool USequencerSettings::GetAutoKeyEnabled() const
+{
+	return bAutoKeyEnabled;
+}
+
+void USequencerSettings::SetAutoKeyEnabled(bool InbAutoKeyEnabled)
+{
+	if ( bAutoKeyEnabled != InbAutoKeyEnabled )
+	{
+		bAutoKeyEnabled = InbAutoKeyEnabled;
+		SaveConfig();
+	}
 }
 
 bool USequencerSettings::GetIsSnapEnabled() const
@@ -241,21 +255,6 @@ void USequencerSettings::SetShowCurveEditorCurveToolTips(bool InbShowCurveEditor
 	}
 }
 
-ESequencerCurveVisibility::Type USequencerSettings::GetCurveVisibility() const
-{
-	return CurveVisibility;
-}
-
-void USequencerSettings::SetCurveVisibility(ESequencerCurveVisibility::Type InCurveVisibility)
-{
-	if (CurveVisibility != InCurveVisibility)
-	{
-		CurveVisibility = InCurveVisibility;
-		OnCurveVisibilityChanged.Broadcast();
-		SaveConfig();
-	}
-}
-
 float USequencerSettings::SnapTimeToInterval( float InTimeValue ) const
 {
 	return TimeSnapInterval > 0
@@ -263,12 +262,8 @@ float USequencerSettings::SnapTimeToInterval( float InTimeValue ) const
 		: InTimeValue;
 }
 
-USequencerSettings::FOnCurveVisibilityChanged& USequencerSettings::GetOnCurveVisibilityChanged()
-{
-	return OnCurveVisibilityChanged;
-}
-
 USequencerSettings::FOnShowCurveEditorChanged& USequencerSettings::GetOnShowCurveEditorChanged()
 {
 	return OnShowCurveEditorChanged;
 }
+

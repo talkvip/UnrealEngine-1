@@ -7,8 +7,6 @@
 
 FLinuxCursor::FLinuxCursor()
 	: 	bHidden(false)
-	,	AccumulatedOffsetX(0)
-	,	AccumulatedOffsetY(0)
 	,	CachedGlobalXPosition(0)
 	,	CachedGlobalYPosition(0)
 	,	bPositionCacheIsValid(false)
@@ -180,9 +178,6 @@ FVector2D FLinuxCursor::GetPosition() const
 
 	int CursorX = CachedGlobalXPosition;
 	int CursorY = CachedGlobalYPosition;
-	
-	CursorX += AccumulatedOffsetX;
-	CursorY += AccumulatedOffsetY;
 
 	return FVector2D( CursorX, CursorY );
 }
@@ -192,27 +187,18 @@ void FLinuxCursor::InvalidateCaches()
 	bPositionCacheIsValid = false;
 }
 
+void FLinuxCursor::SetCachedPosition( const int32 X, const int32 Y )
+{
+	CachedGlobalXPosition = X;
+	CachedGlobalYPosition = Y;
+	bPositionCacheIsValid = true;
+}
+
 void FLinuxCursor::SetPosition( const int32 X, const int32 Y )
 {
-	int WndX, WndY;
+	SDL_WarpMouseGlobal( X, Y);
 
-	SDL_HWindow WndFocus = SDL_GetMouseFocus();
-
-	SDL_GetWindowPosition( WndFocus, &WndX, &WndY );	//	get top left
-	SDL_WarpMouseInWindow( NULL, X - WndX, Y - WndY );
-
-	InvalidateCaches();
-}
-
-void FLinuxCursor::AddOffset(const int32 DX, const int32 DY)
-{
-	AccumulatedOffsetX += DX; 
-	AccumulatedOffsetY += DY;
-}
-
-void FLinuxCursor::ResetOffset()
-{
-	AccumulatedOffsetX = AccumulatedOffsetY = 0;
+	SetCachedPosition(X, Y);
 }
 
 void FLinuxCursor::SetType( const EMouseCursor::Type InNewCursor )
@@ -263,11 +249,9 @@ void FLinuxCursor::Lock( const RECT* const Bounds )
 	if ( Bounds == NULL )
 	{
 		CursorClipRect = FIntRect();
-		SDL_SetWindowGrab( NULL, SDL_FALSE );
 	}
 	else
 	{
-		SDL_SetWindowGrab( NULL, SDL_TRUE );
 		CursorClipRect.Min.X = FMath::TruncToInt(Bounds->left);
 		CursorClipRect.Min.Y = FMath::TruncToInt(Bounds->top);
 		CursorClipRect.Max.X = FMath::TruncToInt(Bounds->right) - 1;

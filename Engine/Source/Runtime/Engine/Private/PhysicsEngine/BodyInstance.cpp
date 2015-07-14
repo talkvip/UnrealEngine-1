@@ -247,6 +247,7 @@ FBodyInstance::FBodyInstance()
 , bOverrideWalkableSlopeOnInstance(false)
 , PhysMaterialOverride(NULL)
 , SleepFamily(ESleepFamily::Normal)
+, CustomSleepThresholdMultiplier(1.f)
 , PhysicsBlendWeight(0.f)
 , PositionSolverIterationCount(8)
 , VelocitySolverIterationCount(1)
@@ -1547,10 +1548,7 @@ struct FInitBodiesHelper
 #if 0
 						// Set the parameters for determining when to put the object to sleep.
 						float SleepEnergyThresh = PNewDynamic->getSleepThreshold();
-						if (SleepFamily == ESleepFamily::Sensitive)
-						{
-							SleepEnergyThresh /= 20.f;
-						}
+						SleepEnergyThresh *= GetSleepThresholdMultiplier();
 						PNewDynamic->setSleepThreshold(SleepEnergyThresh);
 						// set solver iteration count 
 						int32 PositionIterCount = FMath::Clamp(PositionSolverIterationCount, 1, 255);
@@ -3233,21 +3231,22 @@ void FBodyInstance::UpdateDampingProperties()
 
 bool FBodyInstance::IsInstanceAwake() const
 {
+	bool bIsSleeping = false;
 #if WITH_PHYSX
 	ExecuteOnPxRigidDynamicReadOnly(this, [&](const PxRigidDynamic* PRigidDynamic)
 	{
-		return !PRigidDynamic->isSleeping();
+		bIsSleeping = PRigidDynamic->isSleeping();
 	});
 #endif
 
 #if WITH_BOX2D
 	if (BodyInstancePtr)
 	{
-		return BodyInstancePtr->IsAwake();
+		bIsSleeping = !BodyInstancePtr->IsAwake();
 	}
 #endif
 
-	return false;
+	return !bIsSleeping;
 }
 
 void FBodyInstance::WakeInstance()
@@ -3288,6 +3287,20 @@ void FBodyInstance::PutInstanceToSleep()
 		BodyInstancePtr->SetAwake(false);
 	}
 #endif
+}
+
+float FBodyInstance::GetSleepThresholdMultiplier()
+{
+	if (SleepFamily == ESleepFamily::Sensitive)
+	{
+		return 1 / 20.0f;
+	}
+	else if (SleepFamily == ESleepFamily::Custom)
+	{
+		return CustomSleepThresholdMultiplier;
+	}
+
+	return 1.f;
 }
 
 void FBodyInstance::SetLinearVelocity(const FVector& NewVel, bool bAddToCurrent)
@@ -4123,8 +4136,8 @@ bool FBodyInstance::OverlapMulti(TArray<struct FOverlapResult>& InOutOverlaps, c
 	if (pWorldToComponent)
 	{
 		const FTransform RootTM = WeldParent ? WeldParent->GetUnrealWorldTransform() : GetUnrealWorldTransform();
-		const FTransform ShapeSpaceToComponentSpace = RootTM * (*pWorldToComponent);
-		BodyInstanceSpaceToTestSpace = ShapeSpaceToComponentSpace * ComponentSpaceToTestSpace;
+		const FTransform LocalOffset = (*pWorldToComponent) * RootTM;
+		BodyInstanceSpaceToTestSpace = ComponentSpaceToTestSpace * LocalOffset;
 	}
 	else
 	{
@@ -4493,10 +4506,7 @@ void FBodyInstance::InitDynamicProperties_AssumesLocked()
 		}
 
 		float SleepEnergyThresh = RigidActor->getSleepThreshold();
-		if (SleepFamily == ESleepFamily::Sensitive)
-		{
-			SleepEnergyThresh /= 20.f;
-		}
+		SleepEnergyThresh *= GetSleepThresholdMultiplier();
 		RigidActor->setSleepThreshold(SleepEnergyThresh);
 		// set solver iteration count 
 		int32 PositionIterCount = FMath::Clamp(PositionSolverIterationCount, 1, 255);

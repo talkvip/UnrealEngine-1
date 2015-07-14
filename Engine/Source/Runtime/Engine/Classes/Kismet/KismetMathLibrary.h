@@ -683,6 +683,15 @@ class ENGINE_API UKismetMathLibrary : public UBlueprintFunctionLibrary
 	UFUNCTION(BlueprintPure, Category = "Math|Random")
 	static FVector RandomUnitVectorInCone(FVector ConeDir, float ConeHalfAngle);
 
+	/**
+	* RandomUnitVectorWithYawAndPitch
+	*
+	* @param MaxYaw - The Yaw-angle of the cone (from ConeDir to horizontal-edge), in degrees.
+	* @param MaxPitch - The Pitch-angle of the cone (from ConeDir to vertical-edge), in degrees.	
+	*/
+	UFUNCTION(BlueprintPure, Category = "Math|Random", meta = (Keywords = "RandomVector"))
+	static FVector RandomUnitVectorInConeWithYawAndPitch(FVector ConeDir, float MaxYawInDegrees, float MaxPitchInDegrees);
+
 	// Mirrors a vector by a normal
 	UFUNCTION(BlueprintPure, Category="Math|Vector")
 	static FVector MirrorVectorByNormal(FVector InVect, FVector InNormal);
@@ -1214,6 +1223,14 @@ class ENGINE_API UKismetMathLibrary : public UBlueprintFunctionLibrary
 	UFUNCTION(BlueprintPure, Category="Math|Vector", meta=(Keywords="rotation rotate"))
 	static FVector GetUpVector(FRotator InRot);
 
+	/** Creates a directional vector from rotation values {Pitch, Yaw} supplied in degrees with specified Length*/	
+	UFUNCTION(BlueprintPure, Category = "Math|Vector", meta = (Keywords = "rotation rotate"))
+	static FVector CreateVectorFromYawPitch(float Yaw, float Pitch, float Length = 1.0f );
+
+	/** Breaks a vector apart into Yaw, Pitch rotation values given in degrees. (non-clamped) */
+	UFUNCTION(BlueprintPure, Category = "Math|Vector2D", meta = (NativeBreakFunc))
+	static void GetYawPitchFromVector(FVector InVec, float& Yaw, float& Pitch);
+
 	/** Makes a rotator {Roll, Pitch, Yaw} from rotation values supplied in degrees */
 	UFUNCTION(BlueprintPure, Category="Math|Rotator", meta=(Keywords="construct build rotation rotate rotator makerotator", NativeMakeFunc))
 	static FRotator MakeRotator(
@@ -1269,7 +1286,8 @@ class ENGINE_API UKismetMathLibrary : public UBlueprintFunctionLibrary
 
 	/** Breaks apart a rotator into {Roll, Pitch, Yaw} angles in degrees */
 	UFUNCTION(BlueprintPure, Category = "Math|Rotator", meta = (Keywords = "rotation rotate rotator breakrotator", NativeBreakFunc))
-	static void BreakRotator(FRotator InRot,
+	static void BreakRotator(
+		UPARAM(DisplayName="Rotation") FRotator InRot,
 		UPARAM(DisplayName="X (Roll)") float& Roll,
 		UPARAM(DisplayName="Y (Pitch)") float& Pitch,
 		UPARAM(DisplayName="Z (Yaw)") float& Yaw);

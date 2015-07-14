@@ -206,6 +206,7 @@ protected:
 	}
 };
 
+// #YRX_Profiler: 2015-07-10 Should be moved to the profiler module, and added as export or something?
 /** An example command loading a raw stats file and dumping memory usage. */
 class FStatsMemoryDumpCommand
 {
@@ -223,16 +224,16 @@ protected:
 	void InternalRun();
 
 	/** Basic memory profiling, only for debugging purpose. */
-	void ProcessMemoryOperations( const TMap<int64, FStatPacketArray>& CombinedHistory );
+	void ProcessMemoryOperations( FStatsReadFile* InFile );
 
 	/** Generates a basic memory usage report and prints it to the log. */
-	void GenerateMemoryUsageReport( const TMap<uint64, FAllocationInfo>& AllocationMap );
+	void GenerateMemoryUsageReport( const TMap<uint64, FAllocationInfo>& AllocationMap, const TSet<FName>& UObjectRawNames );
 
 	/** Generates scoped allocation statistics. */
 	void ProcessAndDumpScopedAllocations( const TMap<uint64, FAllocationInfo>& AllocationMap );
 
 	/** Generates UObject allocation statistics. */
-	void ProcessAndDumpUObjectAllocations( const TMap<uint64, FAllocationInfo>& AllocationMap );
+	void ProcessAndDumpUObjectAllocations( const TMap<uint64, FAllocationInfo>& AllocationMap, const TSet<FName>& UObjectRawNames );
 
 	void DumpScopedAllocations( const TCHAR* Name, const TMap<FString, FCombinedAllocationInfo>& CombinedAllocations );
 
@@ -256,14 +257,11 @@ protected:
 		return PlatformName;
 	}
 
-	/** Map from a thread id to the thread name. */
-	TMap<uint32, FName> ThreadIdToName;
-
-	/** All names that contains a path to an UObject. */
-	TSet<FName> UObjectNames;
-
 	/** The sequence tag mapping to the named markers. */
 	TArray<TPair<uint32, FName>> Snapshots;
+
+	/** Unique snapshot names. */
+	TSet<FName> SnapshotNames;
 
 	/** The sequence tag mapping to the named markers that need to processed. */
 	TArray<TPair<uint32, FName>> SnapshotsToBeProcessed;
@@ -275,9 +273,6 @@ protected:
 	TMap<FName, TMap<FName, FCombinedAllocationInfo> > SnapshotsWithScopedAllocations;
 
 	TMap<FName, TMap<FString, FCombinedAllocationInfo> > SnapshotsWithDecodedScopedAllocations;
-
-	/** Filepath to the raw stats file. */
-	FString SourceFilepath;
 
 	/** Platform's name based on the loaded ue4statsraw file. */
 	FString PlatformName;

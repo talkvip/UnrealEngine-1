@@ -975,7 +975,7 @@ UPackage* LoadPackageInternal(UPackage* InOuter, const TCHAR* InLongPackageName,
 				TArray<FName> PackageDependencies;
 				FName PackageName(InLongPackageName);
 
-				AssetRegistry->GetDependencies(PackageName, PackageDependencies);
+				AssetRegistry->GetDependencies(PackageName, PackageDependencies, EAssetRegistryDependencyType::Hard);
 
 				Result->PackageFlags |= PKG_ProcessingDependencies;
 				for (auto Dependency : PackageDependencies)
@@ -1784,7 +1784,7 @@ bool StaticAllocateObjectErrorTests( UClass* InClass, UObject* InOuter, FName In
 			const FString ErrorMsg = FString::Printf(TEXT("Class which was marked abstract was trying to be loaded.  It will be nulled out on save. %s %s"), *InName.ToString(), *InClass->GetName());
 			// if we are trying instantiate an abstract class in the editor we'll warn the user that it will be nulled out on save
 			UE_LOG(LogUObjectGlobals, Warning, TEXT("%s"), *ErrorMsg);
-			ensureMsg(false, *ErrorMsg);
+			ensureMsgf(false, *ErrorMsg);
 		}
 		else
 		{

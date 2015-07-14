@@ -518,14 +518,20 @@ void FPhysXSimEventCallback::onConstraintBreak( PxConstraintInfo* constraints, P
 	}
 }
 
-void FPhysXSimEventCallback::onWake(PxActor** actors, PxU32 count)
+void FPhysXSimEventCallback::onWake(PxActor** Actors, PxU32 Count)
 {
-
+	for(PxU32 ActorIdx = 0; ActorIdx < Count; ++ActorIdx)
+	{
+		OwningScene->AddPendingSleepingEvent(Actors[ActorIdx], SleepEvent::SET_Wakeup, SceneType);
+	}
 }
 
-void FPhysXSimEventCallback::onSleep(PxActor** actors, PxU32 count)
+void FPhysXSimEventCallback::onSleep(PxActor** Actors, PxU32 Count)
 {
-
+	for (PxU32 ActorIdx = 0; ActorIdx < Count; ++ActorIdx)
+	{
+		OwningScene->AddPendingSleepingEvent(Actors[ActorIdx], SleepEvent::SET_Sleep, SceneType);
+	}
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -726,6 +732,14 @@ void FApexChunkReport::onStateChangeNotify(const NxApexChunkStateEventData& visi
 bool FApexChunkReport::releaseOnNoChunksVisible(const NxDestructibleActor* destructible)
 {
 	return false;
+}
+
+void FApexChunkReport::onDestructibleWake(physx::NxDestructibleActor** destructibles, physx::PxU32 count)
+{
+}
+
+void FApexChunkReport::onDestructibleSleep(physx::NxDestructibleActor** destructibles, physx::PxU32 count)
+{
 }
 
 ///////// FApexPhysX3Interface //////////////////////////////////

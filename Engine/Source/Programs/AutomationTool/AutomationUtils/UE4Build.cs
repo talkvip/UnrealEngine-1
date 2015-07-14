@@ -5,6 +5,7 @@ using System.Text;
 using System.IO;
 using System.Xml;
 using System.Diagnostics;
+using System.Web.Script.Serialization;
 
 namespace AutomationTool
 {
@@ -125,7 +126,7 @@ namespace AutomationTool
 			// Don't build UBT if we're running with pre-compiled binaries and if there's a debugger attached to this process.
 			// With the debugger attached, even though deleting the exe will work, the pdb files are still locked and the build will fail.
 			// Also, if we're running from VS then since UAT references UBT, we already have the most up-to-date version of UBT.exe
-			if (!bIsUBTReady && !GlobalCommandLine.NoCompile && !System.Diagnostics.Debugger.IsAttached)
+			if (!bIsUBTReady && GlobalCommandLine.Compile && !System.Diagnostics.Debugger.IsAttached)
 			{
 				DeleteFile(UBTExecutable);
 
@@ -457,20 +458,25 @@ namespace AutomationTool
 			var Result = new List<String>();
 			string Branch = P4Enabled ? P4Env.BuildRootEscaped : "";
 			{
-				string VerFile = CombinePaths(CmdEnv.LocalRoot, "Engine", "Build", "build.properties");
+				string VerFile = CombinePaths(CmdEnv.LocalRoot, "Engine", "Build", "Build.version");
 				if (bDoUpdateVersionFiles)
 				{
 					Log("Updating {0} with:", VerFile);
-					Log("  TimestampForBVT={0}", CmdEnv.TimestampAsString);
-					Log("  EngineVersion={0}", ChangelistNumber.ToString());
-					Log("  BranchName={0}", Branch);					
+					Log("  Changelist={0}", ChangelistNumber);
+					Log("  IsLicenseeVersion={0}", bIsLicenseeVersion? 1 : 0);
+					Log("  BranchName={0}", Branch);
 
-					PrepareBuildProduct(VerFile, false);
-					VersionFileUpdater BuildProperties = new VersionFileUpdater(VerFile);
-					BuildProperties.ReplaceLine("TimestampForBVT=", CmdEnv.TimestampAsString);
-					BuildProperties.ReplaceLine("EngineVersion=", ChangelistNumber.ToString());
-					BuildProperties.ReplaceLine("BranchName=", Branch);
-                    BuildProperties.Commit();
+					string VerText = CommandUtils.ReadAllText(VerFile);
+
+					JavaScriptSerializer Serializer = new JavaScriptSerializer();
+					Dictionary<string, object> Pairs = Serializer.Deserialize<Dictionary<string, object>>(VerText);
+					Pairs["Changelist"] = ChangelistNumber;
+					Pairs["IsLicenseeVersion"] = bIsLicenseeVersion? 1 : 0;
+					Pairs["BranchName"] = Branch;
+					VerText = Serializer.Serialize(Pairs).Replace("{\"", "{\n\t\"").Replace(",\"", ",\n\t\"").Replace("\":", "\": ").Replace("\"}", "\"\n}");
+
+					CommandUtils.SetFileAttributes(VerFile, ReadOnly: false);
+					CommandUtils.WriteAllText(VerFile, VerText);
 				}
 				else
 				{
@@ -483,7 +489,6 @@ namespace AutomationTool
 				}
 				Result.Add(VerFile);
 			}
-
 			{
 				string VerFile = CombinePaths(CmdEnv.LocalRoot, "Engine", "Source", "Runtime", "Core", "Private", "UObject", "ObjectVersion.cpp");
 				if (bDoUpdateVersionFiles)
@@ -1545,7 +1550,7 @@ namespace AutomationTool
 		/// </summary>
 		public void AddUBTFilesToBuildProducts()
 		{
-			if (GlobalCommandLine.NoCompile)
+			if (!GlobalCommandLine.Compile)
 			{
 				Log("We are being asked to copy the UBT build products, but we are running precompiled, so this does not make much sense.");
 			}
@@ -1591,6 +1596,7 @@ namespace AutomationTool
 						"AutomationTool.exe.config",
 						"UnrealBuildTool.exe",
 						"UnrealBuildTool.exe.config",
+						"AutomationUtils.Automation.dll",
 						"DotNETUtilities.dll",
 					});
 

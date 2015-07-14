@@ -2,6 +2,8 @@
 
 #pragma once
 
+class FTextFilterExpressionEvaluator;
+
 struct ECollectionVersion
 {
 	enum Type
@@ -35,7 +37,7 @@ enum class ECollectionCloneMode : uint8
 class FCollection
 {
 public:
-	FCollection(const FString& InFilename, bool InUseSCC);
+	FCollection(const FString& InFilename, bool InUseSCC, ECollectionStorageMode::Type InStorageMode);
 
 	/** Clone this collection to a new location */
 	TSharedRef<FCollection> Clone(const FString& InFilename, bool InUseSCC, ECollectionCloneMode InCloneMode) const;
@@ -50,6 +52,8 @@ public:
 	bool Merge(const FCollection& NewCollection);
 	/** Deletes the source file for this collection. If false, OutError is a human readable warning depicting the error. */
 	bool DeleteSourceFile(FText& OutError);
+	/** Empty this collection */
+	void Empty();
 
 	/** Adds a single object to the collection. Static collections only. */
 	bool AddObjectToCollection(FName ObjectPath);
@@ -66,14 +70,18 @@ public:
 	/** Returns true when the specified redirector is in the collection. Static collections only. */
 	bool IsRedirectorInCollection(FName ObjectPath) const;
 
+	/** Set the dynamic query text for this collection. Dynamic collections only. */
+	bool SetDynamicQueryText(const FString& InQueryText);
+	/** Get the dynamic query text for this collection. Dynamic collections only. */
+	FString GetDynamicQueryText() const;
+	/** Tests the dynamic query for against the context provided. Dynamic collections only. */
+	bool TestDynamicQuery(const ITextFilterExpressionContext& InContext) const;
+
 	/** Get the status info for this collection */
 	FCollectionStatusInfo GetStatusInfo() const;
 
 	/** Does this collection contain unsaved changes? */
 	bool IsDirty() const;
-
-	/** Returns true if the collection contains rules instead of a flat list */
-	bool IsDynamic() const;
 
 	/** Whether the collection has any contents */
 	bool IsEmpty() const;
@@ -96,6 +104,9 @@ public:
 	/** Returns the file version of the collection */
 	FORCEINLINE ECollectionVersion::Type GetCollectionVersion() const { return FileVersion; }
 
+	/** Get whether this collection is static or dynamic */
+	ECollectionStorageMode::Type GetStorageMode() const { return StorageMode; }
+
 	/** Get the source filename of this collection */
 	FORCEINLINE const FString& GetSourceFilename() const { return SourceFilename; }
 
@@ -115,7 +126,7 @@ private:
 	bool MergeWithCollection(const FCollection& Other);
 	/** Gets the object differences between object set A (base) and B (new) */
 	static void GetObjectDifferences(const TSet<FName>& BaseSet, const TSet<FName>& NewSet, TArray<FName>& ObjectsAdded, TArray<FName>& ObjectsRemoved);
-	/** Gets the object differences between what we have in memory, and what we loaded from disk */
+	/** Gets the object differences between what we have in memory, and what we loaded from disk. Static collections only. */
 	void GetObjectDifferencesFromDisk(TArray<FName>& ObjectsAdded, TArray<FName>& ObjectsRemoved) const;
 	/** Checks the shared collection out from source control so it may be saved. If false, OutError is a human readable warning depicting the error. */
 	bool CheckoutCollection(FText& OutError);
@@ -134,13 +145,17 @@ private:
 		{
 			ParentCollectionGuid = InCollection.ParentCollectionGuid;
 			ObjectSet = InCollection.ObjectSet;
+			DynamicQueryText = InCollection.DynamicQueryText;
 		}
 
 		/** The GUID of the collection we are parented under */
 		FGuid ParentCollectionGuid;
 
-		/** The set of objects in the collection. Takes the form PackageName.AssetName */
+		/** The set of objects in the collection. Takes the form PackageName.AssetName. Static collections only. */
 		TSet<FName> ObjectSet;
+
+		/** The dynamic query string for this collection. Dynamic collections only. */
+		FString DynamicQueryText;
 	};
 
 	/** The name of the collection */
@@ -158,11 +173,20 @@ private:
 	/** The filename used to load this collection. Empty if it is new or never loaded from disk. */
 	FString SourceFilename;
 
-	/** The set of objects in the collection. Takes the form PackageName.AssetName */
+	/** The set of objects in the collection. Takes the form PackageName.AssetName.Static collections only. */
 	TSet<FName> ObjectSet;
+
+	/** The dynamic query string for this collection. Dynamic collections only. */
+	FString DynamicQueryText;
+
+	/** Expression evaluator that can be used test against the compiled DynamicQueryText */
+	mutable TSharedPtr<FTextFilterExpressionEvaluator> DynamicQueryExpressionEvaluatorPtr;
 
 	/** The file version for this collection */
 	ECollectionVersion::Type FileVersion;
+
+	/** How does this collection store its objects? (static or dynamic) */
+	ECollectionStorageMode::Type StorageMode;
 
 	/** The state of the collection the last time it was loaded from or saved to disk. */
 	FCollectionSnapshot DiskSnapshot;

@@ -297,6 +297,7 @@ namespace AutomationTool
             this.Prebuilt = InParams.Prebuilt;
             this.RunTimeoutSeconds = InParams.RunTimeoutSeconds;
 			this.bIsCodeBasedProject = InParams.bIsCodeBasedProject;
+			this.bCodeSign = InParams.bCodeSign;
 		}
 
 		/// <summary>
@@ -399,7 +400,8 @@ namespace AutomationTool
 			string SpecifiedArchitecture = null,
             bool? IterativeDeploy = null,
 			bool? FastCook = null,
-			bool? IgnoreCookErrors = null
+			bool? IgnoreCookErrors = null,
+			bool? CodeSign = null
 			)
 		{
 			//
@@ -514,6 +516,7 @@ namespace AutomationTool
 			}
 			this.StageDirectoryParam = ParseParamValueIfNotSpecified(Command, StageDirectoryParam, "stagingdirectory", String.Empty, true);
             this.StageNonMonolithic = GetParamValueIfNotSpecified(Command, StageNonMonolithic, this.StageNonMonolithic, "StageNonMonolithic");
+			this.bCodeSign = GetParamValueIfNotSpecified(Command, CodeSign, CommandUtils.IsBuildMachine, "CodeSign");
 			this.Manifests = GetParamValueIfNotSpecified(Command, Manifests, this.Manifests, "manifests");
             this.CreateChunkInstall = GetParamValueIfNotSpecified(Command, CreateChunkInstall, this.CreateChunkInstall, "createchunkinstall");
 			this.ChunkInstallDirectory = ParseParamValueIfNotSpecified(Command, ChunkInstallDirectory, "chunkinstalldirectory", String.Empty, true);
@@ -1201,6 +1204,11 @@ namespace AutomationTool
 		/// </summary>
         public bool NoBootstrapExe { get; set; }
 
+		/// <summary>
+		/// By default we don't code sign unless it is required or requested
+		/// </summary>
+		public bool bCodeSign = false;
+
 		#endregion
 
 		#region Run
@@ -1577,7 +1585,7 @@ namespace AutomationTool
 
 			if (EditorTargetsList == null)
 			{
-				if (!GlobalCommandLine.NoCompile && !GlobalCommandLine.NoCompileEditor && (ProjectType != TargetRules.TargetType.Program) && !String.IsNullOrEmpty(EditorTarget))
+				if (!GlobalCommandLine.NoCompileEditor && (ProjectType != TargetRules.TargetType.Program) && !String.IsNullOrEmpty(EditorTarget))
 				{
 					EditorTargetsList = new ParamList<string>(EditorTarget);
 				}

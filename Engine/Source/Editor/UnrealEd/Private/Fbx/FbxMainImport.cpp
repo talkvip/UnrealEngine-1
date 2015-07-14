@@ -33,7 +33,6 @@
 =============================================================================*/
 
 #include "UnrealEd.h"
-#include "FeedbackContextEditor.h"
 
 #include "Factories.h"
 #include "Engine.h"
@@ -371,6 +370,7 @@ void FFbxImporter::ReleaseScene()
 	CollisionModels.Clear();
 	CurPhase = NOTSTARTED;
 	bFirstMesh = true;
+	LastMergeBonesChoice = EAppReturnType::Ok;
 }
 
 FBXImportOptions* UnFbx::FFbxImporter::GetImportOptions() const
@@ -400,30 +400,52 @@ int32 FFbxImporter::GetImportType(const FString& InFilename)
 			UE_LOG(LogFbx, Log, TEXT("ItemName: %s, ItemCount : %d"), *NameBuffer, ItemCount);
 		}
 
-		for ( ItemIndex = 0; ItemIndex < Statistics.GetNbItems(); ItemIndex++ )
+		FbxSceneInfo SceneInfo;
+		if (GetSceneInfo(Filename, SceneInfo))
 		{
-			Statistics.GetItemPair(ItemIndex, ItemName, ItemCount);
-			const char* NameBuffer = ItemName.Buffer();
-			if ( ItemName == "Deformer" && ItemCount > 0 )
+			if (SceneInfo.SkinnedMeshNum > 0)
 			{
-				// if SkeletalMesh is found, just return
 				Result = 1;
-				break;
 			}
-			// if Geometry is found, sets it, but it can be overwritten by Deformer
-			else if ( ItemName == "Geometry" && ItemCount > 0)
+			else if (SceneInfo.TotalGeometryNum > 0)
 			{
-				// let it still loop through even if Geometry is found
-				// Deformer can overwrite this information
 				Result = 0;
 			}
-			// Check for animation data. It can be overwritten by Geometry or Deformer
-			else if ( (ItemName == "AnimationCurve" || ItemName == "AnimationCurveNode") && ItemCount > 0 )
+
+			bHasAnimation = SceneInfo.bHasAnimation;
+		}
+		else
+		{
+			for(ItemIndex = 0; ItemIndex < Statistics.GetNbItems(); ItemIndex++)
 			{
-				bHasAnimation = true;
+				Statistics.GetItemPair(ItemIndex, ItemName, ItemCount);
+				const char* NameBuffer = ItemName.Buffer();
+				if(ItemName == "Deformer" && ItemCount > 0)
+				{
+					// if SkeletalMesh is found, just return
+					Result = 1;
+					break;
+				}
+				// if Geometry is found, sets it, but it can be overwritten by Deformer
+				else if(ItemName == "Geometry" && ItemCount > 0)
+				{
+					// let it still loop through even if Geometry is found
+					// Deformer can overwrite this information
+					Result = 0;
+				}
+				// Check for animation data. It can be overwritten by Geometry or Deformer
+				else if((ItemName == "AnimationCurve" || ItemName == "AnimationCurveNode") && ItemCount > 0)
+				{
+					bHasAnimation = true;
+				}
 			}
 		}
-		Importer->Destroy();
+
+		if (Importer)
+		{
+			Importer->Destroy();
+		}
+
 		Importer = NULL;
 		CurPhase = NOTSTARTED;
 
@@ -445,8 +467,7 @@ int32 FFbxImporter::GetImportType(const FString& InFilename)
 bool FFbxImporter::GetSceneInfo(FString Filename, FbxSceneInfo& SceneInfo)
 {
 	bool Result = true;
-	FFeedbackContextEditor FbxImportWarn;
-	FbxImportWarn.BeginSlowTask( NSLOCTEXT("FbxImporter", "BeginGetSceneInfoTask", "Parse FBX file to get scene info"), true );
+	GWarn->BeginSlowTask( NSLOCTEXT("FbxImporter", "BeginGetSceneInfoTask", "Parse FBX file to get scene info"), true );
 	
 	bool bSceneInfo = true;
 	switch (CurPhase)
@@ -457,14 +478,14 @@ bool FFbxImporter::GetSceneInfo(FString Filename, FbxSceneInfo& SceneInfo)
 			Result = false;
 			break;
 		}
-		FbxImportWarn.UpdateProgress( 40, 100 );
+		GWarn->UpdateProgress( 40, 100 );
 	case FILEOPENED:
 		if (!ImportFile(Filename))
 		{
 			Result = false;
 			break;
 		}
-		FbxImportWarn.UpdateProgress( 90, 100 );
+		GWarn->UpdateProgress( 90, 100 );
 	case IMPORTED:
 	
 	default:
@@ -563,17 +584,17 @@ bool FFbxImporter::GetSceneInfo(FString Filename, FbxSceneInfo& SceneInfo)
 			}
 		}
 		
-		// TODO: display multiple anim stack
-		SceneInfo.TakeName = NULL;
-		for (int32 AnimStackIndex = 0; AnimStackIndex < Scene->GetSrcObjectCount<FbxAnimStack>(); AnimStackIndex++)
+		SceneInfo.bHasAnimation = false;
+		for (int32 AnimCurveNodeIndex = 0; AnimCurveNodeIndex < Scene->GetSrcObjectCount<FbxAnimCurveNode>(); AnimCurveNodeIndex++)
 		{
-			FbxAnimStack* CurAnimStack = Scene->GetSrcObject<FbxAnimStack>(0);
-			// TODO: skip empty anim stack
-			const char* AnimStackName = CurAnimStack->GetName();
-			SceneInfo.TakeName = new char[FCStringAnsi::Strlen(AnimStackName) + 1];
-
-			FCStringAnsi::Strcpy(SceneInfo.TakeName, FCStringAnsi::Strlen(AnimStackName) + 1, AnimStackName);
+			FbxAnimCurveNode* CurAnimCruveNode = Scene->GetSrcObject<FbxAnimCurveNode>(AnimCurveNodeIndex);
+			if (CurAnimCruveNode->IsAnimated(true))
+			{
+				SceneInfo.bHasAnimation = true;
+				break;
+			}
 		}
+
 		SceneInfo.FrameRate = FbxTime::GetFrameRate(Scene->GetGlobalSettings().GetTimeMode());
 		
 		if ( GlobalTimeSpan.GetDirection() == FBXSDK_TIME_FORWARD)
@@ -586,7 +607,7 @@ bool FFbxImporter::GetSceneInfo(FString Filename, FbxSceneInfo& SceneInfo)
 		}
 	}
 	
-	FbxImportWarn.EndSlowTask();
+	GWarn->EndSlowTask();
 	return Result;
 }
 

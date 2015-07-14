@@ -32,6 +32,7 @@
 #include "PostProcessTemporalAA.h"
 #include "PostProcessMotionBlur.h"
 #include "PostProcessDOF.h"
+#include "PostProcessCircleDOF.h"
 #include "PostProcessUpscale.h"
 #include "PostProcessHMD.h"
 #include "PostProcessVisualizeComplexity.h"
@@ -1462,12 +1463,7 @@ void FPostProcessing::Process(FRHICommandListImmediate& RHICmdList, FViewInfo& V
 				FRenderingCompositePass* VisualizeNode = Context.Graph.RegisterPass(new(FMemStack::Get()) FRCPassPostProcessVisualizeDOF(DepthOfFieldStat));
 				VisualizeNode->SetInput(ePId_Input0, FRenderingCompositeOutputRef(Context.FinalOutput));
 
-				// PassThrough is needed to upscale the half res texture
-				FPooledRenderTargetDesc Desc = FSceneRenderTargets::Get(RHICmdList).GetSceneColor()->GetDesc();
-				Desc.Format = PF_B8G8R8A8;
-				FRenderingCompositePass* NullPass = Context.Graph.RegisterPass(new(FMemStack::Get()) FRCPassPostProcessPassThrough(Desc));
-				NullPass->SetInput(ePId_Input0, FRenderingCompositeOutputRef(VisualizeNode));
-				Context.FinalOutput = FRenderingCompositeOutputRef(NullPass);
+				Context.FinalOutput = FRenderingCompositeOutputRef(VisualizeNode);
 			}
 		}
 		else

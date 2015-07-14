@@ -14,10 +14,6 @@
 #include "GameFramework/Actor.h"
 #include "GameInstance.h"
 
-#if WITH_EDITOR
-	#include "Editor/UnrealEd/Public/HierarchicalLOD.h"
-#endif // WITH_EDITOR
-
 #include "World.generated.h"
 
 class FPhysScene;
@@ -678,7 +674,7 @@ public:
 
 #if WITH_EDITOR
 	/** Hierarchical LOD System. Used when WorldSetting.bEnableHierarchicalLODSystem is true */
-	FHierarchicalLODBuilder						HierarchicalLODBuilder;
+	struct FHierarchicalLODBuilder*						HierarchicalLODBuilder;
 #endif // WITH_EDITOR
 
 private:
@@ -2297,10 +2293,6 @@ public:
 	FDelegateHandle AddOnActorSpawnedHandler( const FOnActorSpawned::FDelegate& InHandler );
 
 	/** Remove a listener for OnActorSpawned events */
-	DELEGATE_DEPRECATED("This overload of RemoveOnActorSpawnedHandler is deprecated, instead pass the result of AddOnActorSpawnedHandler.")
-	void RemoveOnActorSpawnedHandler( const FOnActorSpawned::FDelegate& InHandler );
-
-	/** Remove a listener for OnActorSpawned events */
 	void RemoveOnActorSpawnedHandler( FDelegateHandle InHandle );
 
 	/**
@@ -2787,7 +2779,27 @@ public:
 	 */
 	void RemoveActor( AActor* Actor, bool bShouldModifyLevel );
 
+	/**
+	 * Spawn Actors with given transform and SpawnParameters
+	 * 
+	 * @param	Class					Class to Spawn
+	 * @param	Location				Location To Spawn
+	 * @param	Rotation				Rotation To Spawn
+	 * @param	SpawmParameters			Spawn Parameters
+	 *
+	 * @return	Actor that just spawned
+	 */
 	AActor* SpawnActor( UClass* InClass, FVector const* Location=NULL, FRotator const* Rotation=NULL, const FActorSpawnParameters& SpawnParameters = FActorSpawnParameters() );
+	/**
+	 * Spawn Actors with given transform and SpawnParameters
+	 * 
+	 * @param	Class					Class to Spawn
+	 * @param	Transform				World Transform to spawn on
+	 * @param	SpawmParameters			Spawm Parameters
+	 *
+	 * @return	Actor that just spawned
+	 */
+	AActor* SpawnActor( UClass* Class, FTransform const* Transform, const FActorSpawnParameters& SpawnParameters = FActorSpawnParameters());
 
 	/** Templated version of SpawnActor that allows you to specify a class type via the template type */
 	template< class T >
@@ -2819,6 +2831,16 @@ public:
 	{
 		return CastChecked<T>(SpawnActor(Class, &Location, &Rotation, SpawnParameters),ECastCheckedType::NullAllowed);
 	}
+	/** 
+	
+	 *  Templated version of SpawnActor that allows you to specify whole Transform
+	 *  class type via parameter while the return type is a parent class of that type 
+	 */
+	template< class T >
+	T* SpawnActor(UClass* Class, FTransform const& Transform,const FActorSpawnParameters& SpawnParameters = FActorSpawnParameters())
+	{
+		return CastChecked<T>(SpawnActor(Class, &Transform, SpawnParameters), ECastCheckedType::NullAllowed);
+	}
 	
 	/**
 	* Spawns given class and returns class T pointer, forcibly sets world position. WILL NOT run Construction Script of Blueprints 
@@ -2845,6 +2867,32 @@ public:
 		SpawnInfo.Instigator = Instigator;
 		SpawnInfo.bDeferConstruction = true;
 		return (Class != NULL) ? Cast<T>(SpawnActor(Class, &Location, &Rotation, SpawnInfo )) : NULL;
+	}
+
+	/**
+	* Spawns given class and returns class T pointer, forcibly sets world transform(note this allows scale as well). WILL NOT run Construction Script of Blueprints 
+	* to give caller an opportunity to set parameters beforehand.  Caller is responsible for invoking construction
+	* manually by calling UGameplayStatics::FinishSpawningActor (see AActor::OnConstruction).
+	*/
+	template< class T >
+	T* SpawnActorDeferred(
+		UClass* Class,
+		FTransform const& Transform,
+		AActor* Owner=NULL,
+		APawn* Instigator=NULL,
+		bool bNoCollisionFail=false
+		)
+	{
+		if( Owner )
+		{
+			check(this==Owner->GetWorld());
+		}
+		FActorSpawnParameters SpawnInfo;
+		SpawnInfo.bNoCollisionFail = bNoCollisionFail;
+		SpawnInfo.Owner = Owner;
+		SpawnInfo.Instigator = Instigator;
+		SpawnInfo.bDeferConstruction = true;
+		return (Class != NULL) ? Cast<T>(SpawnActor(Class, &Transform, SpawnInfo )) : NULL;
 	}
 
 	/** 

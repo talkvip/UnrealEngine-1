@@ -166,7 +166,6 @@ FSequencer::FSequencer()
 	, PlaybackState( EMovieScenePlayerStatus::Stopped )
 	, ScrubPosition( 0.0f )
 	, bLoopingEnabled( false )
-	, bAllowAutoKey( false )
 	, bPerspectiveViewportPossessionEnabled( true )
 	, bIsEditingWithinLevelEditor( false )
 	, bNeedTreeRefresh( false )
@@ -527,12 +526,12 @@ FAnimatedRange FSequencer::GetViewRange() const
 
 bool FSequencer::GetAutoKeyEnabled() const 
 {
-	return bAllowAutoKey;
+	return Settings->GetAutoKeyEnabled();
 }
 
 void FSequencer::SetAutoKeyEnabled(bool bAutoKeyEnabled)
 {
-	bAllowAutoKey = bAutoKeyEnabled;
+	Settings->SetAutoKeyEnabled(bAutoKeyEnabled);
 }
 
 bool FSequencer::IsRecordingLive() const 
@@ -1004,11 +1003,6 @@ void FSequencer::OnEndScrubbing()
 {
 	PlaybackState = EMovieScenePlayerStatus::Stopped;
 	AutoscrollOffset.Reset();
-}
-
-void FSequencer::OnToggleAutoKey()
-{
-	bAllowAutoKey = !bAllowAutoKey;
 }
 
 void FSequencer::OnToggleAutoScroll()
@@ -1565,6 +1559,26 @@ void FSequencer::StepBackward()
 	OnStepBackward();
 }
 
+void FSequencer::StepToNextKey()
+{
+	SequencerWidget->StepToNextKey();
+}
+
+void FSequencer::StepToPreviousKey()
+{
+	SequencerWidget->StepToPreviousKey();
+}
+
+void FSequencer::StepToNextCameraKey()
+{
+	SequencerWidget->StepToNextCameraKey();
+}
+
+void FSequencer::StepToPreviousCameraKey()
+{
+	SequencerWidget->StepToPreviousCameraKey();
+}
+
 void FSequencer::ToggleExpandCollapseNodes()
 {
 	SequencerWidget->ToggleExpandCollapseSelectedNodes();
@@ -1625,6 +1639,22 @@ void FSequencer::BindSequencerCommands()
 		FExecuteAction::CreateSP( this, &FSequencer::StepBackward ) );
 
 	SequencerCommandBindings->MapAction(
+		Commands.StepToNextKey,
+		FExecuteAction::CreateSP( this, &FSequencer::StepToNextKey ) );
+
+	SequencerCommandBindings->MapAction(
+		Commands.StepToPreviousKey,
+		FExecuteAction::CreateSP( this, &FSequencer::StepToPreviousKey ) );
+
+	SequencerCommandBindings->MapAction(
+		Commands.StepToNextCameraKey,
+		FExecuteAction::CreateSP( this, &FSequencer::StepToNextCameraKey ) );
+
+	SequencerCommandBindings->MapAction(
+		Commands.StepToPreviousCameraKey,
+		FExecuteAction::CreateSP( this, &FSequencer::StepToPreviousCameraKey ) );
+
+	SequencerCommandBindings->MapAction(
 		Commands.ToggleExpandCollapseNodes,
 		FExecuteAction::CreateSP(this, &FSequencer::ToggleExpandCollapseNodes));
 
@@ -1638,9 +1668,9 @@ void FSequencer::BindSequencerCommands()
 
 	SequencerCommandBindings->MapAction(
 		Commands.ToggleAutoKeyEnabled,
-		FExecuteAction::CreateSP( this, &FSequencer::OnToggleAutoKey ),
+		FExecuteAction::CreateLambda( [this]{ Settings->SetAutoKeyEnabled( !Settings->GetAutoKeyEnabled() ); } ),
 		FCanExecuteAction::CreateLambda( []{ return true; } ),
-		FIsActionChecked::CreateSP( this, &FSequencer::OnGetAllowAutoKey ) );
+		FIsActionChecked::CreateLambda( [this]{ return Settings->GetAutoKeyEnabled(); } ) );
 
 	bAutoScrollEnabled = Settings->GetAutoScrollEnabled();
 	SequencerCommandBindings->MapAction(
@@ -1708,30 +1738,6 @@ void FSequencer::BindSequencerCommands()
 		FExecuteAction::CreateLambda( [this]{ Settings->SetShowCurveEditor(!Settings->GetShowCurveEditor()); } ),
 		FCanExecuteAction::CreateLambda( []{ return true; } ),
 		FIsActionChecked::CreateLambda( [this]{ return Settings->GetShowCurveEditor(); } ) );
-
-	SequencerCommandBindings->MapAction(
-		Commands.ToggleShowCurveEditorCurveToolTips,
-		FExecuteAction::CreateLambda( [this]{ Settings->SetShowCurveEditorCurveToolTips( !Settings->GetShowCurveEditorCurveToolTips() ); } ),
-		FCanExecuteAction::CreateLambda( []{ return true; } ),
-		FIsActionChecked::CreateLambda( [this]{ return Settings->GetShowCurveEditorCurveToolTips(); } ) );
-
-	SequencerCommandBindings->MapAction(
-		Commands.SetAllCurveVisibility,
-		FExecuteAction::CreateLambda( [this]{ Settings->SetCurveVisibility( ESequencerCurveVisibility::AllCurves ); } ),
-		FCanExecuteAction::CreateLambda( []{ return true; } ),
-		FIsActionChecked::CreateLambda( [this]{ return Settings->GetCurveVisibility() == ESequencerCurveVisibility::AllCurves; } ) );
-
-	SequencerCommandBindings->MapAction(
-		Commands.SetSelectedCurveVisibility,
-		FExecuteAction::CreateLambda( [this]{ Settings->SetCurveVisibility( ESequencerCurveVisibility::SelectedCurves ); } ),
-		FCanExecuteAction::CreateLambda( []{ return true; } ),
-		FIsActionChecked::CreateLambda( [this]{ return Settings->GetCurveVisibility() == ESequencerCurveVisibility::SelectedCurves; } ) );
-
-	SequencerCommandBindings->MapAction(
-		Commands.SetAnimatedCurveVisibility,
-		FExecuteAction::CreateLambda( [this]{ Settings->SetCurveVisibility( ESequencerCurveVisibility::AnimatedCurves ); } ),
-		FCanExecuteAction::CreateLambda( []{ return true; } ),
-		FIsActionChecked::CreateLambda( [this]{ return Settings->GetCurveVisibility() == ESequencerCurveVisibility::AnimatedCurves; } ) );
 
 	for (int32 i = 0; i < TrackEditors.Num(); ++i)
 	{

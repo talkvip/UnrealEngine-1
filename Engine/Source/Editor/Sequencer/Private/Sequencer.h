@@ -296,9 +296,6 @@ protected:
 	/** @return The current scrub position */
 	virtual float OnGetScrubPosition() const { return ScrubPosition; }
 
-	/** @return Whether or not we currently allow autokeying */
-	virtual bool OnGetAllowAutoKey() const { return bAllowAutoKey; }
-
 	/**
 	 * Called when the view range is changed by the user
 	 *
@@ -325,13 +322,6 @@ protected:
 	/** Called when the user has finished scrubbing */
 	void OnEndScrubbing();
 
-	/**
-	 * Called when auto-key is toggled by a user
-	 *
-	 * @param bInAllowAutoKey	The new auto key state
-	 */
-	void OnToggleAutoKey();
-
 	/** Called to toggle auto-scroll on and off */
 	void OnToggleAutoScroll();
 	bool GetAutoScrollEnabled() const { return bAutoScrollEnabled; }
@@ -348,6 +338,10 @@ protected:
 	void Rewind();
 	void StepForward();
 	void StepBackward();
+	void StepToNextKey();
+	void StepToPreviousKey();
+	void StepToNextCameraKey();
+	void StepToPreviousCameraKey();
 
 	/** Expand or collapse selected nodes */
 	void ToggleExpandCollapseNodes();
@@ -447,9 +441,6 @@ private:
 
 	/** Whether looping while playing is enabled for this sequencer */
 	bool bLoopingEnabled;
-
-	/** Whether or not we are allowing autokey */
-	bool bAllowAutoKey;
 
 	bool bPerspectiveViewportPossessionEnabled;
 

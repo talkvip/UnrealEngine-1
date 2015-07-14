@@ -23,9 +23,11 @@
 #include "SAnimationOutlinerView.h"
 #include "MovieSceneInstance.h"
 #include "SequencerSettings.h"
+#include "SequencerCommonHelpers.h"
 #include "SequencerCurveOwner.h"
 #include "SSequencerCurveEditor.h"
 #include "SSequencerCurveEditorToolBar.h"
+#include "CurveEditorSettings.h"
 
 DECLARE_LOG_CATEGORY_EXTERN(LogSequencer, Log, All);
 

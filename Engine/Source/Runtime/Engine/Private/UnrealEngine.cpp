@@ -1879,8 +1879,10 @@ void UEngine::Serialize(FArchive& Ar)
 	if (Ar.IsCountingMemory())
 	{
 		// Only use the main audio device when counting memory
-		FAudioDevice* AudioDevice = GetMainAudioDevice();
-		AudioDevice->CountBytes(Ar);
+		if (FAudioDevice* AudioDevice = GetMainAudioDevice())
+		{
+			AudioDevice->CountBytes(Ar);
+		}
 	}
 }
 
@@ -4711,6 +4713,14 @@ bool UEngine::HandleDebugCommand( const TCHAR* Cmd, FOutputDevice& Ar )
 			return true;
 		}
 	}
+	else if( FParse::Command( &Cmd, TEXT("ENSUREALWAYS") ) )
+	{
+		UE_LOG(LogEngine, Warning, TEXT("Printed warning to log.") );
+		if( !ensureAlways( 0 ) )
+		{
+			return true;
+		}
+	}
 	else if( FParse::Command( &Cmd, TEXT( "FATAL" ) ) )
 	{
 		UE_LOG( LogEngine, Warning, TEXT( "Printed warning to log." ) );
@@ -6463,35 +6473,35 @@ void UEngine::InitializeRunningAverageDeltaTime()
 	RunningAverageDeltaTime = 1 / 100.f;
 }
 
-bool UEngine::IsAllowedFramerateSmoothing(bool bAllowFrameRateSmoothing) const
+bool UEngine::IsAllowedFramerateSmoothing() const
 {
-	return FPlatformProperties::AllowsFramerateSmoothing() && bSmoothFrameRate && bAllowFrameRateSmoothing && !IsRunningDedicatedServer();
+	return FPlatformProperties::AllowsFramerateSmoothing() && bSmoothFrameRate && !bForceDisableFrameRateSmoothing && !IsRunningDedicatedServer();
 }
 
 /** Compute tick rate limitor. */
 void UEngine::UpdateRunningAverageDeltaTime(float DeltaTime, bool bAllowFrameRateSmoothing)
 {
-	if (IsAllowedFramerateSmoothing(bAllowFrameRateSmoothing))
+	if (bAllowFrameRateSmoothing && IsAllowedFramerateSmoothing())
 	{
 		// Smooth the framerate if wanted. The code uses a simplistic running average. Other approaches, like reserving
 		// a percentage of time, ended up creating negative feedback loops in conjunction with GPU load and were abandonend.
-			if( DeltaTime < 0.0f )
-			{
+		if( DeltaTime < 0.0f )
+		{
 #if PLATFORM_ANDROID
-				UE_LOG(LogEngine, Warning, TEXT("Detected negative delta time - ignoring"));
-				DeltaTime = 0.01;
+			UE_LOG(LogEngine, Warning, TEXT("Detected negative delta time - ignoring"));
+			DeltaTime = 0.01;
 #elif (UE_BUILD_SHIPPING && WITH_EDITOR)
-				// End users don't have access to the secure parts of UDN. The localized string points to the release notes,
-				// which should include a link to the AMD CPU drivers download site.
-				UE_LOG(LogEngine, Fatal, TEXT("%s"), TEXT("CPU time drift detected! Please consult release notes on how to address this."));
+			// End users don't have access to the secure parts of UDN. The localized string points to the release notes,
+			// which should include a link to the AMD CPU drivers download site.
+			UE_LOG(LogEngine, Fatal, TEXT("%s"), TEXT("CPU time drift detected! Please consult release notes on how to address this."));
 #else
-				// Send developers to the support list thread.
-				UE_LOG(LogEngine, Fatal, TEXT("Negative delta time! Please see https://udn.epicgames.com/lists/showpost.php?list=ue3bugs&id=4364"));
+			// Send developers to the support list thread.
+			UE_LOG(LogEngine, Fatal, TEXT("Negative delta time! Please see https://udn.epicgames.com/lists/showpost.php?list=ue3bugs&id=4364"));
 #endif
-			}
+		}
 
-			// Keep track of running average over 300 frames, clamping at min of 5 FPS for individual delta times.
-			RunningAverageDeltaTime = FMath::Lerp<float>( RunningAverageDeltaTime, FMath::Min<float>( DeltaTime, 0.2f ), 1 / 300.f );
+		// Keep track of running average over 300 frames, clamping at min of 5 FPS for individual delta times.
+		RunningAverageDeltaTime = FMath::Lerp<float>( RunningAverageDeltaTime, FMath::Min<float>( DeltaTime, 0.2f ), 1 / 300.f );
 	}
 }
 
@@ -6501,21 +6511,21 @@ float UEngine::GetMaxTickRate(float DeltaTime, bool bAllowFrameRateSmoothing) co
 {
 	float MaxTickRate = 0;
 
-	if (IsAllowedFramerateSmoothing(bAllowFrameRateSmoothing))
+	if (bAllowFrameRateSmoothing && IsAllowedFramerateSmoothing())
 	{
-			// Work in FPS domain as that is what the function will return.
-			MaxTickRate = 1.f / RunningAverageDeltaTime;
+		// Work in FPS domain as that is what the function will return.
+		MaxTickRate = 1.f / RunningAverageDeltaTime;
 
-			// Clamp FPS into ini defined min/ max range.
-			if (SmoothedFrameRateRange.HasLowerBound())
-			{
-				MaxTickRate = FMath::Max( MaxTickRate, SmoothedFrameRateRange.GetLowerBoundValue() );
-			}
-			if (SmoothedFrameRateRange.HasUpperBound())
-			{
-				MaxTickRate = FMath::Min( MaxTickRate, SmoothedFrameRateRange.GetUpperBoundValue() );
-			}
+		// Clamp FPS into ini defined min/ max range.
+		if (SmoothedFrameRateRange.HasLowerBound())
+		{
+			MaxTickRate = FMath::Max( MaxTickRate, SmoothedFrameRateRange.GetLowerBoundValue() );
 		}
+		if (SmoothedFrameRateRange.HasUpperBound())
+		{
+			MaxTickRate = FMath::Min( MaxTickRate, SmoothedFrameRateRange.GetUpperBoundValue() );
+		}
+	}
 
 	if (CVarCauseHitches.GetValueOnGameThread())
 	{

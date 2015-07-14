@@ -6,16 +6,22 @@ using System.Text;
 
 namespace AutomationTool
 {
-	class LegacyNode : BuildNode
+	public class LegacyNode : BuildNode
 	{
-		public LegacyNode(GUBP.GUBPBranchConfig InBranchConfig, GUBP.GUBPNode InNode)
+		public LegacyNode(GUBP.GUBPNode InNode)
 		{
 			Name = InNode.GetFullName();
 			Node = InNode;
 			AgentSharingGroup = Node.AgentSharingGroup;
-			AgentMemoryRequirement = Node.AgentMemoryRequirement(InBranchConfig);
+			AgentMemoryRequirement = Node.AgentMemoryRequirement();
 			TimeoutInMinutes = Node.TimeoutInMinutes();
 			SendSuccessEmail = Node.SendSuccessEmail();
+			Priority = Node.Priority();
+		}
+
+		public override bool IsSticky
+		{
+			get { return Node.IsSticky(); }
 		}
 	}
 }

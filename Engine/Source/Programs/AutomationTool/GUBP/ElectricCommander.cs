@@ -140,7 +140,7 @@ namespace AutomationTool
 			RunECTool(String.Format("setProperty \"/myWorkflow/EmailNotes/{0}\" \"{1}\"", NodeToDo.Name, EMailNote));
 			{
 				HashSet<string> Emails = new HashSet<string>(NodeToDo.RecipientsForFailureEmails);
-				if (Command.ParseParam("CIS") && !NodeToDo.SendSuccessEmail && !NodeToDo.Node.TriggerNode() && NodeToDo.AddSubmittersToFailureEmails)
+				if (Command.ParseParam("CIS") && !NodeToDo.SendSuccessEmail && NodeToDo.AddSubmittersToFailureEmails)
 				{
 					Emails.UnionWith(FailCauserEMails.Split(new char[] { ' ' }, StringSplitOptions.RemoveEmptyEntries));
 				}
@@ -156,10 +156,8 @@ namespace AutomationTool
 			}
 		}
 
-		public void DoCommanderSetup(IEnumerable<BuildNode> AllNodes, IEnumerable<AggregateNode> AllAggregates, HashSet<BuildNode> NodesToDo, List<BuildNode> OrdereredToDo, List<BuildNode> SortedNodes, int TimeIndex, int TimeQuantum, bool bSkipTriggers, bool bFake, bool bFakeEC, string CLString, BuildNode ExplicitTrigger, List<BuildNode> UnfinishedTriggers, string FakeFail)
+		public void DoCommanderSetup(IEnumerable<BuildNode> AllNodes, IEnumerable<AggregateNode> AllAggregates, List<BuildNode> OrdereredToDo, List<BuildNode> SortedNodes, int TimeIndex, int TimeQuantum, bool bSkipTriggers, bool bFake, bool bFakeEC, string CLString, TriggerNode ExplicitTrigger, List<TriggerNode> UnfinishedTriggers, string FakeFail)
 		{
-			Dictionary<string, string> FullNodeDependedOnBy = GetFullNodeDependedOnBy(NodesToDo);
-
 			List<AggregateNode> SeparatePromotables = FindPromotables(AllAggregates);
 			Dictionary<BuildNode, List<AggregateNode>> DependentPromotions = FindDependentPromotables(AllNodes, SeparatePromotables);
 
@@ -175,17 +173,9 @@ namespace AutomationTool
 			{
 				ECProps.Add(string.Format("AllNodes/{0}={1}", Node.Name, GetNodeForAllNodesProperty(Node, TimeQuantum)));
 			}
-			foreach (BuildNode Node in SortedNodes)
-			{
-				ECProps.Add(string.Format("DirectDependencies/{0}={1}", Node.Name, String.Join(" ", Node.AllDirectDependencies.Select(x => x.Name))));
-			}
 			foreach (KeyValuePair<BuildNode, int> NodePair in FullNodeListSortKey)
 			{
 				ECProps.Add(string.Format("SortKey/{0}={1}", NodePair.Key.Name, NodePair.Value));
-			}
-			foreach (KeyValuePair<string, string> NodePair in FullNodeDependedOnBy)
-			{
-				ECProps.Add(string.Format("DependedOnBy/{0}={1}", NodePair.Key, NodePair.Value));
 			}
 			foreach (KeyValuePair<BuildNode, List<AggregateNode>> NodePair in DependentPromotions)
 			{
@@ -233,7 +223,7 @@ namespace AutomationTool
 				if (!NodeToDo.IsComplete) // if something is already finished, we don't put it into EC
 				{
 					bHaveECNodes = true;
-					if (NodeToDo.Node.IsSticky())
+					if (NodeToDo.IsSticky)
 					{
 						LastSticky = NodeToDo;
 						if (HitNonSticky && !bSkipTriggers)
@@ -282,7 +272,7 @@ namespace AutomationTool
 							}
 						}
 					}
-					if (NodeToDo.Node.IsSticky())
+					if (NodeToDo.IsSticky)
 					{
 						if (!StickyChain.Contains(NodeToDo))
 						{
@@ -297,7 +287,7 @@ namespace AutomationTool
 						List<string> NodeProps = GetECPropsForNode(NodeToDo);
 						ECProps.AddRange(NodeProps);
 
-						bool Sticky = NodeToDo.Node.IsSticky();
+						bool Sticky = NodeToDo.IsSticky;
 						bool DoParallel = !Sticky;
 						if (NodeToDo.Node.ECProcedure() == "GUBP_UAT_Node_Parallel_AgentShare_Editor")
 						{
@@ -308,7 +298,7 @@ namespace AutomationTool
 							throw new AutomationException("Node {1} is sticky but has agent requirements.", NodeToDo.Name);
 						}
 						string Procedure = NodeToDo.Node.ECProcedure();
-						if (NodeToDo.Node.IsSticky() && NodeToDo == LastSticky)
+						if (NodeToDo.IsSticky && NodeToDo == LastSticky)
 						{
 							Procedure = Procedure + "_Release";
 						}
@@ -530,7 +520,7 @@ namespace AutomationTool
 					}
 				}
 			}
-			if (NodeToDo.Node.IsSticky())
+			if (NodeToDo.IsSticky)
 			{
 				List<BuildNode> MyChain = StickyChain;
 				int MyIndex = MyChain.IndexOf(NodeToDo);
@@ -648,35 +638,6 @@ namespace AutomationTool
 				}
 			}
 			return DependentPromotions;
-		}
-
-		private static Dictionary<string, string> GetFullNodeDependedOnBy(HashSet<BuildNode> NodesToDo)
-		{
-			//find things that depend on our nodes and setup commander dictionary
-			Dictionary<string, string> FullNodeDependedOnBy = new Dictionary<string, string>();
-			foreach (BuildNode NodeToDo in NodesToDo)
-			{
-				FullNodeDependedOnBy[NodeToDo.Name] = "";
-			}
-			foreach (BuildNode NodeToDo in NodesToDo)
-			{
-				if (!NodeToDo.Node.IsTest())
-				{
-					foreach (BuildNode Dep in NodeToDo.AllDirectDependencies)
-					{
-						string CurrentValue;
-						if (!FullNodeDependedOnBy.TryGetValue(Dep.Name, out CurrentValue) || CurrentValue.Length == 0)
-						{
-							FullNodeDependedOnBy[Dep.Name] = NodeToDo.Name;
-						}
-						else
-						{
-							FullNodeDependedOnBy[Dep.Name] += " " + NodeToDo.Name;
-						}
-					}
-				}
-			}
-			return FullNodeDependedOnBy;
 		}
 
 		/// <summary>

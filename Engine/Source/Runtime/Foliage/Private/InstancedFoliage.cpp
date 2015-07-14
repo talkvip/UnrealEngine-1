@@ -50,6 +50,8 @@ struct FFoliageCustomVersion
 		FoliageTypeProceduralScaleAndShade = 8,
 		// Added FoliageHISMC and blueprint support
 		FoliageHISMCBlueprints = 9,
+		// Added Mobility setting to UFoliageType
+		AddedMobility = 10,
 		// -----<new versions can be added above this line>-------------------------------------------------
 		VersionPlusOne,
 		LatestVersion = VersionPlusOne - 1
@@ -290,7 +292,7 @@ UFoliageType::UFoliageType(const FObjectInitializer& ObjectInitializer)
 	VertexColorMask = FOLIAGEVERTEXCOLORMASK_Disabled;
 	VertexColorMaskThreshold = 0.5f;
 
-	bEnableStaticLighting = true;
+	Mobility = EComponentMobility::Static;
 	CastShadow = true;
 	bCastDynamicShadow = true;
 	bCastStaticShadow = true;
@@ -359,6 +361,11 @@ void UFoliageType::Serialize(FArchive& Ar)
 	{
 		LandscapeLayers.Add(LandscapeLayer_DEPRECATED);
 		LandscapeLayer_DEPRECATED = NAME_None;
+	}
+
+	if (Ar.IsLoading() && GetLinkerCustomVersion(FFoliageCustomVersion::GUID) < FFoliageCustomVersion::AddedMobility)
+	{
+		Mobility = bEnableStaticLighting_DEPRECATED ? EComponentMobility::Static : EComponentMobility::Movable;
 	}
 
 #if WITH_EDITORONLY_DATA
@@ -703,10 +710,9 @@ void FFoliageMeshInfo::UpdateComponentSettings(const UFoliageType* InSettings)
 			bNeedsMarkRenderStateDirty = true;
 		}
 
-		EComponentMobility::Type NewMobility = FoliageType->bEnableStaticLighting ? EComponentMobility::Static : EComponentMobility::Movable;
-		if (Component->Mobility != NewMobility)
+		if (Component->Mobility != FoliageType->Mobility)
 		{
-			Component->Mobility = NewMobility;
+			Component->SetMobility(FoliageType->Mobility);
 			bNeedsMarkRenderStateDirty = true;
 			bNeedsInvalidateLightingCache = true;
 		}
@@ -2234,11 +2240,18 @@ void AInstancedFoliageActor::PostLoad()
 	}
 	else
 	{
-		// Warn that there is more than one foliage actor in the scene
-		UE_LOG(LogInstancedFoliage, Warning, TEXT("Level %s: has more than one instanced foliage actor: %s, %s"), 
-			*OwningLevel->GetOutermost()->GetName(), 
-			*OwningLevel->InstancedFoliageActor->GetName(),
-			*this->GetName());
+		FFormatNamedArguments Arguments;
+		Arguments.Add(TEXT("Level"), FText::FromString(*OwningLevel->GetOutermost()->GetName()));
+		FMessageLog("MapCheck").Warning()
+			->AddToken(FUObjectToken::Create(this))
+			->AddToken(FTextToken::Create(FText::Format(LOCTEXT("MapCheck_DuplicateInstancedFoliageActor", "Level {Level} has an unexpected duplicate Instanced Foliage Actor {Actor}."), Arguments)))
+#if WITH_EDITOR
+			->AddToken(FActionToken::Create(LOCTEXT("MapCheck_FixDuplicateInstancedFoliageActor", "Fix"),
+				LOCTEXT("MapCheck_FixDuplicateInstancedFoliageActor_Desc", "Click consolidate into the main foliage actor."),
+				FOnActionTokenExecuted::CreateUObject(OwningLevel->InstancedFoliageActor.Get(), &AInstancedFoliageActor::RepairDuplicateIFA, this), true))
+#endif
+			;
+		FMessageLog("MapCheck").Open(EMessageSeverity::Warning);
 	}
 
 #if WITH_EDITOR
@@ -2341,6 +2354,30 @@ void AInstancedFoliageActor::PostLoad()
 }
 
 #if WITH_EDITOR
+
+void AInstancedFoliageActor::RepairDuplicateIFA(AInstancedFoliageActor* DuplicateIFA)
+{
+	for (auto& MeshPair : DuplicateIFA->FoliageMeshes)
+	{
+		UFoliageType* DupeFoliageType = MeshPair.Key;
+		FFoliageMeshInfo& DupeMeshInfo = *MeshPair.Value;
+
+		// Get foliage type compatible with target IFA
+		FFoliageMeshInfo* TargetMeshInfo = nullptr;
+		UFoliageType* TargetFoliageType = AddFoliageType(DupeFoliageType, &TargetMeshInfo);
+
+		// Copy the instances
+		for (FFoliageInstance& Instance : DupeMeshInfo.Instances)
+		{
+			if ((Instance.Flags & FOLIAGE_InstanceDeleted) == 0)
+			{
+				TargetMeshInfo->AddInstance(this, TargetFoliageType, Instance);
+			}
+		}
+	}
+
+	GetWorld()->DestroyActor(DuplicateIFA);
+}
 
 void AInstancedFoliageActor::NotifyFoliageTypeChanged(UFoliageType* FoliageType, bool bMeshChanged)
 {
@@ -2704,17 +2741,17 @@ void UFoliageInstancedStaticMeshComponent::ReceiveComponentDamage(float DamageAm
 				FVector LocalOrigin = GetComponentToWorld().Inverse().TransformPosition(RadialDamageEvent->Origin);
 				float Scale = GetComponentScale().X; // assume component (not instances) is uniformly scaled
 				
-				TArray<FFoliageInstanceDamage> DamageInstances;
-				DamageInstances.Empty(Instances.Num());
+				TArray<float> Damages;
+				Damages.Empty(Instances.Num());
 				
 				for (int32 InstanceIndex : Instances)
 				{
 					// Find distance in local space and then scale; quicker than transforming each instance to world space.
 					float DistanceFromOrigin = (PerInstanceSMData[InstanceIndex].Transform.GetOrigin() - LocalOrigin).Size() * Scale;
-					new(DamageInstances) FFoliageInstanceDamage(InstanceIndex, RadialDamageEvent->Params.GetDamageScale(DistanceFromOrigin));
+					Damages.Add(RadialDamageEvent->Params.GetDamageScale(DistanceFromOrigin));
 				}
 
-				OnInstanceTakeRadialDamage.Broadcast(DamageInstances, EventInstigator, RadialDamageEvent->Origin, MaxRadius, DamageTypeCDO, DamageCauser);
+				OnInstanceTakeRadialDamage.Broadcast(Instances, Damages, EventInstigator, RadialDamageEvent->Origin, MaxRadius, DamageTypeCDO, DamageCauser);
 			}
 		}
 	}

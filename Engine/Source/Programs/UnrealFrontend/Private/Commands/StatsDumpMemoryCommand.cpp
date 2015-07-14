@@ -1,6 +1,7 @@
 // Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
 
 #include "UnrealFrontendPrivatePCH.h"
+#include "Profiler.h"
 #include "StatsDumpMemoryCommand.h"
 #include "DiagnosticTable.h"
 
@@ -193,6 +194,7 @@ void FNodeAllocationInfo::PrepareCallstackData( const TArray<FName>& InDecodedCa
 /** Holds stats stack state, used to preserve continuity when the game frame has changed. */
 struct FStackState
 {
+	/** Default constructor. */
 	FStackState()
 		: bIsBrokenCallstack( false )
 	{}
@@ -217,186 +219,90 @@ static const double NumSecondsBetweenLogs = 5.0;
 
 void FStatsMemoryDumpCommand::InternalRun()
 {
+	FString SourceFilepath;
 	FParse::Value( FCommandLine::Get(), TEXT( "-INFILE=" ), SourceFilepath );
 
-	const int64 Size = IFileManager::Get().FileSize( *SourceFilepath );
-	if( Size < 4 )
 	{
-		UE_LOG( LogStats, Error, TEXT( "Could not open: %s" ), *SourceFilepath );
-		return;
-	}
-	TAutoPtr<FArchive> FileReader( IFileManager::Get().CreateFileReader( *SourceFilepath ) );
-	if( !FileReader )
-	{
-		UE_LOG( LogStats, Error, TEXT( "Could not open: %s" ), *SourceFilepath );
-		return;
+		const FName NAME_ProfilerModule = TEXT( "Profiler" );
+		IProfilerModule& ProfilerModule = FModuleManager::LoadModuleChecked<IProfilerModule>( NAME_ProfilerModule );
+		ProfilerModule.StatsMemoryDumpCommand( *SourceFilepath );
+		//FModuleManager::Get().UnloadModule( NAME_ProfilerModule );
 	}
 
-	FStatsReadStream Stream;
-
-	if( !Stream.ReadHeader( *FileReader ) )
 	{
-		UE_LOG( LogStats, Error, TEXT( "Could not open, bad magic: %s" ), *SourceFilepath );
-		return;
+		const FName NAME_ProfilerModule = TEXT( "Profiler" );
+		IProfilerModule& ProfilerModule = FModuleManager::LoadModuleChecked<IProfilerModule>( NAME_ProfilerModule );
+		ProfilerModule.StatsMemoryDumpCommand( *SourceFilepath );
+		//FModuleManager::Get().UnloadModule( NAME_ProfilerModule );
 	}
 
-	UE_LOG( LogStats, Warning, TEXT( "Reading a raw stats file for memory profiling: %s" ), *SourceFilepath );
 
-	const bool bIsFinalized = Stream.Header.IsFinalized();
-	check( bIsFinalized );
-	check( Stream.Header.Version >= EStatMagicWithHeader::VERSION_6 );
-
-	FStatsThreadState StatsThreadStats;
-	StatsThreadStats.MarkAsLoaded();
-
-	TArray<FStatMessage> Messages;
-	if( Stream.Header.bRawStatsFile )
+	FStatsReadFile* NewReader = FStatsReadFile::CreateReaderForRawStats( *SourceFilepath, FStatsReadFile::FOnNewCombinedHistory::CreateRaw( this, &FStatsMemoryDumpCommand::ProcessMemoryOperations ) );
+	if (NewReader)
 	{
-		FScopeLogTime SLT( TEXT( "FStatsMemoryDumpCommand::InternalRun" ), nullptr, FScopeLogTime::ScopeLog_Seconds );
+		PlatformName = NewReader->Header.PlatformName;
+		NewReader->ReadAndProcessAsynchronously();
 
-		// Read metadata.
-		TArray<FStatMessage> MetadataMessages;
-		Stream.ReadFNamesAndMetadataMessages( *FileReader, MetadataMessages );
-		StatsThreadStats.ProcessMetaDataOnly( MetadataMessages );
-
-		ThreadIdToName = StatsThreadStats.Threads;
-
-		// Find all UObject metadata messages.
-		for( const auto& Meta : MetadataMessages )
+		while( NewReader->IsBusy() )
 		{
-			const FName EncName = Meta.NameAndInfo.GetEncodedName();
-			const FName RawName = Meta.NameAndInfo.GetRawName();
-			const FString Desc = FStatNameAndInfo::GetShortNameFrom( RawName ).GetPlainNameString();
-			const bool bContainsUObject = Desc.Contains( TEXT( "//" ) );
-			if( bContainsUObject )
-			{
-				UObjectNames.Add( RawName );
-			}
+			FPlatformProcess::Sleep( 1.0f );
+
+			UE_LOG( LogStats, Log, TEXT( "Async: Stage: %s / %3i%%" ), *NewReader->GetProcessingStageAsString(), NewReader->GetStageProgress() );
+		}
+		//NewReader->RequestStop();
+
+		// Delete reader, we don't need the data anymore.
+		delete NewReader;
+
+		// Frame-240 Frame-120 Frame-060
+		TMap<FString, FCombinedAllocationInfo> FrameBegin_Exit;
+		CompareSnapshots_FString( TEXT( "BeginSnapshot" ), TEXT( "EngineLoop.Exit" ), FrameBegin_Exit );
+		DumpScopedAllocations( TEXT( "Begin_Exit" ), FrameBegin_Exit );
+
+#if	UE_BUILD_DEBUG
+		TMap<FString, FCombinedAllocationInfo> Frame060_120;
+		CompareSnapshots_FString( TEXT( "Frame-060" ), TEXT( "Frame-120" ), Frame060_120 );
+		DumpScopedAllocations( TEXT( "Frame060_120" ), Frame060_120 );
+
+		TMap<FString, FCombinedAllocationInfo> Frame060_240;
+		CompareSnapshots_FString( TEXT( "Frame-060" ), TEXT( "Frame-240" ), Frame060_240 );
+		DumpScopedAllocations( TEXT( "Frame060_240" ), Frame060_240 );
+
+		// Generate scoped tree view.
+		{
+			TMap<FName, FCombinedAllocationInfo> FrameBegin_Exit_FName;
+			CompareSnapshots_FName( TEXT( "BeginSnapshot" ), TEXT( "EngineLoop.Exit" ), FrameBegin_Exit_FName );
+
+			FNodeAllocationInfo Root;
+			Root.EncodedCallstack = TEXT( "ThreadRoot" );
+			Root.HumanReadableCallstack = TEXT( "ThreadRoot" );
+			GenerateScopedTreeAllocations( FrameBegin_Exit_FName, Root );
 		}
 
-		const int64 CurrentFilePos = FileReader->Tell();
 
-		// Read frames offsets.
-		Stream.ReadFramesOffsets( *FileReader );
-
-		// Buffer used to store the compressed and decompressed data.
-		TArray<uint8> SrcArray;
-		TArray<uint8> DestArray;
-		const bool bHasCompressedData = Stream.Header.HasCompressedData();
-		check( bHasCompressedData );
-
-		PlatformName = Stream.Header.PlatformName;
-
-		TMap<int64, FStatPacketArray> CombinedHistory;
-		int64 TotalDataSize = 0;
-		int64 TotalStatMessagesNum = 0;
-		int64 MaximumPacketSize = 0;
-		int64 TotalPacketsNum = 0;
-		// Read all packets sequentially, forced by the memory profiler which is now a part of the raw stats.
-		// !!CAUTION!! Frame number in the raw stats is pointless, because it is time/cycles based, not frame based.
-		// Background threads usually execute time consuming operations, so the frame number won't be valid.
-		// Needs to be combined by the thread and the time, not by the frame number.
 		{
-			// Display log information once per 5 seconds to avoid spamming.
-			double PreviousSeconds = FPlatformTime::Seconds();
-			const int64 FrameOffset0 = Stream.FramesInfo[0].FrameFileOffset;
-			FileReader->Seek( FrameOffset0 );
+			TMap<FName, FCombinedAllocationInfo> Frame060_240_FName;
+			CompareSnapshots_FName( TEXT( "Frame-060" ), TEXT( "Frame-240" ), Frame060_240_FName );
 
-			const int64 FileSize = FileReader->TotalSize();
-
-			while( FileReader->Tell() < FileSize )
-			{
-				// Read the compressed data.
-				FCompressedStatsData UncompressedData( SrcArray, DestArray );
-				*FileReader << UncompressedData;
-				if( UncompressedData.HasReachedEndOfCompressedData() )
-				{
-					break;
-				}
-
-				FMemoryReader MemoryReader( DestArray, true );
-
-				FStatPacket* StatPacket = new FStatPacket();
-				Stream.ReadStatPacket( MemoryReader, *StatPacket );
-
-				const int64 StatPacketFrameNum = StatPacket->Frame;
-				FStatPacketArray& Frame = CombinedHistory.FindOrAdd( StatPacketFrameNum );
-
-				// Check if we need to combine packets from the same thread.
-				FStatPacket** CombinedPacket = Frame.Packets.FindByPredicate( [&]( FStatPacket* Item ) -> bool
-				{
-					return Item->ThreadId == StatPacket->ThreadId;
-				} );
-
-				const int64 PacketSize = StatPacket->StatMessages.GetAllocatedSize();
-				TotalStatMessagesNum += StatPacket->StatMessages.Num();
-
-				if( CombinedPacket )
-				{
-					TotalDataSize -= (*CombinedPacket)->StatMessages.GetAllocatedSize();
-					(*CombinedPacket)->StatMessages += StatPacket->StatMessages;
-					TotalDataSize += (*CombinedPacket)->StatMessages.GetAllocatedSize();
-
-					delete StatPacket;
-				}
-				else
-				{
-					Frame.Packets.Add( StatPacket );
-					TotalDataSize += PacketSize;
-				}
-
-				const double CurrentSeconds = FPlatformTime::Seconds();
-				if( CurrentSeconds > PreviousSeconds + NumSecondsBetweenLogs )
-				{
-					const int32 PctPos = int32( 100.0*FileReader->Tell() / FileSize );
-					UE_LOG( LogStats, Log, TEXT( "%3i%% %10llu (%.1f MB) read messages, last read frame %4i" ), PctPos, TotalStatMessagesNum, TotalDataSize / 1024.0f / 1024.0f, StatPacketFrameNum );
-					PreviousSeconds = CurrentSeconds;
-				}
-			
-				MaximumPacketSize = FMath::Max( MaximumPacketSize, PacketSize );			
-				TotalPacketsNum++;
-			}
+			FNodeAllocationInfo Root;
+			Root.EncodedCallstack = TEXT( "ThreadRoot" );
+			Root.HumanReadableCallstack = TEXT( "ThreadRoot" );
+			GenerateScopedTreeAllocations( Frame060_240_FName, Root );
 		}
-
-		// Dump frame stats
-		for( const auto& It : CombinedHistory )
-		{
-			const int64 FrameNum = It.Key;
-			int64 FramePacketsSize = 0;
-			int64 FrameStatMessages = 0;
-			int64 FramePackets = It.Value.Packets.Num(); // Threads
-			for( const auto& It2 : It.Value.Packets )
-			{
-				FramePacketsSize += It2->StatMessages.GetAllocatedSize();
-				FrameStatMessages += It2->StatMessages.Num();
-			}
-
-			UE_LOG( LogStats, Warning, TEXT( "Frame: %10llu/%3lli Size: %.1f MB / %10lli" ), 
-					FrameNum, 
-					FramePackets, 
-					FramePacketsSize / 1024.0f / 1024.0f,
-					FrameStatMessages );
-		}
-
-		UE_LOG( LogStats, Warning, TEXT( "TotalPacketSize: %.1f MB, Max: %1f MB" ),
-				TotalDataSize / 1024.0f / 1024.0f,
-				MaximumPacketSize / 1024.0f / 1024.0f );
-
-		TArray<int64> Frames;
-		CombinedHistory.GenerateKeyArray( Frames );
-		Frames.Sort();
-		const int64 MiddleFrame = Frames[Frames.Num() / 2];
-
-		ProcessMemoryOperations( CombinedHistory );
+#endif // UE_BUILD_DEBUG
 	}
 }
 
 
-void FStatsMemoryDumpCommand::ProcessMemoryOperations( const TMap<int64, FStatPacketArray>& CombinedHistory )
+void FStatsMemoryDumpCommand::ProcessMemoryOperations( FStatsReadFile* InFile )
 {
+	const FStatsReadFile& File = *InFile;
+	const TMap<int64, FStatPacketArray>& CombinedHistory = File.CombinedHistory;
+
 	// This is only example code, no fully implemented, may sometimes crash.
 	// This code is not optimized. 
 	double PreviousSeconds = FPlatformTime::Seconds();
+	int32 CurrentStatMessageIndex = 0;
 	uint64 NumMemoryOperations = 0;
 
 	// Generate frames
@@ -421,17 +327,11 @@ void FStatsMemoryDumpCommand::ProcessMemoryOperations( const TMap<int64, FStatPa
 	uint32 LastSequenceTagForNamedMarker = 0;
 	Snapshots.Add( TPairInitializer<uint32, FName>( LastSequenceTagForNamedMarker, TEXT( "BeginSnapshot" ) ) );
 
+	const int32 OnerPercent = FMath::Max( int32(InFile->FileInfo.TotalStatMessagesNum / 100), 65536 );
+
+	// #YRX_Stats: 2015-07-10 This still should be generic
 	for( int32 FrameIndex = 0; FrameIndex < Frames.Num(); ++FrameIndex )
 	{
-		{
-			const double CurrentSeconds = FPlatformTime::Seconds();
-			if( CurrentSeconds > PreviousSeconds + NumSecondsBetweenLogs )
-			{
-				UE_LOG( LogStats, Warning, TEXT( "Processing frame %i/%i" ), FrameIndex+1, Frames.Num() );
-				PreviousSeconds = CurrentSeconds;
-			}
-		}
-
 		const int64 TargetFrame = Frames[FrameIndex];
 		const int64 Diff = TargetFrame - FirstFrame;
 		const FStatPacketArray& Frame = CombinedHistory.FindChecked( TargetFrame );
@@ -439,18 +339,8 @@ void FStatsMemoryDumpCommand::ProcessMemoryOperations( const TMap<int64, FStatPa
 		bool bAtLeastOnePacket = false;
 		for( int32 PacketIndex = 0; PacketIndex < Frame.Packets.Num(); PacketIndex++ )
 		{
-			{
-				const double CurrentSeconds = FPlatformTime::Seconds();
-				if( CurrentSeconds > PreviousSeconds + NumSecondsBetweenLogs )
-				{
-					UE_LOG( LogStats, Log, TEXT( "Processing packet %i/%i" ), PacketIndex, Frame.Packets.Num() );
-					PreviousSeconds = CurrentSeconds;
-					bAtLeastOnePacket = true;
-				}
-			}
-
 			const FStatPacket& StatPacket = *Frame.Packets[PacketIndex];
-			const FName& ThreadFName = ThreadIdToName.FindChecked( StatPacket.ThreadId );
+			const FName& ThreadFName = File.State.Threads.FindChecked( StatPacket.ThreadId );
 
 			FStackState* StackState = StackStates.Find( ThreadFName );
 			if( !StackState )
@@ -462,26 +352,31 @@ void FStatsMemoryDumpCommand::ProcessMemoryOperations( const TMap<int64, FStatPa
 
 			const FStatMessagesArray& Data = StatPacket.StatMessages;
 
-			int32 LastPct = 0;
-			const int32 NumDataElements = Data.Num();
-			const int32 OnerPercent = FMath::Max( NumDataElements / 100, 1024 );
-			bool bAtLeastOneMessage = false;
-			for( int32 Index = 0; Index < NumDataElements; Index++ )
+			const int32 NumStatMessages = Data.Num();
+			for( int32 Index = 0; Index < NumStatMessages; Index++ )
 			{
-				if( Index % OnerPercent )
+				CurrentStatMessageIndex++;
+
+				if (CurrentStatMessageIndex % OnerPercent == 0)
 				{
 					const double CurrentSeconds = FPlatformTime::Seconds();
 					if( CurrentSeconds > PreviousSeconds + NumSecondsBetweenLogs )
 					{
-						const int32 CurrentPct = int32( 100.0*(Index + 1) / NumDataElements );
-						UE_LOG( LogStats, Log, TEXT( "Processing %3i%% (%i/%i) stat messages" ), CurrentPct, Index, NumDataElements );
+						const int32 PercentagePos = int32( 100.0*CurrentStatMessageIndex / InFile->FileInfo.TotalStatMessagesNum );
+						InFile->StageProgress.Set( PercentagePos );
+						UE_LOG( LogStats, Verbose, TEXT( "Processing %3i%% (%10i/%10i) stat messages [Frame: %3i, Packet: %2i]" ), PercentagePos, CurrentStatMessageIndex, InFile->FileInfo.TotalStatMessagesNum, FrameIndex, PacketIndex );
 						PreviousSeconds = CurrentSeconds;
-						bAtLeastOneMessage = true;
+
+						// Abandon support, simply return for now.
+						if (InFile->bShouldStopProcessing == true)
+						{
+							InFile->SetProcessingStage( EStatsProcessingStage::SPS_Stopped );
+							return;
+						}
 					}
 				}
 
 				const FStatMessage& Item = Data[Index];
-
 				const EStatOperation::Type Op = Item.NameAndInfo.GetField<EStatOperation>();
 				const FName RawName = Item.NameAndInfo.GetRawName();
 
@@ -504,12 +399,12 @@ void FStatsMemoryDumpCommand::ProcessMemoryOperations( const TMap<int64, FStatPa
 							NumMemoryOperations++;
 							// @see FStatsMallocProfilerProxy::TrackAlloc
 							// After AllocPtr message there is always alloc size message and the sequence tag.
-							Index++;
+							Index++; CurrentStatMessageIndex++;
 							const FStatMessage& AllocSizeMessage = Data[Index];
 							const int64 AllocSize = AllocSizeMessage.GetValue_int64();
 
 							// Read OperationSequenceTag.
-							Index++;
+							Index++; CurrentStatMessageIndex++;
 							const FStatMessage& SequenceTagMessage = Data[Index];
 							const uint32 SequenceTag = SequenceTagMessage.GetValue_int64();
 
@@ -529,6 +424,7 @@ void FStatsMemoryDumpCommand::ProcessMemoryOperations( const TMap<int64, FStatPa
 								StackState->bIsBrokenCallstack
 								) );
 							LastSequenceTagForNamedMarker = SequenceTag;
+
 						}
 						else if (MemOp == EMemoryOperation::Realloc)
 						{
@@ -536,17 +432,17 @@ void FStatsMemoryDumpCommand::ProcessMemoryOperations( const TMap<int64, FStatPa
 							const uint64 OldPtr = Ptr;
 
 							// Read NewPtr
-							Index++;
+							Index++; CurrentStatMessageIndex++;
 							const FStatMessage& AllocPtrMessage = Data[Index];
 							const uint64 NewPtr = AllocPtrMessage.GetValue_Ptr() & ~(uint64)EMemoryOperation::Mask;
 
 							// After AllocPtr message there is always alloc size message and the sequence tag.
-							Index++;
+							Index++; CurrentStatMessageIndex++;
 							const FStatMessage& ReallocSizeMessage = Data[Index];
 							const int64 ReallocSize = ReallocSizeMessage.GetValue_int64();
 
 							// Read OperationSequenceTag.
-							Index++;
+							Index++; CurrentStatMessageIndex++;
 							const FStatMessage& SequenceTagMessage = Data[Index];
 							const uint32 SequenceTag = SequenceTagMessage.GetValue_int64();
 
@@ -572,7 +468,7 @@ void FStatsMemoryDumpCommand::ProcessMemoryOperations( const TMap<int64, FStatPa
 						{
 							NumMemoryOperations++;
 							// Read OperationSequenceTag.
-							Index++;
+							Index++; CurrentStatMessageIndex++;
 							const FStatMessage& SequenceTagMessage = Data[Index];
 							const uint32 SequenceTag = SequenceTagMessage.GetValue_int64();
 
@@ -638,16 +534,10 @@ void FStatsMemoryDumpCommand::ProcessMemoryOperations( const TMap<int64, FStatPa
 					}
 				}
 			}
-			if( bAtLeastOneMessage )
-			{
-				PreviousSeconds -= NumSecondsBetweenLogs;
-			}
-		}
-		if( bAtLeastOnePacket )
-		{
-			PreviousSeconds -= NumSecondsBetweenLogs;
 		}
 	}
+
+	InFile->StageProgress.Set( 100 );
 
 	// End marker.
 	Snapshots.Add( TPairInitializer<uint32, FName>( TNumericLimits<uint32>::Max(), TEXT( "EndSnapshot" ) ) );
@@ -678,8 +568,17 @@ void FStatsMemoryDumpCommand::ProcessMemoryOperations( const TMap<int64, FStatPa
 	}
 	*/
 
+	InFile->SetProcessingStage( EStatsProcessingStage::SPS_SortSequence );
+
 	// Sort all memory operation by the sequence tag, iterate through all operation and generate memory usage.
 	SequenceAllocationArray.Sort( FAllocationInfoSequenceTagLess() );
+
+	// Abandon support, simply return for now.
+	if (InFile->bShouldStopProcessing == true)
+	{
+		InFile->SetProcessingStage( EStatsProcessingStage::SPS_Stopped );
+		return;
+	}
 
 	// Named markers/snapshots
 
@@ -690,6 +589,8 @@ void FStatsMemoryDumpCommand::ProcessMemoryOperations( const TMap<int64, FStatPa
 	int32 NumDuplicatedMemoryOperations = 0;
 	int32 NumFWAMemoryOperations = 0; // FreeWithoutAlloc
 	int32 NumZeroAllocs = 0; // Malloc(0)
+
+	InFile->SetProcessingStage( EStatsProcessingStage::SPS_ProcessAllocations );
 
 	// Initialize the begin snapshot.
 	auto BeginSnapshot = SnapshotsToBeProcessed[0];
@@ -709,9 +610,17 @@ void FStatsMemoryDumpCommand::ProcessMemoryOperations( const TMap<int64, FStatPa
 			const double CurrentSeconds = FPlatformTime::Seconds();
 			if( CurrentSeconds > PreviousSeconds + NumSecondsBetweenLogs )
 			{
-				const int32 CurrentPct = int32( 100.0*(Index + 1) / NumSequenceAllocations );
-				UE_LOG( LogStats, Log, TEXT( "Processing allocations %3i%% (%10i/%10i)" ), CurrentPct, Index + 1, NumSequenceAllocations );
+				const int32 PercentagePos = int32( 100.0*(Index + 1) / NumSequenceAllocations );
+				InFile->StageProgress.Set( PercentagePos );
+				UE_LOG( LogStats, Verbose, TEXT( "Processing allocations %3i%% (%10i/%10i)" ), PercentagePos, Index + 1, NumSequenceAllocations );
 				PreviousSeconds = CurrentSeconds;
+
+				// Abandon support, simply return for now.
+				if (InFile->bShouldStopProcessing == true)
+				{
+					InFile->SetProcessingStage( EStatsProcessingStage::SPS_Stopped );
+					return;
+				}
 			}
 		}
 
@@ -799,7 +708,7 @@ void FStatsMemoryDumpCommand::ProcessMemoryOperations( const TMap<int64, FStatPa
 
 #if	UE_BUILD_DEBUG
 				const FString ReallocCallstack = FStatsCallstack::GetHumanReadable( Alloc.EncodedCallstack );
-				UE_LOG( LogStats, Warning, TEXT( "ReallocWithoutAlloc: %s %i %i/%i [%i]" ), *ReallocCallstack, Alloc.Size, Alloc.OldPtr, Alloc.Ptr, Alloc.SequenceTag );
+				//UE_LOG( LogStats, Warning, TEXT( "ReallocWithoutAlloc: %s %i %i/%i [%i]" ), *ReallocCallstack, Alloc.Size, Alloc.OldPtr, Alloc.Ptr, Alloc.SequenceTag );
 #endif // UE_BUILD_DEBUG
 
 				AllocationMap.Add( Alloc.Ptr, Alloc );
@@ -825,11 +734,12 @@ void FStatsMemoryDumpCommand::ProcessMemoryOperations( const TMap<int64, FStatPa
 
 #if	UE_BUILD_DEBUG
 				const FString FWACallstack = FStatsCallstack::GetHumanReadable( Alloc.EncodedCallstack );
-				UE_LOG( LogStats, Warning, TEXT( "FreeWithoutAllocCallstack: %s %i" ), *FWACallstack, Alloc.Ptr );
+				//UE_LOG( LogStats, Warning, TEXT( "FreeWithoutAllocCallstack: %s %i" ), *FWACallstack, Alloc.Ptr );
 #endif // UE_BUILD_DEBUG
 			}
 		}
 	}
+	InFile->StageProgress.Set( 100 );
 
 	auto EndSnapshot = SnapshotsToBeProcessed[0];
 	SnapshotsToBeProcessed.RemoveAt( 0 );
@@ -868,42 +778,7 @@ void FStatsMemoryDumpCommand::ProcessMemoryOperations( const TMap<int64, FStatPa
 		}
 	}
 
-	// Frame-240 Frame-120 Frame-060
-	TMap<FString, FCombinedAllocationInfo> FrameBegin_Exit;
-	CompareSnapshots_FString( TEXT( "BeginSnapshot" ), TEXT( "EngineLoop.Exit" ), FrameBegin_Exit );
-	DumpScopedAllocations( TEXT( "Begin_Exit" ), FrameBegin_Exit );
-
-#if	UE_BUILD_DEBUG
-	TMap<FString, FCombinedAllocationInfo> Frame060_120;
-	CompareSnapshots_FString( TEXT( "Frame-060" ), TEXT( "Frame-120" ), Frame060_120 );
-	DumpScopedAllocations( TEXT( "Frame060_120" ), Frame060_120 );
-
-	TMap<FString, FCombinedAllocationInfo> Frame060_240;
-	CompareSnapshots_FString( TEXT( "Frame-060" ), TEXT( "Frame-240" ), Frame060_240 );
-	DumpScopedAllocations( TEXT( "Frame060_240" ), Frame060_240 );
-
-	// Generate scoped tree view.
-	{
-		TMap<FName, FCombinedAllocationInfo> FrameBegin_Exit_FName;
-		CompareSnapshots_FName( TEXT( "BeginSnapshot" ), TEXT( "EngineLoop.Exit" ), FrameBegin_Exit_FName );
-
-		FNodeAllocationInfo Root;
-		Root.EncodedCallstack = TEXT( "ThreadRoot" );
-		Root.HumanReadableCallstack = TEXT( "ThreadRoot" );
-		GenerateScopedTreeAllocations( FrameBegin_Exit_FName, Root );
-	}
-
-
-	{
-		TMap<FName, FCombinedAllocationInfo> Frame060_240_FName;
-		CompareSnapshots_FName( TEXT( "Frame-060" ), TEXT( "Frame-240" ), Frame060_240_FName );
-
-		FNodeAllocationInfo Root;
-		Root.EncodedCallstack = TEXT( "ThreadRoot" );
-		Root.HumanReadableCallstack = TEXT( "ThreadRoot" );
-		GenerateScopedTreeAllocations( Frame060_240_FName, Root );
-	}
-#endif // UE_BUILD_DEBUG
+	InFile->SetProcessingStage( EStatsProcessingStage::SPS_Finished );
 }
 
 void FStatsMemoryDumpCommand::GenerateScopedTreeAllocations( const TMap<FName, FCombinedAllocationInfo>& ScopedAllocations, FNodeAllocationInfo& out_Root )
@@ -964,7 +839,7 @@ void FStatsMemoryDumpCommand::GenerateScopedTreeAllocations( const TMap<FName, F
 }
 
 
-void FStatsMemoryDumpCommand::GenerateMemoryUsageReport( const TMap<uint64, FAllocationInfo>& AllocationMap )
+void FStatsMemoryDumpCommand::GenerateMemoryUsageReport( const TMap<uint64, FAllocationInfo>& AllocationMap, const TSet<FName>& UObjectRawNames )
 {
 	if( AllocationMap.Num() == 0 )
 	{
@@ -1049,7 +924,7 @@ void FStatsMemoryDumpCommand::ProcessAndDumpScopedAllocations( const TMap<uint64
 	MemoryReport.CycleRow();
 }
 
-void FStatsMemoryDumpCommand::ProcessAndDumpUObjectAllocations( const TMap<uint64, FAllocationInfo>& AllocationMap )
+void FStatsMemoryDumpCommand::ProcessAndDumpUObjectAllocations( const TMap<uint64, FAllocationInfo>& AllocationMap, const TSet<FName>& UObjectRawNames )
 {
 	// This code is not optimized. 
 	FScopeLogTime SLT( TEXT( "ProcessingUObjectAllocations" ), nullptr, FScopeLogTime::ScopeLog_Seconds );
@@ -1085,7 +960,7 @@ void FStatsMemoryDumpCommand::ProcessAndDumpUObjectAllocations( const TMap<uint6
 			for( int32 Index = DecodedCallstack.Num() - 1; Index >= 0; --Index )
 			{
 				const FName LongName = DecodedCallstack[Index];
-				const bool bValid = UObjectNames.Contains( LongName );
+				const bool bValid = UObjectRawNames.Contains( LongName );
 				if( bValid )
 				{
 					const FString ObjectName = FStatNameAndInfo::GetShortNameFrom( LongName ).GetPlainNameString();
@@ -1242,13 +1117,21 @@ void FStatsMemoryDumpCommand::PrepareSnapshot( const FName SnapshotName, const T
 {
 	FScopeLogTime SLT( TEXT( "PrepareSnapshot" ), nullptr, FScopeLogTime::ScopeLog_Milliseconds );
 
-	SnapshotsWithAllocationMap.Add( SnapshotName, AllocationMap );
+	// Make sure the snapshot name is unique.
+	FName UniqueSnapshotName = SnapshotName;
+	while (SnapshotNames.Contains( UniqueSnapshotName ))
+	{
+		UniqueSnapshotName = FName( UniqueSnapshotName, UniqueSnapshotName.GetNumber() + 1 );
+	}
+	SnapshotNames.Add( UniqueSnapshotName );
+
+	SnapshotsWithAllocationMap.Add( UniqueSnapshotName, AllocationMap );
 
 	TMap<FName, FCombinedAllocationInfo> SnapshotCombinedAllocations;
 	uint64 TotalAllocatedMemory = 0;
 	uint64 NumAllocations = 0;
 	GenerateScopedAllocations( AllocationMap, SnapshotCombinedAllocations, TotalAllocatedMemory, NumAllocations );
-	SnapshotsWithScopedAllocations.Add( SnapshotName, SnapshotCombinedAllocations );
+	SnapshotsWithScopedAllocations.Add( UniqueSnapshotName, SnapshotCombinedAllocations );
 
 	// Decode callstacks.
 	// Replace encoded callstacks with human readable name. For easier debugging.
@@ -1258,9 +1141,9 @@ void FStatsMemoryDumpCommand::PrepareSnapshot( const FName SnapshotName, const T
 		const FString HumanReadableCallstack = FStatsCallstack::GetHumanReadable( It.Key );
 		SnapshotDecodedCombinedAllocations.Add( HumanReadableCallstack, It.Value );
 	}
-	SnapshotsWithDecodedScopedAllocations.Add( SnapshotName, SnapshotDecodedCombinedAllocations );
+	SnapshotsWithDecodedScopedAllocations.Add( UniqueSnapshotName, SnapshotDecodedCombinedAllocations );
 
-	UE_LOG( LogStats, Warning, TEXT( "PrepareSnapshot: %s Alloc: %i Scoped: %i Total: %.2f MB" ), *SnapshotName.GetPlainNameString(), AllocationMap.Num(), SnapshotCombinedAllocations.Num(), TotalAllocatedMemory / 1024.0f / 1024.0f );
+	UE_LOG( LogStats, Warning, TEXT( "PrepareSnapshot: %s Alloc: %i Scoped: %i Total: %.2f MB" ), *UniqueSnapshotName.ToString(), AllocationMap.Num(), SnapshotCombinedAllocations.Num(), TotalAllocatedMemory / 1024.0f / 1024.0f );
 }
 
 void FStatsMemoryDumpCommand::CompareSnapshots_FName( const FName BeginSnaphotName, const FName EndSnaphotName, TMap<FName, FCombinedAllocationInfo>& out_Result )

@@ -59,6 +59,9 @@ public:
 	 */
 	void InvalidateCaches();
 
+	/** Set the internal cached position, setting the cache to valid */
+	void SetCachedPosition( const int32 X, const int32 Y );
+
 private:
 
 	EMouseCursor::Type CurrentType;
@@ -70,12 +73,6 @@ private:
 	FIntRect CursorClipRect;
 
 	uint32 CursorEvent;
-
-	/** Accumulated X offset (from relative mouse movement events) used for reconstructing global cursor position */
-	int32 AccumulatedOffsetX;
-
-	/** Accumulated Y offset (from relative mouse movement events) used for reconstructing global cursor position */
-	int32 AccumulatedOffsetY;
 
 	/** Cached global X position */
 	mutable int32 CachedGlobalXPosition;

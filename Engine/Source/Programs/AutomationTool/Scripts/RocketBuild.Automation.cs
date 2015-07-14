@@ -66,24 +66,7 @@ namespace Rocket
 			"TP_VehicleAdv",
 			"TP_VehicleAdvBP",
 			"StarterContent",
-			"MobileStarterContent",
-			"GeometryHigh",		//Shared packs
-			"GeometryStandard",
-			"MannequinHigh",
-			"MannequinStandard",
-			"RollingHigh",
-			"RollingStandard",
-			"2DSideScrollerStandard",
-			"FirstPersonStandard",
-			"FlyingStandard",
-			"PuzzleStandard",
-			"RollingStandard",
-			"RollingHigh",
-			"SideScrollerStandard",
-			"ThirdPersonStandard",
-			"TwinStickStandard",
-			"VehicleStandard",
-			"VehicleAdvStandard",
+			"MobileStarterContent",			
 		};
 
 		public RocketBuild()
@@ -787,6 +770,9 @@ namespace Rocket
 			FilterRocketNode FilterNode = (FilterRocketNode)BranchConfig.FindNode(FilterRocketNode.StaticGetFullName(HostPlatform));
 			CopyManifestFilesToOutput(FilterNode.DepotManifestPath, CommandUtils.CmdEnv.LocalRoot, OutputDir);
 
+			// sign the executables
+			CodeSignManifestFiles(bp, FilterNode.DepotManifestPath, OutputDir);
+
 			// Copy the stripped files to the output directory
 			foreach(KeyValuePair<string, string> StrippedManifestPath in FilterNode.StrippedNodeManifestPaths)
 			{
@@ -805,6 +791,20 @@ namespace Rocket
 			// Create a dummy build product
 			BuildProducts = new List<string>();
 			SaveRecordOfSuccessAndAddToBuildProducts();
+		}
+
+		static void CodeSignManifestFiles(BuildCommand bp, string ManifestPath, string OutputDir)
+		{
+			// Read the files from the manifest
+			CommandUtils.Log("Reading manifest: '{0}'", ManifestPath);
+			string[] Files = CommandUtils.ReadAllLines(ManifestPath).Select(x => x.Trim()).Where(x => x.Length > 0).ToArray();
+
+			// Create lists of source and target files
+			CommandUtils.Log("Code sign files...");
+			string[] SourceFiles = Files.Select(x => CommandUtils.CombinePaths(OutputDir, x)).Where(x => (x.Contains(".dll") || x.Contains(".exe")) && !(Path.GetDirectoryName(x).Replace("\\", "/")).Contains("Binaries/XboxOne")).ToArray();
+
+			// Copy everything
+			CodeSign.SignMultipleIfEXEOrDLL(bp, SourceFiles.ToList());
 		}
 
 		static void CopyManifestFilesToOutput(string ManifestPath, string InputDir, string OutputDir)
@@ -898,7 +898,6 @@ namespace Rocket
 			BranchConfig = InBranchConfig;
 			SymbolsOutputDir = InSymbolsOutputDir;
 
-			AddDependency(GUBP.WaitForSharedPromotionUserInput.StaticGetFullName(false));
 			AddDependency(GUBP.ToolsForCompileNode.StaticGetFullName(HostPlatform));
 			AddDependency(GUBP.RootEditorNode.StaticGetFullName(HostPlatform));
 			AddDependency(GUBP.ToolsNode.StaticGetFullName(HostPlatform));

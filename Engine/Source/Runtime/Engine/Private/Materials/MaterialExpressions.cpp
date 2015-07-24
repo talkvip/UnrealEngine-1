@@ -1148,7 +1148,17 @@ bool UMaterialExpressionTextureSample::CanEditChange(const UProperty* InProperty
 	bool bIsEditable = Super::CanEditChange(InProperty);
 	if (bIsEditable && InProperty != NULL)
 	{
-		if (InProperty->GetFName() == TEXT("Texture"))
+		FName PropertyFName = InProperty->GetFName();
+
+		if (PropertyFName == GET_MEMBER_NAME_CHECKED(UMaterialExpressionTextureSample, ConstMipValue))
+		{
+			bIsEditable = MipValueMode == TMVM_MipLevel || MipValueMode == TMVM_MipBias;
+		}
+		else if (PropertyFName == GET_MEMBER_NAME_CHECKED(UMaterialExpressionTextureSample, ConstCoordinate))
+		{
+			bIsEditable = !Coordinates.Expression;
+		}
+		else if (PropertyFName == GET_MEMBER_NAME_CHECKED(UMaterialExpressionTextureSample, Texture))
 		{
 			// The Texture property is overridden by a connection to TextureObject
 			bIsEditable = TextureObject.Expression == NULL;
@@ -2893,7 +2903,7 @@ UMaterialExpressionCameraPositionWS::UMaterialExpressionCameraPositionWS(const F
 
 int32 UMaterialExpressionCameraPositionWS::Compile(class FMaterialCompiler* Compiler, int32 OutputIndex, int32 MultiplexIndex)
 {
-	return Compiler->CameraWorldPosition();
+	return Compiler->ViewProperty(MEVP_WorldSpaceCameraPosition);
 }
 
 void UMaterialExpressionCameraPositionWS::GetCaption(TArray<FString>& OutCaptions) const
@@ -5403,7 +5413,7 @@ UMaterialExpressionTransform::UMaterialExpressionTransform(const FObjectInitiali
 
 	MenuCategories.Add(ConstructorStatics.NAME_VectorOps);
 	TransformSourceType = TRANSFORMSOURCE_Tangent;
-	TransformType = TRANSFORM_Local;
+	TransformType = TRANSFORM_World;
 }
 
 
@@ -5426,7 +5436,7 @@ UMaterialExpressionTransformPosition::UMaterialExpressionTransformPosition(const
 
 	MenuCategories.Add(ConstructorStatics.NAME_VectorOps);
 	TransformSourceType = TRANSFORMPOSSOURCE_Local;
-	TransformType = TRANSFORMPOSSOURCE_World;
+	TransformType = TRANSFORMPOSSOURCE_Local;
 }
 
 static EMaterialCommonBasis GetMaterialCommonBasis(EMaterialPositionTransformSource X)

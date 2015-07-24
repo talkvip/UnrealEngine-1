@@ -166,7 +166,16 @@ void FHotReloadClassReinstancer::SerializeCDOProperties(UObject* InObject, FHotR
 		virtual FArchive& operator<<(FStringAssetReference& Value) override
 		{
 			FArchive& Ar = *this;
-			Ar << Value.AssetLongPathname;
+
+			FString Path = Value.ToString();
+
+			Ar << Path;
+
+			if (IsLoading())
+			{
+				Value.SetPath(MoveTemp(Path));
+			}
+
 			return Ar;
 		}
 		/** Archive name, for debugging */
@@ -262,11 +271,13 @@ void FHotReloadClassReinstancer::RecreateCDOAndSetupOldClassReinstancing(UClass*
 	}
 }
 
-FHotReloadClassReinstancer::FHotReloadClassReinstancer(UClass* InNewClass, UClass* InOldClass, TMap<UObject*, UObject*>& OutReconstructedCDOsMap)
+FHotReloadClassReinstancer::FHotReloadClassReinstancer(UClass* InNewClass, UClass* InOldClass, TMap<UObject*, UObject*>& OutReconstructedCDOsMap, TSet<UBlueprint*>& InBPSetToRecompile, TSet<UBlueprint*>& InBPSetToRecompileBytecodeOnly)
 	: NewClass(nullptr)
 	, bNeedsReinstancing(false)
 	, CopyOfPreviousCDO(nullptr)
 	, ReconstructedCDOsMap(OutReconstructedCDOsMap)
+	, BPSetToRecompile(InBPSetToRecompile)
+	, BPSetToRecompileBytecodeOnly(InBPSetToRecompileBytecodeOnly)
 {
 	ensure(InOldClass);
 	ensure(!HotReloadedOldClass && !HotReloadedNewClass);
@@ -384,7 +395,16 @@ void FHotReloadClassReinstancer::UpdateDefaultProperties()
 		virtual FArchive& operator<<(FStringAssetReference& Value) override
 		{
 			FArchive& Ar = *this;
-			Ar << Value.AssetLongPathname;
+
+			FString Path = Value.ToString();
+
+			Ar << Path;
+
+			if (IsLoading())
+			{
+				Value.SetPath(MoveTemp(Path));
+			}
+
 			return Ar;
 		}
 	};
@@ -494,6 +514,40 @@ void FHotReloadClassReinstancer::AddReferencedObjects(FReferenceCollector& Colle
 {
 	FBlueprintCompileReinstancer::AddReferencedObjects(Collector);
 	Collector.AddReferencedObject(CopyOfPreviousCDO);
+}
+
+void FHotReloadClassReinstancer::EnlistDependentBlueprintToRecompile(UBlueprint* BP, bool bBytecodeOnly)
+{
+	if (IsValid(BP))
+	{
+		if (bBytecodeOnly)
+		{
+			if (!BPSetToRecompile.Contains(BP) && !BPSetToRecompileBytecodeOnly.Contains(BP))
+			{
+				BPSetToRecompileBytecodeOnly.Add(BP);
+			}
+		}
+		else
+		{
+			if (!BPSetToRecompile.Contains(BP))
+			{
+				if (BPSetToRecompileBytecodeOnly.Contains(BP))
+				{
+					BPSetToRecompileBytecodeOnly.Remove(BP);
+				}
+
+				BPSetToRecompile.Add(BP);
+			}
+		}
+	}
+}
+
+void FHotReloadClassReinstancer::BlueprintWasRecompiled(UBlueprint* BP, bool bBytecodeOnly)
+{
+	BPSetToRecompile.Remove(BP);
+	BPSetToRecompileBytecodeOnly.Remove(BP);
+
+	FBlueprintCompileReinstancer::BlueprintWasRecompiled(BP, bBytecodeOnly);
 }
 
 #endif

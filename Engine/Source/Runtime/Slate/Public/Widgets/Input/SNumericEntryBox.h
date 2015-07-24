@@ -57,7 +57,7 @@ public:
 		/** The value that should be displayed.  This value is optional in the case where a value cannot be determined */
 		SLATE_ATTRIBUTE( TOptional<NumericType>, Value )
 		/** The string to display if the value cannot be determined */
-		SLATE_TEXT_ARGUMENT( UndeterminedString )
+		SLATE_ARGUMENT( FText, UndeterminedString )
 		/** Font color and opacity */
 		SLATE_ATTRIBUTE( FSlateFontInfo, Font )
 		/** Whether or not the user should be able to change the value by dragging with the mouse cursor */
@@ -76,6 +76,8 @@ public:
 		SLATE_ATTRIBUTE( float, SliderExponent )
 		/** The minimum desired width for the value portion of the control. */
 		SLATE_ATTRIBUTE( float, MinDesiredValueWidth )
+		/** The text margin to use if overridden. */
+		SLATE_ATTRIBUTE( FMargin, OverrideTextMargin )
 		/** Called whenever the text is changed interactively by the user */
 		SLATE_EVENT( FOnValueChanged, OnValueChanged )
 		/** Called whenever the text is committed.  This happens when the user presses enter or the text box loses focus. */
@@ -108,8 +110,8 @@ public:
 		BorderImageNormal = &InArgs._EditableTextBoxStyle->BackgroundImageNormal;
 		BorderImageHovered = &InArgs._EditableTextBoxStyle->BackgroundImageHovered;
 		BorderImageFocused = &InArgs._EditableTextBoxStyle->BackgroundImageFocused;
-		const FMargin& TextMargin = InArgs._EditableTextBoxStyle->Padding;
-		
+		TAttribute<FMargin> TextMargin = InArgs._OverrideTextMargin.IsSet() ? InArgs._OverrideTextMargin : InArgs._EditableTextBoxStyle->Padding;
+
 		Interface = InArgs._TypeInterface.IsValid() ? InArgs._TypeInterface : MakeShareable( new TDefaultNumericTypeInterface<NumericType> );
 
 		TSharedPtr<SWidget> FinalWidget;

@@ -394,31 +394,33 @@ namespace UnrealBuildTool
 							break;
 
                         case "-MAKEFILE":
-                        {
-                            // Force platform to Linux for building IntelliSense files
-                            Platform = UnrealTargetPlatform.Linux;
+							{
+								// Force platform to Linux for building IntelliSense files
+								Platform = UnrealTargetPlatform.Linux;
 
-                            // Force configuration to Development for IntelliSense
-                            Configuration = UnrealTargetConfiguration.Development;
-                        }
-                        break;
+								// Force configuration to Development for IntelliSense
+								Configuration = UnrealTargetConfiguration.Development;
+							}
+							break;
 
-					    case "-CMAKEFILE":
-						    {
-							    // Force configuration to Development for IntelliSense
-							    Configuration = UnrealTargetConfiguration.Development;
-						    }
-						    break;
+						case "-CMAKEFILE":
+							{
+								Platform = BuildHostPlatform.Current.Platform;
 
-					    case "-QMAKEFILE":
-						    {
-							    // Force platform to Linux for building IntelliSense files
-							    Platform = UnrealTargetPlatform.Linux;
+								// Force configuration to Development for IntelliSense
+								Configuration = UnrealTargetConfiguration.Development;
+							}
+							break;
 
-							    // Force configuration to Development for IntelliSense
-							    Configuration = UnrealTargetConfiguration.Development;
-						    }
-						    break;
+						case "-QMAKEFILE":
+							{
+								// Force platform to Linux for building IntelliSense files
+								Platform = UnrealTargetPlatform.Linux;
+
+								// Force configuration to Development for IntelliSense
+								Configuration = UnrealTargetConfiguration.Development;
+							}
+							break;
 
 						case "-KDEVELOPFILE":
 							{
@@ -428,7 +430,16 @@ namespace UnrealBuildTool
 								// Force configuration to Development for IntelliSense
 								Configuration = UnrealTargetConfiguration.Development;
 							}
-						break;
+							break;
+
+						case "-CODELITEFILE":
+							{
+								Platform = BuildHostPlatform.Current.Platform;
+
+								// Force configuration to Development for IntelliSense
+								Configuration = UnrealTargetConfiguration.Development;
+							}
+							break;
 
                         case "-EDITORRECOMPILE":
 							{
@@ -609,6 +620,7 @@ namespace UnrealBuildTool
                             break;
 
 						case "-CMAKEFILE":
+							Platform = BuildHostPlatform.Current.Platform;
 							Configuration = UnrealTargetConfiguration.Development;
 							break;
 
@@ -621,6 +633,12 @@ namespace UnrealBuildTool
 						case "-KDEVELOPFILE":
 							// Force platform to Linux and configuration to Development for building IntelliSense files
 							Platform = UnrealTargetPlatform.Linux;
+							Configuration = UnrealTargetConfiguration.Development;
+							break;
+
+						case "-CODELITEFILE":
+							Platform = BuildHostPlatform.Current.Platform;
+							// Force configuration to Development for IntelliSense
 							Configuration = UnrealTargetConfiguration.Development;
 							break;
                     }
@@ -789,7 +807,10 @@ namespace UnrealBuildTool
 		public CaselessDictionary<FlatModuleCsDataType> FlatModuleCsData = new CaselessDictionary<FlatModuleCsDataType>();
 
 		/** The receipt for this target, which contains a record of this build. */
-		private BuildReceipt Receipt;
+		private TargetReceipt Receipt;
+
+		/** Filename for the receipt for this target. */
+		private string ReceiptFileName;
 
 		/** Force output of the receipt to an additional filename */
 		[NonSerialized]
@@ -902,6 +923,9 @@ namespace UnrealBuildTool
 			{
 				EngineIntermediateDirectory = Path.GetFullPath(Path.Combine(BuildConfiguration.RelativeEnginePath, BuildConfiguration.PlatformIntermediateFolder, AppName, Configuration.ToString()));
 			}
+
+			// Get the receipt path for this target
+			ReceiptFileName = TargetReceipt.GetDefaultPath(ProjectDirectory, TargetName, Platform, Configuration, UEBuildPlatform.GetBuildPlatform(Platform).GetActiveArchitecture());
 
 			RemoteRoot = InDesc.RemoteRoot;
 
@@ -1043,10 +1067,10 @@ namespace UnrealBuildTool
 			// Expand all the paths in the receipt; they'll currently use variables for the engine and project directories
 			IUEBuildPlatform BuildPlatform = UEBuildPlatform.GetBuildPlatform(Platform);
 			// Expand all the paths in the receipt; they'll currently use variables for the engine and project directories
-			BuildReceipt ReceiptWithFullPaths = BuildReceipt.Read(BuildReceipt.GetDefaultPath(ProjectDirectory, TargetName, Platform, Configuration, BuildPlatform.GetActiveArchitecture()));
+			TargetReceipt ReceiptWithFullPaths = TargetReceipt.Read(ReceiptFileName);
 			if (ReceiptWithFullPaths == null)
 			{
-				ReceiptWithFullPaths = new BuildReceipt(Receipt);
+				ReceiptWithFullPaths = new TargetReceipt(Receipt);
 			}
 			ReceiptWithFullPaths.ExpandPathVariables(BuildConfiguration.RelativeEnginePath, ProjectDirectory);
 
@@ -1087,7 +1111,7 @@ namespace UnrealBuildTool
 				}
 				if (OnlyModules.Count == 0)
 				{
-					AllFilesToDelete.Add(BuildReceipt.GetDefaultPath(ProjectDirectory, TargetName, Platform, Configuration, BuildPlatform.GetActiveArchitecture()));
+					AllFilesToDelete.Add(ReceiptFileName);
 				}
 
 				//@todo. This does not clean up files that are no longer built by the target...				
@@ -1295,11 +1319,11 @@ namespace UnrealBuildTool
 		public void CleanStaleModules()
 		{
 			// Expand all the paths in the receipt; they'll currently use variables for the engine and project directories
-			BuildReceipt ReceiptWithFullPaths = new BuildReceipt(Receipt);
+			TargetReceipt ReceiptWithFullPaths = new TargetReceipt(Receipt);
 			ReceiptWithFullPaths.ExpandPathVariables(BuildConfiguration.RelativeEnginePath, ProjectDirectory);
 			IUEBuildPlatform BuildPlatform = UEBuildPlatform.GetBuildPlatform(Platform);
 			// Expand all the paths in the receipt; they'll currently use variables for the engine and project directories
-			BuildReceipt BuiltReceiptWithFullPaths = BuildReceipt.Read(BuildReceipt.GetDefaultPath(ProjectDirectory, TargetName, Platform, Configuration, BuildPlatform.GetActiveArchitecture()));
+			TargetReceipt BuiltReceiptWithFullPaths = TargetReceipt.Read(ReceiptFileName);
 			if (BuiltReceiptWithFullPaths == null)
 			{
 				return;
@@ -1395,22 +1419,29 @@ namespace UnrealBuildTool
 				LibraryPaths.Add(Directory.GetCurrentDirectory());
 				LibraryPaths.AddRange(Rules.PublicLibraryPaths.Where(x => !x.StartsWith("$(")).Select(x => Path.GetFullPath(x.Replace('/', '\\'))));
 
-				// Add all the libraries
-				string LibraryExtension = BuildPlatform.GetBinaryExtension(UEBuildBinaryType.StaticLibrary);
-				foreach(string LibraryName in Rules.PublicAdditionalLibraries)
-				{
-					foreach(string LibraryPath in LibraryPaths)
-					{
-						string LibraryFileName = Path.Combine(LibraryPath, LibraryName);
-						if(File.Exists(LibraryFileName))
-						{
-							FileNames.Add(LibraryFileName);
-						}
+				// Get all the extensions to look for
+				List<string> LibraryExtensions = new List<string>();
+				LibraryExtensions.Add(BuildPlatform.GetBinaryExtension(UEBuildBinaryType.StaticLibrary));
+				LibraryExtensions.Add(BuildPlatform.GetBinaryExtension(UEBuildBinaryType.DynamicLinkLibrary));
 
-						string UnixLibraryFileName = Path.Combine(LibraryPath, "lib" + LibraryName + LibraryExtension);
-						if(File.Exists(UnixLibraryFileName))
+				// Add all the libraries
+				foreach(string LibraryExtension in LibraryExtensions)
+				{
+					foreach(string LibraryName in Rules.PublicAdditionalLibraries)
+					{
+						foreach(string LibraryPath in LibraryPaths)
 						{
-							FileNames.Add(UnixLibraryFileName);
+							string LibraryFileName = Path.Combine(LibraryPath, LibraryName);
+							if(File.Exists(LibraryFileName))
+							{
+								FileNames.Add(LibraryFileName);
+							}
+
+							string UnixLibraryFileName = Path.Combine(LibraryPath, "lib" + LibraryName + LibraryExtension);
+							if(File.Exists(UnixLibraryFileName))
+							{
+								FileNames.Add(UnixLibraryFileName);
+							}
 						}
 					}
 				}
@@ -1492,7 +1523,7 @@ namespace UnrealBuildTool
 			}
 
 			// Expand all the paths in the receipt; they'll currently use variables for the engine and project directories
-			BuildReceipt ReceiptWithFullPaths = new BuildReceipt(Receipt);
+			TargetReceipt ReceiptWithFullPaths = new TargetReceipt(Receipt);
 			ReceiptWithFullPaths.ExpandPathVariables(BuildConfiguration.RelativeEnginePath, ProjectDirectory);
 
 			foreach(BuildProduct BuildProduct in ReceiptWithFullPaths.BuildProducts)
@@ -1516,7 +1547,7 @@ namespace UnrealBuildTool
 			IUEBuildPlatform BuildPlatform = UEBuildPlatform.GetBuildPlatform(Platform);
 			if(OnlyModules.Count == 0)
 			{
-				Manifest.AddBuildProduct(BuildReceipt.GetDefaultPath(ProjectDirectory, TargetName, Platform, Configuration, BuildPlatform.GetActiveArchitecture()));
+				Manifest.AddBuildProduct(ReceiptFileName);
 			}
 
 			if (UEBuildConfiguration.bCleanProject)
@@ -1532,7 +1563,7 @@ namespace UnrealBuildTool
 		/** Creates the receipt for the target */
 		private void PrepareReceipt(IUEToolChain ToolChain)
 		{
-			Receipt = new BuildReceipt();
+			Receipt = new TargetReceipt();
 
 			// Add the target properties
 			Receipt.SetProperty("TargetName", TargetName);
@@ -1543,7 +1574,7 @@ namespace UnrealBuildTool
 			// Merge all the binary receipts into this
 			foreach(UEBuildBinary Binary in AppBinaries)
 			{
-				BuildReceipt BinaryReceipt = Binary.MakeReceipt(ToolChain);
+				TargetReceipt BinaryReceipt = Binary.MakeReceipt(ToolChain);
 				if(Binary.Config.Type == UEBuildBinaryType.StaticLibrary)
 				{
 					BinaryReceipt.RuntimeDependencies.Clear();
@@ -1563,7 +1594,6 @@ namespace UnrealBuildTool
 				IUEBuildPlatform BuildPlatform = UEBuildPlatform.GetBuildPlatform(Platform);
 				if(OnlyModules == null || OnlyModules.Count == 0)
 				{
-					string ReceiptFileName = BuildReceipt.GetDefaultPath(ProjectDirectory, TargetName, Platform, Configuration, BuildPlatform.GetActiveArchitecture());
 					Directory.CreateDirectory(Path.GetDirectoryName(ReceiptFileName));
 					Receipt.Write(ReceiptFileName);
 				}

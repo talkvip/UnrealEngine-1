@@ -1604,11 +1604,12 @@ static TAutoConsoleVariable<int32> CVarMobileDynamicPointLightsUseStaticBranch(
 	TEXT("1: Use a shared shader with static branching for rendering 1 or more dynamic point lights (slightly slower but reduces shaders generated, recommended for most games)."),
 	ECVF_RenderThreadSafe | ECVF_ReadOnly);
 
-static TAutoConsoleVariable<int32> CVarMobileHDR32bpp(
-	TEXT("r.MobileHDR32bpp"),
+static TAutoConsoleVariable<int32> CVarMobileHDR32bppMode(
+	TEXT("r.MobileHDR32bppMode"),
 	0,
-	TEXT("0: Mobile HDR renders to an FP16 render target.\n")
-	TEXT("1: Mobile HDR renders to an RGBA8 target."),
+	TEXT("0: If 32bpp is required mobile HDR will use best suited 32 bpp mode. (default)")
+	TEXT("1: Force Mobile 32bpp HDR to use mosaic encoding.\n")
+	TEXT("2: Force Mobile 32bpp HDR to use RGBA encoding mode."),
 	ECVF_RenderThreadSafe);
 
 static TAutoConsoleVariable<int32> CVarMobileReduceLoadedMips(
@@ -2046,7 +2047,7 @@ static TAutoConsoleVariable<int32> CVarDBuffer(
 	TEXT("At the moment only can be ensures by full enablng this pass: r.EarlyZPassMovable=1 r.EarlyZPass=2\n")
 	TEXT(" 0: off\n")
 	TEXT(" 1: on (needs early pass rendering on all decal receivers and base pass lookups into the DBuffer, costs GPU memory, allows GBuffer compression)"),
-	ECVF_Scalability | ECVF_RenderThreadSafe);
+	ECVF_RenderThreadSafe | ECVF_ReadOnly);
 
 static TAutoConsoleVariable<float> CVarSkeletalMeshLODRadiusScale(
 	TEXT("r.SkeletalMeshLODRadiusScale"),

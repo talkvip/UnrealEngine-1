@@ -197,11 +197,11 @@ FHMDGameFrame* FHeadMountedDisplay::GetCurrentFrame() const
 	return nullptr;
 }
 
-bool FHeadMountedDisplay::OnStartGameFrame()
+bool FHeadMountedDisplay::OnStartGameFrame( FWorldContext& WorldContext )
 {
 	check(IsInGameThread());
 
-	if (!GWorld || !GWorld->IsGameWorld())
+	if (!WorldContext.World() || !WorldContext.World()->IsGameWorld())
 	{
 		// ignore all non-game worlds
 		return false;
@@ -213,13 +213,13 @@ bool FHeadMountedDisplay::OnStartGameFrame()
 	if (Flags.bNeedDisableStereo || (Settings->Flags.bStereoEnabled && !IsHMDConnected()))
 	{
 		Flags.bNeedDisableStereo = false;
-		EnableStereo(false);
+		DoEnableStereo(false, Flags.bEnableStereoToHmd);
 	}
 	else if (Flags.bNeedEnableStereo)
 	{
 		// If 'stereo on' was queued, handle it here.
 		Flags.bNeedEnableStereo = false; // reset it before Do..., since it could be queued up again.
-		EnableStereo(true);
+		DoEnableStereo(true, Flags.bEnableStereoToHmd);
 	}
 
 	if (!Settings->IsStereoEnabled() && !Settings->Flags.bHeadTrackingEnforced)
@@ -253,20 +253,18 @@ bool FHeadMountedDisplay::OnStartGameFrame()
 	CurrentFrame->FrameNumber = GFrameCounter;
 	CurrentFrame->Flags.bOutOfFrame = false;
 
-	check(GWorld);
-
 	if (Settings->Flags.bWorldToMetersOverride)
 	{
 		CurrentFrame->WorldToMetersScale = Settings->WorldToMetersScale;
 	}
 	else
 	{
-		CurrentFrame->WorldToMetersScale = GWorld->GetWorldSettings()->WorldToMeters;
+		CurrentFrame->WorldToMetersScale = WorldContext.World()->GetWorldSettings()->WorldToMeters;
 	}
 	return true;
 }
 
-bool FHeadMountedDisplay::OnEndGameFrame()
+bool FHeadMountedDisplay::OnEndGameFrame( FWorldContext& WorldContext )
 {
 	check(IsInGameThread());
 
@@ -274,7 +272,7 @@ bool FHeadMountedDisplay::OnEndGameFrame()
 
 	FHMDGameFrame* const CurrentGameFrame = Frame.Get();
 
-		if (!GWorld || !GWorld->IsGameWorld() || !CurrentGameFrame)
+	if (!WorldContext.World() || !WorldContext.World()->IsGameWorld() || !CurrentGameFrame)
 	{
 		// ignore all non-game worlds
 		return false;
@@ -391,6 +389,7 @@ bool FHeadMountedDisplay::EnablePositionalTracking(bool enable)
 
 bool FHeadMountedDisplay::EnableStereo(bool bStereo)
 {
+	Settings->Flags.bStereoEnforced = false;
 	return DoEnableStereo(bStereo, true);
 }
 
@@ -521,7 +520,9 @@ bool FHeadMountedDisplay::Exec(UWorld* InWorld, const TCHAR* Cmd, FOutputDevice&
 				{
 					Ar.Logf(TEXT("HMD is disabled. Use 'hmd enable' to re-enable it."));
 				}
-				DoEnableStereo(true, hmd);
+				Flags.bEnableStereoToHmd = hmd;
+				EnableStereo(true);
+				Settings->Flags.bStereoEnforced = true;
 				return true;
 			}
 		}
@@ -1149,7 +1150,7 @@ void FHeadMountedDisplay::DrawSeaOfCubes(UWorld* World, FVector ViewLocation)
 	if (frame->Settings->Flags.bDrawCubes && !SeaOfCubesActorPtr.IsValid())
 	{
 		FActorSpawnParameters SpawnInfo;
-		SpawnInfo.bNoCollisionFail = true;
+		SpawnInfo.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 		SpawnInfo.bNoFail = true;
 		SpawnInfo.ObjectFlags = RF_Transient;
 		AStaticMeshActor* SeaOfCubesActor;

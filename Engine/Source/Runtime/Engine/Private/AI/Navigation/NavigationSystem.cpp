@@ -658,7 +658,10 @@ void UNavigationSystem::OnWorldInitDone(FNavigationSystemRunMode Mode)
 			{
 				for (ANavigationData* NavData : NavDataSet)
 				{
-					NavData->OnStreamingLevelAdded(Level, World);
+					if (NavData)
+					{
+						NavData->OnStreamingLevelAdded(Level, World);
+					}
 				}
 			}
 		}
@@ -671,7 +674,10 @@ void UNavigationSystem::OnWorldInitDone(FNavigationSystemRunMode Mode)
 			// for all the actors in sublevels
 			for (ANavigationData* NavData : NavDataSet)
 			{
-				NavData->MarkAsNeedingUpdate();
+				if (NavData)
+				{
+					NavData->MarkAsNeedingUpdate();
+				}
 			}
 		}
 	}
@@ -1847,14 +1853,14 @@ UNavigationSystem::ERegistrationResult UNavigationSystem::RegisterNavData(ANavig
 
 void UNavigationSystem::UnregisterNavData(ANavigationData* NavData)
 {
+	NavDataSet.RemoveSingle(NavData);
+
 	if (NavData == NULL)
 	{
 		return;
 	}
 
 	FScopeLock Lock(&NavDataRegistration);
-
-	NavDataSet.RemoveSingle(NavData);
 	NavData->OnUnregistered();
 }
 
@@ -2366,7 +2372,7 @@ void UNavigationSystem::AddElementToNavOctree(const FNavigationDirtyElement& Dir
 		}
 
 		const FOctreeElementId* UseParentId = ParentId ? ParentId : GetObjectsNavOctreeId(NavigationParent);
-		if (UseParentId)
+		if (UseParentId && NavOctree->IsValidElementId(*UseParentId))
 		{
 			UE_LOG(LogNavOctree, Log, TEXT("ADD %s to %s"), *GetNameSafe(ElementOwner), *GetNameSafe(NavigationParent));
 			NavOctree->AppendToNode(*UseParentId, DirtyElement.NavInterface, ElementBounds, GeneratedData);
@@ -3329,7 +3335,10 @@ void UNavigationSystem::OnLevelAddedToWorld(ULevel* InLevel, UWorld* InWorld)
 		{
 			for (ANavigationData* NavData : NavDataSet)
 			{
-				NavData->OnStreamingLevelAdded(InLevel, InWorld);
+				if (NavData)
+				{
+					NavData->OnStreamingLevelAdded(InLevel, InWorld);
+				}
 			}
 		}
 	}
@@ -3345,7 +3354,10 @@ void UNavigationSystem::OnLevelRemovedFromWorld(ULevel* InLevel, UWorld* InWorld
 		{
 			for (ANavigationData* NavData : NavDataSet)
 			{
-				NavData->OnStreamingLevelRemoved(InLevel, InWorld);
+				if (NavData)
+				{
+					NavData->OnStreamingLevelRemoved(InLevel, InWorld);
+				}
 			}
 		}
 	}

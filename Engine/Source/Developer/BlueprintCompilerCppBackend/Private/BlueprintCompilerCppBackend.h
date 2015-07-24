@@ -6,9 +6,6 @@
 class FBlueprintCompilerCppBackend : public IBlueprintCompilerCppBackend
 {
 protected:
-	FCompilerResultsLog& MessageLog;
-	FKismetCompilerContext& CompilerContext;
-
 	struct FFunctionLabelInfo
 	{
 		TMap<FBlueprintCompiledStatement*, int32> StateMap;
@@ -36,50 +33,27 @@ protected:
 
 	FString CppClassName;
 
-	// Pointers to commonly used structures (found in constructor)
-	UScriptStruct* VectorStruct;
-	UScriptStruct* RotatorStruct;
-	UScriptStruct* TransformStruct;
-	UScriptStruct* LatentInfoStruct;
-	UScriptStruct* LinearColorStruct;
 public:
 	FStringOutputDevice Header;
 	FStringOutputDevice Body;
-	FString TermToText(const FBPTerminal* Term, const UProperty* SourceProperty = NULL);
 
-	const FString& GetBody()	const override { return Body; }
-	const FString& GetHeader()	const override { return Header; }
+	// IBlueprintCompilerCppBackend implementation
+	virtual void GenerateCodeFromClass(UClass* SourceClass, TIndirectArray<FKismetFunctionContext>& Functions, bool bGenerateStubsOnly) override;
+	virtual void GenerateCodeFromEnum(UUserDefinedEnum* SourceEnum) override;
+	virtual void GenerateCodeFromStruct(UUserDefinedStruct* SourceStruct) override;
 
-protected:
-	FString LatentFunctionInfoTermToText(FBPTerminal* Term, FBlueprintCompiledStatement* TargetLabel);
+	virtual const FString& GetBody()	const override { return Body; }
+	virtual const FString& GetHeader()	const override { return Header; }
+	// end of IBlueprintCompilerCppBackend implementation
 
-	int32 StatementToStateIndex(FKismetFunctionContext& FunctionContext, FBlueprintCompiledStatement* Statement)
-	{
-		int32 Index = FunctionIndexMap.FindChecked(&FunctionContext);
-		return StateMapPerFunction[Index].StatementToStateIndex(Statement);
-	}
 public:
-
-	FBlueprintCompilerCppBackend(FKismetCompilerContext& InContext)
-		: MessageLog(InContext.MessageLog)
-		, CompilerContext(InContext)
-	{
-		extern UScriptStruct* Z_Construct_UScriptStruct_FVector();
-		VectorStruct = Z_Construct_UScriptStruct_FVector();
-		RotatorStruct = TBaseStructure<FRotator>::Get();
-		TransformStruct = TBaseStructure<FTransform>::Get();
-		LinearColorStruct = TBaseStructure<FLinearColor>::Get();
-		LatentInfoStruct = FLatentActionInfo::StaticStruct();
-	}
 
 	void Emit(FStringOutputDevice& Target, const TCHAR* Message)
 	{
 		Target += Message;
 	}
 
-	void EmitClassProperties(FStringOutputDevice& Target, UClass* SourceClass);
-
-	void GenerateCodeFromClass(UClass* SourceClass, FString NewClassName, TIndirectArray<FKismetFunctionContext>& Functions, bool bGenerateStubsOnly) override;
+	void EmitStructProperties(FStringOutputDevice& Target, UStruct* SourceClass);
 
 	void EmitCallStatment(FKismetFunctionContext& FunctionContext, FBlueprintCompiledStatement& Statement);
 	void EmitCallDelegateStatment(FKismetFunctionContext& FunctionContext, FBlueprintCompiledStatement& Statement);
@@ -109,4 +83,23 @@ public:
 
 	/** Builds both the header declaration and body implementation of a function */
 	void ConstructFunction(FKismetFunctionContext& FunctionContext, bool bGenerateStubOnly);
+
+	FString TermToText(const FBPTerminal* Term, const UProperty* SourceProperty = nullptr);
+
+protected:
+	void EmitFileBeginning(const FString& CleanName, UStruct* SourceStruct);
+
+	FString LatentFunctionInfoTermToText(FBPTerminal* Term, FBlueprintCompiledStatement* TargetLabel);
+
+	int32 StatementToStateIndex(FKismetFunctionContext& FunctionContext, FBlueprintCompiledStatement* Statement)
+	{
+		int32 Index = FunctionIndexMap.FindChecked(&FunctionContext);
+		return StateMapPerFunction[Index].StatementToStateIndex(Statement);
+	}
+
+	FString EmitMethodInputParameterList(FBlueprintCompiledStatement& Statement);
+
+	FString EmitSwitchValueStatmentInner(FBlueprintCompiledStatement& Statement);
+
+	FString EmitCallStatmentInner(FBlueprintCompiledStatement& Statement, bool bInline);
 };

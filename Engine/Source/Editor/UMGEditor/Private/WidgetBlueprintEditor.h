@@ -181,6 +181,15 @@ private:
 	/** Adds the supplied UObject to the current animation. */
 	void AddObjectToAnimation(UObject* ObjectToAnimate);
 
+	/** Gets the extender to use for sequencers context sensitive menus and toolbars. */
+	TSharedRef<FExtender> GetContextSensitiveSequencerExtender( const TSharedRef<FUICommandList> CommandList, const TArray<UObject*> ContextSensitiveObjects );
+
+	/** Extends the sequencer add track menu. */
+	void ExtendSequencerAddTrackMenu( FMenuBuilder& AddTrackMenuBuilder, TArray<UObject*> ContextObjects );
+
+	/** Add an animation track for the supplied slot to the current animation. */
+	void AddSlotTrack( UPanelSlot* Slot );
+
 private:
 	/** The preview scene that owns the preview GUI */
 	FPreviewScene PreviewScene;
@@ -193,9 +202,6 @@ private:
 
 	/** A text block which is displayed in the overlay when no animation is selected. */
 	TWeakPtr<STextBlock> NoAnimationTextBlock;
-
-	/** Manager for handling bindings to sequence animations */
-	TSharedPtr<class FUMGSequencerObjectBindingManager> SequencerObjectBindingManager;
 
 	/** The Blueprint associated with the current preview */
 	UWidgetBlueprint* PreviewBlueprint;
@@ -234,4 +240,9 @@ private:
 	bool bIsRealTime;
 
 	TArray< TFunction<void()> > QueuedDesignerActions;
+
+	/** The currently viewed animation, if any. */
+	TWeakObjectPtr<UWidgetAnimation> CurrentAnimation;
+
+	FDelegateHandle SequencerExtenderHandle;
 };

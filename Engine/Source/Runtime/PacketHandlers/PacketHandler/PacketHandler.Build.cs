@@ -15,7 +15,5 @@ public class PacketHandler : ModuleRules
         );
 
         CircularlyReferencedDependentModules.Add("ReliabilityHandlerComponent");
-
-        //DynamicallyLoadedModuleNames.Add("EncryptionHandlerComponent");
     }
 }

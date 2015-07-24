@@ -6,8 +6,9 @@
 #include "Internationalization/Text.h"
 #include "SlateStats.h"
 
-//DECLARE_CYCLE_STAT(TEXT("Find Batch For Element Time"), STAT_SlateFindBatchForElement, STATGROUP_Slate);
-DECLARE_DWORD_COUNTER_STAT(TEXT("Num Elements (Prebatch)"), STAT_SlateNumPrebatchElements, STATGROUP_Slate);
+DECLARE_CYCLE_STAT(TEXT("Find Batch For Element Time"), STAT_SlateFindBatchForElement, STATGROUP_SlateVerbose);
+DECLARE_DWORD_COUNTER_STAT(TEXT("Num Elements (Prebatch)"), STAT_SlateNumPrebatchElements, STATGROUP_SlateVerbose);
+
 DECLARE_CYCLE_STAT(TEXT("Add Elements Time"), STAT_SlateAddElements, STATGROUP_Slate);
 
 SLATE_DECLARE_CYCLE_COUNTER(GSlateAddElements, "Add Elements");
@@ -112,7 +113,7 @@ void FSlateElementBatcher::AddElements( FSlateWindowElementList& WindowElementLi
 		if ( !bIsFullyClipped )
 		{
 			// do this check in here do we can short circuit above more quickly, but still name this variable so its meaning is clear.
-			const bool bIsScissored = DrawElement.GetScissorRect().IsSet() && !DrawElement.GetScissorRect().GetValue().DoesIntersect(FShortRect(InClippingRect));
+			const bool bIsScissored = DrawElement.GetScissorRect().IsSet() && DrawElement.GetElementType() != FSlateDrawElement::ET_Custom && !DrawElement.GetScissorRect().GetValue().DoesIntersect(FShortRect(InClippingRect));
 			// scissor rects are sort of a low level hack, so no one konws to clip against them. Instead we do it here to make sure the element is not actually rendered.
 			if (!bIsScissored)
 			{
@@ -616,7 +617,7 @@ void FSlateElementBatcher::AddTextElement(const FSlateDrawElement& DrawElement)
 		}
 		else
 		{
-			const FCharacterEntry& Entry = CharacterList[ CurrentChar ];
+			const FCharacterEntry& Entry = CharacterList.GetCharacter(InPayload.FontInfo, CurrentChar);
 
 			if( FontAtlasTexture == nullptr || Entry.TextureIndex != FontTextureIndex )
 			{
@@ -640,7 +641,7 @@ void FSlateElementBatcher::AddTextElement(const FSlateDrawElement& DrawElement)
 
 			const bool bIsWhitespace = FText::IsWhitespace(CurrentChar);
 
-			if( !bIsWhitespace && PreviousCharEntry.IsValidEntry() )
+			if( !bIsWhitespace && PreviousCharEntry.IsCached() )
 			{
 				Kerning = CharacterList.GetKerning( PreviousCharEntry, Entry );
 			}

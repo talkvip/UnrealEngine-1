@@ -34,7 +34,9 @@ Compiler define
 */
 #ifdef _MSC_VER 
 #	define PX_VC
-#	if _MSC_VER >= 1800
+#	if _MSC_VER >= 1900
+#		define PX_VC14
+#	elif _MSC_VER >= 1800
 #		define PX_VC12
 #   elif _MSC_VER >= 1700
 #       define PX_VC11

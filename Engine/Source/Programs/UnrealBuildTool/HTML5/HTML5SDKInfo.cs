@@ -101,12 +101,22 @@ namespace UnrealBuildTool
 
 		public static string  SetupEmscriptenTemp()
 		{
-			string HTML5Intermediatory = Path.GetFullPath(Path.Combine(BuildConfiguration.RelativeEnginePath, BuildConfiguration.PlatformIntermediateFolder));
+			string HTML5Intermediatory = Path.GetFullPath(Path.Combine(BuildConfiguration.RelativeEnginePath, BuildConfiguration.BaseIntermediateFolder, "HTML5"));
 			string TempPath= Path.Combine(HTML5Intermediatory, "EmscriptenTemp");
-			if (!Directory.Exists(TempPath))
+			try
 			{
+				if (Directory.Exists(TempPath))
+				{
+					Directory.Delete(TempPath, true);
+				}
+
 				Directory.CreateDirectory(TempPath);
 			}
+			catch(Exception Ex )
+			{
+				Log.TraceErrorOnce(" Recreation of Emscripten Temp folder failed because of " + Ex.ToString());
+			}
+				
 			return TempPath;
 		}
 

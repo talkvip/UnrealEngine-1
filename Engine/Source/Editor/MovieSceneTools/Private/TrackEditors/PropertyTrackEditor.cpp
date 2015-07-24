@@ -3,6 +3,7 @@
 #include "MovieSceneToolsPrivatePCH.h"
 #include "PropertyEditing.h"
 #include "MovieScene.h"
+#include "MovieSceneAnimation.h"
 #include "MovieSceneTrack.h"
 #include "MovieSceneFloatTrack.h"
 #include "MovieSceneVectorTrack.h"
@@ -12,7 +13,6 @@
 #include "MovieSceneVisibilityTrack.h"
 #include "ScopedTransaction.h"
 #include "MovieSceneSection.h"
-#include "ISequencerObjectBindingManager.h"
 #include "ISequencerObjectChangeListener.h"
 #include "ISequencerSection.h"
 #include "ISectionLayoutBuilder.h"
@@ -34,8 +34,10 @@
 class FColorPropertySection : public FPropertySection
 {
 public:
-	FColorPropertySection( UMovieSceneSection& InSectionObject, FName SectionName )
-		: FPropertySection(InSectionObject, SectionName) {}
+	FColorPropertySection( UMovieSceneSection& InSectionObject, FName SectionName, ISequencer* InSequencer, UMovieSceneTrack* InTrack  )
+		: FPropertySection(InSectionObject, SectionName)
+	, Sequencer(InSequencer)
+	, Track(InTrack) {}
 
 	virtual void GenerateSectionLayout( class ISectionLayoutBuilder& LayoutBuilder ) const override
 	{
@@ -101,6 +103,50 @@ public:
 private:
 	void ConsolidateColorCurves(TArray< TKeyValuePair<float, FLinearColor> >& OutColorKeys, const UMovieSceneColorSection* Section) const
 	{
+		// Get the default color of the first instance
+		FLinearColor DefaultColor(0.0f, 0.0f, 0.0f, 0.0f);
+
+		static const FName SlateColorName("SlateColor");
+
+		const TArray<FMovieSceneBinding>& MovieSceneBindings = Sequencer->GetFocusedMovieScene()->GetBindings();
+
+		bool bFoundColor = false;
+		for (int32 BindingIndex = 0; BindingIndex < MovieSceneBindings.Num() && !bFoundColor; ++BindingIndex)
+		{
+			const FMovieSceneBinding& MovieSceneBinding = MovieSceneBindings[BindingIndex];
+
+			for (int32 TrackIndex = 0; TrackIndex < MovieSceneBinding.GetTracks().Num() && !bFoundColor; ++TrackIndex)
+			{
+				if (MovieSceneBinding.GetTracks()[TrackIndex] == Track)
+				{
+					UObject* RuntimeObject = Sequencer->GetAnimation()->FindObject(MovieSceneBinding.GetObjectGuid());
+
+					if (RuntimeObject != nullptr)
+					{
+						UProperty* Property = RuntimeObject->GetClass()->FindPropertyByName(CastChecked<UMovieSceneColorTrack>(Track)->GetPropertyName());
+						UStructProperty* ColorStructProp = Cast<UStructProperty>( Property );
+						if (ColorStructProp && ColorStructProp->Struct )
+						{
+							if (ColorStructProp->Struct->GetFName() == SlateColorName )
+							{
+								DefaultColor = (*Property->ContainerPtrToValuePtr<FSlateColor>(RuntimeObject)).GetSpecifiedColor();
+							}
+							else if( ColorStructProp->Struct->GetFName() == NAME_LinearColor )
+							{
+								DefaultColor = *Property->ContainerPtrToValuePtr<FLinearColor>(RuntimeObject);
+							}
+							else
+							{
+								DefaultColor = Property->ContainerPtrToValuePtr<FColor>(RuntimeObject)->ReinterpretAsLinear();
+							}
+							bFoundColor = true;
+							break;
+						}
+					}
+				}
+			}
+		}
+
 		// @todo Sequencer Optimize - This could all get cached, instead of recalculating everything every OnPaint
 
 		const FRichCurve* Curves[4] = {
@@ -154,9 +200,12 @@ private:
 		// @todo Sequencer Optimize - This another O(n^2) loop, since Eval is O(n)!
 		for (int32 i = 0; i < TimesWithKeys.Num(); ++i)
 		{
-			OutColorKeys.Add( TKeyValuePair<float, FLinearColor>(TimesWithKeys[i], Section->Eval(TimesWithKeys[i], FLinearColor(0,0,0,0) ) ) );
+			OutColorKeys.Add( TKeyValuePair<float, FLinearColor>(TimesWithKeys[i], Section->Eval(TimesWithKeys[i], DefaultColor) ) );
 		}
 	}
+
+	ISequencer* Sequencer;
+	UMovieSceneTrack* Track;
 };
 
 /**
@@ -291,6 +340,19 @@ private:
 };
 
 /**
+ * An implementation of visibility property sections
+ */
+class FVisibilityPropertySection : public FBoolPropertySection
+{
+public:
+	FVisibilityPropertySection( UMovieSceneSection& InSectionObject, FName SectionName, ISequencer* InSequencer )
+		: FBoolPropertySection(InSectionObject, SectionName, InSequencer) 
+	{ 
+		DisplayName = FText::FromString(TEXT("Visible"));
+	}
+};
+
+/**
 * An implementation of byte property sections
 */
 class FBytePropertySection : public FPropertySection
@@ -377,12 +439,12 @@ TSharedRef<ISequencerSection> FPropertyTrackEditor::MakeSectionInterface( UMovie
 	UClass* SectionClass = SectionObject.GetOuter()->GetClass();
 
 	TSharedRef<ISequencerSection> NewSection = TSharedRef<ISequencerSection>(
-		SectionClass == UMovieSceneColorTrack::StaticClass() ? new FColorPropertySection( SectionObject, Track->GetTrackName() ) :
+		SectionClass == UMovieSceneColorTrack::StaticClass() ? new FColorPropertySection( SectionObject, Track->GetTrackName(), GetSequencer().Get(), Track ) :
 		SectionClass == UMovieSceneBoolTrack::StaticClass() ? new FBoolPropertySection( SectionObject, Track->GetTrackName(), GetSequencer().Get() ) :
 		SectionClass == UMovieSceneByteTrack::StaticClass() ? new FBytePropertySection(SectionObject, Track->GetTrackName(), Cast<UMovieSceneByteTrack>(SectionObject.GetOuter())->GetEnum()) :
 		SectionClass == UMovieSceneVectorTrack::StaticClass() ? new FVectorPropertySection( SectionObject, Track->GetTrackName() ) :
 		SectionClass == UMovieSceneFloatTrack::StaticClass() ? new FFloatPropertySection( SectionObject, Track->GetTrackName() ) :
-		SectionClass == UMovieSceneVisibilityTrack::StaticClass() ? new FBoolPropertySection( SectionObject, Track->GetTrackName(), GetSequencer().Get() ) :
+		SectionClass == UMovieSceneVisibilityTrack::StaticClass() ? new FVisibilityPropertySection( SectionObject, Track->GetTrackName(), GetSequencer().Get() ) :
 		new FPropertySection( SectionObject, Track->GetTrackName() )
 		);
 
@@ -403,11 +465,10 @@ void FPropertyTrackEditor::AddKey(const FGuid& ObjectGuid, UObject* AdditionalAs
 
 UEnum* GetEnumForByteTrack(TSharedPtr<ISequencer> Sequencer, const FGuid& OwnerObjectHandle, FName PropertyName, UMovieSceneByteTrack* ByteTrack)
 {
-	TArray<UObject*> RuntimeObjects;
-	Sequencer->GetObjectBindingManager()->GetRuntimeObjects(Sequencer->GetFocusedMovieSceneInstance(), OwnerObjectHandle, RuntimeObjects);
+	UObject* RuntimeObject = Sequencer->GetAnimation()->FindObject(OwnerObjectHandle);
 
 	TSet<UEnum*> PropertyEnums;
-	for (UObject* RuntimeObject : RuntimeObjects)
+	if (RuntimeObject != nullptr)
 	{
 		UProperty* Property = RuntimeObject->GetClass()->FindPropertyByName(PropertyName);
 		if (Property != nullptr)

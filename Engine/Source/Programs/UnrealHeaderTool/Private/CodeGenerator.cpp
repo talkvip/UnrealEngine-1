@@ -2049,6 +2049,7 @@ void FNativeClassHeaderGenerator::ExportClassesFromSourceFileInner(FUnrealSource
 			if (ClassDefinitionRanges.Contains(Class))
 			{
 				ClassRange = ClassDefinitionRanges[Class];
+				ClassRange.Validate();
 			}
 
 			auto ClassStart = ClassRange.Start;
@@ -2143,6 +2144,7 @@ void FNativeClassHeaderGenerator::ExportClassesFromSourceFileInner(FUnrealSource
 			if (ClassDefinitionRanges.Contains(Class))
 			{
 				ClassRange = ClassDefinitionRanges[Class];
+				ClassRange.Validate();
 			}
 
 			auto ClassStart = ClassRange.Start;
@@ -4180,6 +4182,7 @@ void FNativeClassHeaderGenerator::ExportFunctionThunk(FUHTStringBuilder& RPCWrap
 	if (ClassDefinitionRanges.Contains(Function->GetOwnerClass()))
 	{
 		ClassRange = ClassDefinitionRanges[Function->GetOwnerClass()];
+		ClassRange.Validate();
 	}
 
 	auto ClassStart = ClassRange.Start;
@@ -4285,6 +4288,7 @@ void FNativeClassHeaderGenerator::ExportNativeFunctions(FUnrealSourceFile& Sourc
 	if (ClassDefinitionRanges.Contains(Class))
 	{
 		ClassRange = ClassDefinitionRanges[Class];
+		ClassRange.Validate();
 	}
 
 	// export the C++ stubs
@@ -5335,14 +5339,12 @@ void ResolveSuperClasses(UPackage* Package)
 			if (FoundBaseClass == nullptr)
 			{
 				// Don't know its parent class. Raise error.
-				UE_LOG(LogCompile, Error, TEXT("Couldn't find parent type for '%s' named '%s' in current module or any other module parsed so far."),
+				FError::Throwf(TEXT("Couldn't find parent type for '%s' named '%s' in current module or any other module parsed so far."),
 					*DefinedClass->GetName(), *ParsingInfo.GetBaseClassName());
 			}
-			else
-			{
-				DefinedClass->SetSuperStruct(FoundBaseClass);
-				DefinedClass->ClassCastFlags |= FoundBaseClass->ClassCastFlags;
-			}
+
+			DefinedClass->SetSuperStruct(FoundBaseClass);
+			DefinedClass->ClassCastFlags |= FoundBaseClass->ClassCastFlags;
 		}
 	}
 }
@@ -5509,11 +5511,8 @@ ECompilationResult::Type UnrealHeaderTool_Main(const FString& ModuleInfoFilename
 				{
 					TGuardValue<ELogTimes::Type> DisableLogTimes(GPrintLogTimes, ELogTimes::None);
 
-					FString Prefix;
-
-					const FString AbsFilename = IFileManager::Get().ConvertToAbsolutePathForExternalAppForRead(*RawFilename);
-					Prefix = FString::Printf(TEXT("%s(1): "), *AbsFilename);
-
+					FString AbsFilename           = IFileManager::Get().ConvertToAbsolutePathForExternalAppForRead(*RawFilename);
+					FString Prefix                = FString::Printf(TEXT("%s(1): "), *AbsFilename);
 					FString FormattedErrorMessage = FString::Printf(TEXT("%sError: %s\r\n"), *Prefix, ErrorMsg);
 					Result = GCompilationResult;
 
@@ -5530,7 +5529,27 @@ ECompilationResult::Type UnrealHeaderTool_Main(const FString& ModuleInfoFilename
 			}
 		}
 
-		ResolveSuperClasses(Package);
+	#if !PLATFORM_EXCEPTIONS_DISABLED
+		try
+	#endif
+		{
+			ResolveSuperClasses(Package);
+		}
+	#if !PLATFORM_EXCEPTIONS_DISABLED
+		catch (TCHAR* ErrorMsg)
+		{
+			TGuardValue<ELogTimes::Type> DisableLogTimes(GPrintLogTimes, ELogTimes::None);
+
+			FString FormattedErrorMessage = FString::Printf(TEXT("Error: %s\r\n"), ErrorMsg);
+
+			Result = GCompilationResult;
+
+			UE_LOG(LogCompile, Log, TEXT("%s"), *FormattedErrorMessage);
+			GWarn->Log(ELogVerbosity::Error, FormattedErrorMessage);
+
+			++NumFailures;
+		}
+	#endif
 
 		ThisModuleTimer.Stop();
 		TotalModulePreparseTime += ThisModulePreparseTime;
@@ -5634,12 +5653,12 @@ ECompilationResult::Type UnrealHeaderTool_Main(const FString& ModuleInfoFilename
 	// Avoid TArray slack for meta data.
 	GScriptHelper.Shrink();
 
-	UE_LOG(LogCompile, Log, TEXT("Preparsing %i modules took %f seconds"), GManifest.Modules.Num(), TotalModulePreparseTime);
-	UE_LOG(LogCompile, Log, TEXT("Parsing took %f seconds"), TotalParseAndCodegenTime - GHeaderCodeGenTime);
-	UE_LOG(LogCompile, Log, TEXT("Code generation took %f seconds"), GHeaderCodeGenTime);
-	UE_LOG(LogCompile, Log, TEXT("ScriptPlugin overhead was %f seconds"), GPluginOverheadTime);
-	UE_LOG(LogCompile, Log, TEXT("Macroize time was %f seconds"), GMacroizeTime);
-	UE_LOG(LogCompile, Log, TEXT("Tabify time was was %f seconds"), GTabifyTime);
+	UE_LOG(LogCompile, Log, TEXT("Preparsing %i modules took %.2f seconds"), GManifest.Modules.Num(), TotalModulePreparseTime);
+	UE_LOG(LogCompile, Log, TEXT("Parsing took %.2f seconds"), TotalParseAndCodegenTime - GHeaderCodeGenTime);
+	UE_LOG(LogCompile, Log, TEXT("Code generation took %.2f seconds"), GHeaderCodeGenTime);
+	UE_LOG(LogCompile, Log, TEXT("ScriptPlugin overhead was %.2f seconds"), GPluginOverheadTime);
+	UE_LOG(LogCompile, Log, TEXT("Macroize time was %.2f seconds"), GMacroizeTime);
+	UE_LOG(LogCompile, Log, TEXT("Tabify time was was %.2f seconds"), GTabifyTime);
 
 	if (bWriteContents)
 	{

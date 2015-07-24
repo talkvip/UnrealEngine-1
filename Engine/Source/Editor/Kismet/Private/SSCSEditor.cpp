@@ -2812,7 +2812,7 @@ FText SSCS_RowWidget::GetTooltipText() const
 		}
 		else
 		{
-			return LOCTEXT("DefaultSceneRootToolTip", "This is the default scene root component. It cannot be copied, renamed or deleted.\nAdding a new scene component will automatically replace it as the new root.");
+			return LOCTEXT("DefaultSceneRootToolTip", "This is the default scene root component. It cannot be copied, renamed or deleted.\nIt can be replaced by drag/dropping another scene component over it.");
 		}
 	}
 	else
@@ -5127,6 +5127,19 @@ void SSCSEditor::RemoveComponentNode(FSCSEditorTreeNodePtrType InNodePtr)
 
 			// Clear the delegate
 			SCS_Node->SetOnNameChanged(FSCSNodeNameChanged());
+
+			// on removal, since we don't move the template from the 
+			// GeneratedClass (which we shouldn't, as it would create a 
+			// discrepancy with existing instances), we rename it instead so that 
+			// we can re-use the name without having to compile (we still have a 
+			// problem if they attempt to name it to what ever we choose here, 
+			// but that is unlikely)
+			if (SCS_Node->ComponentTemplate != nullptr)
+			{
+				SCS_Node->ComponentTemplate->Modify();
+				const FString RemovedName = SCS_Node->GetVariableName().ToString() + TEXT("_REMOVED_") + FGuid::NewGuid().ToString();
+				SCS_Node->ComponentTemplate->Rename(*RemovedName, /*NewOuter =*/nullptr, REN_DontCreateRedirectors);
+			}
 		}
 	}
 	else    // EComponentEditorMode::ActorInstance

@@ -34,7 +34,7 @@ namespace AutomationTool
                 bool bOk = true;
                 if (!Name.Equals(Other.Name, StringComparison.InvariantCultureIgnoreCase))
                 {
-                    CommandUtils.Log(System.Diagnostics.TraceEventType.Error, "File name mismatch {0} {1}", Name, Other.Name);
+                    CommandUtils.LogError("File name mismatch {0} {1}", Name, Other.Name);
                     bOk = false;
                 }
                 else
@@ -68,22 +68,22 @@ namespace AutomationTool
                     // Lets just allow all mac warnings to be silent
                     bSilentOkToBeDifferent = bSilentOkToBeDifferent || Name.Contains("Engine/Binaries/Mac");
 
-                    System.Diagnostics.TraceEventType LogType = bOkToBeDifferent ? System.Diagnostics.TraceEventType.Warning : System.Diagnostics.TraceEventType.Error;
+                    UnrealBuildTool.LogEventType LogType = bOkToBeDifferent ? UnrealBuildTool.LogEventType.Warning : UnrealBuildTool.LogEventType.Error;
                     if (bSilentOkToBeDifferent)
                     {
-                        LogType = System.Diagnostics.TraceEventType.Information;
+                        LogType = UnrealBuildTool.LogEventType.Console;
                     }
 
                     // on FAT filesystems writetime has a two seconds resolution
                     // cf. http://msdn.microsoft.com/en-us/library/windows/desktop/ms724290%28v=vs.85%29.aspx
                     if (!((Timestamp - Other.Timestamp).TotalSeconds < 2 && (Timestamp - Other.Timestamp).TotalSeconds > -2))
                     {
-                        CommandUtils.Log(LogType, "File date mismatch {0} {1} {2} {3}", Name, Timestamp.ToString(), Other.Name, Other.Timestamp.ToString());
+                        CommandUtils.LogWithVerbosity(LogType, "File date mismatch {0} {1} {2} {3}", Name, Timestamp.ToString(), Other.Name, Other.Timestamp.ToString());
                         bOk = bOkToBeDifferent || bSilentOkToBeDifferent;
                     }
                     if (!(Size == Other.Size))
                     {
-                        CommandUtils.Log(LogType, "File size mismatch {0} {1} {2} {3}", Name, Size, Other.Name, Other.Size);
+                        CommandUtils.LogWithVerbosity(LogType, "File size mismatch {0} {1} {2} {3}", Name, Size, Other.Name, Other.Size);
                         bOk = bOkToBeDifferent;
                     }
                 }
@@ -94,112 +94,6 @@ namespace AutomationTool
             {
                 return String.IsNullOrEmpty(Name) ? "" : Name;
             }
-        }
-
-		public static void Robust_CopyFile(string InputFileName, string OutputFileName)
-		{
-            if (OutputFileName.StartsWith("/Volumes/"))
-            {
-                int Retry = 0;
-                int NumRetries = 60;
-                bool bCopied = false;
-                while (!bCopied && Retry < NumRetries)
-                {
-                    if (Retry > 0)
-                    {
-                        CommandUtils.Log("*** Mac temp storage retry {0}", OutputFileName);
-                        System.Threading.Thread.Sleep(1000);
-                    }
-                    bCopied = CommandUtils.CopyFile_NoExceptions(InputFileName, OutputFileName, true);
-                    Retry++;
-                }
-            }
-            else
-            {
-                CommandUtils.CopyFile(InputFileName, OutputFileName);
-            }
-		}
-
-        public static void Robust_FileExists_NoExceptions(string Filename, string Message)
-        {
-            Robust_FileExists_NoExceptions(false, Filename, Message);
-        }
-        public static void Robust_FileExists_NoExceptions(bool bQuiet, string Filename, string Message)
-        {
-            if (!CommandUtils.FileExists_NoExceptions(bQuiet, Filename))
-            {
-                bool bFound = false;
-                // mac is terrible on shares, this isn't a solution, but a stop gap
-                if (Filename.StartsWith("/Volumes/"))
-                {
-                    int Retry = 0;
-                    while (!bFound && Retry < 60)
-                    {
-                        CommandUtils.Log(System.Diagnostics.TraceEventType.Information, "*** Mac temp storage retry {0}", Filename);
-                        System.Threading.Thread.Sleep(10000);
-                        bFound = CommandUtils.FileExists_NoExceptions(bQuiet, Filename);
-						Retry++;
-                    }
-                }
-                if (!bFound)
-                {
-                    throw new AutomationException(Message, Filename);
-                }
-            }
-        }
-
-		public static bool Robust_DirectoryExists_NoExceptions(string Directoryname, string Message)
-		{
-			bool bFound = false;
-			if (!CommandUtils.DirectoryExists_NoExceptions(Directoryname))
-			{				
-				// mac is terrible on shares, this isn't a solution, but a stop gap
-				if (Directoryname.StartsWith("/Volumes/"))
-				{
-					int Retry = 0;
-					while (!bFound && Retry < 60)
-					{
-						CommandUtils.Log(System.Diagnostics.TraceEventType.Information, "*** Mac temp storage retry {0}", Directoryname);
-						System.Threading.Thread.Sleep(10000);
-						bFound = CommandUtils.DirectoryExists_NoExceptions(Directoryname);
-						Retry++;
-					}
-				}				
-			}
-			else
-			{
-				bFound = true;
-			}
-			return bFound;
-		}
-        public static bool Robust_DirectoryExistsAndIsWritable_NoExceptions(string Directoryname)
-        {
-            bool bFound = false;
-            if (!CommandUtils.DirectoryExistsAndIsWritable_NoExceptions(Directoryname))
-            {
-                // mac is terrible on shares, this isn't a solution, but a stop gap
-                if (Directoryname.StartsWith("/Volumes/"))
-                {
-                    int Retry = 0;
-                    int NumRetries = 60;
-                    if(!Directoryname.Contains("UE4"))
-                    {
-                        NumRetries = 2;
-                    }
-                    while (!bFound && Retry < NumRetries)
-                    {
-                        CommandUtils.Log("*** Mac temp storage retry {0}", Directoryname);
-                        System.Threading.Thread.Sleep(1000);
-                        bFound = CommandUtils.DirectoryExistsAndIsWritable_NoExceptions(Directoryname);
-                        Retry++;
-                    }
-                }
-            }
-            else
-            {
-                bFound = true;
-            }
-            return bFound;
         }
 
         public class TempStorageManifest
@@ -224,11 +118,11 @@ namespace AutomationTool
                 foreach (string InFilename in InFiles)
                 {
                     var Filename = CommandUtils.CombinePaths(InFilename);
-                    Robust_FileExists_NoExceptions(true, Filename, "Could not add {0} to manifest because it does not exist");
+                    InternalUtils.Robust_FileExists_NoExceptions(true, Filename, "Could not add {0} to manifest because it does not exist");
 
                     FileInfo Info = new FileInfo(Filename);
                     Filename = Info.FullName;
-                    Robust_FileExists_NoExceptions(true, Filename, "Could not add {0} to manifest because it does not exist2");
+                    InternalUtils.Robust_FileExists_NoExceptions(true, Filename, "Could not add {0} to manifest because it does not exist2");
 
                     if (!Filename.StartsWith(BaseFolder, StringComparison.InvariantCultureIgnoreCase))
                     {
@@ -264,13 +158,13 @@ namespace AutomationTool
             {
                 if (Directories.Count != Other.Directories.Count)
                 {
-                    CommandUtils.Log(System.Diagnostics.TraceEventType.Error, "Directory count mismatch {0} {1}", Directories.Count, Other.Directories.Count);
+                    CommandUtils.LogError("Directory count mismatch {0} {1}", Directories.Count, Other.Directories.Count);
                     foreach (KeyValuePair<string, List<TempStorageFileInfo>> Directory in Directories)
                     {
                         List<TempStorageFileInfo> OtherDirectory;
                         if (Other.Directories.TryGetValue(Directory.Key, out OtherDirectory) == false)
                         {
-                            CommandUtils.Log(System.Diagnostics.TraceEventType.Error, "Missing Directory {0}", Directory.Key);
+                            CommandUtils.LogError("Missing Directory {0}", Directory.Key);
                             return false;
                         }
                     }
@@ -279,7 +173,7 @@ namespace AutomationTool
                         List<TempStorageFileInfo> OtherDirectory;
                         if (Directories.TryGetValue(Directory.Key, out OtherDirectory) == false)
                         {
-                            CommandUtils.Log(System.Diagnostics.TraceEventType.Error, "Missing Other Directory {0}", Directory.Key);
+                            CommandUtils.LogError("Missing Other Directory {0}", Directory.Key);
                             return false;
                         }
                     }
@@ -291,12 +185,12 @@ namespace AutomationTool
                     List<TempStorageFileInfo> OtherDirectory;
                     if (Other.Directories.TryGetValue(Directory.Key, out OtherDirectory) == false)
                     {
-                        CommandUtils.Log(System.Diagnostics.TraceEventType.Error, "Missing Directory {0}", Directory.Key); 
+                        CommandUtils.LogError("Missing Directory {0}", Directory.Key); 
                         return false;
                     }
                     if (OtherDirectory.Count != Directory.Value.Count)
                     {
-                        CommandUtils.Log(System.Diagnostics.TraceEventType.Error, "File count mismatch {0} {1} {2}", Directory.Key, OtherDirectory.Count, Directory.Value.Count);
+                        CommandUtils.LogError("File count mismatch {0} {1} {2}", Directory.Key, OtherDirectory.Count, Directory.Value.Count);
                         for (int FileIndex = 0; FileIndex < Directory.Value.Count; ++FileIndex)
                         {
                             CommandUtils.Log("Manifest1: {0}", Directory.Value[FileIndex].Name);
@@ -558,9 +452,16 @@ namespace AutomationTool
                     {
                         var NewFile = CommandUtils.CombinePaths(NewBaseDir, ThisFileInfo.Name);
 
-                        FileInfo Info = new FileInfo(NewFile);
-
-                        Result.Add(Info.FullName);
+						try
+						{
+							FileInfo Info = new FileInfo(NewFile);
+							Result.Add(Info.FullName);
+						}
+						catch (PathTooLongException)
+						{
+							CommandUtils.LogError("Path too long ... failed to create FileInfo for {0}", NewFile);
+							throw;
+						}
                     }
                 }
                 if (Result.Count < 1)
@@ -569,7 +470,7 @@ namespace AutomationTool
                 }
 
 				CommandUtils.Log("Checking that first file in manifest exists...");
-				Robust_FileExists_NoExceptions(false, Result[0], "Rebased manifest file does not exist {0}");
+                InternalUtils.Robust_FileExists_NoExceptions(false, Result[0], "Rebased manifest file does not exist {0}");
 
                 return Result;
             }
@@ -588,7 +489,7 @@ namespace AutomationTool
             }
             TopDirectoryTestedForClean.Add(TopDirectory);
 
-            const int MaximumDaysToKeepTempStorage = 2;
+            const int MaximumDaysToKeepTempStorage = 1;
             var StartTimeDir = DateTime.UtcNow;
             DirectoryInfo DirInfo = new DirectoryInfo(TopDirectory);
             var TopLevelDirs = DirInfo.GetDirectories();
@@ -651,7 +552,7 @@ namespace AutomationTool
                 int Retries = 0;
                 while (Retries < 24)
                 {
-                    if (Robust_DirectoryExistsAndIsWritable_NoExceptions(Dir))
+                    if (InternalUtils.Robust_DirectoryExistsAndIsWritable_NoExceptions(Dir))
                     {
                         return true;
                     }
@@ -660,7 +561,7 @@ namespace AutomationTool
 					Retries++;
                 }
             }
-            else if (Robust_DirectoryExists_NoExceptions(Dir, "Could not find {0}"))
+            else if (InternalUtils.Robust_DirectoryExists_NoExceptions(Dir, "Could not find {0}"))
             {
                 return true;
             }
@@ -676,7 +577,7 @@ namespace AutomationTool
             }
             string Root = CommandUtils.RootSharedTempStorageDirectory();
             string Result = CommandUtils.CombinePaths(Root, GameFolder);
-            if (String.IsNullOrEmpty(GameFolder) || !Robust_DirectoryExistsAndIsWritable_NoExceptions(Result))
+            if (String.IsNullOrEmpty(GameFolder) || !InternalUtils.Robust_DirectoryExistsAndIsWritable_NoExceptions(Result))
             {
                 string GameStr = "Game";
                 bool HadGame = false;
@@ -686,10 +587,10 @@ namespace AutomationTool
                     Result = CommandUtils.CombinePaths(Root, ShortFolder);
                     HadGame = true;
                 }
-                if (!HadGame || !Robust_DirectoryExistsAndIsWritable_NoExceptions(Result))
+                if (!HadGame || !InternalUtils.Robust_DirectoryExistsAndIsWritable_NoExceptions(Result))
                 {
                     Result = CommandUtils.CombinePaths(Root, "UE4");
-                    if (!Robust_DirectoryExistsAndIsWritable_NoExceptions(Result))
+                    if (!InternalUtils.Robust_DirectoryExistsAndIsWritable_NoExceptions(Result))
                     {
                         throw new AutomationException("Could not find an appropriate shared temp folder {0}", Result);
                     }
@@ -704,11 +605,11 @@ namespace AutomationTool
             string SharedSubdir = SharedTempStorageDirectory();
             string Result = CommandUtils.CombinePaths(ResolveSharedBuildDirectory(GameFolder), SharedSubdir);
 
-            if (!Robust_DirectoryExists_NoExceptions(Result, "Could not find {0}"))
+            if (!InternalUtils.Robust_DirectoryExists_NoExceptions(Result, "Could not find {0}"))
             {
                 CommandUtils.CreateDirectory_NoExceptions(Result);
             }
-            if (!Robust_DirectoryExists_NoExceptions(Result, "Could not find {0}"))
+            if (!InternalUtils.Robust_DirectoryExists_NoExceptions(Result, "Could not find {0}"))
             {
                 throw new AutomationException("Could not create an appropriate shared temp folder {0}", Result);
             }
@@ -731,8 +632,8 @@ namespace AutomationTool
             }
             catch (Exception Ex)
             {
-                CommandUtils.Log(System.Diagnostics.TraceEventType.Warning, "Unable to Clean Directory with GameName {0}", GameFolder);
-                CommandUtils.Log(System.Diagnostics.TraceEventType.Warning, " Exception was {0}", LogUtils.FormatException(Ex));
+                CommandUtils.LogWarning("Unable to Clean Directory with GameName {0}", GameFolder);
+                CommandUtils.LogWarning(" Exception was {0}", LogUtils.FormatException(Ex));
             }
         }
         public static string SharedTempStorageDirectory(string StorageBlock, string GameFolder = "")
@@ -855,7 +756,7 @@ namespace AutomationTool
                 var StartTime = DateTime.UtcNow;
 
                 var BlockPath = SharedTempStorageDirectory(StorageBlockName, GameFolder);
-                CommandUtils.Log("Storing to {0}", BlockPath);
+                CommandUtils.LogConsole("Storing to {0}", BlockPath);
                 if (CommandUtils.DirectoryExists_NoExceptions(BlockPath))
                 {
                     throw new AutomationException("Storage Block Already Exists! {0}", BlockPath);
@@ -872,7 +773,7 @@ namespace AutomationTool
                     foreach (string InFilename in Files)
                     {
                         var Filename = CommandUtils.CombinePaths(InFilename);
-                        Robust_FileExists_NoExceptions(false, Filename, "Could not add {0} to manifest because it does not exist");
+                        InternalUtils.Robust_FileExists_NoExceptions(false, Filename, "Could not add {0} to manifest because it does not exist");
 
                         if (!Filename.StartsWith(BaseFolder, StringComparison.InvariantCultureIgnoreCase))
                         {
@@ -885,7 +786,7 @@ namespace AutomationTool
                             throw new AutomationException("Dest file {0} already exists.", DestFile);
                         }
                         CommandUtils.CopyFile(Filename, DestFile, true);
-                        Robust_FileExists_NoExceptions(true, DestFile, "Could not copy to {0}");
+                        InternalUtils.Robust_FileExists_NoExceptions(true, DestFile, "Could not copy to {0}");
 
                         DestFiles.Add(DestFile);
                     }
@@ -896,7 +797,7 @@ namespace AutomationTool
                     foreach (string InFilename in Files)
                     {
                         var Filename = CommandUtils.CombinePaths(InFilename);
-                        Robust_FileExists_NoExceptions(false, Filename, "Could not add {0} to manifest because it does not exist");
+                        InternalUtils.Robust_FileExists_NoExceptions(false, Filename, "Could not add {0} to manifest because it does not exist");
 
                         if (!Filename.StartsWith(BaseFolder, StringComparison.InvariantCultureIgnoreCase))
                         {
@@ -914,7 +815,7 @@ namespace AutomationTool
                     CommandUtils.ThreadedCopyFiles(SrcFiles.ToArray(), DestFiles.ToArray(), ThreadsToCopyWith());
                     foreach (string DestFile in DestFiles)
                     {
-                        Robust_FileExists_NoExceptions(true, DestFile, "Could not copy to {0}");
+                        InternalUtils.Robust_FileExists_NoExceptions(true, DestFile, "Could not copy to {0}");
                     }
                 }
                 var Shared = SaveSharedTempStorageManifest(Env, StorageBlockName, GameFolder, DestFiles);
@@ -928,7 +829,7 @@ namespace AutomationTool
                 if (BuildDuration > 60.0f && Shared.GetTotalSize() > 0)
                 {
                     var MBSec = (((float)(Shared.GetTotalSize())) / (1024.0f * 1024.0f)) / BuildDuration;
-                    CommandUtils.Log("Wrote to shared temp storage at {0} MB/s    {1}B {2}s", MBSec, Shared.GetTotalSize(), BuildDuration);
+                    CommandUtils.LogConsole("Wrote to shared temp storage at {0} MB/s    {1}B {2}s", MBSec, Shared.GetTotalSize(), BuildDuration);
                 }
             }
 
@@ -1002,7 +903,7 @@ namespace AutomationTool
                 throw new AutomationException("Storage Block Does Not Exists! {0}", BlockPath);
             }
             var SharedManifest = SharedTempStorageManifestFilename(Env, StorageBlockName, GameFolder);
-            Robust_FileExists_NoExceptions(SharedManifest, "Storage Block Manifest Does Not Exists! {0}");
+            InternalUtils.Robust_FileExists_NoExceptions(SharedManifest, "Storage Block Manifest Does Not Exists! {0}");
 
             var Shared = new TempStorageManifest();
             Shared.Load(SharedManifest);
@@ -1015,7 +916,7 @@ namespace AutomationTool
                 foreach (string InFilename in SharedFiles)
                 {
                     var Filename = CommandUtils.CombinePaths(InFilename);
-                    Robust_FileExists_NoExceptions(true, Filename, "Could not add {0} to manifest because it does not exist");
+                    InternalUtils.Robust_FileExists_NoExceptions(true, Filename, "Could not add {0} to manifest because it does not exist");
 
                     if (!Filename.StartsWith(BlockPath, StringComparison.InvariantCultureIgnoreCase))
                     {
@@ -1030,7 +931,7 @@ namespace AutomationTool
                     }
                     CommandUtils.CopyFile(Filename, DestFile, true);
 
-                    Robust_FileExists_NoExceptions(true, DestFile, "Could not copy to {0}");
+                    InternalUtils.Robust_FileExists_NoExceptions(true, DestFile, "Could not copy to {0}");
 
                     if (UnrealBuildTool.Utils.IsRunningOnMono)
                     {
@@ -1067,7 +968,7 @@ namespace AutomationTool
                 var NewDestFiles = new List<string>();
                 foreach (string DestFile in DestFiles)
                 {
-                    Robust_FileExists_NoExceptions(true, DestFile, "Could not copy to {0}");
+                    InternalUtils.Robust_FileExists_NoExceptions(true, DestFile, "Could not copy to {0}");
                     if (UnrealBuildTool.Utils.IsRunningOnMono)
                     {
 						CommandUtils.FixUnixFilePermissions(DestFile);
@@ -1113,7 +1014,7 @@ namespace AutomationTool
             {
                 foreach (var ThisFile in CommandUtils.FindFiles_NoExceptions(WildCard, true, LocalParent))
                 {
-                    CommandUtils.Log("  Found local file {0}", ThisFile);
+                    CommandUtils.LogConsole("  Found local file {0}", ThisFile);
                     int IndexOfWildcard = ThisFile.IndexOf(PreStarWildcard);
                     if (IndexOfWildcard < 0)
                     {
@@ -1151,8 +1052,8 @@ namespace AutomationTool
                     }
                     catch (Exception Ex)
                     {
-                        CommandUtils.Log("Unable to Find Directories in {0} with wildcard {1}", SharedParent, Path.GetFileNameWithoutExtension(SharedFiles));
-                        CommandUtils.Log(" Exception was {0}", LogUtils.FormatException(Ex));
+                        CommandUtils.LogConsole("Unable to Find Directories in {0} with wildcard {1}", SharedParent, Path.GetFileNameWithoutExtension(SharedFiles));
+                        CommandUtils.LogConsole(" Exception was {0}", LogUtils.FormatException(Ex));
                     }
                     if (Dirs != null)
                     {

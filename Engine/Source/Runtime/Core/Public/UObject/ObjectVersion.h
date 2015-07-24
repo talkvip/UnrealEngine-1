@@ -560,6 +560,10 @@ enum EUnrealEngineObjectUE4Version
 	VER_UE4_MAX_ANGULAR_VELOCITY_DEFAULT,
 	// Build Adjacency index buffer for clothing tessellation
 	VER_UE4_APEX_CLOTH_TESSELLATION,
+	// Added DecalSize member, solved backward compatibility
+	VER_UE4_DECAL_SIZE,
+	// Keep only package names in StringAssetReferencesMap
+	VER_UE4_KEEP_ONLY_PACKAGE_NAMES_IN_STRING_ASSET_REFERENCES_MAP,
 	// -----<new versions can be added before this line>-------------------------------------------------
 	// - this needs to be the last line (see note below)
 	VER_UE4_AUTOMATIC_VERSION_PLUS_ONE,
@@ -586,9 +590,5 @@ enum EUnrealEngineObjectLicenseeUE4Version
 
 // Version access.
 
-extern CORE_API int32			GEngineNetVersion;				// Version used for networking; the P4 changelist number.
-extern CORE_API int32			GEngineMinNetVersion;			// Earliest engine build that is network compatible with this one.
-extern CORE_API int32			GEngineNegotiationVersion;		// Base protocol version to negotiate in network play.
-
-extern CORE_API int32			GPackageFileUE4Version;			// UE4 Version Number.
-extern CORE_API int32			GPackageFileLicenseeUE4Version;	// Licensee Version Number.
+extern const CORE_API int32			GPackageFileUE4Version;			// UE4 Version Number.
+extern const CORE_API int32			GPackageFileLicenseeUE4Version;	// Licensee Version Number.

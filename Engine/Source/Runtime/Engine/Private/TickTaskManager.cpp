@@ -511,10 +511,18 @@ public:
 				CumulativeCooldown += TickFunction->RelativeTickCooldown;
 
 				TickFunction->TickState = FTickFunction::ETickState::Enabled;
-				// we store a bit in here if this came from an interval queue 
-				AllTickFunctions.Add((FTickFunction*)(UPTRINT(TickFunction) | 1));
 
-				TickFunctionsToReschedule.Add(FTickScheduleDetails(TickFunction, TickFunction->TickInterval - (Context.DeltaSeconds - CumulativeCooldown))); // Give credit for any overrun
+				if (TickFunction->TickInterval > 0.f)
+				{
+					// we store a bit in here if this came from an interval queue 
+					AllTickFunctions.Add((FTickFunction*)(UPTRINT(TickFunction) | 1));
+
+					TickFunctionsToReschedule.Add(FTickScheduleDetails(TickFunction, TickFunction->TickInterval - (Context.DeltaSeconds - CumulativeCooldown))); // Give credit for any overrun
+				}
+				else
+				{
+					AllEnabledTickFunctions.Add(TickFunction);
+				}
 
 				AllCoolingDownTickFunctions.Head = TickFunction->Next;
 				TickFunction = TickFunction->Next;
@@ -547,7 +555,7 @@ public:
 		TickFunctionsToReschedule.Add(FTickScheduleDetails(TickFunction, TickFunction->TickInterval));
 	}
 
-	/* Puts a TickFunction in to the cooldown state*/
+	/* Schedules tick functions for cooldown */
 	void ScheduleTickFunctionCooldowns()
 	{
 		if (TickFunctionsToReschedule.Num() > 0)
@@ -565,33 +573,41 @@ public:
 			FTickFunction* ComparisonTickFunction = AllCoolingDownTickFunctions.Head;
 			while (ComparisonTickFunction && RescheduleIndex < TickFunctionsToReschedule.Num())
 			{
-				const float CooldownTime = TickFunctionsToReschedule[RescheduleIndex].Cooldown;
-				if ((CumulativeCooldown + ComparisonTickFunction->RelativeTickCooldown) > CooldownTime)
+				FTickFunction* TickFunction = TickFunctionsToReschedule[RescheduleIndex].TickFunction;
+				if (TickFunction->TickInterval > 0.f)
 				{
-					FTickFunction* TickFunction = TickFunctionsToReschedule[RescheduleIndex].TickFunction;
-					TickFunction->TickState = FTickFunction::ETickState::CoolingDown;
-					TickFunction->RelativeTickCooldown = CooldownTime - CumulativeCooldown;
-
-					if (PrevComparisonTickFunction)
+					const float CooldownTime = TickFunctionsToReschedule[RescheduleIndex].Cooldown;
+					if ((CumulativeCooldown + ComparisonTickFunction->RelativeTickCooldown) > CooldownTime)
 					{
-						PrevComparisonTickFunction->Next = TickFunction;
+						TickFunction->TickState = FTickFunction::ETickState::CoolingDown;
+						TickFunction->RelativeTickCooldown = CooldownTime - CumulativeCooldown;
+
+						if (PrevComparisonTickFunction)
+						{
+							PrevComparisonTickFunction->Next = TickFunction;
+						}
+						else
+						{
+							check(ComparisonTickFunction == AllCoolingDownTickFunctions.Head);
+							AllCoolingDownTickFunctions.Head = TickFunction;
+						}
+						TickFunction->Next = ComparisonTickFunction;
+						PrevComparisonTickFunction = TickFunction;
+						ComparisonTickFunction->RelativeTickCooldown -= TickFunction->RelativeTickCooldown;
+						CumulativeCooldown += TickFunction->RelativeTickCooldown;
+						++RescheduleIndex;
 					}
 					else
 					{
-						check(ComparisonTickFunction == AllCoolingDownTickFunctions.Head);
-						AllCoolingDownTickFunctions.Head = TickFunction;
+						CumulativeCooldown += ComparisonTickFunction->RelativeTickCooldown;
+						PrevComparisonTickFunction = ComparisonTickFunction;
+						ComparisonTickFunction = ComparisonTickFunction->Next;
 					}
-					TickFunction->Next = ComparisonTickFunction;
-					PrevComparisonTickFunction = TickFunction;
-					ComparisonTickFunction->RelativeTickCooldown -= TickFunction->RelativeTickCooldown;
-					CumulativeCooldown += TickFunction->RelativeTickCooldown;
-					++RescheduleIndex;
 				}
 				else
 				{
-					CumulativeCooldown += ComparisonTickFunction->RelativeTickCooldown;
-					PrevComparisonTickFunction = ComparisonTickFunction;
-					ComparisonTickFunction = ComparisonTickFunction->Next;
+					AllEnabledTickFunctions.Add(TickFunction);
+					++RescheduleIndex;
 				}
 			}
 			for ( ; RescheduleIndex < TickFunctionsToReschedule.Num(); ++RescheduleIndex)
@@ -643,7 +659,14 @@ public:
 			{
 				CumulativeCooldown += TickFunction->RelativeTickCooldown;
 				TickFunction->QueueTickFunction(TTS, Context);
-				TickFunctionsToReschedule.Add(FTickScheduleDetails(TickFunction, TickFunction->TickInterval - (Context.DeltaSeconds - CumulativeCooldown))); // Give credit for any overrun
+				if (TickFunction->TickInterval > 0.f)
+				{
+					TickFunctionsToReschedule.Add(FTickScheduleDetails(TickFunction, TickFunction->TickInterval - (Context.DeltaSeconds - CumulativeCooldown))); // Give credit for any overrun
+				}
+				else
+				{
+					AllEnabledTickFunctions.Add(TickFunction);
+				}
 				AllCoolingDownTickFunctions.Head = TickFunction->Next;
 			}
 			else
@@ -679,6 +702,27 @@ public:
 		NewlySpawnedTickFunctions.Empty();
 		return Num;
 	}
+	/**
+	 * If there is infinite recursive spawning, log that and discard them
+	 */
+	void LogAndDisardRunawayNewlySpawned(ETickingGroup CurrentTickGroup)
+	{
+		Context.TickGroup = CurrentTickGroup;
+		FTickTaskSequencer& TTS = FTickTaskSequencer::Get();
+		for (TSet<FTickFunction*>::TIterator It(NewlySpawnedTickFunctions); It; ++It)
+		{
+			FTickFunction* TickFunction = *It;
+			UE_LOG(LogTick, Error, TEXT("Could not tick newly spawned in 100 iterations; runaway recursive spawing. Tick is %s."), *TickFunction->DiagnosticMessage());
+
+			if (TickFunction->TickInterval > 0.f)
+			{
+				AllEnabledTickFunctions.Remove(TickFunction);
+				TickFunctionsToReschedule.Add(FTickScheduleDetails(TickFunction, TickFunction->TickInterval));
+			}
+		}
+		ScheduleTickFunctionCooldowns();
+		NewlySpawnedTickFunctions.Empty();
+	}
 
 	/**
 	 * Run all of the ticks for a pause frame synchronously on the game thread.
@@ -699,12 +743,21 @@ public:
 			{
 				if (CumulativeCooldown < InContext.DeltaSeconds)
 				{
+					TickFunction->TickState = FTickFunction::ETickState::Enabled;
+
 					TickFunction->TickVisitedGFrameCounter = GFrameCounter;
 					TickFunction->TickQueuedGFrameCounter = GFrameCounter;
 					TickFunction->ExecuteTick(InContext.DeltaSeconds, InContext.TickType, ENamedThreads::GameThread, FGraphEventRef());
 					TickFunction->TaskPointer = nullptr; // this is stale, clear it out now
 
-					TickFunctionsToReschedule.Add(FTickScheduleDetails(TickFunction, TickFunction->TickInterval - (InContext.DeltaSeconds - CumulativeCooldown))); // Give credit for any overrun
+					if (TickFunction->TickInterval > 0.f)
+					{
+						TickFunctionsToReschedule.Add(FTickScheduleDetails(TickFunction, TickFunction->TickInterval - (InContext.DeltaSeconds - CumulativeCooldown))); // Give credit for any overrun
+					}
+					else
+					{
+						AllEnabledTickFunctions.Add(TickFunction);
+					}
 				}
 				else
 				{
@@ -765,6 +818,7 @@ public:
 	{
 		return AllEnabledTickFunctions.Contains(TickFunction) || AllDisabledTickFunctions.Contains(TickFunction) || AllCoolingDownTickFunctions.Contains(TickFunction);
 	}
+
 	/** Add the tick function to the master list **/
 	void AddTickFunction(FTickFunction* TickFunction)
 	{
@@ -902,7 +956,7 @@ public:
 			FTickFunction* PrevComparisionFunction = nullptr;
 			FTickFunction* ComparisonFunction = AllCoolingDownTickFunctions.Head;
 			bool bFound = false;
-			while (ComparisonFunction)
+			while (ComparisonFunction && !bFound)
 			{
 				if (ComparisonFunction == TickFunction)
 				{
@@ -1154,9 +1208,9 @@ public:
 		{
 			QUICK_SCOPE_CYCLE_COUNTER(STAT_TickTask_RunTickGroup_BlockTillComplete);
 
+			bool bFinished = false;
 			for (int32 Iterations = 0;Iterations < 101; Iterations++)
 			{
-				check(Iterations < 100); // this is runaway recursive spawning.
 				int32 Num = 0;
 				for( int32 LevelIndex = 0; LevelIndex < LevelList.Num(); LevelIndex++ )
 				{
@@ -1169,7 +1223,16 @@ public:
 				}
 				else
 				{
+					bFinished = true;
 					break;
+				}
+			}
+			if (!bFinished)
+			{
+				// this is runaway recursive spawning.
+				for( int32 LevelIndex = 0; LevelIndex < LevelList.Num(); LevelIndex++ )
+				{
+					LevelList[LevelIndex]->LogAndDisardRunawayNewlySpawned(Context.TickGroup);
 				}
 			}
 		}

@@ -8,7 +8,7 @@ using System.Diagnostics;
 using System.Threading;
 using System.Reflection;
 using System.Linq;
-using Tools.DotNETCommon.ExecutingAssembly;
+using Tools.DotNETCommon;
 
 namespace UnrealBuildTool
 {
@@ -128,7 +128,7 @@ namespace UnrealBuildTool
 			List<string> DirectoriesToSearch = new List<string>();
 
 			// Find all the .uprojectdirs files contained in the root folder and add their entries to the search array
-			string RootDirectory = Path.Combine(ExecutingAssembly.GetDirectory(), "..", "..", "..");
+			string RootDirectory = Path.Combine( Path.GetDirectoryName(Assembly.GetEntryAssembly().GetOriginalLocation()), "..", "..", "..");
 			string EngineSourceDirectory = Path.GetFullPath( Path.Combine(RootDirectory, "Engine", "Source") );
 
 			foreach (var File in Directory.EnumerateFiles(RootDirectory, "*.uprojectdirs", SearchOption.TopDirectoryOnly))
@@ -310,13 +310,16 @@ namespace UnrealBuildTool
 		public static bool IsPluginEnabledForProject(PluginInfo Plugin, ProjectDescriptor Project, UnrealTargetPlatform Platform)
 		{
 			bool bEnabled = Plugin.Descriptor.bEnabledByDefault || Plugin.LoadedFrom == PluginLoadedFrom.GameProject;
+			Console.WriteLine("Plugin passes first enabled check: " + Plugin.FileName);
 			if(Project != null && Project.Plugins != null)
 			{
 				foreach(PluginReferenceDescriptor PluginReference in Project.Plugins)
 				{
 					if(String.Compare(PluginReference.Name, Plugin.Name, true) == 0)
 					{
+						Console.WriteLine("Plugin passes project ref check: " + Plugin.FileName);
 						bEnabled = PluginReference.IsEnabledForPlatform(Platform);
+						Console.WriteLine("Plugin " + Plugin.FileName + "now " + bEnabled.ToString());
 					}
 				}
 			}

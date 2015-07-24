@@ -55,7 +55,7 @@ public:
 
 		if(Category.Texture.IsValid())
 		{
-			UTexture2D* Texture = LoadObject<UTexture2D>(nullptr, *Category.Texture.AssetLongPathname);
+			UTexture2D* Texture = LoadObject<UTexture2D>(nullptr, *Category.Texture.ToString());
 			if(Texture != nullptr)
 			{
 				FIntPoint TextureSize = Texture->GetImportedSize();
@@ -79,7 +79,12 @@ public:
 	}
 
 	virtual ~FTutorialListEntry_Category()
-	{}
+	{
+		if( DynamicBrush.IsValid() )
+		{
+			DynamicBrush->ReleaseResource();
+		}
+	}
 
 	virtual TSharedRef<ITableRow> OnGenerateTutorialRow(const TSharedRef<STableViewBase>& OwnerTable) const override
 	{
@@ -296,7 +301,12 @@ public:
 	}
 
 	virtual ~FTutorialListEntry_Tutorial()
-	{}
+	{
+		if( DynamicBrush.IsValid() )
+		{
+			DynamicBrush->ReleaseResource();
+		}
+	}
 
 	virtual TSharedRef<ITableRow> OnGenerateTutorialRow(const TSharedRef<STableViewBase>& OwnerTable) const override
 	{

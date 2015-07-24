@@ -277,6 +277,18 @@ int32 UAbilitySystemComponent::GetGameplayEffectCount(TSubclassOf<UGameplayEffec
 	return Count;
 }
 
+int32 UAbilitySystemComponent::GetAggregatedStackCount(const FActiveGameplayEffectQuery& Query)
+{
+	PRAGMA_DISABLE_DEPRECATION_WARNINGS
+	return ActiveGameplayEffects.GetActiveEffectCount(Query);
+	PRAGMA_ENABLE_DEPRECATION_WARNINGS
+}
+
+int32 UAbilitySystemComponent::GetAggregatedStackCount(const FGameplayEffectQuery& Query)
+{
+	return ActiveGameplayEffects.GetActiveEffectCount(Query);
+}
+
 FActiveGameplayEffectHandle UAbilitySystemComponent::BP_ApplyGameplayEffectToTarget(TSubclassOf<UGameplayEffect> GameplayEffectClass, UAbilitySystemComponent* Target, float Level, FGameplayEffectContextHandle Context)
 {
 	if (Target == nullptr)
@@ -404,9 +416,9 @@ void UAbilitySystemComponent::CaptureAttributeForGameplayEffect(OUT FGameplayEff
 	}
 }
 
-FOnGameplayEffectTagCountChanged& UAbilitySystemComponent::RegisterGameplayTagEvent(FGameplayTag Tag)
+FOnGameplayEffectTagCountChanged& UAbilitySystemComponent::RegisterGameplayTagEvent(FGameplayTag Tag, EGameplayTagEventType::Type EventType)
 {
-	return GameplayTagCountContainer.RegisterGameplayTagEvent(Tag);
+	return GameplayTagCountContainer.RegisterGameplayTagEvent(Tag, EventType);
 }
 
 FOnGameplayEffectTagCountChanged& UAbilitySystemComponent::RegisterGenericGameplayTagEvent()
@@ -511,6 +523,15 @@ void UAbilitySystemComponent::UpdateTagMap(const FGameplayTagContainer& Containe
 	{
 		const FGameplayTag& Tag = *TagIt;
 		UpdateTagMap(Tag, CountDelta);
+	}
+}
+
+void UAbilitySystemComponent::NotifyTagMap_StackCountChange(const FGameplayTagContainer& Container)
+{
+	for (auto TagIt = Container.CreateConstIterator(); TagIt; ++TagIt)
+	{
+		const FGameplayTag& Tag = *TagIt;
+		GameplayTagCountContainer.Notify_StackCountChange(Tag);
 	}
 }
 
@@ -891,6 +912,11 @@ float UAbilitySystemComponent::GetGameplayEffectDuration(FActiveGameplayEffectHa
 float UAbilitySystemComponent::GetGameplayEffectMagnitude(FActiveGameplayEffectHandle Handle, FGameplayAttribute Attribute) const
 {
 	return ActiveGameplayEffects.GetGameplayEffectMagnitude(Handle, Attribute);
+}
+
+void UAbilitySystemComponent::SetActiveGameplayEffectLevel(FActiveGameplayEffectHandle ActiveHandle, int32 NewLevel)
+{
+	ActiveGameplayEffects.SetActiveGameplayEffectLevel(ActiveHandle, NewLevel);
 }
 
 int32 UAbilitySystemComponent::GetCurrentStackCount(FActiveGameplayEffectHandle Handle) const

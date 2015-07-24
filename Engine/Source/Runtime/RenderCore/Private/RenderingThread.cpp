@@ -78,8 +78,10 @@ FSuspendRenderingThread::FSuspendRenderingThread( bool bInRecreateThread )
 	bWasRenderingThreadRunning = GIsThreadedRendering;
 	if ( bRecreateThread )
 	{
-		GUseThreadedRendering = false;
 		StopRenderingThread();
+		// GUseThreadedRendering should be set to false after StopRenderingThread call since
+		// otherwise a wrong context could be used.
+		GUseThreadedRendering = false;
 		FPlatformAtomics::InterlockedIncrement( &GIsRenderingThreadSuspended );
 	}
 	else
@@ -652,6 +654,8 @@ void StopRenderingThread()
 			delete GRenderingThread;
 			GRenderingThread = NULL;
 			
+			GRHICommandList.LatchBypass();
+
 			delete GRenderingThreadRunnable;
 			GRenderingThreadRunnable = NULL;
 		}

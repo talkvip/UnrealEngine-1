@@ -823,12 +823,12 @@ void FWindowsPlatformMisc::PumpMessages(bool bFromMainLoop)
 	FApp::SetVolumeMultiplier( HasFocus ? 1.0f : FApp::GetUnfocusedVolumeMultiplier() );
 }
 
-uint32 FWindowsPlatformMisc::GetCharKeyMap(uint16* KeyCodes, FString* KeyNames, uint32 MaxMappings)
+uint32 FWindowsPlatformMisc::GetCharKeyMap(uint32* KeyCodes, FString* KeyNames, uint32 MaxMappings)
 {
 	return FGenericPlatformMisc::GetStandardPrintableKeyMap(KeyCodes, KeyNames, MaxMappings, true, false);
 }
 
-uint32 FWindowsPlatformMisc::GetKeyMap( uint16* KeyCodes, FString* KeyNames, uint32 MaxMappings )
+uint32 FWindowsPlatformMisc::GetKeyMap( uint32* KeyCodes, FString* KeyNames, uint32 MaxMappings )
 {
 #define ADDKEYMAP(KeyCode, KeyName)		if (NumMappings<MaxMappings) { KeyCodes[NumMappings]=KeyCode; KeyNames[NumMappings]=KeyName; ++NumMappings; };
 
@@ -907,8 +907,8 @@ uint32 FWindowsPlatformMisc::GetKeyMap( uint16* KeyCodes, FString* KeyNames, uin
 		ADDKEYMAP( VK_LWIN, TEXT("LeftCommand") );
 		ADDKEYMAP( VK_RWIN, TEXT("RightCommand") );
 
-		TMap<uint16, uint16> ScanToVKMap;
-#define MAP_OEM_VK_TO_SCAN(KeyCode) { uint16 CharCode = MapVirtualKey(KeyCode,2); if (CharCode != 0) { ScanToVKMap.Add(CharCode,KeyCode); } }
+		TMap<uint32, uint32> ScanToVKMap;
+#define MAP_OEM_VK_TO_SCAN(KeyCode) { const uint32 CharCode = MapVirtualKey(KeyCode,2); if (CharCode != 0) { ScanToVKMap.Add(CharCode,KeyCode); } }
 		MAP_OEM_VK_TO_SCAN(VK_OEM_1);
 		MAP_OEM_VK_TO_SCAN(VK_OEM_2);
 		MAP_OEM_VK_TO_SCAN(VK_OEM_3);
@@ -925,7 +925,7 @@ uint32 FWindowsPlatformMisc::GetKeyMap( uint16* KeyCodes, FString* KeyNames, uin
 #undef  MAP_OEM_VK_TO_SCAN
 
 		static const uint32 MAX_KEY_MAPPINGS(256);
-		uint16 CharCodes[MAX_KEY_MAPPINGS];
+		uint32 CharCodes[MAX_KEY_MAPPINGS];
 		FString CharKeyNames[MAX_KEY_MAPPINGS];
 		const int32 CharMappings = GetCharKeyMap(CharCodes, CharKeyNames, MAX_KEY_MAPPINGS);
 
@@ -1789,6 +1789,12 @@ void FWindowsPlatformMisc::LoadPreInitModules()
 	// D3D11 is not supported on WinXP, so in this case we use the OpenGL RHI
 	if(FWindowsPlatformMisc::VerifyWindowsVersion(6, 0))
 	{
+		//#todo-rco: Only try on Win10
+		const bool bForceD3D12 = FParse::Param(FCommandLine::Get(), TEXT("d3d12")) || FParse::Param(FCommandLine::Get(), TEXT("dx12"));
+		if (bForceD3D12)
+		{
+			FModuleManager::Get().LoadModule(TEXT("D3D12RHI"));
+		}
 		FModuleManager::Get().LoadModule(TEXT("D3D11RHI"));
 	}
 	FModuleManager::Get().LoadModule(TEXT("OpenGLDrv"));
@@ -1985,27 +1991,18 @@ void FWindowsPlatformMisc::PromptForRemoteDebugging(bool bIsEnsure)
 }
 #endif	//#if !UE_BUILD_SHIPPING
 
-FLinearColor FWindowsPlatformMisc::GetScreenPixelColor(const FVector2D& InScreenPos, float InGamma)
+FLinearColor FWindowsPlatformMisc::GetScreenPixelColor(const FVector2D& InScreenPos, float /*InGamma*/)
 {
 	COLORREF PixelColorRef = GetPixel(GetDC(HWND_DESKTOP), InScreenPos.X, InScreenPos.Y);
 
-	const float DivideBy255 = 1.0f / 255.0f;
+	FColor sRGBScreenColor(
+		(PixelColorRef & 0xFF),
+		((PixelColorRef & 0xFF00) >> 8),
+		((PixelColorRef & 0xFF0000) >> 16),
+		255);
 
-	FLinearColor ScreenColor(
-		(PixelColorRef & 0xFF) * DivideBy255,
-		((PixelColorRef & 0xFF00) >> 8) * DivideBy255,
-		((PixelColorRef & 0xFF0000) >> 16) * DivideBy255,
-		1.0f);
-
-	if (InGamma > 1.0f)
-	{
-		// Correct for render gamma
-		ScreenColor.R = FMath::Pow(ScreenColor.R, InGamma);
-		ScreenColor.G = FMath::Pow(ScreenColor.G, InGamma);
-		ScreenColor.B = FMath::Pow(ScreenColor.B, InGamma);
-	}
-
-	return ScreenColor;
+	// Assume the screen color is coming in as sRGB space
+	return FLinearColor(sRGBScreenColor);
 }
 
 /**

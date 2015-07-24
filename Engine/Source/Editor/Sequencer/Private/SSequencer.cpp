@@ -20,59 +20,19 @@
 #include "DragAndDrop/ActorDragDropGraphEdOp.h"
 #include "DragAndDrop/ClassDragDropOp.h"
 #include "AssetSelection.h"
-#include "K2Node_PlayMovieScene.h"
 #include "MovieSceneShotSection.h"
 #include "CommonMovieSceneTools.h"
 #include "SSearchBox.h"
 #include "SNumericDropDown.h"
 #include "EditorWidgetsModule.h"
-#include "SequencerTrackLaneFactory.h"
+#include "SSequencerTreeView.h"
+
 #include "SSequencerSplitterOverlay.h"
 #include "IKeyArea.h"
 
+
 #define LOCTEXT_NAMESPACE "Sequencer"
 
-
-class SSequencerScrollBox : public SScrollBox
-{
-public:
-	void Construct( const FArguments& InArgs, TSharedRef<FSequencer> InSequencer);
-
-	virtual FReply OnMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
-
-	/** The sequencer which owns this widget. */
-	TWeakPtr<FSequencer> Sequencer;
-};
-
-void SSequencerScrollBox::Construct(const FArguments& InArgs, TSharedRef<FSequencer> InSequencer)
-{
-	Sequencer = InSequencer;
-	SScrollBox::Construct(InArgs);
-}
-
-FReply SSequencerScrollBox::OnMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent)
-{
-	// Clear the selection if no sequencer display nodes were clicked on
-	if (MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
-	{
-		if (Sequencer.Pin()->GetSelection().GetSelectedOutlinerNodes().Num() != 0)
-		{
-			Sequencer.Pin()->GetSelection().EmptySelectedOutlinerNodes();
-
-			if (Sequencer.Pin()->IsLevelEditorSequencer())
-			{
-				const bool bNotifySelectionChanged = false;
-				const bool bDeselectBSP = true;
-				const bool bWarnAboutTooManyActors = false;
-
-				const FScopedTransaction Transaction(NSLOCTEXT("UnrealEd", "ClickingOnActors", "Clicking on Actors"));
-				GEditor->SelectNone(bNotifySelectionChanged, bDeselectBSP, bWarnAboutTooManyActors);
-				return FReply::Handled();
-			}
-		}
-	}
-	return FReply::Unhandled();
-}
 
 /**
  * The shot filter overlay displays the overlay needed to filter out widgets based on
@@ -184,6 +144,37 @@ private:
 	TArray< TRange<float> > CachedFilteredRanges;
 };
 
+/**
+* Wrapper box to encompass clicks that don't fall on a tree view row.
+*/
+class SSequencerTreeViewBox : public SBox
+{
+public:
+	void Construct( const FArguments& InArgs, TSharedRef<FSequencer> InSequencer ) 
+	{
+		Sequencer = InSequencer;
+		SBox::Construct(InArgs);
+	}
+	
+	virtual FReply OnMouseButtonDown( const FGeometry& MyGeometry, const FPointerEvent& MouseEvent ) override 
+	{
+		if (Sequencer.Pin().IsValid())
+		{
+			FSequencerSelection& Selection = Sequencer.Pin()->GetSelection();
+			if (Selection.GetSelectedOutlinerNodes().Num())
+			{
+				Selection.EmptySelectedOutlinerNodes();
+				return FReply::Handled();
+			}
+		}
+		return FReply::Unhandled();
+	}
+	
+private:
+	/** Weak pointer to the sequencer */
+	TWeakPtr<FSequencer> Sequencer;
+};
+
 void SSequencer::Construct( const FArguments& InArgs, TSharedRef< class FSequencer > InSequencer )
 {
 	Sequencer = InSequencer;
@@ -235,14 +226,19 @@ void SSequencer::Construct( const FArguments& InArgs, TSharedRef< class FSequenc
 
 	SAssignNew( TrackOutliner, SSequencerTrackOutliner );
 
-	SAssignNew( TrackArea, SSequencerTrackArea, TimeSliderController )
+	SAssignNew( TrackArea, SSequencerTrackArea, TimeSliderController, PinnedSequencer )
 		.Visibility( this, &SSequencer::GetTrackAreaVisibility );
+	
+	SAssignNew( TreeView, SSequencerTreeView, SequencerNodeTree.ToSharedRef(), TrackArea.ToSharedRef() )
+	.ExternalScrollbar( ScrollBar );
 
 	SAssignNew( CurveEditor, SSequencerCurveEditor, PinnedSequencer, TimeSliderController )
 		.Visibility( this, &SSequencer::GetCurveEditorVisibility )
 		.OnViewRangeChanged( InArgs._OnViewRangeChanged )
 		.ViewRange( InArgs._ViewRange );
 	CurveEditor->SetAllowAutoFrame(Settings->GetShowCurveEditor());
+
+	TrackArea->SetTreeView(TreeView);
 
 	const int32 				Column0	= 0,	Column1	= 1;
 	const int32 Row0	= 0,
@@ -303,29 +299,23 @@ void SSequencer::Construct( const FArguments& InArgs, TSharedRef< class FSequenc
 
 							+ SOverlay::Slot()
 							[
-								SNew( SSequencerScrollBox, Sequencer.Pin().ToSharedRef() )
-								.ExternalScrollbar(ScrollBar)
-
-								+ SScrollBox::Slot()
+								SNew(SHorizontalBox)
+								
+								+ SHorizontalBox::Slot()
+								.FillWidth( FillCoefficient_0 )
 								[
-									SNew( SHorizontalBox )
-
-									+ SHorizontalBox::Slot()
-									.FillWidth( FillCoefficient_0 )
+									SNew(SSequencerTreeViewBox, PinnedSequencer)
+									// Padding to allow space for the scroll bar
+									.Padding(FMargin(0,0,10.f,0))
 									[
-										SNew(SBox)
-										// Padding to allow space for the scroll bar
-										.Padding(FMargin(0,0,10.f,0))
-										[
-											TrackOutliner.ToSharedRef()
-										]
+										TreeView.ToSharedRef()
 									]
+								]
 
-									+ SHorizontalBox::Slot()
-									.FillWidth( FillCoefficient_1 )
-									[
-										TrackArea.ToSharedRef()
-									]
+								+ SHorizontalBox::Slot()
+								.FillWidth( FillCoefficient_1 )
+								[
+									TrackArea.ToSharedRef()
 								]
 							]
 
@@ -474,7 +464,7 @@ TSharedRef<SWidget> SSequencer::MakeToolBar()
 					[
 						SNew(STextBlock)
 						.TextStyle(FEditorStyle::Get(), "NormalText.Important")
-						.Text(LOCTEXT("AddButton", "Track"))
+						.Text(LOCTEXT("AddButton", "Add"))
 					]
 
 					+ SHorizontalBox::Slot()
@@ -541,13 +531,6 @@ TSharedRef<SWidget> SSequencer::MakeToolBar()
 
 	ToolBarBuilder.BeginSection("Snapping");
 	{
-		TArray<SNumericDropDown<float>::FNamedValue> SnapValues;
-		SnapValues.Add( SNumericDropDown<float>::FNamedValue( 0.001f, LOCTEXT( "Snap_OneThousandth", "0.001" ), LOCTEXT( "SnapDescription_OneThousandth", "Set snap to 1/1000th" ) ) );
-		SnapValues.Add( SNumericDropDown<float>::FNamedValue( 0.01f, LOCTEXT( "Snap_OneHundredth", "0.01" ), LOCTEXT( "SnapDescription_OneHundredth", "Set snap to 1/100th" ) ) );
-		SnapValues.Add( SNumericDropDown<float>::FNamedValue( 0.1f, LOCTEXT( "Snap_OneTenth", "0.1" ), LOCTEXT( "SnapDescription_OneTenth", "Set snap to 1/10th" ) ) );
-		SnapValues.Add( SNumericDropDown<float>::FNamedValue( 1.0f, LOCTEXT( "Snap_One", "1" ), LOCTEXT( "SnapDescription_One", "Set snap to 1" ) ) );
-		SnapValues.Add( SNumericDropDown<float>::FNamedValue( 10.0f, LOCTEXT( "Snap_Ten", "10" ), LOCTEXT( "SnapDescription_Ten", "Set snap to 10" ) ) );
-		SnapValues.Add( SNumericDropDown<float>::FNamedValue( 100.0f, LOCTEXT( "Snap_OneHundred", "100" ), LOCTEXT( "SnapDescription_OneHundred", "Set snap to 100" ) ) );
 
 		ToolBarBuilder.SetLabelVisibility( EVisibility::Collapsed );
 		ToolBarBuilder.AddToolBarButton( FSequencerCommands::Get().ToggleIsSnapEnabled, NAME_None, TAttribute<FText>( FText::GetEmpty() ) );
@@ -563,8 +546,9 @@ TSharedRef<SWidget> SSequencer::MakeToolBar()
 			.VAlign( VAlign_Center )
 			[
 				SNew( SNumericDropDown<float> )
-				.DropDownValues( SnapValues )
+				.DropDownValues( SequencerSnapValues::GetTimeSnapValues() )
 				.LabelText( LOCTEXT( "TimeSnapLabel", "Time" ) )
+				.bShowNamedValue(true)
 				.ToolTipText( LOCTEXT( "TimeSnappingIntervalToolTip", "Time snapping interval" ) )
 				.Value( this, &SSequencer::OnGetTimeSnapInterval )
 				.OnValueChanged( this, &SSequencer::OnTimeSnapIntervalChanged )
@@ -574,7 +558,7 @@ TSharedRef<SWidget> SSequencer::MakeToolBar()
 			.VAlign( VAlign_Center )
 			[
 				SNew( SNumericDropDown<float> )
-				.DropDownValues( SnapValues )
+				.DropDownValues( SequencerSnapValues::GetSnapValues() )
 				.LabelText( LOCTEXT( "ValueSnapLabel", "Value" ) )
 				.ToolTipText( LOCTEXT( "ValueSnappingIntervalToolTip", "Curve value snapping interval" ) )
 				.Value( this, &SSequencer::OnGetValueSnapInterval )
@@ -601,6 +585,12 @@ TSharedRef<SWidget> SSequencer::MakeAddMenu()
 TSharedRef<SWidget> SSequencer::MakeSnapMenu()
 {
 	FMenuBuilder MenuBuilder( false, Sequencer.Pin()->GetCommandBindings() );
+
+	MenuBuilder.BeginSection("Frames", LOCTEXT("SnappingMenuFramesHeader", "Frames") );
+	{
+		MenuBuilder.AddMenuEntry( FSequencerCommands::Get().ToggleShowFrameNumbers );
+	}
+	MenuBuilder.EndSection();
 
 	MenuBuilder.BeginSection( "KeySnapping", LOCTEXT( "SnappingMenuKeyHeader", "Key Snapping" ) );
 	{
@@ -704,19 +694,25 @@ void SSequencer::UpdateLayoutTree()
 		SelectedPathNames.Add(SelectedDisplayNode->GetPathName());
 	}
 
+	// Suspend broadcasting selection changes because we don't want unnecessary rebuilds.
+	Sequencer.Pin()->GetSelection().SuspendBroadcast();
+
 	// Update the node tree
 	SequencerNodeTree->Update();
 
-	FSequencerTrackLaneFactory Factory(TrackOutliner.ToSharedRef(), TrackArea.ToSharedRef(), Sequencer.Pin().ToSharedRef() );
-	Factory.Repopulate( *SequencerNodeTree );
-
-	CurveEditor->SetSequencerNodeTree(SequencerNodeTree);
+	TreeView->Refresh();
 
 	// Restore the selection state.
 	RestoreSelectionState(SequencerNodeTree->GetRootNodes(), SelectedPathNames, Sequencer.Pin()->GetSelection());	// Update to actor selection.
 	OnActorSelectionChanged(NULL);
 
+	// This must come after the selection state has been restored so that the curve editor is populated with the correctly selected nodes
+	CurveEditor->SetSequencerNodeTree(SequencerNodeTree);
+
 	SequencerNodeTree->UpdateCachedVisibilityBasedOnShotFiltersChanged();
+
+	// Continue broadcasting selection changes
+	Sequencer.Pin()->GetSelection().ResumeBroadcast();
 }
 
 void SSequencer::UpdateBreadcrumbs(const TArray< TWeakObjectPtr<class UMovieSceneSection> >& FilteringShots)
@@ -761,6 +757,7 @@ void SSequencer::ResetBreadcrumbs()
 void SSequencer::OnOutlinerSearchChanged( const FText& Filter )
 {
 	SequencerNodeTree->FilterNodes( Filter.ToString() );
+	TreeView->Refresh();
 }
 
 float SSequencer::OnGetTimeSnapInterval() const
@@ -1118,6 +1115,11 @@ FText SSequencer::GetShotSectionTitle(UMovieSceneSection* ShotSection) const
 	return Cast<UMovieSceneShotSection>(ShotSection)->GetShotDisplayName();
 }
 
+TSharedPtr<SSequencerTreeView> SSequencer::GetTreeView() const
+{
+	return TreeView;
+}
+
 void SSequencer::DeleteSelectedNodes()
 {
 	TSet< TSharedRef<FSequencerDisplayNode> > SelectedNodesCopy = Sequencer.Pin()->GetSelection().GetSelectedOutlinerNodes();
@@ -1130,28 +1132,12 @@ void SSequencer::DeleteSelectedNodes()
 
 		for( const TSharedRef<FSequencerDisplayNode>& SelectedNode : SelectedNodesCopy )
 		{
-			if( SelectedNode->IsVisible() )
+			if( !SelectedNode->IsHidden() )
 			{
 				// Delete everything in the entire node
 				TSharedRef<const FSequencerDisplayNode> NodeToBeDeleted = StaticCastSharedRef<const FSequencerDisplayNode>(SelectedNode);
 				SequencerRef.OnRequestNodeDeleted( NodeToBeDeleted );
 			}
-		}
-	}
-}
-
-void SSequencer::ExpandCollapseNode(TSharedRef<FSequencerDisplayNode> Node, bool bDescendants, bool bExpand)
-{
-	if (Node->IsExpanded() != bExpand)
-	{
-		Node->ToggleExpansion();
-	}
-
-	if (bDescendants)
-	{
-		for (auto ChildNode : Node->GetChildNodes())
-		{
-			ExpandCollapseNode(ChildNode, bDescendants, bExpand);
 		}
 	}
 }
@@ -1283,30 +1269,6 @@ void SSequencer::StepToKey(bool bStepToNextKey, bool bCameraOnly)
 		if (StepToKeyFound)
 		{
 			Sequencer.Pin()->SetGlobalTime(StepToTime);
-		}
-	}
-}
-
-void SSequencer::ToggleExpandCollapseSelectedNodes(bool bDescendants)
-{
-	const TSet< TSharedRef<FSequencerDisplayNode> >& SelectedNodes = Sequencer.Pin()->GetSelection().GetSelectedOutlinerNodes();
-
-	TSet< TSharedRef<FSequencerDisplayNode> > Nodes(SelectedNodes);
-
-	if (Nodes.Num() == 0)
-	{
-		TSet<TSharedRef<FSequencerDisplayNode>> RootNodes(SequencerNodeTree->GetRootNodes());
-		Nodes = RootNodes;
-	}
-
-	if (Nodes.Num() > 0)
-	{
-		auto It = Nodes.CreateConstIterator();
-		bool bExpand = !(*It).Get().IsExpanded();
-
-		for (auto Node : Nodes)
-		{
-			ExpandCollapseNode(Node, bDescendants, bExpand);
 		}
 	}
 }

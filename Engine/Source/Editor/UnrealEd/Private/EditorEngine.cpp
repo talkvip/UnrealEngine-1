@@ -3294,7 +3294,7 @@ void UEditorEngine::ConvertActorsFromClass( UClass* FromClass, UClass* ToClass )
 				
 				FActorSpawnParameters SpawnInfo;
 				SpawnInfo.OverrideLevel = Info.SourceLevel;
-				SpawnInfo.bNoCollisionFail = true;
+				SpawnInfo.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 				if( bToStaticMesh )
 				{					
 					AStaticMeshActor* SMActor = CastChecked<AStaticMeshActor>( World->SpawnActor( ToClass, &Info.Location, &Info.Rotation, SpawnInfo ) );
@@ -3343,23 +3343,29 @@ void UEditorEngine::ConvertActorsFromClass( UClass* FromClass, UClass* ToClass )
 
 bool UEditorEngine::ShouldOpenMatinee(AMatineeActor* MatineeActor) const
 {
+	if( PlayWorld )
+	{
+		FMessageDialog::Open( EAppMsgType::Ok, NSLOCTEXT("UnrealEd", "Error_MatineeCantOpenDuringPIE", "Matinee cannot be opened during Play in Editor.") );
+		return false;
+	}
+
 	if ( MatineeActor && !MatineeActor->MatineeData )
 	{
-		FMessageDialog::Open( EAppMsgType::Ok, NSLOCTEXT("UnrealEd", "Error_MatineeActionMustHaveData", "UnrealMatinee must have valid InterpData assigned before being edited.") );
+		FMessageDialog::Open( EAppMsgType::Ok, NSLOCTEXT("UnrealEd", "Error_MatineeActionMustHaveData", "Matinee must have valid InterpData assigned before being edited.") );
 		return false;
 	}
 
 	// Make sure we can't open the same action twice in Matinee.
 	if( GLevelEditorModeTools().IsModeActive(FBuiltinEditorModes::EM_InterpEdit) )
 	{
-		FMessageDialog::Open( EAppMsgType::Ok, NSLOCTEXT("UnrealEd", "MatineeActionAlreadyOpen", "An UnrealMatinee sequence is currently open in an editor.  Please close it before proceeding.") );
+		FMessageDialog::Open( EAppMsgType::Ok, NSLOCTEXT("UnrealEd", "MatineeActionAlreadyOpen", "An Matinee sequence is currently open in an editor.  Please close it before proceeding.") );
 		return false;
 	}
 
 	// Don't let you open Matinee if a transaction is currently active.
 	if( GEditor->IsTransactionActive() )
 	{
-		FMessageDialog::Open( EAppMsgType::Ok, NSLOCTEXT("UnrealEd", "TransactionIsActive", "Undo Transaction Is Active - Cannot Open UnrealMatinee.") );
+		FMessageDialog::Open( EAppMsgType::Ok, NSLOCTEXT("UnrealEd", "TransactionIsActive", "Undo Transaction Is Active - Cannot Open Matinee.") );
 		return false;
 	}
 
@@ -3494,7 +3500,7 @@ bool UEditorEngine::DetachSelectedActors()
 			OldParentActor->Modify();
 			RootComp->DetachFromParent(true);
 			bDetachOccurred = true;
-			Actor->SetFolderPath(OldParentActor->GetFolderPath());
+			Actor->SetFolderPath_Recursively(OldParentActor->GetFolderPath());
 		}
 	}
 	return bDetachOccurred;
@@ -4009,7 +4015,7 @@ void UEditorEngine::CloseEntryPopupWindow()
 
 EAppReturnType::Type UEditorEngine::OnModalMessageDialog(EAppMsgType::Type InMessage, const FText& InText, const FText& InTitle)
 {
-	if( FSlateApplication::IsInitialized() && FSlateApplication::Get().CanAddModalWindow() )
+	if( IsInGameThread() && FSlateApplication::IsInitialized() && FSlateApplication::Get().CanAddModalWindow() )
 	{
 		return OpenMsgDlgInt(InMessage, InText, InTitle);
 	}
@@ -4121,6 +4127,14 @@ AActor* UEditorEngine::UseActorFactory( UActorFactory* Factory, const FAssetData
 	//Load Asset
 	UObject* Asset = AssetData.GetAsset();
 
+	UWorld* OldWorld = nullptr;
+
+	// The play world needs to be selected if it exists
+	if (GIsEditor && GEditor->PlayWorld && !GIsPlayInEditorWorld)
+	{
+		OldWorld = SetPlayInEditorWorld(GEditor->PlayWorld);
+	}
+
 	AActor* Actor = NULL;
 	if ( bIsAllowedToCreateActor )
 	{
@@ -4171,18 +4185,19 @@ AActor* UEditorEngine::UseActorFactory( UActorFactory* Factory, const FAssetData
 					ULevel::LevelDirtiedEvent.Broadcast();
 				}
 			}
-			else
-			{
-				return NULL;
-			}
 		}
 		else
 		{
 			FNotificationInfo Info( NSLOCTEXT("UnrealEd", "Error_OperationDisallowedOnLockedLevel", "The requested operation could not be completed because the level is locked.") );
 			Info.ExpireDuration = 3.0f;
 			FSlateNotificationManager::Get().AddNotification(Info);
-			return NULL;
 		}
+	}
+
+	// Restore the old world if there was one
+	if (OldWorld)
+	{
+		RestoreEditorWorld(OldWorld);
 	}
 
 	return Actor;
@@ -5240,7 +5255,7 @@ void UEditorEngine::DoConvertActors( const TArray<AActor*>& ActorsToConvert, UCl
 				{
 					FActorSpawnParameters SpawnInfo;
 					SpawnInfo.OverrideLevel = ActorLevel;
-					SpawnInfo.bNoCollisionFail = true;
+					SpawnInfo.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 					NewActor = World->SpawnActor( ConvertToClass, &SpawnLoc, &SpawnRot, SpawnInfo );
 
 					if (NewActor)
@@ -5524,7 +5539,7 @@ AActor* UEditorEngine::AddActor(ULevel* InLevel, UClass* Class, const FTransform
 
 		FActorSpawnParameters SpawnInfo;
 		SpawnInfo.OverrideLevel = DesiredLevel;
-		SpawnInfo.bNoCollisionFail = true;
+		SpawnInfo.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 		SpawnInfo.ObjectFlags = ObjectFlags;
 		const auto Location = Transform.GetLocation();
 		const auto Rotation = Transform.GetRotation().Rotator();

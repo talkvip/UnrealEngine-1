@@ -11,6 +11,7 @@
 #include "UObject/TlsObjectInitializers.h"
 #include "UObject/UObjectThreadContext.h"
 #include "BlueprintSupport.h" // for FDeferredObjInitializerTracker
+#include "ExclusiveLoadPackageTimeTracker.h"
 #include "AssetRegistryInterface.h"
 
 DEFINE_LOG_CATEGORY(LogUObjectGlobals);
@@ -84,53 +85,28 @@ static FORCEINLINE bool IsGarbageCollectingOnGameThread()
 	return IsInGameThread() && IsGarbageCollecting();
 }
 
-/**
- * Fast version of StaticFindObject that relies on the passed in FName being the object name
- * without any group/ package qualifiers.
- *
- * @param	ObjectClass		The to be found object's class
- * @param	ObjectPackage	The to be found object's outer
- * @param	ObjectName		The to be found object's class
- * @param	ExactClass		Whether to require an exact match with the passed in class
- * @param	AnyPackage		Whether to look in any package
- * @param	ExclusiveFlags	Ignores objects that contain any of the specified exclusive flags
- * @return	Returns a pointer to the found object or NULL if none could be found
- */
-UObject* StaticFindObjectFast( UClass* ObjectClass, UObject* ObjectPackage, FName ObjectName, bool ExactClass, bool AnyPackage, EObjectFlags ExclusiveFlags )
-{
-	if (GIsSavingPackage || IsGarbageCollectingOnGameThread())
-	{
-		UE_LOG(LogUObjectGlobals, Fatal,TEXT("Illegal call to StaticFindObjectFast() while serializing object data or garbage collecting!"));
-	}
-
-	// We don't want to return any objects that are currently being background loaded unless we're using FindObject during async loading.
-	ExclusiveFlags |= IsInAsyncLoadingThread() ? RF_NoFlags : RF_AsyncLoading;
-	return StaticFindObjectFastInternal( ObjectClass, ObjectPackage, ObjectName, ExactClass, AnyPackage, ExclusiveFlags );
-}
-
 // Anonymous namespace to not pollute global.
 namespace
 {
 	/**
-	 * Legacy static find object helper, that helps to find reflected types, that
-	 * are no longer a subobjects of UCLASS defined in the same header.
-	 *
-	 * If the class looked for is of one of the relocated types (or theirs subclass)
-	 * then it performs another search in containing package.
-	 *
-	 * If the class match wasn't exact (i.e. either nullptr or subclass of allowed
-	 * ones) and we've found an object we're revalidating it to make sure the
-	 * legacy search was valid.
-	 *
-	 * @param ObjectClass Class of the object to find.
-	 * @param ObjectPackage Package of the object to find.
-	 * @param ObjectName Name of the object to find.
-	 * @param ExactClass If the class match has to be exact. I.e. ObjectClass == FoundObjects.GetClass()
-	 * @param OrigInName Original name provided to StaticFindObject, before resolving. Used to determine if we're looking for delegate signature.
-	 *
-	 * @returns Found object.
-	 */
-	UObject* StaticFindObjectWithChangedLegacyPath(UClass* ObjectClass, UObject* ObjectPackage, FName ObjectName, bool ExactClass, const TCHAR* OrigInName)
+	* Legacy static find object helper, that helps to find reflected types, that
+	* are no longer a subobjects of UCLASS defined in the same header.
+	*
+	* If the class looked for is of one of the relocated types (or theirs subclass)
+	* then it performs another search in containing package.
+	*
+	* If the class match wasn't exact (i.e. either nullptr or subclass of allowed
+	* ones) and we've found an object we're revalidating it to make sure the
+	* legacy search was valid.
+	*
+	* @param ObjectClass Class of the object to find.
+	* @param ObjectPackage Package of the object to find.
+	* @param ObjectName Name of the object to find.
+	* @param ExactClass If the class match has to be exact. I.e. ObjectClass == FoundObjects.GetClass()
+	*
+	* @returns Found object.
+	*/
+	UObject* StaticFindObjectWithChangedLegacyPath(UClass* ObjectClass, UObject* ObjectPackage, FName ObjectName, bool ExactClass)
 	{
 		UObject* MatchingObject = nullptr;
 
@@ -141,7 +117,7 @@ namespace
 			ObjectPackage != nullptr &&
 			ObjectPackage->IsA<UClass>()) // Only if outer is a class.
 		{
-			bool bHasDelegateSignaturePostfix = FString(OrigInName).EndsWith(HEADER_GENERATED_DELEGATE_SIGNATURE_SUFFIX);
+			bool bHasDelegateSignaturePostfix = ObjectName.ToString().EndsWith(HEADER_GENERATED_DELEGATE_SIGNATURE_SUFFIX);
 
 			bool bExactPathChangedClass = ObjectClass == UEnum::StaticClass() // Enums
 				|| ObjectClass == UScriptStruct::StaticClass() || ObjectClass == UStruct::StaticClass() // Structs
@@ -176,6 +152,38 @@ namespace
 
 		return MatchingObject;
 	}
+}
+
+/**
+ * Fast version of StaticFindObject that relies on the passed in FName being the object name
+ * without any group/ package qualifiers.
+ *
+ * @param	ObjectClass		The to be found object's class
+ * @param	ObjectPackage	The to be found object's outer
+ * @param	ObjectName		The to be found object's class
+ * @param	ExactClass		Whether to require an exact match with the passed in class
+ * @param	AnyPackage		Whether to look in any package
+ * @param	ExclusiveFlags	Ignores objects that contain any of the specified exclusive flags
+ * @return	Returns a pointer to the found object or NULL if none could be found
+ */
+UObject* StaticFindObjectFast( UClass* ObjectClass, UObject* ObjectPackage, FName ObjectName, bool ExactClass, bool AnyPackage, EObjectFlags ExclusiveFlags )
+{
+	if (GIsSavingPackage || IsGarbageCollectingOnGameThread())
+	{
+		UE_LOG(LogUObjectGlobals, Fatal,TEXT("Illegal call to StaticFindObjectFast() while serializing object data or garbage collecting!"));
+	}
+
+	// We don't want to return any objects that are currently being background loaded unless we're using FindObject during async loading.
+	ExclusiveFlags |= IsInAsyncLoadingThread() ? RF_NoFlags : RF_AsyncLoading;
+	
+	UObject* FoundObject = StaticFindObjectFastInternal( ObjectClass, ObjectPackage, ObjectName, ExactClass, AnyPackage, ExclusiveFlags );
+
+	if (!FoundObject)
+	{
+		FoundObject = StaticFindObjectWithChangedLegacyPath(ObjectClass, ObjectPackage, ObjectName, ExactClass);
+	}
+
+	return FoundObject;
 }
 
 //
@@ -234,14 +242,7 @@ UObject* StaticFindObject( UClass* ObjectClass, UObject* InObjectPackage, const 
 	}
 
 	FName ObjectName(*InName, FNAME_Add, true);
-	MatchingObject = StaticFindObjectFast( ObjectClass, ObjectPackage, ObjectName, ExactClass, bAnyPackage );
-
-	if (!MatchingObject)
-	{
-		return StaticFindObjectWithChangedLegacyPath(ObjectClass, ObjectPackage, ObjectName, ExactClass, OrigInName);
-	}
-
-	return MatchingObject;
+	return StaticFindObjectFast(ObjectClass, ObjectPackage, ObjectName, ExactClass, bAnyPackage);
 }
 
 //
@@ -568,55 +569,65 @@ UPackage* CreatePackage( UObject* InOuter, const TCHAR* PackageName )
 	return Result;
 }
 
+FString ResolveIniObjectsReference(const FString& ObjectReference, const FString* IniFilename, bool bThrow)
+{
+	// Get .ini key and section.
+	FString Section = ObjectReference.Mid(1 + ObjectReference.Find(TEXT(":"), ESearchCase::CaseSensitive));
+	int32 i = Section.Find(TEXT("."), ESearchCase::CaseSensitive, ESearchDir::FromEnd);
+	FString Key;
+	if (i != -1)
+	{
+		Key = Section.Mid(i + 1);
+		Section = Section.Left(i);
+	}
+
+	FString Output;
+
+	// Look up name.
+	if (!GConfig->GetString(*Section, *Key, Output, *IniFilename))
+	{
+		if (bThrow == true)
+		{
+			UE_LOG(LogUObjectGlobals, Error, TEXT(" %s %s "), *FString::Printf(TEXT("Can't find '%s' in configuration file section=%s key=%s"), *ObjectReference, *Section, *Key), **IniFilename);
+		}
+	}
+
+	return Output;
+}
+
+const FString* GetIniFilenameFromObjectsReference(const FString& Name)
+{
+	// See if the name is specified in the .ini file.
+	if (FCString::Strnicmp(*Name, TEXT("engine-ini:"), FCString::Strlen(TEXT("engine-ini:"))) == 0)
+	{
+		return &GEngineIni;
+	}
+	else if (FCString::Strnicmp(*Name, TEXT("game-ini:"), FCString::Strlen(TEXT("game-ini:"))) == 0)
+	{
+		return &GGameIni;
+	}
+	else if (FCString::Strnicmp(*Name, TEXT("input-ini:"), FCString::Strlen(TEXT("input-ini:"))) == 0)
+	{
+		return &GInputIni;
+	}
+	else if (FCString::Strnicmp(*Name, TEXT("editor-ini:"), FCString::Strlen(TEXT("editor-ini:"))) == 0)
+	{
+		return &GEditorIni;
+	}
+
+	return nullptr;
+}
+
 //
 // Resolve a package and name.
 //
 bool ResolveName( UObject*& InPackage, FString& InOutName, bool Create, bool Throw )
 {
-	FString* IniFilename = NULL;
+	const FString* IniFilename = GetIniFilenameFromObjectsReference(InOutName);
 
-	// See if the name is specified in the .ini file.
-	if( FCString::Strnicmp( *InOutName, TEXT("engine-ini:"), FCString::Strlen(TEXT("engine-ini:")) )==0 )
+	if (IniFilename && InOutName.Contains(TEXT("."), ESearchCase::CaseSensitive))
 	{
-		IniFilename = &GEngineIni;
-	}
-	else if( FCString::Strnicmp( *InOutName, TEXT("game-ini:"), FCString::Strlen(TEXT("game-ini:")) )==0 )
-	{
-		IniFilename = &GGameIni;
-	}
-	else if( FCString::Strnicmp( *InOutName, TEXT("input-ini:"), FCString::Strlen(TEXT("input-ini:")) )==0 )
-	{
-		IniFilename = &GInputIni;
-	}
-	else if( FCString::Strnicmp( *InOutName, TEXT("editor-ini:"), FCString::Strlen(TEXT("editor-ini:")) )==0 )
-	{
-		IniFilename = &GEditorIni;
-	}
-
-
-	if( IniFilename && InOutName.Contains(TEXT("."), ESearchCase::CaseSensitive) )
-	{
-		// Get .ini key and section.
-		FString Section = InOutName.Mid(1+InOutName.Find(TEXT(":"), ESearchCase::CaseSensitive));
-		int32 i = Section.Find(TEXT("."), ESearchCase::CaseSensitive, ESearchDir::FromEnd);
-		FString Key;
-		if( i != -1)
-		{
-			Key = Section.Mid(i+1);
-			Section = Section.Left(i);
-		}
-
-		// Look up name.
-		FString Result;
-		if( !GConfig->GetString( *Section, *Key, Result, *IniFilename ) )
-		{
-			if( Throw == true )
-			{
-				UE_LOG(LogUObjectGlobals, Error, TEXT( " %s %s " ), *FString::Printf( TEXT("Can't find '%s' in configuration file section=%s key=%s"), *InOutName, *Section, *Key), **IniFilename );
-			}
-			return false;
-		}
-		InOutName = Result;
+		InOutName = ResolveIniObjectsReference(InOutName, IniFilename, Throw);
 	}
 
 	// Strip off the object class.
@@ -957,6 +968,9 @@ UPackage* LoadPackageInternal(UPackage* InOuter, const TCHAR* InLongPackageName,
 			return Result;
 		}
 
+		// The time tracker keeps track of time spent in LoadPackage.
+		FExclusiveLoadPackageTimeTracker::FScopedPackageTracker Tracker(Result);
+
 #if !WITH_EDITOR
 		static auto CVarPreloadDependencies = IConsoleManager::Get().FindConsoleVariable(TEXT("s.PreloadPackageDependencies"));
 		if (CVarPreloadDependencies && CVarPreloadDependencies->GetInt() != 0)
@@ -1224,6 +1238,9 @@ void EndLoad()
 
 	while (--ThreadContext.ObjBeginLoadCount == 0 && (ThreadContext.ObjLoaded.Num() || ThreadContext.ImportCount || ThreadContext.ForcedExportCount))
 	{
+		// The time tracker keeps track of time spent in EndLoad.
+		FExclusiveLoadPackageTimeTracker::FScopedEndLoadTracker Tracker;
+
 		// Make sure we're not recursively calling EndLoad as e.g. loading a config file could cause
 		// BeginLoad/EndLoad to be called.
 		ThreadContext.ObjBeginLoadCount++;
@@ -2178,13 +2195,13 @@ FObjectInitializer::~FObjectInitializer()
 	if (bIsCDO && (ObjectArchetype != nullptr) && !FBlueprintSupport::IsDeferredCDOInitializationDisabled())
 	{
 		UClass* ArchetypeClass = ObjectArchetype->GetClass();
+		const bool bSuperCDONeedsLoad = ObjectArchetype->HasAnyFlags(RF_NeedLoad) ||
+			(ArchetypeClass->GetLinker() && ArchetypeClass->GetLinker()->IsBlueprintFinalizationPending()) ||
+			FDeferredObjInitializerTracker::IsCdoDeferred(ArchetypeClass);
+
 		// if this is a blueprint CDO that derives from another blueprint, and 
 		// that parent (archetype) CDO isn't fully serialized
-		if ( !Class->HasAnyFlags(RF_Native) && !ArchetypeClass->HasAnyFlags(RF_Native) && 
-			(	ObjectArchetype->HasAnyFlags(RF_NeedLoad) ||
-				(ArchetypeClass->GetLinker() && ArchetypeClass->GetLinker()->IsBlueprintFinalizationPending()) ||
-				FDeferredObjInitializerTracker::IsCdoDeferred(ArchetypeClass))
-			)
+		if (!Class->HasAnyFlags(RF_Native) && !ArchetypeClass->HasAnyFlags(RF_Native) && bSuperCDONeedsLoad)
 		{
 			FLinkerLoad* ClassLinker = Class->GetLinker();
 			if ((ClassLinker != nullptr) && (ClassLinker->LoadFlags & LOAD_DeferDependencyLoads) != 0x00)

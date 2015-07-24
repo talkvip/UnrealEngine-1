@@ -551,7 +551,12 @@ UObject* ULevelFactory::FactoryCreateText
 						FActorSpawnParameters SpawnInfo;
 						SpawnInfo.Name = ActorUniqueName;
 						SpawnInfo.Template = Archetype;
-						SpawnInfo.bNoCollisionFail = true;
+						SpawnInfo.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+						if (GEditor->bIsSimulatingInEditor)
+						{
+							// During SIE, we don't want to run construction scripts on a BP until it is completely constructed
+							SpawnInfo.bDeferConstruction = true;
+						}
 						AActor* NewActor = World->SpawnActor( TempClass, nullptr, nullptr, SpawnInfo );
 						
 						if( NewActor )
@@ -4046,9 +4051,6 @@ UTexture* UTextureFactory::ImportTexture(UClass* Class, UObject* InParent, FName
 
 			// for now we don't support mip map generation on cubemaps
 			TextureCube->MipGenSettings = TMGS_LeaveExistingMips;
-
-			// generates the mips from the source art
-			TextureCube->PostEditChange();
 		}
 
 		return TextureCube;
@@ -4089,11 +4091,9 @@ UTexture* UTextureFactory::ImportTexture(UClass* Class, UObject* InParent, FName
 
 				if(Texture->HasHDRSource())
 				{
+					// the loader can suggest a compression setting
 					Texture->CompressionSettings = TC_HDR;
 				}
-
-				// generates the mips from the source art
-				Texture->PostEditChange();
 			}
 
 			return Texture;
@@ -4121,8 +4121,8 @@ UTexture* UTextureFactory::ImportTexture(UClass* Class, UObject* InParent, FName
 				TSF_BGRE8,
 				HDRDDSLoadHelper.GetDDSDataPointer()
 				);
+			// the loader can suggest a compression setting
 			TextureCube->CompressionSettings = TC_HDR;
-			TextureCube->PostEditChange();
 		}
 
 		return TextureCube;
@@ -4158,7 +4158,6 @@ UTexture* UTextureFactory::ImportTexture(UClass* Class, UObject* InParent, FName
 				MipGenSettings = TMGS_NoMipmaps;
 				Texture->Brightness = IESLoadHelper.GetBrightness();
 				Texture->TextureMultiplier = Multiplier;
-				Texture->PostEditChange();
 			}
 
 			return Texture;
@@ -4364,7 +4363,13 @@ UObject* UTextureFactory::FactoryCreateBinary
 	Texture->CompressionNoAlpha		= NoAlpha;
 	Texture->DeferCompression		= bDeferCompression;
 	Texture->bDitherMipMapAlpha		= bDitherMipMapAlpha;
-	Texture->MipGenSettings			= MipGenSettings;
+	
+	if(Texture->MipGenSettings == TMGS_FromTextureGroup)
+	{
+		// unless the loader suggest a different setting
+		Texture->MipGenSettings = MipGenSettings;
+	}
+	
 	Texture->bPreserveBorder		= bPreserveBorder;
 
 	Texture->AssetImportData->Update(CurrentFilename);

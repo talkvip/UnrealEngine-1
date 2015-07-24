@@ -8,6 +8,8 @@
 #include "SSearchBox.h"
 #include "PluginBrowserModule.h"
 #include "DirectoryWatcherModule.h"
+#include "IProjectManager.h"
+#include "GameProjectGenerationModule.h"
 
 #define LOCTEXT_NAMESPACE "PluginsEditor"
 
@@ -18,6 +20,8 @@ SPluginBrowser::~SPluginBrowser()
 	{
 		DirectoryWatcherModule.Get()->UnregisterDirectoryChangedCallback_Handle(Pair.Key, Pair.Value);
 	}
+
+	FPluginBrowserModule::Get().OnNewPluginCreated().RemoveAll(this);
 }
 
 void SPluginBrowser::Construct( const FArguments& Args )
@@ -41,6 +45,8 @@ void SPluginBrowser::Construct( const FArguments& Args )
 		}
 	}
 
+	FPluginBrowserModule::Get().OnNewPluginCreated().AddSP(this, &SPluginBrowser::OnNewPluginCreated);
+
 	RegisterActiveTimer (0.f, FWidgetActiveTimerDelegate::CreateSP (this, &SPluginBrowser::TriggerBreadcrumbRefresh));
 
 	struct Local
@@ -60,9 +66,9 @@ void SPluginBrowser::Construct( const FArguments& Args )
 
 	PluginCategories = SNew( SPluginCategoryTree, SharedThis( this ) );
 
-
-	ChildSlot
-	[ 
+	TSharedRef<SVerticalBox> MainContent = SNew( SVerticalBox )
+	+SVerticalBox::Slot()
+	[
 		SNew( SHorizontalBox )
 
 		+SHorizontalBox::Slot()
@@ -146,12 +152,38 @@ void SPluginBrowser::Construct( const FArguments& Args )
 			]
 		]
 	];
+
+	// Don't create new plugin button in content only projects as they won't compile
+	const FProjectDescriptor* CurrentProject = IProjectManager::Get().GetCurrentProject();
+	bool bIsContentOnlyProject = CurrentProject == nullptr || CurrentProject->Modules.Num() == 0 || !FGameProjectGenerationModule::Get().ProjectHasCodeFiles();
+
+	if (!bIsContentOnlyProject)
+	{
+		MainContent->AddSlot()
+		.AutoHeight()
+		.Padding(5)
+		.HAlign(HAlign_Right)
+		[
+			SNew(SButton)
+			.ContentPadding(5)
+			.TextStyle(FEditorStyle::Get(), "LargeText")
+			.ButtonStyle(FEditorStyle::Get(), "FlatButton.Success")
+			.HAlign(HAlign_Center)
+			.Text(LOCTEXT("NewPluginLabel", "New plugin"))
+			.OnClicked(this, &SPluginBrowser::HandleNewPluginButtonClicked)
+		];
+	}
+
+	ChildSlot
+	[
+		MainContent
+	];
 }
 
 
 EVisibility SPluginBrowser::HandleRestartEditorNoticeVisibility() const
 {
-	return (FPluginBrowserModule::Get().PendingEnablePlugins.Num() > 0)? EVisibility::Visible : EVisibility::Collapsed;
+	return FPluginBrowserModule::Get().HasPluginsPendingEnable() ? EVisibility::Visible : EVisibility::Collapsed;
 }
 
 
@@ -212,6 +244,15 @@ void SPluginBrowser::OnPluginDirectoryChanged(const TArray<struct FFileChangeDat
 	UpdatePluginsTimerHandle = RegisterActiveTimer(2.0f, FWidgetActiveTimerDelegate::CreateSP(this, &SPluginBrowser::UpdatePluginsTimerCallback));
 }
 
+void SPluginBrowser::OnNewPluginCreated()
+{
+	if (UpdatePluginsTimerHandle.IsValid())
+	{
+		UnRegisterActiveTimer(UpdatePluginsTimerHandle.ToSharedRef());
+	}
+	UpdatePluginsTimerHandle = RegisterActiveTimer(2.0f, FWidgetActiveTimerDelegate::CreateSP(this, &SPluginBrowser::UpdatePluginsTimerCallback));
+}
+
 EActiveTimerReturnType SPluginBrowser::UpdatePluginsTimerCallback(double InCurrentTime, float InDeltaTime)
 {
 	IPluginManager::Get().RefreshPluginsList();
@@ -260,6 +301,11 @@ void SPluginBrowser::BreadcrumbTrail_OnCrumbClicked( const TSharedPtr<FPluginCat
 	}
 }
 
+FReply SPluginBrowser::HandleNewPluginButtonClicked() const
+{
+	FGlobalTabmanager::Get()->InvokeTab( FPluginBrowserModule::PluginCreatorTabName );
 
+	return FReply::Handled();
+}
 
 #undef LOCTEXT_NAMESPACE

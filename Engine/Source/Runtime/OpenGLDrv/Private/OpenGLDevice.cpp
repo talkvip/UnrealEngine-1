@@ -228,7 +228,7 @@ static const TCHAR* GetOpenGLDebugTypeStringARB(GLenum Type)
 	}
 #ifdef GL_KHR_debug	
 	{
-		static const TCHAR* TypeStrings[] =
+		static const TCHAR* DebugTypeStrings[] =
 		{
 			TEXT("Marker"),
 			TEXT("PushGroup"),
@@ -237,7 +237,7 @@ static const TCHAR* GetOpenGLDebugTypeStringARB(GLenum Type)
 
 		if (Type >= GL_DEBUG_TYPE_MARKER && Type <= GL_DEBUG_TYPE_POP_GROUP)
 		{
-			return TypeStrings[Type - GL_DEBUG_TYPE_MARKER];
+			return DebugTypeStrings[Type - GL_DEBUG_TYPE_MARKER];
 		}
 	}
 #endif
@@ -493,7 +493,7 @@ static void InitRHICapabilitiesForGL()
 #endif
 
 	// GL vendor and version information.
-#if !defined(__GNUC__) && !defined(__clang__)
+#if !defined(__GNUC__) && !defined(__clang__) && !(defined(_MSC_VER) && _MSC_VER >= 1900)
 	#define LOG_GL_STRING(StringEnum) UE_LOG(LogRHI, Log, TEXT("  ") ## TEXT(#StringEnum) ## TEXT(": %s"), ANSI_TO_TCHAR((const ANSICHAR*)glGetString(StringEnum)))
 #else
 	#define LOG_GL_STRING(StringEnum) UE_LOG(LogRHI, Log, TEXT("  " #StringEnum ": %s"), ANSI_TO_TCHAR((const ANSICHAR*)glGetString(StringEnum)))
@@ -562,7 +562,7 @@ static void InitRHICapabilitiesForGL()
 	FOpenGL::InitDebugContext();
 
 	// Log and get various limits.
-#if !defined(__GNUC__) && !defined(__clang__)
+#if !defined(__GNUC__) && !defined(__clang__) && !(defined(_MSC_VER) && _MSC_VER >= 1900)
 #define LOG_AND_GET_GL_INT_TEMP(IntEnum,Default) GLint Value_##IntEnum = Default; if (IntEnum) {glGetIntegerv(IntEnum, &Value_##IntEnum); glGetError();} else {Value_##IntEnum = Default;} UE_LOG(LogRHI, Log, TEXT("  ") ## TEXT(#IntEnum) ## TEXT(": %d"), Value_##IntEnum)
 #else
 #define LOG_AND_GET_GL_INT_TEMP(IntEnum,Default) GLint Value_##IntEnum = Default; if (IntEnum) {glGetIntegerv(IntEnum, &Value_##IntEnum); glGetError();} else {Value_##IntEnum = Default;} UE_LOG(LogRHI, Log, TEXT("  " #IntEnum ": %d"), Value_##IntEnum)
@@ -696,6 +696,8 @@ static void InitRHICapabilitiesForGL()
 	GMaxShadowDepthBufferSizeX = FMath::Min<int32>(Value_GL_MAX_RENDERBUFFER_SIZE, 4096); // Limit to the D3D11 max.
 	GMaxShadowDepthBufferSizeY = FMath::Min<int32>(Value_GL_MAX_RENDERBUFFER_SIZE, 4096);
 	GHardwareHiddenSurfaceRemoval = FOpenGL::HasHardwareHiddenSurfaceRemoval();
+
+	GSupportsHDR32bppEncodeModeIntrinsic = FOpenGL::SupportsHDR32bppEncodeModeIntrinsic();
 
 	GShaderPlatformForFeatureLevel[ERHIFeatureLevel::ES2] = (GMaxRHIFeatureLevel == ERHIFeatureLevel::ES2) ? GMaxRHIShaderPlatform : SP_OPENGL_PCES2;
 	GShaderPlatformForFeatureLevel[ERHIFeatureLevel::ES3_1] = (GMaxRHIFeatureLevel == ERHIFeatureLevel::ES3_1) ? GMaxRHIShaderPlatform : SP_OPENGL_PCES3_1;
@@ -999,15 +1001,22 @@ static void CheckVaryingLimit()
 
 		// Do not need to do this check if more than 8 varyings supported
 		if (FOpenGL::GetMaxVaryingVectors() > 8)
+		{
 			return;
+		}
 
 		// Make sure MobileHDR is on and device needs mosaic
 		static auto* MobileHDRCvar = IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.MobileHDR"));
-		static auto* MobileHDR32bppCvar = IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.MobileHDR32bpp"));
+		static auto* MobileHDR32bppModeCvar = IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.MobileHDR32bppMode"));
+
 		const bool bMobileHDR32bpp = (MobileHDRCvar && MobileHDRCvar->GetValueOnAnyThread() == 1)
-			&& (FAndroidMisc::SupportsFloatingPointRenderTargets() == false || (MobileHDR32bppCvar && MobileHDR32bppCvar->GetValueOnAnyThread() == 1));
-		if (!bMobileHDR32bpp)
+			&& (FAndroidMisc::SupportsFloatingPointRenderTargets() == false || (MobileHDR32bppModeCvar && MobileHDR32bppModeCvar->GetValueOnAnyThread() != 0));
+		const bool bRequiresMosaic = bMobileHDR32bpp && (!FAndroidMisc::SupportsShaderFramebufferFetch() || (MobileHDR32bppModeCvar && MobileHDR32bppModeCvar->GetValueOnAnyThread() == 1));
+
+		if (!bRequiresMosaic)
+		{
 			return;
+		}
 
 		UE_LOG(LogRHI, Display, TEXT("Testing for gl_FragCoord requiring a varying since mosaic is enabled"));
 		const ANSICHAR* TestVertexProgram = "\n"
@@ -1346,10 +1355,24 @@ void FOpenGLDynamicRHI::RHIAcquireThreadOwnership()
 	PlatformRebindResources(PlatformDevice);
 	bIsRenderingContextAcquired = true;
 	VERIFY_GL(RHIAcquireThreadOwnership);
+	{
+		FScopeLock lock(&CustomPresentSection);
+		if (CustomPresent)
+		{
+			CustomPresent->OnAcquireThreadOwnership();
+		}
+	}
 }
 
 void FOpenGLDynamicRHI::RHIReleaseThreadOwnership()
 {
+	{
+		FScopeLock lock(&CustomPresentSection);
+		if (CustomPresent)
+		{
+			CustomPresent->OnReleaseThreadOwnership();
+		}
+	}
 	VERIFY_GL(RHIReleaseThreadOwnership);
 	bIsRenderingContextAcquired = false;
 	PlatformNULLContextSetup();
@@ -1403,6 +1426,12 @@ void FOpenGLDynamicRHI::InvalidateQueries( void )
 			TimerQueries[Index]->bInvalidResource = true;
 		}
 	}
+}
+
+void FOpenGLDynamicRHI::SetCustomPresent(FRHICustomPresent* InCustomPresent)
+{
+	FScopeLock lock(&CustomPresentSection);
+	CustomPresent = InCustomPresent;
 }
 
 bool FOpenGLDynamicRHIModule::IsSupported()

@@ -1659,6 +1659,7 @@ FMaterialRenderProxy::FMaterialRenderProxy()
 	: bSelected(false)
 	, bHovered(false)
 	, SubsurfaceProfileRT(0)
+	, DeletedFlag(0)
 {
 }
 
@@ -1666,6 +1667,7 @@ FMaterialRenderProxy::FMaterialRenderProxy(bool bInSelected, bool bInHovered)
 	: bSelected(bInSelected)
 	, bHovered(bInHovered)
 	, SubsurfaceProfileRT(0)
+	, DeletedFlag(0)
 {
 }
 
@@ -1676,6 +1678,8 @@ FMaterialRenderProxy::~FMaterialRenderProxy()
 		check(IsInRenderingThread());
 		ReleaseResource();
 	}
+
+	DeletedFlag = 1;
 }
 
 void FMaterialRenderProxy::InitDynamicRHI()
@@ -2130,7 +2134,7 @@ FMaterialUpdateContext::~FMaterialUpdateContext()
 
 	double EndTime = FPlatformTime::Seconds();
 	UE_LOG(LogMaterial, Log,
-		TEXT("%f seconds spent updating %d materials, %d interfaces, %d instances, %d with static permutations."),
+		TEXT("%.2f seconds spent updating %d materials, %d interfaces, %d instances, %d with static permutations."),
 		(float)(EndTime - StartTime),
 		UpdatedMaterials.Num(),
 		UpdatedMaterialInterfaces.Num(),

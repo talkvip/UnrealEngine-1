@@ -80,18 +80,6 @@ struct ENGINE_API FEdGraphSchemaAction
 	UPROPERTY()
 	int32 SectionID;
 
-	/** Search title for the action (doesn't have to be set when instantiated, will be constructed by GetSearchTitle() if left empty). */
-	UPROPERTY()
-	FString CachedSearchTitle;
-
-	/** Search keywords for the action (doesn't have to be set when instantiated, will be constructed by GetSearchTitle() if left empty). */
-	UPROPERTY()
-	FString CachedSearchKeywords;
-
-	/** Search categories for the action (doesn't have to be set when instantiated, will be constructed by GetSearchTitle() if left empty). */
-	UPROPERTY()
-	FString CachedSearchCategories;
-
 	FEdGraphSchemaAction() 
 		: Grouping(0)
 		, SectionID(0)
@@ -131,42 +119,27 @@ struct ENGINE_API FEdGraphSchemaAction
 	}
 
 	/** Retrieves the full searchable title for this action. */
-	const FString& GetSearchTitle()
+	FString GetSearchTitle()
 	{
-		if(CachedSearchTitle.IsEmpty())
-		{
-			CachedSearchTitle = MenuDescription.ToString();
-			CachedSearchTitle.AppendChar(TEXT(' '));
-			CachedSearchTitle.Append(MenuDescription.BuildSourceString());
-			CachedSearchTitle = CachedSearchTitle.ToLower();
-		}
-		return CachedSearchTitle;
+		return (MenuDescription.ToString() +
+			TEXT(' ') +
+			MenuDescription.BuildSourceString()).ToLower();
 	}
 
 	/** Retrieves the full searchable keywords for this action. */
-	const FString& GetSearchKeywords()
+	FString GetSearchKeywords()
 	{
-		if(CachedSearchKeywords.IsEmpty())
-		{
-			CachedSearchKeywords = Keywords.ToString();
-			CachedSearchKeywords.AppendChar(TEXT(' '));
-			CachedSearchKeywords.Append(Keywords.BuildSourceString());
-			CachedSearchKeywords = CachedSearchKeywords.ToLower();
-		}
-		return CachedSearchKeywords;
+		return (Keywords.ToString() +
+			TEXT(' ') +
+			Keywords.BuildSourceString()).ToLower();
 	}
 
 	/** Retrieves the full searchable categories for this action. */
-	const FString& GetSearchCategory()
+	FString GetSearchCategory()
 	{
-		if(CachedSearchCategories.IsEmpty())
-		{
-			CachedSearchCategories = Category.ToString();
-			CachedSearchCategories.AppendChar(TEXT(' '));
-			CachedSearchCategories.Append(Category.BuildSourceString());
-			CachedSearchCategories = CachedSearchCategories.ToLower();
-		}
-		return CachedSearchCategories;
+		return (Category.ToString() +
+			TEXT(' ') +
+			Category.BuildSourceString()).ToLower();
 	}
 
 	// GC.
@@ -637,8 +610,10 @@ class ENGINE_API UEdGraphSchema : public UObject
 	 */
 	virtual FLinearColor GetPinTypeColor(const FEdGraphPinType& PinType) const { return FLinearColor::Black; }
 
+#if WITH_EDITORONLY_DATA
 	/** Get the name to show in the editor */
 	virtual FText GetPinDisplayName(const UEdGraphPin* Pin) const;
+#endif // WITH_EDITORONLY_DATA
 
 	/**
 	 * Takes the PinDescription and tacks on any other data important to the 

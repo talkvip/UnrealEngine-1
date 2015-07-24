@@ -11,6 +11,7 @@
 #include "UObject/UObjectThreadContext.h"
 #include "UObject/LinkerManager.h"
 #include "Serialization/AsyncLoadingThread.h"
+#include "ExclusiveLoadPackageTimeTracker.h"
 #include "AssetRegistryInterface.h"
 
 /*-----------------------------------------------------------------------------
@@ -30,6 +31,8 @@ DECLARE_CYCLE_STAT(TEXT("LoadImports AsyncPackage"),STAT_FAsyncPackage_LoadImpor
 DECLARE_CYCLE_STAT(TEXT("CreateImports AsyncPackage"),STAT_FAsyncPackage_CreateImports,STATGROUP_AsyncLoad);
 DECLARE_CYCLE_STAT(TEXT("FinishTextureAllocations AsyncPackage"),STAT_FAsyncPackage_FinishTextureAllocations,STATGROUP_AsyncLoad);
 DECLARE_CYCLE_STAT(TEXT("CreateExports AsyncPackage"),STAT_FAsyncPackage_CreateExports,STATGROUP_AsyncLoad);
+DECLARE_CYCLE_STAT(TEXT("FreeReferencedImports AsyncPackage"), STAT_FAsyncPackage_FreeReferencedImports, STATGROUP_AsyncLoad);
+DECLARE_CYCLE_STAT(TEXT("Precache ArchiveAsync"), STAT_FArchiveAsync_Precache, STATGROUP_AsyncLoad);
 DECLARE_CYCLE_STAT(TEXT("PreLoadObjects AsyncPackage"),STAT_FAsyncPackage_PreLoadObjects,STATGROUP_AsyncLoad);
 DECLARE_CYCLE_STAT(TEXT("PostLoadObjects AsyncPackage"),STAT_FAsyncPackage_PostLoadObjects,STATGROUP_AsyncLoad);
 DECLARE_CYCLE_STAT(TEXT("FinishObjects AsyncPackage"),STAT_FAsyncPackage_FinishObjects,STATGROUP_AsyncLoad);
@@ -509,7 +512,7 @@ int32 FAsyncLoadingThread::CreateAsyncPackagesFromQueue()
 				ProcessAsyncPackageRequest(PackageRequest, nullptr, DependencyTracker);
 			}
 		}
-		UE_LOG(LogStreaming, Display, TEXT("Async package requests inserted in %fms"), Timer * 1000.0);
+		UE_LOG(LogStreaming, Verbose, TEXT("Async package requests inserted in %fms"), Timer * 1000.0);
 	}
 
 	NumCreated = QueueCopy.Num();
@@ -1043,7 +1046,8 @@ bool FAsyncPackage::IsTimeLimitExceeded()
  */
 bool FAsyncPackage::GiveUpTimeSlice()
 {
-	if (!FPlatformProcess::SupportsMultithreading())
+	static const bool bPlatformIsSingleThreaded = !FPlatformProcess::SupportsMultithreading();
+	if (bPlatformIsSingleThreaded)
 	{
 		FIOSystem::Get().TickSingleThreaded();
 	}
@@ -1148,6 +1152,9 @@ EAsyncPackageState::Type FAsyncPackage::Tick(bool InbUseTimeLimit, bool InbUseFu
 		// Begin async loading, simulates BeginLoad
 		BeginAsyncLoad();
 
+		// We have begun loading a package that we know the name of. Let the package time tracker know.
+		FExclusiveLoadPackageTimeTracker::PushLoadPackage(Desc.NameToLoad);
+
 		// Create raw linker. Needs to be async created via ticking before it can be used.
 		if (LoadingState == EAsyncPackageState::Complete)
 		{
@@ -1196,6 +1203,9 @@ EAsyncPackageState::Type FAsyncPackage::Tick(bool InbUseTimeLimit, bool InbUseFu
 		{
 			LoadingState = PostLoadObjects();
 		}
+
+		// We are done loading the package for now. Whether it is done or not, let the package time tracker know.
+		FExclusiveLoadPackageTimeTracker::PopLoadPackage(Linker ? Linker->LinkerRoot : nullptr);
 
 		// End async loading, simulates EndLoad
 		EndAsyncLoad();
@@ -1633,21 +1643,20 @@ EAsyncPackageState::Type FAsyncPackage::CreateExports()
 			UObject* Object	= Linker->CreateExport( ExportIndex++ );
 			// ... and preload it.
 			if( Object )
-			{
+			{				
 				// This will cause the object to be serialized. We do this here for all objects and
 				// not just UClass and template objects, for which this is required in order to ensure
 				// seek free loading, to be able introduce async file I/O.
 				Linker->Preload( Object );
-
 			}
 
 			LastObjectWorkWasPerformedOn	= Object;
-			LastTypeOfWorkPerformed			= TEXT("creating exports for");
-			
+			LastTypeOfWorkPerformed = TEXT("creating exports for");
+				
 			UpdateLoadPercentage();
 		}
 		// Data isn't ready yet. Give up remainder of time slice if we're not using a time limit.
-		else if( GiveUpTimeSlice() )
+		else if (GiveUpTimeSlice())
 		{
 			INC_FLOAT_STAT_BY(STAT_AsyncIO_AsyncPackagePrecacheWaitTime, (float)FApp::GetDeltaTime());
 			return EAsyncPackageState::TimeOut;
@@ -1665,6 +1674,8 @@ EAsyncPackageState::Type FAsyncPackage::CreateExports()
  */
 void FAsyncPackage::FreeReferencedImports()
 {	
+	SCOPE_CYCLE_COUNTER(STAT_FAsyncPackage_FreeReferencedImports);	
+
 	for (int32 ReferenceIndex = 0; ReferenceIndex < ReferencedImports.Num(); ++ReferenceIndex)
 	{
 		FAsyncPackage& Ref = *ReferencedImports[ReferenceIndex];
@@ -2400,6 +2411,8 @@ void FArchiveAsync::PrecacheCompressedChunk( int64 ChunkIndex, int64 BufferIndex
  */
 bool FArchiveAsync::Precache( int64 RequestOffset, int64 RequestSize )
 {
+	SCOPE_CYCLE_COUNTER(STAT_FArchiveAsync_Precache);
+
 	// Check whether we're currently waiting for a read request to finish.
 	bool bFinishedReadingCurrent	= PrecacheReadStatus[CURRENT].GetValue()==0 ? true : false;
 	bool bFinishedReadingNext		= PrecacheReadStatus[NEXT].GetValue()==0 ? true : false;

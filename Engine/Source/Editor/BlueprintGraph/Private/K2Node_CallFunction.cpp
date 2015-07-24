@@ -1366,10 +1366,15 @@ FString UK2Node_CallFunction::GetDefaultTooltipForFunction(const UFunction* Func
 		static const FString DoxygenParam(TEXT("@param"));
 		static const FString DoxygenReturn(TEXT("@return"));
 		static const FString DoxygenSee(TEXT("@see"));
+		static const FString TooltipSee(TEXT("See:"));
+		static const FString DoxygenNote(TEXT("@note"));
+		static const FString TooltipNote(TEXT("Note:"));
 
 		Tooltip.Split(DoxygenParam, &Tooltip, nullptr, ESearchCase::IgnoreCase, ESearchDir::FromStart);
 		Tooltip.Split(DoxygenReturn, &Tooltip, nullptr, ESearchCase::IgnoreCase, ESearchDir::FromStart);
-		Tooltip.Split(DoxygenSee, &Tooltip, nullptr, ESearchCase::IgnoreCase, ESearchDir::FromStart);
+		Tooltip.ReplaceInline(*DoxygenSee, *TooltipSee);
+		Tooltip.ReplaceInline(*DoxygenNote, *TooltipNote);
+
 		Tooltip.Trim();
 		Tooltip.TrimTrailing();
 
@@ -2055,14 +2060,16 @@ UEdGraphPin* UK2Node_CallFunction::InnerHandleAutoCreateRef(UK2Node* Node, UEdGr
 		UK2Node_PureAssignmentStatement* AssignDefaultValue = CompilerContext.SpawnIntermediateNode<UK2Node_PureAssignmentStatement>(Node, SourceGraph);
 		AssignDefaultValue->AllocateDefaultPins();
 		const bool bVariableConnected = CompilerContext.GetSchema()->TryCreateConnection(AssignDefaultValue->GetVariablePin(), LocalVariable->GetVariablePin());
+		auto AssignInputPit = AssignDefaultValue->GetValuePin();
+		const bool bPreviousInputSaved = AssignInputPit && CompilerContext.MovePinLinksToIntermediate(*Pin, *AssignInputPit).CanSafeConnect();
 		const bool bOutputConnected = CompilerContext.GetSchema()->TryCreateConnection(AssignDefaultValue->GetOutputPin(), Pin);
-		if (!bVariableConnected || !bOutputConnected)
+		if (!bVariableConnected || !bOutputConnected || !bPreviousInputSaved)
 		{
 			CompilerContext.MessageLog.Error(*LOCTEXT("AutoCreateRefTermPin_AssignmentError", "AutoCreateRefTerm Expansion: Assignment Error @@").ToString(), AssignDefaultValue);
 			return NULL;
 		}
 		CompilerContext.GetSchema()->SetPinDefaultValueBasedOnType(AssignDefaultValue->GetValuePin());
-		return AssignDefaultValue->GetValuePin();
+		return AssignInputPit;
 	}
 	return NULL;
 }

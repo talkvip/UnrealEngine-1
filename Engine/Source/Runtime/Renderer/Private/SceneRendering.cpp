@@ -464,6 +464,8 @@ TUniformBufferRef<FViewUniformShaderParameters> FViewInfo::CreateUniformBuffer(
 	ViewUniformShaderParameters.WorldToClip = ViewProjectionMatrix;
 	ViewUniformShaderParameters.TranslatedWorldToView = EffectiveTranslatedViewMatrix;
 	ViewUniformShaderParameters.ViewToTranslatedWorld = EffectiveViewToTranslatedWorld;
+	ViewUniformShaderParameters.TranslatedWorldToCameraView = ViewMatrices.TranslatedViewMatrix;
+	ViewUniformShaderParameters.CameraViewToTranslatedWorld = ViewUniformShaderParameters.TranslatedWorldToCameraView.Inverse();
 	ViewUniformShaderParameters.ViewToClip = ViewMatrices.ProjMatrix;
 	ViewUniformShaderParameters.ClipToView = ViewMatrices.GetInvProjMatrix();
 	ViewUniformShaderParameters.ClipToTranslatedWorld = ViewMatrices.InvTranslatedViewProjectionMatrix;
@@ -497,6 +499,8 @@ TUniformBufferRef<FViewUniformShaderParameters> FViewInfo::CreateUniformBuffer(
 	ViewUniformShaderParameters.PrevTranslatedWorldToClip = PrevViewMatrices.TranslatedViewProjectionMatrix;
 	ViewUniformShaderParameters.PrevTranslatedWorldToView = PrevViewMatrices.TranslatedViewMatrix;
 	ViewUniformShaderParameters.PrevViewToTranslatedWorld = ViewUniformShaderParameters.PrevTranslatedWorldToView.Inverse();
+	ViewUniformShaderParameters.PrevTranslatedWorldToCameraView = PrevViewMatrices.TranslatedViewMatrix;
+	ViewUniformShaderParameters.PrevCameraViewToTranslatedWorld = ViewUniformShaderParameters.PrevTranslatedWorldToCameraView.Inverse();
 	ViewUniformShaderParameters.PrevViewOrigin = PrevViewMatrices.ViewOrigin;
 	ViewUniformShaderParameters.PrevPreViewTranslation = PrevViewMatrices.PreViewTranslation;
 	// can be optimized
@@ -758,8 +762,12 @@ TUniformBufferRef<FViewUniformShaderParameters> FViewInfo::CreateUniformBuffer(
 	ViewUniformShaderParameters.AmbientCubemapIntensity = FinalPostProcessSettings.AmbientCubemapIntensity;
 
 	{
-		// Enables toggle of HDR Mosaic mode without recompile of all PC shaders during ES2 emulation.
-		ViewUniformShaderParameters.HdrMosaic = IsMobileHDR32bpp() ? 1.0f : 0.0f;
+		// Enables HDR encoding mode selection without recompile of all PC shaders during ES2 emulation.
+		ViewUniformShaderParameters.HDR32bppEncodingMode = 0;
+		if (IsMobileHDR32bpp())
+		{
+			ViewUniformShaderParameters.HDR32bppEncodingMode = IsMobileHDRMosaic() ? 1.0f : 2.0f;
+		}
 	}
 	
 	FVector2D OneScenePixelUVSize = FVector2D(1.0f / BufferSize.X, 1.0f / BufferSize.Y);
@@ -1036,7 +1044,7 @@ void FViewInfo::DestroyAllSnapshots()
 	ViewInfoSnapshots.Reset();
 }
 
-IPooledRenderTarget* FViewInfo::GetEyeAdaptation() const
+FSceneViewState* FViewInfo::GetEffectiveViewState() const
 {
 	FSceneViewState* EffectiveViewState = ViewState;
 
@@ -1059,6 +1067,13 @@ IPooledRenderTarget* FViewInfo::GetEyeAdaptation() const
 		}
 	}
 
+	return EffectiveViewState;
+}
+
+IPooledRenderTarget* FViewInfo::GetEyeAdaptation() const
+{
+	FSceneViewState* EffectiveViewState = GetEffectiveViewState();
+
 	if (EffectiveViewState)
 	{
 		TRefCountPtr<IPooledRenderTarget>& EyeAdaptRef = EffectiveViewState->GetEyeAdaptation();
@@ -1069,6 +1084,28 @@ IPooledRenderTarget* FViewInfo::GetEyeAdaptation() const
 	}
 	return NULL;
 }
+
+bool FViewInfo::HasValidEyeAdaptation() const
+{
+	FSceneViewState* EffectiveViewState = GetEffectiveViewState();	
+
+	if (EffectiveViewState)
+	{
+		return EffectiveViewState->HasValidEyeAdaptation();
+	}
+	return false;
+}
+
+void FViewInfo::SetValidEyeAdaptation()
+{
+	FSceneViewState* EffectiveViewState = GetEffectiveViewState();	
+
+	if (EffectiveViewState)
+	{
+		EffectiveViewState->SetValidEyeAdaptation();
+	}
+}
+
 /*-----------------------------------------------------------------------------
 	FSceneRenderer
 -----------------------------------------------------------------------------*/
@@ -1433,7 +1470,7 @@ void FSceneRenderer::OnStartFrame()
 
 		if(State)
 		{
-			State->OnStartFrame(View);
+			State->OnStartFrame(View, ViewFamily);
 		}
 	}
 }
@@ -1666,6 +1703,47 @@ TGlobalResource<FFilterVertexDeclaration>& FRendererModule::GetFilterVertexDecla
 	return GFilterVertexDeclaration;
 }
 
+void FRendererModule::RegisterPostOpaqueRenderDelegate(const FPostOpaqueRenderDelegate& InPostOpaqueRenderDelegate)
+{
+	this->PostOpaqueRenderDelegate = InPostOpaqueRenderDelegate;
+}
+
+void FRendererModule::RegisterOverlayRenderDelegate(const FPostOpaqueRenderDelegate& InOverlayRenderDelegate)
+{
+	this->OverlayRenderDelegate = InOverlayRenderDelegate;
+}
+
+void FRendererModule::RenderPostOpaqueExtensions(const FSceneView& View, FRHICommandListImmediate& RHICmdList, FSceneRenderTargets& SceneContext)
+{
+	check(IsInRenderingThread());
+	FPostOpaqueRenderParameters RenderParameters;
+	RenderParameters.ViewMatrix = View.ViewMatrices.ViewMatrix;
+	RenderParameters.ProjMatrix = View.ViewMatrices.ProjMatrix;
+	RenderParameters.DepthTexture = SceneContext.GetSceneDepthSurface()->GetTexture2D();
+	RenderParameters.SmallDepthTexture = SceneContext.GetSmallDepthSurface()->GetTexture2D();
+
+	RenderParameters.ViewportRect = View.ViewRect;
+	RenderParameters.RHICmdList = &RHICmdList;
+
+	RenderParameters.Uid = (void*)(&View);
+	PostOpaqueRenderDelegate.ExecuteIfBound(RenderParameters);
+}
+
+void FRendererModule::RenderOverlayExtensions(const FSceneView& View, FRHICommandListImmediate& RHICmdList, FSceneRenderTargets& SceneContext)
+{
+	check(IsInRenderingThread());
+	FPostOpaqueRenderParameters RenderParameters;
+	RenderParameters.ViewMatrix = View.ViewMatrices.ViewMatrix;
+	RenderParameters.ProjMatrix = View.ViewMatrices.ProjMatrix;
+	RenderParameters.DepthTexture = SceneContext.GetSceneDepthSurface()->GetTexture2D();
+	RenderParameters.SmallDepthTexture = SceneContext.GetSmallDepthSurface()->GetTexture2D();
+
+	RenderParameters.ViewportRect = View.ViewRect;
+	RenderParameters.RHICmdList = &RHICmdList;
+
+	RenderParameters.Uid=(void*)(&View);
+	OverlayRenderDelegate.ExecuteIfBound(RenderParameters);
+}
 
 bool IsMobileHDR()
 {
@@ -1675,6 +1753,23 @@ bool IsMobileHDR()
 
 bool IsMobileHDR32bpp()
 {
-	static auto* MobileHDR32bppCvar = IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.MobileHDR32bpp"));
-	return IsMobileHDR() && (GSupportsRenderTargetFormat_PF_FloatRGBA == false || MobileHDR32bppCvar->GetValueOnRenderThread() == 1);
+	static auto* MobileHDR32bppModeCvar = IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.MobileHDR32bppMode"));
+	return IsMobileHDR() && (GSupportsRenderTargetFormat_PF_FloatRGBA == false || MobileHDR32bppModeCvar->GetValueOnRenderThread() != 0);
+}
+
+bool IsMobileHDRMosaic()
+{
+	if (!IsMobileHDR32bpp())
+		return false;
+
+	static auto* MobileHDR32bppMode = IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.MobileHDR32bppMode"));
+	switch (MobileHDR32bppMode->GetValueOnRenderThread())
+	{
+		case 1:
+			return true;
+		case 2:
+			return false;
+		default:
+			return !(GSupportsHDR32bppEncodeModeIntrinsic && GSupportsShaderFramebufferFetch);
+	}
 }

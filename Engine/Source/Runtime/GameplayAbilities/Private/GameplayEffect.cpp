@@ -1634,6 +1634,8 @@ void FActiveGameplayEffectsContainer::OnStackCountChange(FActiveGameplayEffect& 
 {
 	MarkItemDirty(ActiveEffect);
 	UpdateAllAggregatorModMagnitudes(ActiveEffect);
+	Owner->NotifyTagMap_StackCountChange(ActiveEffect.Spec.Def->InheritableOwnedTagsContainer.CombinedTags);
+	Owner->NotifyTagMap_StackCountChange(ActiveEffect.Spec.DynamicGrantedTags);
 }
 
 void FActiveGameplayEffectsContainer::UpdateAllAggregatorModMagnitudes(FActiveGameplayEffect& ActiveEffect)
@@ -1815,6 +1817,21 @@ float FActiveGameplayEffectsContainer::GetGameplayEffectMagnitude(FActiveGamepla
 
 	ABILITY_LOG(Warning, TEXT("GetGameplayEffectMagnitude called with invalid Handle: %s"), *Handle.ToString());
 	return -1.f;
+}
+
+void FActiveGameplayEffectsContainer::SetActiveGameplayEffectLevel(FActiveGameplayEffectHandle ActiveHandle, int32 NewLevel)
+{
+	for (FActiveGameplayEffect& Effect : this)
+	{
+		if (Effect.Handle == ActiveHandle)
+		{
+			Effect.Spec.SetLevel(NewLevel);
+			MarkItemDirty(Effect);
+			Effect.Spec.CalculateModifierMagnitudes();
+			UpdateAllAggregatorModMagnitudes(Effect);
+			break;
+		}
+	}
 }
 
 const FGameplayTagContainer* FActiveGameplayEffectsContainer::GetGameplayEffectSourceTagsFromHandle(FActiveGameplayEffectHandle Handle) const
@@ -3244,7 +3261,7 @@ bool FGameplayEffectQuery::Matches(const FActiveGameplayEffect& Effect) const
 	if (OwningTagQuery.IsEmpty() == false)
 	{
 		FGameplayTagContainer const& CombinedTags = Effect.Spec.Def->InheritableOwnedTagsContainer.CombinedTags;
-		if ((CombinedTags.Num() > 0) && (OwningTagQuery.Matches(CombinedTags) == false))		// note: matches on empty
+		if (OwningTagQuery.Matches(CombinedTags) == false)
 		{
 			if (OwningTagQuery.Matches(Effect.Spec.DynamicGrantedTags) == false)
 			{
@@ -3260,7 +3277,7 @@ bool FGameplayEffectQuery::Matches(const FActiveGameplayEffect& Effect) const
 	if (EffectTagQuery.IsEmpty() == false)
 	{
 		FGameplayTagContainer const& CombinedTags = Effect.Spec.Def->InheritableOwnedTagsContainer.CombinedTags;
-		if ((CombinedTags.Num() > 0) && (OwningTagQuery.Matches(CombinedTags) == false))		// note: matches on empty
+		if (OwningTagQuery.Matches(CombinedTags) == false)
 		{
 			if (OwningTagQuery.Matches(Effect.Spec.DynamicAssetTags) == false)
 			{

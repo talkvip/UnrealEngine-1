@@ -113,6 +113,9 @@ extern RHI_API bool GSupportsDepthRenderTargetWithoutColorRenderTarget;
 /** True if the RHI supports depth bounds testing */
 extern RHI_API bool GSupportsDepthBoundsTest;
 
+/** True if the RHI supports 'GetHDR32bppEncodeModeES2' shader intrinsic. */
+extern RHI_API bool GSupportsHDR32bppEncodeModeIntrinsic;
+
 /** The minimum Z value in clip space for the RHI. */
 extern RHI_API float GMinClipZ;
 
@@ -1162,6 +1165,9 @@ DECLARE_MEMORY_STAT_POOL_EXTERN(TEXT("Pixel buffer memory"),STAT_PixelBufferMemo
 
 /** Initializes the RHI. */
 extern RHI_API void RHIInit(bool bHasEditorToken);
+
+/** Performs additional RHI initialization before the render thread starts. */
+extern RHI_API void RHIPostInit();
 
 /** Shuts down the RHI. */
 extern RHI_API void RHIExit();

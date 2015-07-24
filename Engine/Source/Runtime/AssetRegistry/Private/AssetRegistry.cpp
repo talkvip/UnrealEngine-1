@@ -732,7 +732,7 @@ bool FAssetRegistry::GetAllAssets(TArray<FAssetData>& OutAssetData) const
 	return true;
 }
 
-bool FAssetRegistry::GetDependencies(FName PackageName, TArray<FName>& OutDependencies, EAssetRegistryDependencyType::Type InDependencyType) const
+bool FAssetRegistry::GetDependencies(FName PackageName, TArray<FName>& OutDependencies, EAssetRegistryDependencyType::Type InDependencyType, bool bResolveIniStringReferences) const
 {
 	const FDependsNode*const* NodePtr = CachedDependsNodes.Find(PackageName);
 	const FDependsNode* Node = NULL;
@@ -743,7 +743,27 @@ bool FAssetRegistry::GetDependencies(FName PackageName, TArray<FName>& OutDepend
 
 	if (Node != NULL)
 	{
-		Node->GetDependencies(OutDependencies, InDependencyType);
+		if (bResolveIniStringReferences)
+		{
+			TArray<FName> DependencyNodes;
+			Node->GetDependencies(DependencyNodes, InDependencyType);
+
+			for (auto NodeIt = DependencyNodes.CreateConstIterator(); NodeIt; ++NodeIt)
+			{
+				FString PackagePath = NodeIt->ToString();
+				const FString* IniFilename = GetIniFilenameFromObjectsReference(PackagePath);
+
+				OutDependencies.Add(
+					(IniFilename != nullptr)
+					? FName(*ResolveIniObjectsReference(PackagePath, IniFilename))
+					: *NodeIt);
+			}
+		}
+		else
+		{
+			Node->GetDependencies(OutDependencies, InDependencyType);
+		}
+
 		return true;
 	}
 	else
@@ -1148,7 +1168,7 @@ void FAssetRegistry::PrioritizeSearchPath(const FString& PathToPrioritize)
 		int32 LowestNonPriorityFileIdx = 0;
 		for (int32 ResultIdx = 0; ResultIdx < BackgroundAssetResults.Num(); ++ResultIdx)
 		{
-			if (BackgroundAssetResults[ResultIdx]->PackagePath.StartsWith(PathToPrioritize))
+			if (BackgroundAssetResults[ResultIdx]->IsWithinSearchPath(PathToPrioritize))
 			{
 				BackgroundAssetResults.Swap(ResultIdx, LowestNonPriorityFileIdx);
 				LowestNonPriorityFileIdx++;
@@ -1460,7 +1480,11 @@ void FAssetRegistry::SaveRegistryData(FArchive& Ar, TMap<FName, FAssetData*>& Da
 	{
 		Ar << *It.Value();
 		AssetIndexMap.Add(It.Value()->PackageName, AssetIndexMap.Num());
-		Dependencies.Add(FindDependsNode(It.Value()->PackageName));
+		FDependsNode* DependencyNode = FindDependsNode(It.Value()->PackageName);
+		if (DependencyNode)
+		{
+			Dependencies.Add(DependencyNode);
+		}
 	}
 
 	for (auto DependentNode : Dependencies)
@@ -1650,7 +1674,7 @@ void FAssetRegistry::ScanPathsSynchronous_Internal(const TArray<FString>& InPath
 		FAssetDataGatherer AssetSearch(PathsToScan, /*bSynchronous=*/true, bUseCache);
 
 		// Get the search results
-		TArray<FBackgroundAssetData*> AssetResults;
+		TArray<IGatheredAssetData*> AssetResults;
 		TArray<FString> PathResults;
 		TArray<FPackageDependencyData> DependencyResults;
 		TArray<double> SearchTimes;
@@ -1680,7 +1704,7 @@ void FAssetRegistry::ScanPathsSynchronous_Internal(const TArray<FString>& InPath
 	}
 }
 
-void FAssetRegistry::AssetSearchDataGathered(const double TickStartTime, TArray<FBackgroundAssetData*>& AssetResults)
+void FAssetRegistry::AssetSearchDataGathered(const double TickStartTime, TArray<IGatheredAssetData*>& AssetResults)
 {
 	const bool bFlushFullBuffer = TickStartTime < 0;
 	TSet<FName> ModifiedPaths;
@@ -1689,7 +1713,7 @@ void FAssetRegistry::AssetSearchDataGathered(const double TickStartTime, TArray<
 	int32 AssetIndex = 0;
 	for (AssetIndex = 0; AssetIndex < AssetResults.Num(); ++AssetIndex)
 	{
-		FBackgroundAssetData*& BackgroundResult = AssetResults[AssetIndex];
+		IGatheredAssetData*& BackgroundResult = AssetResults[AssetIndex];
 		FAssetData Result = BackgroundResult->ToAssetData();
 
 		// Try to update any asset data that may already exist
@@ -1712,7 +1736,7 @@ void FAssetRegistry::AssetSearchDataGathered(const double TickStartTime, TArray<
 		}
 
 		// Populate the path tree
-		AddAssetPath(BackgroundResult->PackagePath);
+		AddAssetPath(Result.PackagePath.ToString());
 
 		// Delete the result that was originally created by an FPackageReader
 		delete BackgroundResult;
@@ -1785,13 +1809,12 @@ void FAssetRegistry::DependencyDataGathered(const double TickStartTime, TArray<F
 
 		for (int32 StringAssetRefIdx = 0; StringAssetRefIdx < Result.StringAssetReferencesMap.Num(); ++StringAssetRefIdx)
 		{
-			FString PackageName, ObjName;
-			Result.StringAssetReferencesMap[StringAssetRefIdx].Split(".", &PackageName, &ObjName, ESearchCase::CaseSensitive);
-
-			if (!PackageDependencies.Contains(*PackageName))
+			if (FPackageName::IsShortPackageName(Result.StringAssetReferencesMap[StringAssetRefIdx]))
 			{
-				PackageDependencies.Add(*PackageName, EAssetRegistryDependencyType::Soft);
+				UE_LOG(LogAssetRegistry, Warning, TEXT("Package with string asset reference with short asset path: %s. This is unsupported, can couse errors and be slow on loading. Please resave the package to fix this."), *Result.PackageName.ToString());
 			}
+
+			PackageDependencies.Add(*Result.StringAssetReferencesMap[StringAssetRefIdx]);
 		}
 
 

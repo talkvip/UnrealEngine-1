@@ -384,7 +384,7 @@ void FLevelEditorModule::BroadcastTakeHighResScreenShots( )
 	TakeHighResScreenShotsEvent.Broadcast();
 }
 
-void FLevelEditorModule::BroadcastMapChanged( UWorld* World, EMapChangeType::Type MapChangeType )
+void FLevelEditorModule::BroadcastMapChanged( UWorld* World, EMapChangeType MapChangeType )
 {
 	MapChangedEvent.Broadcast( World, MapChangeType );
 }
@@ -1300,12 +1300,6 @@ void FLevelEditorModule::BindGlobalLevelEditorCommands()
 		Commands.CreateRoughConvexVolume,
 		FExecuteAction::CreateStatic( &FLevelEditorActionCallbacks::ExecuteExecCommand, FString( TEXT("ACTOR CREATE_BV_CONVEXVOLUME NORMALTOLERANCE=0.75 SnapToGrid=1") ) )
 		);
-
-	ActionList.MapAction(
-		Commands.SaveBrushAsCollision,
-		FExecuteAction::CreateStatic( &FLevelEditorActionCallbacks::OnSaveBrushAsCollision )
-		);
-
 
 	ActionList.MapAction(
 		Commands.KeepSimulationChanges,

@@ -813,9 +813,9 @@ void UWorld::RepairWorldSettings()
 		}
 		
 		FActorSpawnParameters SpawnInfo;
-		SpawnInfo.bNoCollisionFail = true;
+		SpawnInfo.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 		SpawnInfo.Name = GEngine->WorldSettingsClass->GetFName();
-		AWorldSettings* NewWorldSettings = SpawnActor<AWorldSettings>( GEngine->WorldSettingsClass, SpawnInfo );
+		AWorldSettings* const NewWorldSettings = SpawnActor<AWorldSettings>( GEngine->WorldSettingsClass, SpawnInfo );
 
 		const int32 NewWorldSettingsActorIndex = PersistentLevel->Actors.Find( NewWorldSettings );
 
@@ -1047,7 +1047,7 @@ void UWorld::InitializeNewWorld(const InitializationValues IVS)
 
 	// Create the WorldInfo actor.
 	FActorSpawnParameters SpawnInfo;
-	SpawnInfo.bNoCollisionFail = true;
+	SpawnInfo.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	// Set constant name for WorldSettings to make a network replication work between new worlds on host and client
 	SpawnInfo.Name = GEngine->WorldSettingsClass->GetFName();
 	AActor* WorldSettings = SpawnActor( GEngine->WorldSettingsClass, NULL, NULL, SpawnInfo );
@@ -2879,7 +2879,7 @@ bool UWorld::SetGameMode(const FURL& InURL)
 		// Spawn the GameMode.
 		UE_LOG(LogWorld, Log,  TEXT("Game class is '%s'"), *GameClass->GetName() );
 		FActorSpawnParameters SpawnInfo;
-		SpawnInfo.bNoCollisionFail = true;
+		SpawnInfo.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 		SpawnInfo.ObjectFlags |= RF_Transient;	// We never want to save game modes into a map
 		AuthorityGameMode = SpawnActor<AGameMode>( GameClass, SpawnInfo );
 		
@@ -3062,6 +3062,12 @@ bool UWorld::IsNavigationRebuilt() const
 void UWorld::CleanupWorld(bool bSessionEnded, bool bCleanupResources, UWorld* NewWorld)
 {
 	check(IsVisibilityRequestPending() == false);
+
+	// Wait on current physics scenes if they are processing
+	if(FPhysScene* CurrPhysicsScene = GetPhysicsScene())
+	{
+		CurrPhysicsScene->WaitPhysScenes();
+	}
 
 	FWorldDelegates::OnWorldCleanup.Broadcast(this, bSessionEnded, bCleanupResources);
 
@@ -5395,8 +5401,6 @@ ENetMode UWorld::GetNetMode() const
 
 	// Use NextURL or PendingNetURL to derive NetMode
 	return AttemptDeriveFromURL();
-
-	//return NM_Standalone;
 }
 
 #if WITH_EDITOR
@@ -5413,9 +5417,33 @@ ENetMode UWorld::AttemptDeriveFromPlayInSettings() const
 			switch (PlayNetMode)
 			{
 			case EPlayNetMode::PIE_Client:
+			{
+				int32 NumberOfClients = 0;
+				PlayInSettings->GetPlayNumberOfClients(NumberOfClients);
+
+				bool bAutoConnectToServer = false;
+				PlayInSettings->GetAutoConnectToServer(bAutoConnectToServer);
+
+				// Playing as client without listen server in single process,
+				// or as a client not going to connect to a server
+				if(NumberOfClients == 1 || bAutoConnectToServer == false)
+				{
+					return NM_Standalone;
+				}
 				return NM_Client;
+			}
 			case EPlayNetMode::PIE_ListenServer:
+			{
+				bool bDedicatedServer = false;
+				PlayInSettings->GetPlayNetDedicated(bDedicatedServer);
+
+				if(bDedicatedServer == true)
+				{
+					return NM_DedicatedServer;
+				}
+
 				return NM_ListenServer;
+			}
 			case EPlayNetMode::PIE_Standalone:
 				return NM_Standalone;
 			default:

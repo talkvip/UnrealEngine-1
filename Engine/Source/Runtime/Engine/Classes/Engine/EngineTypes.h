@@ -2457,6 +2457,10 @@ struct FMeshMergingSettings
 	UPROPERTY(EditAnywhere, Category=FMeshMergingSettings)
 	bool bPivotPointAtZero;
 
+	/** Whether to merge physics data (collision primitives)*/
+	UPROPERTY(EditAnywhere, Category=FMeshMergingSettings)
+	bool bMergePhysicsData;
+
 	/** Whether to merge source materials into one flat material */
 	UPROPERTY(EditAnywhere, Category=MeshMerge)
 	bool bMergeMaterials;
@@ -2483,6 +2487,7 @@ struct FMeshMergingSettings
 		, TargetLightMapResolution(256)
 		, bImportVertexColors(false)
 		, bPivotPointAtZero(false)
+		, bMergePhysicsData(false)
 		, bMergeMaterials(false)
 		, bExportNormalMap(true)
 		, bExportMetallicMap(false)
@@ -3641,3 +3646,20 @@ struct FCanvasUVTri
 
 
 template <> struct TIsZeroConstructType<FCanvasUVTri> { enum { Value = true }; };
+
+/** Defines available strategies for handling the case where an actor is spawned in such a way that it penetrates blocking collision. */
+UENUM(BlueprintType)
+enum class ESpawnActorCollisionHandlingMethod : uint8
+{
+	/** Fall back to default settings. */
+	Undefined								UMETA(DisplayName = "Default"),
+	/** Actor will spawn in desired location, regardless of collisions. */
+	AlwaysSpawn								UMETA(DisplayName = "Always Spawn, Ignore Collisions"),
+	/** Actor will try to find a nearby non-colliding location (based on shape components), but will always spawn even if one cannot be found. */
+	AdjustIfPossibleButAlwaysSpawn			UMETA(DisplayName = "Try To Adjust Location, But Always Spawn"),
+	/** Actor will try to find a nearby non-colliding location (based on shape components), but will NOT spawn unless one is found. */
+	AdjustIfPossibleButDontSpawnIfColliding	UMETA(DisplayName = "Try To Adjust Location, Don't Spawn If Still Colliding"),
+	/** Actor will fail to spawn. */
+	DontSpawnIfColliding					UMETA(DisplayName = "Do Not Spawn"),
+};
+

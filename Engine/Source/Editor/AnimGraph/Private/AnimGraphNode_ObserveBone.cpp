@@ -6,6 +6,8 @@
 #include "SGraphNode.h"
 #include "KismetNodeInfoContext.h"
 #include "KismetDebugUtilities.h"
+#include "DetailLayoutBuilder.h"
+#include "PropertyHandle.h"
 
 #define LOCTEXT_NAMESPACE "ObserveBone"
 
@@ -36,11 +38,8 @@ public:
 	{
 		SGraphNode::UpdateGraphNode();
 
-		// Prevent the comment bubble from being displayed
-// 		GetOrAddSlot(ENodeZone::TopCenter)
-// 		[
-// 			SNullWidget::NullWidget
-// 		];
+		// Remove the comment bubble slot
+		RemoveSlot(ENodeZone::TopCenter);
 	}
 	// End of SGraphNode interface
 
@@ -190,6 +189,13 @@ void UAnimGraphNode_ObserveBone::CustomizePinData(UEdGraphPin* Pin, FName Source
 	{
 		Pin->bHidden = true;
 	}
+}
+
+void UAnimGraphNode_ObserveBone::CustomizeDetails(IDetailLayoutBuilder& DetailBuilder)
+{
+	TSharedRef<IPropertyHandle> NodeHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UAnimGraphNode_ObserveBone, Node), GetClass());
+	DetailBuilder.HideProperty(NodeHandle->GetChildHandle(GET_MEMBER_NAME_CHECKED(FAnimNode_SkeletalControlBase, Alpha)));
+	DetailBuilder.HideProperty(NodeHandle->GetChildHandle(GET_MEMBER_NAME_CHECKED(FAnimNode_SkeletalControlBase, AlphaScaleBias)));
 }
 
 #undef LOCTEXT_NAMESPACE

@@ -47,7 +47,7 @@ void SProjectLauncherSettings::Construct( const FArguments& InArgs, const FProje
 				.VAlign(VAlign_Center)
 				.Padding(4.0f, 0.0f, 4.0f, 0.0f)
 				[
-					SNew(SProjectLauncherProfileNameDescEditor, true)
+					SNew(SProjectLauncherProfileNameDescEditor, InModel, true)
 					.LaunchProfile(this, &SProjectLauncherSettings::GetLaunchProfile)
 				]
 
@@ -299,7 +299,7 @@ void SProjectLauncherSettings::OnNameTextCommitted(const FText& NewText, ETextCo
 	const ILauncherProfilePtr& LaunchProfile = Model->GetSelectedProfile();
 	if (LaunchProfile.IsValid())
 	{
-		LaunchProfile->SetName(NewText.ToString());
+		Model->GetProfileManager()->ChangeProfileName(LaunchProfile.ToSharedRef(), NewText.ToString());
 	}
 }
 

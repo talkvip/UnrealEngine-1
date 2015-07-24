@@ -58,12 +58,10 @@ public:
 	/**
 	 *	FWorldTileModel Constructor
 	 *
-	 *	@param	InEditor		The UEditorEngine to use
 	 *	@param	InWorldData		WorldBrowser world data
 	 *	@param	TileIdx			Tile index in world composition tiles list
 	 */
-	FWorldTileModel(const TWeakObjectPtr<UEditorEngine>& InEditor, 
-					FWorldTileCollectionModel& InWorldData, int32 TileIdx);
+	FWorldTileModel(FWorldTileCollectionModel& InWorldData, int32 TileIdx);
 	~FWorldTileModel();
 
 public:
@@ -84,6 +82,8 @@ public:
 	virtual void OnLevelRemovedFromWorld() override;
 	virtual void OnParentChanged() override;
 	virtual bool IsVisibleInCompositionView() const override;
+	virtual FLinearColor GetLevelColor() const override;
+	virtual void SetLevelColor(FLinearColor InColor) override;
 	// FLevelModel interface end
 	
 	/** Adds new streaming level*/

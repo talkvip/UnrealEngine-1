@@ -206,65 +206,71 @@ void FCollisionResponse::UpdateResponseContainerFromArray()
 ////////////////////////////////////////////////////////////////////////////
 
 FBodyInstance::FBodyInstance()
-: InstanceBodyIndex(INDEX_NONE)
-, InstanceBoneIndex(INDEX_NONE)
-, Scale3D(1.0f)
-, SceneIndexSync(0)
-, SceneIndexAsync(0)
-, CollisionProfileName(UCollisionProfile::CustomCollisionProfileName)
-, CollisionEnabled(ECollisionEnabled::QueryAndPhysics)
-, ObjectType(ECC_WorldStatic)
-, bUseCCD(false)
-, bNotifyRigidBodyCollision(false)
-, bSimulatePhysics(false)
-, bOverrideMass(false)
-, MassInKg(100.f)
-, LinearDamping(0.01)
-, AngularDamping(0.0)
-, bEnableGravity(true)
-, bAutoWeld(false)
-, bWelded(false)
-, bStartAwake(true)
-, bGenerateWakeEvents(false)
-, bUpdateMassWhenScaleChanges(false)
-, bLockTranslation(true)
-, bLockRotation(true)
-, bLockXTranslation(false)
-, bLockYTranslation(false)
-, bLockZTranslation(false)
-, bLockXRotation(false)
-, bLockYRotation(false)
-, bLockZRotation(false)
-, DOFMode(0)
-, CustomDOFPlaneNormal(FVector::ZeroVector)
-, COMNudge(ForceInit)
-, MassScale(1.f)
-, DOFConstraint(NULL)
-, WeldParent(NULL)
-, bUseAsyncScene(false)
-, bOverrideMaxDepenetrationVelocity(false)
-, MaxDepenetrationVelocity(0.f)
-, bOverrideWalkableSlopeOnInstance(false)
-, PhysMaterialOverride(NULL)
-, SleepFamily(ESleepFamily::Normal)
-, CustomSleepThresholdMultiplier(1.f)
-, PhysicsBlendWeight(0.f)
-, PositionSolverIterationCount(8)
-, VelocitySolverIterationCount(1)
+	: InstanceBodyIndex(INDEX_NONE)
+	, InstanceBoneIndex(INDEX_NONE)
+	, Scale3D(1.0f)
+	, SceneIndexSync(0)
+	, SceneIndexAsync(0)
+	, CollisionProfileName(UCollisionProfile::CustomCollisionProfileName)
+	, bUseCCD(false)
+	, bNotifyRigidBodyCollision(false)
+	, bSimulatePhysics(false)
+	, bOverrideMass(false)
+	, bEnableGravity(true)
+	, bAutoWeld(false)
+	, bWelded(false)
+	, bStartAwake(true)
+	, bGenerateWakeEvents(false)
+	, bUpdateMassWhenScaleChanges(false)
+	, bLockTranslation(true)
+	, bLockRotation(true)
+	, bLockXTranslation(false)
+	, bLockYTranslation(false)
+	, bLockZTranslation(false)
+	, bLockXRotation(false)
+	, bLockYRotation(false)
+	, bLockZRotation(false)
 #if WITH_PHYSX
-, RigidActorSync(NULL)
-, RigidActorAsync(NULL)
-, BodyAggregate(NULL)
-, RigidActorSyncId(PX_SERIAL_OBJECT_ID_INVALID)
-, RigidActorAsyncId(PX_SERIAL_OBJECT_ID_INVALID)
-, InitialLinearVelocity(0.0f)
-, bWokenExternally(false)
-, PhysxUserData(this)
-, CurrentSceneState(BodyInstanceSceneState::NotAdded)
-#endif	//WITH_PHYSX
+	, bWokenExternally(false)
+#endif // WITH_PHYSX
+	, bUseAsyncScene(false)
+	, bOverrideMaxDepenetrationVelocity(false)
+	, bOverrideWalkableSlopeOnInstance(false)
+	, MaxDepenetrationVelocity(0.f)
+	, MassInKg(100.f)
+	, LinearDamping(0.01)
+	, AngularDamping(0.0)
+	, CustomDOFPlaneNormal(FVector::ZeroVector)
+	, COMNudge(ForceInit)
+	, MassScale(1.f)
+	, DOFConstraint(NULL)
+	, WeldParent(NULL)
+	, PhysMaterialOverride(NULL)
+	, CustomSleepThresholdMultiplier(1.f)
+	, PhysicsBlendWeight(0.f)
+	, PositionSolverIterationCount(8)
+#if WITH_PHYSX
+	, RigidActorSync(NULL)
+	, RigidActorAsync(NULL)
+	, BodyAggregate(NULL)
+	, RigidActorSyncId(PX_SERIAL_OBJECT_ID_INVALID)
+	, RigidActorAsyncId(PX_SERIAL_OBJECT_ID_INVALID)
+#endif // WITH_PHYSX
+	, VelocitySolverIterationCount(1)
+#if WITH_PHYSX
+	, InitialLinearVelocity(0.0f)
+	, PhysxUserData(this)
+#endif // WITH_PHYSX
 #if WITH_BOX2D
-, BodyInstancePtr(nullptr)
-#endif
+	, BodyInstancePtr(nullptr)
+#endif // WITH_BOX2D
+#if WITH_PHYSX
+	, CurrentSceneState(BodyInstanceSceneState::NotAdded)
+#endif // WITH_PHYSX
+	, SleepFamily(ESleepFamily::Normal)
+	, DOFMode(0)
+	, CollisionEnabled(ECollisionEnabled::QueryAndPhysics)
+	, ObjectType(ECC_WorldStatic)
 {
 	MaxAngularVelocity = UPhysicsSettings::Get()->MaxAngularVelocity;
 }
@@ -829,6 +835,12 @@ void FBodyInstance::UpdatePhysicsShapeFilterData(uint32 SkelMeshCompID, bool bUs
 void FBodyInstance::UpdatePhysicsFilterData()
 {
 	SCOPE_CYCLE_COUNTER(STAT_UpdatePhysFilter);
+
+	if(WeldParent)
+	{
+		WeldParent->UpdatePhysicsFilterData();
+		return;
+	}
 
 	// Do nothing if no physics actor
 	if (!IsValidBodyInstance())
@@ -1677,14 +1689,14 @@ FVector GetInitialLinearVelocity(const AActor* OwningActor, bool& bComponentAwak
 const FBodyInstance* FBodyInstance::GetOriginalBodyInstance(const PxShape* PShape) const
 {
 	const FBodyInstance* BI = WeldParent ? WeldParent : this;
-	const FWeldInfo* Result = BI->ShapeToBodiesMap.Find(PShape);
+	const FWeldInfo* Result = BI->ShapeToBodiesMap.IsValid() ? BI->ShapeToBodiesMap->Find(PShape) : nullptr;
 	return Result ? Result->ChildBI : this;
 }
 
 const FTransform& FBodyInstance::GetRelativeBodyTransform(const physx::PxShape* PShape) const
 {
 	const FBodyInstance* BI = WeldParent ? WeldParent : this;
-	const FWeldInfo* Result = BI->ShapeToBodiesMap.Find(PShape);
+	const FWeldInfo* Result = BI->ShapeToBodiesMap.IsValid() ? BI->ShapeToBodiesMap->Find(PShape) : nullptr;
 	return Result ? Result->RelativeTM : FTransform::Identity;
 }
 
@@ -1732,7 +1744,7 @@ TArray<int32> FBodyInstance::AddCollisionNotifyInfo(const FBodyInstance* Body0, 
 }
 
 //helper function for TermBody to avoid code duplication between scenes
-void TermBodyHelper(int32& SceneIndex, PxRigidActor*& PRigidActor, FBodyInstance* BodyInstance)
+void TermBodyHelper(int16& SceneIndex, PxRigidActor*& PRigidActor, FBodyInstance* BodyInstance)
 {
 	if (SceneIndex)
 	{
@@ -1883,20 +1895,26 @@ bool FBodyInstance::Weld(FBodyInstance* TheirBody, const FTransform& TheirTM)
 
 		if (PxRigidActor* MyBody = RigidActorAsync)
 		{
-			TheirBody->BodySetup->AddShapesToRigidActor_AssumesLocked(this, MyBody, PST_Sync, Scale3D, PSimpleMat, ComplexPhysMats, ShapeData, RelativeTM, &PNewShapes);
+			TheirBody->BodySetup->AddShapesToRigidActor_AssumesLocked(this, MyBody, PST_Async, Scale3D, PSimpleMat, ComplexPhysMats, ShapeData, RelativeTM, &PNewShapes);
 			if (TheirBody->bGenerateWakeEvents)
 			{
 				MyBody->setActorFlag(PxActorFlag::eSEND_SLEEP_NOTIFIES, true);
 			}
 		}
 
-		for (int32 ShapeIdx = 0; ShapeIdx < PNewShapes.Num(); ++ShapeIdx)
+		if(PNewShapes.Num())
 		{
-			PxShape* PShape = PNewShapes[ShapeIdx];
-			ShapeToBodiesMap.Add(PShape, FWeldInfo(TheirBody, RelativeTM));
+			if(!ShapeToBodiesMap.IsValid())
+			{
+				ShapeToBodiesMap = TSharedPtr<TMap<physx::PxShape*, FWeldInfo>> (new TMap<physx::PxShape*, FWeldInfo>());
+			}
+
+			for (int32 ShapeIdx = 0; ShapeIdx < PNewShapes.Num(); ++ShapeIdx)
+			{
+				PxShape* PShape = PNewShapes[ShapeIdx];
+				ShapeToBodiesMap->Add(PShape, FWeldInfo(TheirBody, RelativeTM));
+			}
 		}
-
-
 
 		PostShapeChange();
 
@@ -1925,25 +1943,25 @@ void FBodyInstance::UnWeld(FBodyInstance* TheirBI)
 		TArray<physx::PxShape *> PShapes;
 		const int32 NumSyncShapes = GetAllShapes_AssumesLocked(PShapes);
 
-	for (int32 ShapeIdx = 0; ShapeIdx < NumSyncShapes; ++ShapeIdx)
-	{
-		PxShape* PShape = PShapes[ShapeIdx];
-			const FBodyInstance* BI = GetOriginalBodyInstance(PShape);
-			if (TheirBI == BI)
-			{
-				ShapeToBodiesMap.Remove(PShape);
-				RigidActorSync->detachShape(*PShape);
-				bShapesChanged = true;
-			}
+		for (int32 ShapeIdx = 0; ShapeIdx < NumSyncShapes; ++ShapeIdx)
+		{
+			PxShape* PShape = PShapes[ShapeIdx];
+				const FBodyInstance* BI = GetOriginalBodyInstance(PShape);
+				if (TheirBI == BI)
+				{
+					ShapeToBodiesMap->Remove(PShape);
+					RigidActorSync->detachShape(*PShape);
+					bShapesChanged = true;
+				}
 		}
 
-	for (int32 ShapeIdx = NumSyncShapes; ShapeIdx <PShapes.Num(); ++ShapeIdx)
-	{
-		PxShape* PShape = PShapes[ShapeIdx];
+		for (int32 ShapeIdx = NumSyncShapes; ShapeIdx <PShapes.Num(); ++ShapeIdx)
+		{
+			PxShape* PShape = PShapes[ShapeIdx];
 			const FBodyInstance* BI = GetOriginalBodyInstance(PShape);
 			if (TheirBI == BI)
 			{
-				ShapeToBodiesMap.Remove(PShape);
+				ShapeToBodiesMap->Remove(PShape);
 				RigidActorAsync->detachShape(*PShape);
 				bShapesChanged = true;
 			}

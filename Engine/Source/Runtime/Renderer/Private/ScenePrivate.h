@@ -32,13 +32,15 @@ typedef TConstDualSetBitIterator<SceneRenderingBitArrayAllocator,SceneRenderingB
 
 // Forward declarations.
 class FScene;
-class FLightPropagationVolume;
 
 /** True if HDR is enabled for the mobile renderer. */
 bool IsMobileHDR();
 
 /** True if the mobile renderer is emulating HDR in a 32bpp render target. */
 bool IsMobileHDR32bpp();
+
+/** True if the mobile renderer is emulating HDR with mosaic. */
+bool IsMobileHDRMosaic();
 
 class FOcclusionQueryHelpers
 {
@@ -105,6 +107,7 @@ public:
 #include "ClearQuad.h"
 #include "AtmosphereRendering.h"
 #include "GlobalDistanceFieldParameters.h"
+#include "LightPropagationVolume.h"
 
 /** Factor by which to grow occlusion tests **/
 #define OCCLUSION_SLOP (1.0f)
@@ -464,6 +467,9 @@ private:
 	// to implement eye adaptation changes over time
 	TRefCountPtr<IPooledRenderTarget> EyeAdaptationRT;
 
+	// eye adaptation is only valid after it has been computed, not on allocation of the RT
+	bool bValidEyeAdaptation;
+
 	// used by the Postprocess Material Blending system to avoid recreation and garbage collection of MIDs
 	TArray<UMaterialInstanceDynamic*> MIDPool;
 	uint32 MIDUsedCount;
@@ -475,8 +481,11 @@ private:
 
 	int32 DistanceFieldTemporalSampleIndex;
 
-	// can be 0
-	FLightPropagationVolume* LightPropagationVolume;
+	// light propagation volume used in this view
+	TRefCountPtr<FLightPropagationVolume> LightPropagationVolume;
+
+	// whether this view is a stereo counterpart to a primary view
+	bool bIsStereoView;
 
 public:
 
@@ -582,10 +591,13 @@ public:
 	}
 
 	// call only if not yet created
-	void CreateLightPropagationVolumeIfNeeded(ERHIFeatureLevel::Type InFeatureLevel);
+	void SetupLightPropagationVolume(FSceneView& View, FSceneViewFamily& ViewFamily);
 
-	// @return can return 0 (if globally disabled)
-	FLightPropagationVolume* GetLightPropagationVolume(ERHIFeatureLevel::Type InFeatureLevel) const;
+	/**
+	 * @return can return 0
+	 * @param bIncludeStereo - specifies whether the getter should include stereo views in its returned value
+	 */
+	FLightPropagationVolume* GetLightPropagationVolume(ERHIFeatureLevel::Type InFeatureLevel, bool bIncludeStereo = false) const;
 
 	/** Default constructor. */
 	FSceneViewState();
@@ -649,6 +661,16 @@ public:
 		return EyeAdaptationRT;
 	}
 
+	bool HasValidEyeAdaptation() const
+	{
+		return bValidEyeAdaptation;
+	}
+
+	void SetValidEyeAdaptation()
+	{
+		bValidEyeAdaptation = true;
+	}
+
 	TRefCountPtr<IPooledRenderTarget>& GetSeparateTranslucency(FIntPoint Size)
 	{
 		if (!SeparateTranslucencyRT || SeparateTranslucencyRT->GetDesc().Extent != Size)
@@ -703,6 +725,11 @@ public:
 	// FSceneViewStateInterface
 	RENDERER_API virtual void Destroy() override;
 	
+	virtual FSceneViewState* GetConcreteViewState() override
+	{
+		return this;
+	}
+
 	virtual void AddReferencedObjects(FReferenceCollector& Collector) override
 	{
 		uint32 Count = MIDPool.Num();
@@ -716,13 +743,13 @@ public:
 	}
 
 	/** called in InitViews() */
-	virtual void OnStartFrame(FSceneView& CurrentView) override
+	virtual void OnStartFrame(FSceneView& View, FSceneViewFamily& ViewFamily) override
 	{
 		check(IsInRenderingThread());
 
-		if(!(CurrentView.FinalPostProcessSettings.IndirectLightingColor * CurrentView.FinalPostProcessSettings.IndirectLightingIntensity).IsAlmostBlack())
+		if(!(View.FinalPostProcessSettings.IndirectLightingColor * View.FinalPostProcessSettings.IndirectLightingIntensity).IsAlmostBlack())
 		{
-			CreateLightPropagationVolumeIfNeeded(CurrentView.GetFeatureLevel());
+			SetupLightPropagationVolume(View, ViewFamily);
 		}
 	}
 

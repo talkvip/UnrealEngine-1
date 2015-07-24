@@ -28,15 +28,16 @@ namespace UnrealBuildTool
 				UEToolChain.RegisterPlatformToolChain(CPPTargetPlatform.HTML5, this);
 			}
 		}
+
 		public override void PreBuildSync()
 		{
+			Log.TraceInformation("Setting Emscripten SDK ");
 			HTML5SDKInfo.SetupEmscriptenTemp();
 			HTML5SDKInfo.SetUpEmscriptenConfigFile();
 			// set some environment variable we'll need.
 			// Forces emcc to use our generated .emscripten config, not the one in the users home directory.
 			Environment.SetEnvironmentVariable("EM_CONFIG", HTML5SDKInfo.DOT_EMSCRIPTEN);
 			Environment.SetEnvironmentVariable("EM_CACHE", HTML5SDKInfo.EMSCRIPTEN_CACHE); 
-
 		}
 	
 		static string GetSharedArguments_Global(CPPTargetConfiguration TargetConfiguration, string Architecture, bool bEnableShadowVariableWarning)
@@ -535,7 +536,7 @@ namespace UnrealBuildTool
 			throw new BuildException("HTML5 cannot compile C# files");
 		}
 
-        public override void AddFilesToReceipt(BuildReceipt Receipt, UEBuildBinary Binary)
+        public override void AddFilesToReceipt(TargetReceipt Receipt, UEBuildBinary Binary)
         {
             // we need to include the generated .mem and .symbols file.  
 			if(Binary.Config.Type != UEBuildBinaryType.StaticLibrary)

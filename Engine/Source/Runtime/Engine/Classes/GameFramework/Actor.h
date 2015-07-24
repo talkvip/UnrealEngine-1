@@ -341,18 +341,22 @@ private:
 
 public:
 
-	/** This actor collides with the world when placing in the editor or when spawned, even if RootComponent collision is disabled */
+	/** This actor collides with the world when placing in the editor, even if RootComponent collision is disabled. Does not affect spawning, @see SpawnCollisionHandlingMethod */
 	UPROPERTY()
-	uint32 bCollideWhenPlacing:1;    
+	uint32 bCollideWhenPlacing:1;
 
 	/** If true, this actor should search for an owned camera component to view through when used as a view target. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category=Actor, AdvancedDisplay)
 	uint32 bFindCameraComponentWhenViewTarget:1;
 	
-	/** If true, this actor will be replicated to network replys (default is true) */
+	/** If true, this actor will be replicated to network replays (default is true) */
 	UPROPERTY()
 	uint32 bRelevantForNetworkReplays:1;
 
+	/** Controls how to handle spawning this actor in a situation where it's colliding with something else. "Default" means AlwaysSpawn here. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category=Actor)
+	ESpawnActorCollisionHandlingMethod SpawnCollisionHandlingMethod;
+	
 	/** The time this actor was created, relative to World->GetTimeSeconds().
 	* @see UWorld::GetTimeSeconds()
 	*/
@@ -1089,15 +1093,6 @@ public:
 	class UMaterialInstanceDynamic* MakeMIDForMaterial(class UMaterialInterface* Parent);
 
 	//=============================================================================
-	// Sound functions.
-	
-	DEPRECATED(4.0, "Actor::PlaySoundOnActor will be removed. Use UGameplayStatics::PlaySoundAttached instead.")
-	void PlaySoundOnActor(class USoundCue* InSoundCue, float VolumeMultiplier=1.f, float PitchMultiplier=1.f);
-
-	DEPRECATED(4.0, "Actor::PlaySoundOnActor will be removed. Use UGameplayStatics::PlaySoundAtLocation instead.")
-	void PlaySoundAtLocation(class USoundCue* InSoundCue, FVector SoundLocation, float VolumeMultiplier=1.f, float PitchMultiplier=1.f);
-
-	//=============================================================================
 	// AI functions.
 	
 	/**
@@ -1622,10 +1617,15 @@ public:
 
 	/**
 	 * Assigns a new folder to this actor. Actor folder paths are only available in development builds.
-	 * @param	NewFolderPath	   The new folder to assign to the actor.
-	 * @param   bDetachFromParent  whether to detach this actor from its parent when setting the folder path
+	 * @param	NewFolderPath		The new folder to assign to the actor.
 	 */
-	void SetFolderPath(const FName& NewFolderPath, bool bDetachFromParent = true);
+	void SetFolderPath(const FName& NewFolderPath);
+
+	/**
+	 * Assigns a new folder to this actor and any attached children. Actor folder paths are only available in development builds.
+	 * @param	NewFolderPath		The new folder to assign to the actors.
+	 */
+	void SetFolderPath_Recursively(const FName& NewFolderPath);
 
 	/**
 	 * Used by the "Sync to Content Browser" right-click menu option in the editor.

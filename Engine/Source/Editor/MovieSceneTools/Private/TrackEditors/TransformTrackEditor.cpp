@@ -138,13 +138,17 @@ F3DTransformTrackEditor::F3DTransformTrackEditor( TSharedRef<ISequencer> InSeque
 
 F3DTransformTrackEditor::~F3DTransformTrackEditor()
 {
+	OnRelease();
+	F3DTransformTrackCommands::Unregister();
+}
+
+void F3DTransformTrackEditor::OnRelease()
+{
 	GEditor->OnBeginObjectMovement().RemoveAll( this );
 	GEditor->OnEndObjectMovement().RemoveAll( this );
 
 	GEditor->OnBeginCameraMovement().RemoveAll( this );
 	GEditor->OnEndCameraMovement().RemoveAll( this );
-
-	F3DTransformTrackCommands::Unregister();
 }
 
 TSharedRef<FMovieSceneTrackEditor> F3DTransformTrackEditor::CreateTrackEditor( TSharedRef<ISequencer> InSequencer )
@@ -327,6 +331,17 @@ void F3DTransformTrackEditor::AddScaleKey()
 
 void F3DTransformTrackEditor::AddTransformKeyInternal(F3DTransformTrackKey::Type KeyType)
 {
+	// WASD hotkeys to fly the viewport can conflict with hotkeys for setting keyframes (ie. s). 
+	// If the viewport is moving, disregard setting keyframes.
+	for (int32 i = 0; i < GEditor->LevelViewportClients.Num(); ++i)
+	{		
+		FLevelEditorViewportClient* LevelVC = GEditor->LevelViewportClients[i];
+		if (LevelVC && LevelVC->IsMovingCamera())
+		{
+			return;
+		}
+	}
+
 	USelection* CurrentSelection = GEditor->GetSelectedActors();
 	TArray<UObject*> SelectedActors;
 	CurrentSelection->GetSelectedObjects( AActor::StaticClass(), SelectedActors );
@@ -391,6 +406,7 @@ void F3DTransformTrackEditor::BuildObjectBindingEditButtons(TSharedPtr<SHorizont
 		.IsChecked(this, &F3DTransformTrackEditor::IsCameraLocked, CameraActor)
 		.OnCheckStateChanged(this, &F3DTransformTrackEditor::OnLockCameraClicked, CameraActor)
 		.ToolTipText(this, &F3DTransformTrackEditor::GetLockCameraToolTip, CameraActor)
+		.ForegroundColor(FLinearColor::White)
 		.CheckedImage(FEditorStyle::GetBrush("Sequencer.LockCamera"))
 		.CheckedHoveredImage(FEditorStyle::GetBrush("Sequencer.LockCamera"))
 		.CheckedPressedImage(FEditorStyle::GetBrush("Sequencer.LockCamera"))
@@ -415,7 +431,9 @@ void F3DTransformTrackEditor::OnTransformChangedInternals(float KeyTime, UObject
 	
 		if (!TransformPair.LastTransformData.IsValid())
 		{
-			bool bHasTranslationKeys = false, bHasRotationKeys = false, bHasScaleKeys = false;
+			TArray<bool> bHasTranslationKeys;
+			TArray<bool> bHasRotationKeys;
+			TArray<bool> bHasScaleKeys;			
 			TransformPair.LastTransformData.bValid = TransformTrack->Eval(KeyTime, KeyTime, TransformPair.LastTransformData.Translation, TransformPair.LastTransformData.Rotation, TransformPair.LastTransformData.Scale, bHasTranslationKeys, bHasRotationKeys, bHasScaleKeys);
 		}
 

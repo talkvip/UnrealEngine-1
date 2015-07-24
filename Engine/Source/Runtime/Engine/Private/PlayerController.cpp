@@ -3583,6 +3583,9 @@ void APlayerController::GetLifetimeReplicatedProps( TArray< FLifetimeProperty > 
 	// But, since they also don't update unless that condition is true, these values won't change, thus won't send
 	// This is a little less efficient, but fits into the new condition system well, and shouldn't really add much overhead
 	DOREPLIFETIME_CONDITION( APlayerController, TargetViewRotation,		COND_OwnerOnly );
+
+	// Replicate SpawnLocation for remote spectators
+	DOREPLIFETIME_CONDITION( APlayerController, SpawnLocation, COND_OwnerOnly );
 }
 
 void APlayerController::SetPawn(APawn* InPawn)
@@ -3917,16 +3920,28 @@ void APlayerController::SetSpectatorPawn(class ASpectatorPawn* NewSpectatorPawn)
 	{
 		RemovePawnTickDependency(SpectatorPawn);
 		SpectatorPawn = NewSpectatorPawn;
-		AttachToPawn(SpectatorPawn);
-		AddPawnTickDependency(SpectatorPawn);
-
+		
 		if (NewSpectatorPawn)
 		{
+			// setting to a new valid spectator pawn
+			AttachToPawn(NewSpectatorPawn);
+			AddPawnTickDependency(NewSpectatorPawn);
 			AutoManageActiveCameraTarget(NewSpectatorPawn);
 		}
 		else
 		{
-			AutoManageActiveCameraTarget(this);
+			// clearing the spectator pawn, try to attach to the regular pawn
+			APawn* const Pawn = GetPawn();
+			AttachToPawn(Pawn);
+			AddPawnTickDependency(Pawn);
+			if (Pawn)
+			{
+				AutoManageActiveCameraTarget(Pawn);
+			}
+			else
+			{
+				AutoManageActiveCameraTarget(this);
+			}
 		}
 	}
 }
@@ -3943,7 +3958,8 @@ ASpectatorPawn* APlayerController::SpawnSpectatorPawn()
 		{
 			FActorSpawnParameters SpawnParams;
 			SpawnParams.Owner = this;
-			SpawnParams.bNoCollisionFail = true;
+			SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
 			SpawnParams.ObjectFlags |= RF_Transient;	// We never want to save spectator pawns into a map
 			SpawnedSpectator = GetWorld()->SpawnActor<ASpectatorPawn>(GameState->SpectatorClass, GetSpawnLocation(), GetControlRotation(), SpawnParams);
 			if (SpawnedSpectator)

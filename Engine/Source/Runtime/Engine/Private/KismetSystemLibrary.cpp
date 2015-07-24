@@ -14,6 +14,9 @@
 #include "Kismet/GameplayStatics.h"
 #include "SlateCore.h"
 #include "Engine/StreamableManager.h"
+#include "OnlineSubsystemTypes.h"
+#include "OnlineSubsystemUtils.h"
+#include "OnlineIdentityInterface.h"
 
 //////////////////////////////////////////////////////////////////////////
 // UKismetSystemLibrary
@@ -1279,31 +1282,34 @@ bool UKismetSystemLibrary::ComponentOverlapComponents_NEW(UPrimitiveComponent* C
 {
 	OutComponents.Empty();
 
-	static FName ComponentOverlapComponentsName(TEXT("ComponentOverlapComponents"));
-	FComponentQueryParams Params(ComponentOverlapComponentsName);	
-	Params.bTraceAsyncScene = true;
-	Params.AddIgnoredActors(ActorsToIgnore);
-
-	TArray<FOverlapResult> Overlaps;
-
-	FCollisionObjectQueryParams ObjectParams;
-	for (auto Iter = ObjectTypes.CreateConstIterator(); Iter; ++Iter)
+	if(Component != nullptr)
 	{
-		const ECollisionChannel & Channel = UCollisionProfile::Get()->ConvertToCollisionChannel(false, *Iter);
-		ObjectParams.AddObjectTypesToQuery(Channel);
-	}
+		static FName ComponentOverlapComponentsName(TEXT("ComponentOverlapComponents"));
+		FComponentQueryParams Params(ComponentOverlapComponentsName);	
+		Params.bTraceAsyncScene = true;
+		Params.AddIgnoredActors(ActorsToIgnore);
 
-	check( Component->GetWorld());
-	Component->GetWorld()->ComponentOverlapMulti(Overlaps, Component, ComponentTransform.GetTranslation(), ComponentTransform.GetRotation(), Params, ObjectParams);
+		TArray<FOverlapResult> Overlaps;
 
-	for (int32 OverlapIdx=0; OverlapIdx<Overlaps.Num(); ++OverlapIdx)
-	{
-		FOverlapResult const& O = Overlaps[OverlapIdx];
-		if (O.Component.IsValid())
-		{ 
-			if ( !ComponentClassFilter || O.Component.Get()->IsA(ComponentClassFilter) )
-			{
-				OutComponents.Add(O.Component.Get());
+		FCollisionObjectQueryParams ObjectParams;
+		for (auto Iter = ObjectTypes.CreateConstIterator(); Iter; ++Iter)
+		{
+			const ECollisionChannel & Channel = UCollisionProfile::Get()->ConvertToCollisionChannel(false, *Iter);
+			ObjectParams.AddObjectTypesToQuery(Channel);
+		}
+
+		check( Component->GetWorld());
+		Component->GetWorld()->ComponentOverlapMulti(Overlaps, Component, ComponentTransform.GetTranslation(), ComponentTransform.GetRotation(), Params, ObjectParams);
+
+		for (int32 OverlapIdx=0; OverlapIdx<Overlaps.Num(); ++OverlapIdx)
+		{
+			FOverlapResult const& O = Overlaps[OverlapIdx];
+			if (O.Component.IsValid())
+			{ 
+				if ( !ComponentClassFilter || O.Component.Get()->IsA(ComponentClassFilter) )
+				{
+					OutComponents.Add(O.Component.Get());
+				}
 			}
 		}
 	}
@@ -2649,6 +2655,12 @@ void UKismetSystemLibrary::DrawDebugLine(UObject* WorldContextObject, FVector co
 	}
 }
 
+/** Draw a debug circle */
+void UKismetSystemLibrary::DrawDebugCircle(UObject* WorldContextObject,FVector Center, float Radius, int32 NumSegments, FLinearColor LineColor, float LifeTime, float Thickness, FVector YAxis, FVector ZAxis, bool bDrawAxis)
+{ 
+	::DrawDebugCircle(GEngine->GetWorldFromContextObject(WorldContextObject),Center, Radius, NumSegments, LineColor.ToFColor(true), false, LifeTime, SDPG_World, Thickness, YAxis, ZAxis, bDrawAxis);
+}
+
 /** Draw a debug point */
 void UKismetSystemLibrary::DrawDebugPoint(UObject* WorldContextObject, FVector const Position, float Size, FLinearColor PointColor, float LifeTime)
 {
@@ -3073,6 +3085,26 @@ void UKismetSystemLibrary::ShowPlatformSpecificAchievementsScreen(class APlayerC
 		}
 		ExternalUI->ShowAchievementsUI(LocalUserNum);
 	}
+}
+bool UKismetSystemLibrary::IsLoggedIn(APlayerController* SpecificPlayer)
+{
+	IOnlineIdentityPtr Identity = Online::GetIdentityInterface();
+	
+	if (!Identity.IsValid())
+	{
+		return false;
+	}
+	
+	int LocalUserNum = 0;
+	if (SpecificPlayer != nullptr)
+	{
+		ULocalPlayer* LocalPlayer = Cast<ULocalPlayer>(SpecificPlayer->Player);
+		if(LocalPlayer)
+		{
+			LocalUserNum = LocalPlayer->GetControllerId();
+		}
+	}
+	return Identity->GetLoginStatus(LocalUserNum) == ELoginStatus::LoggedIn;
 }
 
 void UKismetSystemLibrary::SetStructurePropertyByName(UObject* Object, FName PropertyName, const FGenericStruct& Value)

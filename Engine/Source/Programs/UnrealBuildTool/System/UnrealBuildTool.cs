@@ -9,7 +9,7 @@ using System.Threading;
 using System.Reflection;
 using System.Linq;
 using System.Runtime.Serialization.Formatters.Binary;
-using Tools.DotNETCommon.ExecutingAssembly;
+using Tools.DotNETCommon;
 
 namespace UnrealBuildTool
 {
@@ -192,7 +192,7 @@ namespace UnrealBuildTool
 
         static public string GetUBTPath()
         {
-            string UnrealBuildToolPath = Path.Combine(ExecutingAssembly.GetDirectory(), "UnrealBuildTool.exe");
+            string UnrealBuildToolPath = Assembly.GetExecutingAssembly().GetOriginalLocation();
             return UnrealBuildToolPath;
         }
 
@@ -604,7 +604,7 @@ namespace UnrealBuildTool
                 bLogSeverity: false,
                 bLogSources: false,
                 bColorConsoleOutput: true,
-                TraceListeners: new[] { new FilteredConsoleTraceListener() });
+                TraceListeners: new[] { new ConsoleTraceListener() });
         }
 
         /// <summary>
@@ -634,20 +634,19 @@ namespace UnrealBuildTool
             // Change the working directory to be the Engine/Source folder. We are likely running from Engine/Binaries/DotNET
             // This is critical to be done early so any code that relies on the current directory being Engine/Source will work.
             // UEBuildConfiguration.PostReset is susceptible to this, so we must do this before configs are loaded.
-            string EngineSourceDirectory = Path.Combine(ExecutingAssembly.GetDirectory(), "..", "..", "..", "Engine", "Source");
+            string EngineSourceDirectory = Path.Combine(Path.GetDirectoryName(Assembly.GetEntryAssembly().GetOriginalLocation()), "..", "..", "..", "Engine", "Source");
 
             //@todo.Rocket: This is a workaround for recompiling game code in editor
             // The working directory when launching is *not* what we would expect
             if (Directory.Exists(EngineSourceDirectory) == false)
             {
-                // We are assuming UBT always runs from <>/Engine/...
-                EngineSourceDirectory = ExecutingAssembly.GetDirectory();
+                // We are assuming UBT always runs from <>/Engine/Binaries/DotNET/...
+                EngineSourceDirectory = Assembly.GetExecutingAssembly().GetOriginalLocation();
                 EngineSourceDirectory = EngineSourceDirectory.Replace("\\", "/");
-                Int32 EngineIdx = EngineSourceDirectory.IndexOf("/Engine/");
+                Int32 EngineIdx = EngineSourceDirectory.IndexOf("/Engine/Binaries/DotNET/", StringComparison.InvariantCultureIgnoreCase);
                 if (EngineIdx != 0)
                 {
-                    EngineSourceDirectory = EngineSourceDirectory.Substring(0, EngineIdx + 8);
-                    EngineSourceDirectory += "Source";
+                    EngineSourceDirectory = Path.Combine(EngineSourceDirectory.Substring(0, EngineIdx), "Engine", "Source");
                 }
             }
             if (Directory.Exists(EngineSourceDirectory)) // only set the directory if it exists, this should only happen if we are launching the editor from an artist sync
@@ -854,7 +853,7 @@ namespace UnrealBuildTool
                 bColorConsoleOutput: true,
                 TraceListeners: new[] 
                 {
-                    new FilteredConsoleTraceListener(),
+                    new ConsoleTraceListener(),
                     !string.IsNullOrEmpty(BuildConfiguration.LogFilename) ? new TextWriterTraceListener(new StreamWriter(new FileStream(BuildConfiguration.LogFilename, FileMode.Create, FileAccess.ReadWrite, FileShare.Read)) { AutoFlush = true }) : null,
                 });
         }
@@ -941,7 +940,7 @@ namespace UnrealBuildTool
                 Mutex SingleInstanceMutex = null;
                 if (bUseMutex)
                 {
-                    int LocationHash = ExecutingAssembly.GetFilename().GetHashCode();
+                    int LocationHash = Assembly.GetEntryAssembly().GetOriginalLocation().GetHashCode();
 
                     String MutexName;
                     if (bAutoSDKOnly || bValidatePlatforms)
@@ -957,7 +956,7 @@ namespace UnrealBuildTool
                     SingleInstanceMutex = new Mutex(true, MutexName, out bCreatedMutex);
                     if (!bCreatedMutex)
                     {
-                        throw new BuildException("Mutex {0} already set, indicating that a conflicting instance of {1} is already running.", MutexName, ExecutingAssembly.GetFilename());
+                        throw new BuildException("Mutex {0} already set, indicating that a conflicting instance of {1} is already running.", MutexName, Assembly.GetEntryAssembly().GetOriginalLocation());
                     }
                 }
 
@@ -967,9 +966,10 @@ namespace UnrealBuildTool
                     var bGenerateVCProjectFiles = false;
                     var bGenerateXcodeProjectFiles = false;
                     var bGenerateMakefiles = false;
-					var bGenerateCMakefiles = false;
-					var bGenerateQMakefiles = false;
-					var bGenerateKDevelopFiles = false;
+                    var bGenerateCMakefiles = false;
+                    var bGenerateQMakefiles = false;
+                    var bGenerateKDevelopFiles = false;
+                    var bGenerateCodeLiteFiles = false;
                     var bValidPlatformsOnly = false;
                     var bSpecificModulesOnly = false;
 
@@ -1038,6 +1038,11 @@ namespace UnrealBuildTool
 						else if (LowercaseArg.StartsWith("-kdevelopfile"))
 						{
 							bGenerateKDevelopFiles = true;
+							ProjectFileGenerator.bGenerateProjectFiles = true;
+						}
+						else if (LowercaseArg.StartsWith("-codelitefile"))
+						{
+							bGenerateCodeLiteFiles = true;
 							ProjectFileGenerator.bGenerateProjectFiles = true;
 						}
                         else if (LowercaseArg.StartsWith("-projectfile"))
@@ -1150,6 +1155,13 @@ namespace UnrealBuildTool
 						throw new BuildException("When running UnrealCodeAnalyzer, please specify module to analyze in UCAModuleToAnalyze field in BuildConfiguration.xml");
 					}
 
+					// Get the build version
+					BuildVersion Version;
+					if(!Utils.TryReadBuildVersion("../Build/Build.version", out Version))
+					{
+						Log.TraceWarning("Could not read build.version");
+					}
+
                     // Send an event with basic usage dimensions
                     // [RCL] 2014-11-03 FIXME: this is incorrect since we can have more than one action
                     Telemetry.SendEvent("CommonAttributes.2",
@@ -1162,23 +1174,25 @@ namespace UnrealBuildTool
                         "UBT Action", bGenerateVCProjectFiles 
                             ? "GenerateVCProjectFiles" 
                             : bGenerateXcodeProjectFiles 
-                                ? "GenerateXcodeProjectFiles" 
-                                : bRunCopyrightVerification
-                                    ? "RunCopyrightVerification"
-                                    : bGenerateMakefiles
-                                        ? "GenerateMakefiles"
-										: bGenerateCMakefiles
-										    ? "GenerateCMakeFiles"
-											: bGenerateQMakefiles
-											    ? "GenerateQMakefiles"
-												: bGenerateKDevelopFiles
-													? "GenerateKDevelopFiles"
-													: bValidatePlatforms 
-                                                   		? "ValidatePlatforms"
-                                                		: "Build",
+                            ? "GenerateXcodeProjectFiles" 
+                            : bRunCopyrightVerification
+                            ? "RunCopyrightVerification"
+                            : bGenerateMakefiles
+                            ? "GenerateMakefiles"
+                            : bGenerateCMakefiles
+                            ? "GenerateCMakeFiles"
+                            : bGenerateQMakefiles
+                            ? "GenerateQMakefiles"
+                            : bGenerateKDevelopFiles
+                            ? "GenerateKDevelopFiles"
+                            : bGenerateCodeLiteFiles
+                            ? "GenerateCodeLiteFiles"
+                            : bValidatePlatforms 
+                            ? "ValidatePlatforms"
+                            : "Build",
                         "Platform", CheckPlatform.ToString(),
                         "Configuration", CheckConfiguration.ToString(),
-                        "EngineVersion", Utils.GetEngineVersionFromObjVersionCPP().ToString()
+                        "EngineVersion", (Version == null)? "0" : Version.Changelist.ToString()
                         );
 
 
@@ -1207,7 +1221,7 @@ namespace UnrealBuildTool
                         JunkDeleter.DeleteJunk();
                     }
 
-					if (bGenerateVCProjectFiles || bGenerateXcodeProjectFiles || bGenerateMakefiles || bGenerateCMakefiles || bGenerateQMakefiles || bGenerateKDevelopFiles)
+					if (bGenerateCodeLiteFiles || bGenerateVCProjectFiles || bGenerateXcodeProjectFiles || bGenerateMakefiles || bGenerateCMakefiles || bGenerateQMakefiles || bGenerateKDevelopFiles)
                     {
                         bool bGenerationSuccess = true;
                         if (bGenerateVCProjectFiles)
@@ -1234,7 +1248,10 @@ namespace UnrealBuildTool
 						{
 							bGenerationSuccess &= GenerateProjectFiles(new KDevelopGenerator(), Arguments);
 						}
-
+						if (bGenerateCodeLiteFiles)
+						{
+							bGenerationSuccess &= GenerateProjectFiles(new CodeLiteGenerator(), Arguments);
+						}
                         if(!bGenerationSuccess)
                         {
                             Result = ECompilationResult.OtherCompilationError;
@@ -1913,10 +1930,13 @@ namespace UnrealBuildTool
                                     ActionsToExecute.Count
                                     );
 
-							// clean up any stale modules
-							foreach (UEBuildTarget Target in Targets)
+							if (!bIsHotReload)
 							{
-								Target.CleanStaleModules();
+								// clean up any stale modules
+								foreach (UEBuildTarget Target in Targets)
+								{
+									Target.CleanStaleModules();
+								}
 							}
 							
 							ToolChain.PreBuildSync();
@@ -2003,7 +2023,7 @@ namespace UnrealBuildTool
             if (ExecutorName == "Local" || ExecutorName == "Distcc" || ExecutorName == "SNDBS")
             {
                 Log.WriteLineIf(BuildConfiguration.bLogDetailedActionStats || BuildConfiguration.bPrintDebugInfo,
-					TraceEventType.Information, 
+					LogEventType.Console, 
 					"Cumulative action seconds ({0} processors): {1:0.00} building projects, {2:0.00} compiling, {3:0.00} creating app bundles, {4:0.00} generating debug info, {5:0.00} linking, {6:0.00} other",
                     System.Environment.ProcessorCount,
                     TotalBuildProjectTime,

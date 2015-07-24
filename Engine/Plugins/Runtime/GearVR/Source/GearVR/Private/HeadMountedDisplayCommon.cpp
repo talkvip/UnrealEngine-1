@@ -11,11 +11,12 @@ FHMDSettings::FHMDSettings() :
 	, UserDistanceToScreenModifier(0.f)
 	, HFOVInRadians(FMath::DegreesToRadians(90.f))
 	, VFOVInRadians(FMath::DegreesToRadians(90.f))
-	, MirrorWindowSize(0, 0)
 	, NearClippingPlane(0)
 	, FarClippingPlane(0)
+	, MirrorWindowSize(0, 0)
 	, BaseOffset(0, 0, 0)
 	, BaseOrientation(FQuat::Identity)
+	, PositionOffset(FVector::ZeroVector)
 {
 	Flags.Raw = 0;
 	Flags.bHMDEnabled = true;
@@ -27,7 +28,6 @@ FHMDSettings::FHMDSettings() :
 	Flags.bYawDriftCorrectionEnabled = true;
 	Flags.bLowPersistenceMode = true;
 	Flags.bUpdateOnRT = true;
-	Flags.bOverdrive = true;
 	Flags.bMirrorToWindow = true;
 	Flags.bTimeWarp = true;
 	Flags.bHmdPosTracking = true;
@@ -130,6 +130,13 @@ FHeadMountedDisplay::FHeadMountedDisplay()
 	Flags.Raw = 0;
 	Flags.bNeedUpdateStereoRenderingParams = true;
 	DeltaControlRotation = FRotator::ZeroRotator;  // used from ApplyHmdRotation
+
+#if !UE_BUILD_SHIPPING
+	SideOfSingleCubeInMeters = 0;
+	SeaOfCubesVolumeSizeInMeters = 0;
+	NumberOfCubesInOneSide = 0;
+	CenterOffsetInMeters = FVector::ZeroVector; // offset from the center of 'sea of cubes'
+#endif
 }
 
 bool FHeadMountedDisplay::IsInitialized() const
@@ -162,11 +169,6 @@ TSharedPtr<FHMDSettings, ESPMode::ThreadSafe> FHeadMountedDisplay::CreateNewSett
 	return Result;
 }
 
-// FHMDGameFrame* FHeadMountedDisplay::GetCurrentFrame()
-// {
-// 	return const_cast<FHMDGameFrame*>(const_cast<const FHeadMountedDisplay*>(this)->FHMDGameFrame());
-// }
-
 FHMDGameFrame* FHeadMountedDisplay::GetCurrentFrame() const
 {
 	//UE_LOG(LogHMD, Log, TEXT("Getting current frame, frame number %d"), int(GFrameCounter));
@@ -195,29 +197,29 @@ FHMDGameFrame* FHeadMountedDisplay::GetCurrentFrame() const
 	return nullptr;
 }
 
-bool FHeadMountedDisplay::OnStartGameFrame()
+bool FHeadMountedDisplay::OnStartGameFrame( FWorldContext& WorldContext )
 {
 	check(IsInGameThread());
 
-	Frame.Reset();
-	Flags.bFrameStarted = true;
-
-	if (!GWorld || !GWorld->IsGameWorld())
+	if (!WorldContext.World() || !WorldContext.World()->IsGameWorld())
 	{
 		// ignore all non-game worlds
 		return false;
 	}
 
+	Frame.Reset();
+	Flags.bFrameStarted = true;
+
 	if (Flags.bNeedDisableStereo || (Settings->Flags.bStereoEnabled && !IsHMDConnected()))
 	{
 		Flags.bNeedDisableStereo = false;
-		EnableStereo(false);
+		DoEnableStereo(false, Flags.bEnableStereoToHmd);
 	}
 	else if (Flags.bNeedEnableStereo)
 	{
 		// If 'stereo on' was queued, handle it here.
 		Flags.bNeedEnableStereo = false; // reset it before Do..., since it could be queued up again.
-		EnableStereo(true);
+		DoEnableStereo(true, Flags.bEnableStereoToHmd);
 	}
 
 	if (!Settings->IsStereoEnabled() && !Settings->Flags.bHeadTrackingEnforced)
@@ -251,20 +253,18 @@ bool FHeadMountedDisplay::OnStartGameFrame()
 	CurrentFrame->FrameNumber = GFrameCounter;
 	CurrentFrame->Flags.bOutOfFrame = false;
 
-	check(GWorld);
-
 	if (Settings->Flags.bWorldToMetersOverride)
 	{
 		CurrentFrame->WorldToMetersScale = Settings->WorldToMetersScale;
 	}
 	else
 	{
-		CurrentFrame->WorldToMetersScale = GWorld->GetWorldSettings()->WorldToMeters;
+		CurrentFrame->WorldToMetersScale = WorldContext.World()->GetWorldSettings()->WorldToMeters;
 	}
 	return true;
 }
 
-bool FHeadMountedDisplay::OnEndGameFrame()
+bool FHeadMountedDisplay::OnEndGameFrame( FWorldContext& WorldContext )
 {
 	check(IsInGameThread());
 
@@ -272,7 +272,7 @@ bool FHeadMountedDisplay::OnEndGameFrame()
 
 	FHMDGameFrame* const CurrentGameFrame = Frame.Get();
 
-		if (!GWorld || !GWorld->IsGameWorld() || !CurrentGameFrame)
+	if (!WorldContext.World() || !WorldContext.World()->IsGameWorld() || !CurrentGameFrame)
 	{
 		// ignore all non-game worlds
 		return false;
@@ -389,6 +389,7 @@ bool FHeadMountedDisplay::EnablePositionalTracking(bool enable)
 
 bool FHeadMountedDisplay::EnableStereo(bool bStereo)
 {
+	Settings->Flags.bStereoEnforced = false;
 	return DoEnableStereo(bStereo, true);
 }
 
@@ -403,7 +404,10 @@ bool FHeadMountedDisplay::IsStereoEnabled() const
 		}
 		else
 		{
-			return false; //@TODO?(!Flags.bFrameStarted && Settings->IsStereoEnabled());
+			// If IsStereoEnabled is called when a game frame hasn't started, then always return false.
+			// In the case when you need to check if stereo is GOING TO be enabled in next frame,
+			// use explicit call to Settings->IsStereoEnabled()
+			return false;
 		}
 	}
 	else
@@ -411,6 +415,11 @@ bool FHeadMountedDisplay::IsStereoEnabled() const
 		check(0);
 	}
 	return false;
+}
+
+bool FHeadMountedDisplay::IsStereoEnabledOnNextFrame() const
+{
+	return Settings->IsStereoEnabled();
 }
 
 void FHeadMountedDisplay::AdjustViewRect(EStereoscopicPass StereoPass, int32& X, int32& Y, uint32& SizeX, uint32& SizeY) const
@@ -511,7 +520,9 @@ bool FHeadMountedDisplay::Exec(UWorld* InWorld, const TCHAR* Cmd, FOutputDevice&
 				{
 					Ar.Logf(TEXT("HMD is disabled. Use 'hmd enable' to re-enable it."));
 				}
-				DoEnableStereo(true, hmd);
+				Flags.bEnableStereoToHmd = hmd;
+				EnableStereo(true);
+				Settings->Flags.bStereoEnforced = true;
 				return true;
 			}
 		}
@@ -577,6 +588,7 @@ bool FHeadMountedDisplay::Exec(UWorld* InWorld, const TCHAR* Cmd, FOutputDevice&
 				{
 					Settings->Flags.bVSync = Settings->Flags.bSavedVSync;
 					Flags.bApplySystemOverridesOnStereo = true;
+					Flags.bNeedUpdateHmdCaps = true;
 				}
 				Settings->Flags.bOverrideVSync = false;
 				return true;
@@ -588,6 +600,7 @@ bool FHeadMountedDisplay::Exec(UWorld* InWorld, const TCHAR* Cmd, FOutputDevice&
 					Settings->Flags.bVSync = true;
 					Settings->Flags.bOverrideVSync = true;
 					Flags.bApplySystemOverridesOnStereo = true;
+					Flags.bNeedUpdateHmdCaps = true;
 					return true;
 				}
 				else if (FParse::Command(&Cmd, TEXT("OFF")) || FParse::Command(&Cmd, TEXT("0")))
@@ -595,6 +608,7 @@ bool FHeadMountedDisplay::Exec(UWorld* InWorld, const TCHAR* Cmd, FOutputDevice&
 					Settings->Flags.bVSync = false;
 					Settings->Flags.bOverrideVSync = true;
 					Flags.bApplySystemOverridesOnStereo = true;
+					Flags.bNeedUpdateHmdCaps = true;
 					return true;
 				}
 				else if (FParse::Command(&Cmd, TEXT("TOGGLE")) || FParse::Command(&Cmd, TEXT("")))
@@ -602,6 +616,7 @@ bool FHeadMountedDisplay::Exec(UWorld* InWorld, const TCHAR* Cmd, FOutputDevice&
 					Settings->Flags.bVSync = !Settings->Flags.bVSync;
 					Settings->Flags.bOverrideVSync = true;
 					Flags.bApplySystemOverridesOnStereo = true;
+					Flags.bNeedUpdateHmdCaps = true;
 					Ar.Logf(TEXT("VSync is currently %s"), (Settings->Flags.bVSync) ? TEXT("ON") : TEXT("OFF"));
 					return true;
 				}
@@ -735,6 +750,15 @@ bool FHeadMountedDisplay::Exec(UWorld* InWorld, const TCHAR* Cmd, FOutputDevice&
 				Settings->Flags.bDrawCubes = !Settings->Flags.bDrawCubes;
 				return true;
 			}
+		}
+		else if (FParse::Command(&Cmd, TEXT("POSOFF")))
+		{
+			FString StrX = FParse::Token(Cmd, 0);
+			FString StrY = FParse::Token(Cmd, 0);
+			FString StrZ = FParse::Token(Cmd, 0);
+			Settings->PositionOffset.X = FCString::Atof(*StrX);
+			Settings->PositionOffset.Y = FCString::Atof(*StrY);
+			Settings->PositionOffset.Z = FCString::Atof(*StrZ);
 		}
 	}
 #endif //!UE_BUILD_SHIPPING
@@ -888,6 +912,54 @@ void FHeadMountedDisplay::ResetControlRotation() const
 	}
 }
 
+void FHeadMountedDisplay::GetCurrentHMDPose(FQuat& CurrentOrientation, FVector& CurrentPosition,
+	bool bUseOrienationForPlayerCamera, bool bUsePositionForPlayerCamera, const FVector& PositionScale)
+{
+	// only supposed to be used from the game thread
+	check(IsInGameThread());
+	auto frame = GetCurrentFrame();
+	if (!frame)
+	{
+		CurrentOrientation = FQuat::Identity;
+		CurrentPosition = FVector::ZeroVector;
+		return;
+	}
+	if (PositionScale != FVector::ZeroVector)
+	{
+		frame->CameraScale3D = PositionScale;
+		frame->Flags.bCameraScale3DAlreadySet = true;
+	}
+	GetCurrentPose(CurrentOrientation, CurrentPosition, bUseOrienationForPlayerCamera, bUsePositionForPlayerCamera);
+	if (bUseOrienationForPlayerCamera)
+	{
+		frame->LastHmdOrientation = CurrentOrientation;
+		frame->Flags.bOrientationChanged = bUseOrienationForPlayerCamera;
+	}
+	if (bUsePositionForPlayerCamera)
+	{
+		frame->LastHmdPosition = CurrentPosition;
+		frame->Flags.bPositionChanged = bUsePositionForPlayerCamera;
+	}
+}
+
+void FHeadMountedDisplay::GetCurrentOrientationAndPosition(FQuat& CurrentOrientation, FVector& CurrentPosition)
+{
+	GetCurrentHMDPose(CurrentOrientation, CurrentPosition, false, false, FVector::ZeroVector);
+}
+
+FVector FHeadMountedDisplay::GetNeckPosition(const FQuat& CurrentOrientation, const FVector& CurrentPosition, const FVector& PositionScale)
+{
+	const auto frame = GetCurrentFrame();
+	if (!frame)
+	{
+		return FVector::ZeroVector;
+	}
+	FVector UnrotatedPos = CurrentOrientation.Inverse().RotateVector(CurrentPosition);
+	UnrotatedPos.X -= frame->Settings->NeckToEyeInMeters.X * frame->WorldToMetersScale;
+	UnrotatedPos.Z -= frame->Settings->NeckToEyeInMeters.Y * frame->WorldToMetersScale;
+	return UnrotatedPos;
+}
+
 void FHeadMountedDisplay::ApplyHmdRotation(APlayerController* PC, FRotator& ViewRotation)
 {
 	auto frame = GetCurrentFrame();
@@ -951,7 +1023,7 @@ void FHeadMountedDisplay::UpdatePlayerCameraRotation(APlayerCameraManager* Camer
 #endif
 	FQuat	CurHmdOrientation;
 	FVector CurHmdPosition;
-	GetCurrentPose(CurHmdOrientation, CurHmdPosition, true, true); // POV.bFollowHmdOrientation, POV.bFollowHmdPosition);
+	GetCurrentPose(CurHmdOrientation, CurHmdPosition, frame->Settings->Flags.bPlayerCameraManagerFollowsHmdOrientation, frame->Settings->Flags.bPlayerCameraManagerFollowsHmdPosition);
 
 	const FQuat CurPOVOrientation = POV.Rotation.Quaternion();
 
@@ -1078,17 +1150,17 @@ void FHeadMountedDisplay::DrawSeaOfCubes(UWorld* World, FVector ViewLocation)
 	if (frame->Settings->Flags.bDrawCubes && !SeaOfCubesActorPtr.IsValid())
 	{
 		FActorSpawnParameters SpawnInfo;
-		SpawnInfo.bNoCollisionFail = true;
+		SpawnInfo.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 		SpawnInfo.bNoFail = true;
 		SpawnInfo.ObjectFlags = RF_Transient;
 		AStaticMeshActor* SeaOfCubesActor;
 		SeaOfCubesActorPtr = SeaOfCubesActor = World->SpawnActor<AStaticMeshActor>(SpawnInfo);
 
-		const float cube_side_in_meters = 0.12f;
+		const float cube_side_in_meters = (SideOfSingleCubeInMeters == 0) ? 0.12f : SideOfSingleCubeInMeters;
 		const float cube_side = cube_side_in_meters * frame->Settings->WorldToMetersScale;
-		const float cubes_volume_in_meters = 3.2f;
+		const float cubes_volume_in_meters = (SeaOfCubesVolumeSizeInMeters == 0) ? 3.2f : SeaOfCubesVolumeSizeInMeters;
 		const float cubes_volume = cubes_volume_in_meters * frame->Settings->WorldToMetersScale;
-		const int num_of_cubes = 11;
+		const int num_of_cubes = (NumberOfCubesInOneSide == 0) ? 11 : NumberOfCubesInOneSide;
 		const TCHAR* const cube_resource_name = (CubeMeshName.IsEmpty()) ? TEXT("/Engine/BasicShapes/Cube.Cube") : *CubeMeshName;
 		const TCHAR* const cube_material_name = (CubeMaterialName.IsEmpty()) ? TEXT("/Engine/EngineMaterials/DefaultMaterial.DefaultMaterial") : *CubeMaterialName;
 
@@ -1117,7 +1189,7 @@ void FHeadMountedDisplay::DrawSeaOfCubes(UWorld* World, FVector ViewLocation)
 
 		const FVector box_scale(cube_side / (bounds.BoxExtent.X * 2), cube_side / (bounds.BoxExtent.Y * 2), cube_side / (bounds.BoxExtent.Z * 2));
 
-		const FVector SeaOfCubesOrigin = ViewLocation;
+		const FVector SeaOfCubesOrigin = ViewLocation + (CenterOffsetInMeters * frame->Settings->WorldToMetersScale);
 
 		UInstancedStaticMeshComponent* ISMComponent = NewObject<UInstancedStaticMeshComponent>();
 		ISMComponent->AttachTo(SeaOfCubesActor->GetStaticMeshComponent());

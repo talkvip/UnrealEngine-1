@@ -733,13 +733,17 @@ void APlayerCameraManager::PostInitializeComponents()
 	{
 		for (auto ModifierClass : DefaultModifiers)
 		{
-			UCameraModifier* const NewMod = AddNewCameraModifier(ModifierClass);
-		
-			// cache ref to camera shake if this is it
-			UCameraModifier_CameraShake* const ShakeMod = Cast<UCameraModifier_CameraShake>(NewMod);
-			if (ShakeMod)
+			// empty entries are not valid here, do work only for actual classes
+			if (ModifierClass)
 			{
-				CachedCameraShakeMod = ShakeMod;
+				UCameraModifier* const NewMod = AddNewCameraModifier(ModifierClass);
+
+				// cache ref to camera shake if this is it
+				UCameraModifier_CameraShake* const ShakeMod = Cast<UCameraModifier_CameraShake>(NewMod);
+				if (ShakeMod)
+				{
+					CachedCameraShakeMod = ShakeMod;
+				}
 			}
 		}
 	}
@@ -757,7 +761,7 @@ void APlayerCameraManager::PostInitializeComponents()
 	FActorSpawnParameters SpawnInfo;
 	SpawnInfo.Owner = this;
 	SpawnInfo.Instigator = Instigator;
-	SpawnInfo.bNoCollisionFail = true;
+	SpawnInfo.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	SpawnInfo.ObjectFlags |= RF_Transient;	// We never want to save these temp actors into a map
 	AnimCameraActor = GetWorld()->SpawnActor<ACameraActor>(SpawnInfo);
 }
@@ -1145,7 +1149,7 @@ AEmitterCameraLensEffectBase* APlayerCameraManager::AddCameraLensEffect(TSubclas
 			FActorSpawnParameters SpawnInfo;
 			SpawnInfo.Owner = PCOwner->GetViewTarget();
 			SpawnInfo.Instigator = Instigator;
-			SpawnInfo.bNoCollisionFail = true;
+			SpawnInfo.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 			SpawnInfo.ObjectFlags |= RF_Transient;	// We never want to save these into a map
 			LensEffect = GetWorld()->SpawnActor<AEmitterCameraLensEffectBase>(LensEffectEmitterClass, SpawnInfo);
 			if (LensEffect != NULL)

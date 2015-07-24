@@ -93,34 +93,9 @@ partial class GUBP
         {
             return 100.0f;
         }
-        public virtual void SetAsExplicitTrigger()
-        {
-
-        }
         public virtual string ECAgentString()
         {
             return "";
-        }
-        public virtual string ECProcedureInfix()
-        {
-            return "";
-        }
-        public virtual string ECProcedure()
-        {
-            if (IsSticky() && AgentSharingGroup != "")
-            {
-                throw new AutomationException("Node {0} is both agent sharing and sitcky.", GetFullName());
-            }
-            return String.Format("GUBP{0}_UAT_Node{1}{2}", ECProcedureInfix(), IsSticky() ? "" : "_Parallel", AgentSharingGroup != "" ? "_AgentShare" : "");
-        }
-        public virtual string ECProcedureParams()
-        {
-            var Result = String.Format(", {{actualParameterName => 'Sticky', value => '{0}'}}", IsSticky() ? 1 : 0);
-            if (AgentSharingGroup != "")
-            {
-                Result += String.Format(", {{actualParameterName => 'AgentSharingGroup', value => '{0}'}}", AgentSharingGroup);
-            }
-            return Result;
         }
         public static string MergeSpaceStrings(params string[] EmailLists)
         {
@@ -270,29 +245,15 @@ partial class GUBP
 			}
             return "";
         }
+		public override BuildNode GetBuildNode()
+		{
+			BuildNode Node = base.GetBuildNode();
+			Node.AgentPlatform = GetAgentPlatform();
+			return Node;
+		}
         public virtual UnrealTargetPlatform GetAgentPlatform()
         {
             return HostPlatform;
-        }
-        public override string ECProcedureInfix()
-        {
-            if (GetAgentPlatform() == UnrealTargetPlatform.Mac)
-            {
-                if (IsSticky())
-                {
-                    throw new AutomationException("Node {0} is sticky, but Mac hosted. Sticky nodes must be PC hosted.", GetFullName());
-                }
-                return "_Mac";
-            }
-			if(GetAgentPlatform() == UnrealTargetPlatform.Linux)
-			{
-				if(IsSticky())
-				{
-					throw new AutomationException("Node {0} is sticky, but Linux hosted. Sticky nodes must be PC hosted.", GetFullName());
-				}
-				return "_Linux";
-			}
-            return "";
         }
         public virtual string GetHostPlatformSuffix()
         {
@@ -404,14 +365,15 @@ partial class GUBP
             }
             return false;
         }
-        public override string ECProcedure()
-        {
-            if (HostPlatform == UnrealTargetPlatform.Win64)
-            {
-                return String.Format("GUBP_UAT_Node_Parallel_AgentShare_Editor");
-            }
-            return base.ECProcedure();
-        }
+		public override BuildNode GetBuildNode()
+		{
+			BuildNode Node = base.GetBuildNode();
+			if(HostPlatform == UnrealTargetPlatform.Win64)
+			{
+				Node.IsParallelAgentShareEditor = true;
+			}
+			return Node;
+		}
         public override bool DeleteBuildProducts()
         {
             return true;
@@ -505,15 +467,16 @@ partial class GUBP
             }
             return false;
         }
-        public override string ECProcedure()
-        {
-            if (HostPlatform == UnrealTargetPlatform.Win64)
-            {
-                return String.Format("GUBP_UAT_Node_Parallel_AgentShare_Editor");
-            }
-            return base.ECProcedure();
-        }
-        public override UE4Build.BuildAgenda GetAgenda(GUBP bp)
+		public override BuildNode GetBuildNode()
+		{
+			BuildNode Node = base.GetBuildNode();
+			if (HostPlatform == UnrealTargetPlatform.Win64)
+			{
+				Node.IsParallelAgentShareEditor = true;
+			}
+			return Node;
+		}
+		public override UE4Build.BuildAgenda GetAgenda(GUBP bp)
         {
             var Agenda = new UE4Build.BuildAgenda();
 
@@ -554,7 +517,7 @@ partial class GUBP
             {
                 var EnginePlatformBinaries = CommandUtils.CombinePaths(CommandUtils.CmdEnv.LocalRoot, "Engine", "Binaries", HostPlatform.ToString());
                 var Wildcard = Target + "-*";
-                Log("************Deleting stale editor DLLs, path {0} wildcard {1}", EnginePlatformBinaries, Wildcard);
+                LogConsole("************Deleting stale editor DLLs, path {0} wildcard {1}", EnginePlatformBinaries, Wildcard);
                 foreach (var DiskFile in FindFiles(Wildcard, true, EnginePlatformBinaries))
                 {
                     bool IsBuildProduct = false;
@@ -573,7 +536,7 @@ partial class GUBP
                 }
                 var EnginePluginBinaries = CommandUtils.CombinePaths(CommandUtils.CmdEnv.LocalRoot, "Engine", "Plugins");
                 var HostSubstring = CommandUtils.CombinePaths("/", HostPlatform.ToString(), "/");
-                Log("************Deleting stale editor DLLs, path {0} wildcard {1} host {2}", EnginePluginBinaries, Wildcard, HostSubstring);
+                LogConsole("************Deleting stale editor DLLs, path {0} wildcard {1} host {2}", EnginePluginBinaries, Wildcard, HostSubstring);
                 foreach (var DiskFile in FindFiles(Wildcard, true, EnginePluginBinaries))
                 {
                     if (DiskFile.IndexOf(HostSubstring, StringComparison.InvariantCultureIgnoreCase) < 0)
@@ -662,7 +625,7 @@ partial class GUBP
             {
                 var EnginePlatformBinaries = CommandUtils.CombinePaths(CommandUtils.CmdEnv.LocalRoot, "Engine", "Binaries", UnrealTargetPlatform.Linux.ToString());
                 var Wildcard = Target + "-*";
-                Log("************Deleting stale editor DLLs, path {0} wildcard {1}", EnginePlatformBinaries, Wildcard);
+                LogConsole("************Deleting stale editor DLLs, path {0} wildcard {1}", EnginePlatformBinaries, Wildcard);
                 foreach (var DiskFile in FindFiles(Wildcard, true, EnginePlatformBinaries))
                 {
                     bool IsBuildProduct = false;
@@ -681,7 +644,7 @@ partial class GUBP
                 }
                 var EnginePluginBinaries = CommandUtils.CombinePaths(CommandUtils.CmdEnv.LocalRoot, "Engine", "Plugins");
                 var HostSubstring = CommandUtils.CombinePaths("/", UnrealTargetPlatform.Linux.ToString(), "/");
-                Log("************Deleting stale editor DLLs, path {0} wildcard {1} host {2}", EnginePluginBinaries, Wildcard, HostSubstring);
+                LogConsole("************Deleting stale editor DLLs, path {0} wildcard {1} host {2}", EnginePluginBinaries, Wildcard, HostSubstring);
                 foreach (var DiskFile in FindFiles(Wildcard, true, EnginePluginBinaries))
                 {
                     if (DiskFile.IndexOf(HostSubstring, StringComparison.InvariantCultureIgnoreCase) < 0)
@@ -1093,20 +1056,21 @@ partial class GUBP
         public override bool IsSticky()
         {
             if (HostPlatform == UnrealTargetPlatform.Win64)
-        {
+	        {
                 return true;
             }
             return false;
         }
-        public override string ECProcedure()
-        {
-            if (HostPlatform == UnrealTargetPlatform.Win64)
-            {
-                return String.Format("GUBP_UAT_Node_Parallel_AgentShare_Editor");
-            }
-            return base.ECProcedure();
-        }
-        public override string GameNameIfAnyForTempStorage()
+		public override BuildNode GetBuildNode()
+		{
+			BuildNode Node = base.GetBuildNode();
+			if (HostPlatform == UnrealTargetPlatform.Win64)
+			{
+				Node.IsParallelAgentShareEditor = true;
+			}
+			return Node;
+		}
+		public override string GameNameIfAnyForTempStorage()
         {
             return GameProjects[0].Options(HostPlatform).GroupName ?? GameProjects[0].GameName;
             }                    
@@ -1261,6 +1225,11 @@ partial class GUBP
 				AddDependency(ToolsNode.StaticGetFullName(InHostPlatform));
 			}
 
+			if(IsSample(BranchConfig, InGameProj))
+			{
+				AddDependency(WaitToPackageSamplesNode.StaticGetFullName());
+			}
+
             if (InGameProj.GameName != BranchConfig.Branch.BaseEngineProject.GameName && GameProj.Properties.Targets.ContainsKey(TargetRules.TargetType.Editor))
             {
 				if (!BranchConfig.BranchOptions.ExcludePlatformsForEditor.Contains(InHostPlatform))
@@ -1285,6 +1254,11 @@ partial class GUBP
                 AgentSharingGroup = "TemplateMonolithics" + StaticGetHostPlatformSuffix(InHostPlatform);
             }
         }
+
+		public static bool IsSample(GUBPBranchConfig BranchConfig, BranchInfo.BranchUProject GameProj)
+		{
+			return (GameProj.GameName != BranchConfig.Branch.BaseEngineProject.GameName && (GameProj.FilePath.Contains("Samples") || GameProj.FilePath.Contains("Templates")));
+		}
 
 		public override string GetDisplayGroupName()
 		{
@@ -1798,10 +1772,8 @@ partial class GUBP
 
     public class WaitForUserInput : GUBPNode
     {
-        protected bool bTriggerWasTriggered;
         public WaitForUserInput()
         {
-            bTriggerWasTriggered = false;
         }
 
         public override void DoBuild(GUBP bp)
@@ -1812,14 +1784,6 @@ partial class GUBP
         public override BuildNode GetBuildNode()
         {
 			return new TriggerNode(this);
-        }
-        public override void SetAsExplicitTrigger()
-        {
-            bTriggerWasTriggered = true;
-        }
-        public override bool IsSticky()
-        {
-            return bTriggerWasTriggered;
         }
         public virtual string GetTriggerStateName()
         {
@@ -1837,31 +1801,37 @@ partial class GUBP
         {
             return true;
         }
-        public override string ECProcedure()
-        {
-            if (bTriggerWasTriggered)
-            {
-                return base.ECProcedure(); // after this user hits the trigger, we want to run this as an ordinary node
-            }
-            if (TriggerRequiresRecursiveWorkflow())
-            {
-                return String.Format("GUBP_UAT_Trigger"); //here we run a recursive workflow to wait for the trigger
-            }
-            return String.Format("GUBP_Hardcoded_Trigger"); //here we advance the state in the hardcoded workflow so folks can approve
-        }
-        public override string ECProcedureParams()
-        {
-            var Result = base.ECProcedureParams();
-            if (!bTriggerWasTriggered)
-            {
-                Result += String.Format(", {{actualParameterName => 'TriggerState', value => '{0}'}}, {{actualParameterName => 'ActionText', value =>\"{1}\"}}, {{actualParameterName => 'DescText', value =>\"{2}\"}}", GetTriggerStateName(), GetTriggerActionText(), GetTriggerDescText());
-                //Result += String.Format(" --actualParameter TriggerState={0} --actualParameter ActionText=\"{1}\" --actualParameter DescText=\"{2}\"", GetTriggerStateName(), GetTriggerActionText(), GetTriggerDescText());
-            }
-            return Result;
-        }
         public override int TimeoutInMinutes()
         {
             return 0;
+        }
+    }
+
+    public class WaitToPackageSamplesNode : WaitForUserInput
+    {
+        public WaitToPackageSamplesNode()
+        {
+			AddDependency(WaitForSharedPromotionUserInput.StaticGetFullName(false));
+		}
+
+        public static string StaticGetFullName()
+        {
+            return "WaitToPackageSamples";
+        }
+
+        public override string GetFullName()
+        {
+            return StaticGetFullName();
+        }
+
+        public override string GetTriggerDescText()
+        {
+			return "Ready to package samples";
+        }
+
+        public override string GetTriggerActionText()
+        {
+			return "Package samples";
         }
     }
 
@@ -2057,7 +2027,7 @@ partial class GUBP
                 else
                 {
 					int WorkingCL = P4.CreateChange(P4Env.Client, String.Format("GUBP Node {0} built from changelist {1}", GetFullName(), BranchConfig.CL));
-                    Log("Build from {0}    Working in {1}", BranchConfig.CL, WorkingCL);
+                    LogConsole("Build from {0}    Working in {1}", BranchConfig.CL, WorkingCL);
 
                     var ProductsToSubmit = new List<String>();
 
@@ -2247,7 +2217,13 @@ partial class GUBP
                 {
                     AddPseudodependency(CookNode.StaticGetFullName(HostPlatform, BranchConfig.Branch.BaseEngineProject, BaseCookedPlatform));
                 }
-            }			
+            }
+
+			if(GamePlatformMonolithicsNode.IsSample(BranchConfig, GameProj))
+			{
+				AddDependency(WaitToPackageSamplesNode.StaticGetFullName());
+				AgentSharingGroup = "SampleCooks" + StaticGetHostPlatformSuffix(HostPlatform);
+			}
         }
         public static string StaticGetFullName(UnrealTargetPlatform InHostPlatform, BranchInfo.BranchUProject InGameProj, string InCookPlatform)
         {
@@ -2339,9 +2315,9 @@ partial class GUBP
 							if(Target.Rules.GUBP_BuildWindowsXPMonolithics())
 							{
 								AddDependency(GamePlatformMonolithicsNode.StaticGetFullName(HostPlatform, GameProj, TargetPlatform, true));
-                        }
-                    }
-                }
+							}
+						}
+					}
                 }
                 else
                 {
@@ -3277,7 +3253,7 @@ partial class GUBP
                     TempStorage.CleanSharedTempStorageDirectory(GameName);
                 }
                 var BuildDuration = (DateTime.UtcNow - StartTime).TotalMilliseconds;
-                Log("Took {0}s to clear temp storage of old files.", BuildDuration / 1000);
+                LogConsole("Took {0}s to clear temp storage of old files.", BuildDuration / 1000);
             }
 
             BuildProducts = new List<string>();

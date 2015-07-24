@@ -8,7 +8,7 @@
 #include "AnimationRuntime.h"
 #include "AnimationUtils.h"
 #include "Animation/AnimStats.h"
-#include "Animation/AnimNode_StateMachine.h"
+#include "Animation/AnimBlueprintGeneratedClass.h"
 #include "GameFramework/Character.h"
 #include "ParticleDefinitions.h"
 #include "DisplayDebugHelpers.h"
@@ -18,12 +18,11 @@
 #include "Animation/AnimNotifies/AnimNotifyState.h"
 #include "Animation/AnimNotifies/AnimNotify.h"
 #include "Animation/AnimMontage.h"
-#include "Animation/AnimInstance.h"
+#include "Animation/AnimNodeBase.h"
+#include "Animation/AnimNode_StateMachine.h"
 #include "Animation/AnimNode_TransitionResult.h"
-#include "Animation/AnimNode_SequencePlayer.h"
-#include "Animation/AnimNode_BlendSpacePlayer.h"
 #include "Animation/AnimNode_AssetPlayerBase.h"
-
+#include "Animation/AnimInstance.h"
 /** Anim stats */
 
 DEFINE_STAT(STAT_UpdateSkelMeshBounds);
@@ -1297,7 +1296,7 @@ void UAnimInstance::GetSlotWeight(FName const & SlotNodeName, float& out_SlotNod
 		{
 			NodeTotalWeight += MontageInstance->Weight;
 
-			if( !MontageInstance->Montage->IsValidAdditive() )
+			if( !MontageInstance->Montage->IsValidAdditiveSlot(SlotNodeName) )
 			{
 				NonAdditiveTotalWeight += MontageInstance->Weight;
 			}

@@ -125,6 +125,7 @@ void FGraphActionListBuilderBase::ActionGroup::Move(FGraphActionListBuilderBase:
 	CategoryChain = MoveTemp(Other.CategoryChain);
 	SearchKeywordsArray = MoveTemp(Other.SearchKeywordsArray);
 	MenuDescriptionArray = MoveTemp(Other.MenuDescriptionArray);
+	SearchTitleArray = MoveTemp(Other.SearchTitleArray);
 	SearchCategoryArray = MoveTemp(Other.SearchCategoryArray);
 	SearchText = MoveTemp(Other.SearchText);
 }
@@ -136,6 +137,7 @@ void FGraphActionListBuilderBase::ActionGroup::Copy(const ActionGroup& Other)
 	CategoryChain = Other.CategoryChain;
 	SearchKeywordsArray = Other.SearchKeywordsArray;
 	MenuDescriptionArray = Other.MenuDescriptionArray;
+	SearchTitleArray = Other.SearchTitleArray;
 	SearchCategoryArray = Other.SearchCategoryArray;
 	SearchText = Other.SearchText;
 }
@@ -168,15 +170,12 @@ void FGraphActionListBuilderBase::ActionGroup::InitScoringData()
 	if (Actions.Num() > 0)
 	{
 		FEdGraphSchemaAction& FirstAction = *Actions[0];
-		const FString& Keywords = FirstAction.GetSearchKeywords();
-		const FString& Title = FirstAction.GetSearchTitle();
-		const FString& Category = FirstAction.GetSearchCategory();
 
 		// We keep these individual arrays so that they can be weighted differently by the scoring algorithm in SGraphActionMenu::GetActionFilteredWeight
-		Keywords.ParseIntoArray(SearchKeywordsArray, TEXT(" "), true);
+		FirstAction.GetSearchKeywords().ParseIntoArray(SearchKeywordsArray, TEXT(" "), true);
 		FirstAction.MenuDescription.ToString().ToLower().ParseIntoArray(MenuDescriptionArray, TEXT(" "), true);
-		Title.ParseIntoArray(SearchTitleArray, TEXT(" "), true);
-		Category.ParseIntoArray(SearchCategoryArray, TEXT(" "), true);
+		FirstAction.GetSearchTitle().ParseIntoArray(SearchTitleArray, TEXT(" "), true);
+		FirstAction.GetSearchCategory().ParseIntoArray(SearchCategoryArray, TEXT(" "), true);
 
 		// Glob search text together, we use the SearchText string for basic filtering:
 		for (const auto& Entry : SearchTitleArray)
@@ -596,6 +595,7 @@ FPinConnectionResponse UEdGraphSchema::CopyPinLinks(UEdGraphPin& CopyFromPin, UE
 	return FinalResponse;
 }
 
+#if WITH_EDITORONLY_DATA
 FText UEdGraphSchema::GetPinDisplayName(const UEdGraphPin* Pin) const
 {
 	FText ResultPinName;
@@ -616,6 +616,7 @@ FText UEdGraphSchema::GetPinDisplayName(const UEdGraphPin* Pin) const
 	}
 	return ResultPinName;
 }
+#endif // WITH_EDITORONLY_DATA
 
 void UEdGraphSchema::ConstructBasicPinTooltip(UEdGraphPin const& Pin, FText const& PinDescription, FString& TooltipOut) const
 {

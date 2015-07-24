@@ -158,7 +158,7 @@ static TAutoConsoleVariable<float> CVarSceneColorFringeMax(
 EVertexColorViewMode::Type GVertexColorViewMode = EVertexColorViewMode::Color;
 
 /** Global primitive uniform buffer resource containing identity transformations. */
-TGlobalResource<FIdentityPrimitiveUniformBuffer> GIdentityPrimitiveUniformBuffer;
+ENGINE_API TGlobalResource<FIdentityPrimitiveUniformBuffer> GIdentityPrimitiveUniformBuffer;
 
 FSceneViewStateReference::~FSceneViewStateReference()
 {
@@ -170,7 +170,7 @@ void FSceneViewStateReference::Allocate()
 	check(!Reference);
 	Reference = GetRendererModule().AllocateViewState();
 	GlobalListLink = TLinkedList<FSceneViewStateReference*>(this);
-	GlobalListLink.Link(GetSceneViewStateList());
+	GlobalListLink.LinkHead(GetSceneViewStateList());
 }
 
 void FSceneViewStateReference::Destroy()
@@ -342,7 +342,7 @@ FSceneView::FSceneView(const FSceneViewInitOptions& InitOptions)
 
 	/** The view transform, starting from world-space points translated by -ViewOrigin. */
 	FMatrix TranslatedViewMatrix = InitOptions.ViewRotationMatrix;
-	FMatrix InvTranslatedViewMatrix = TranslatedViewMatrix.GetTransposed();
+	FMatrix InvTranslatedViewMatrix = TranslatedViewMatrix.Inverse();
 
 	// Translate world-space so its origin is at ViewOrigin for improved precision.
 	// Note that this isn't exactly right for orthogonal projections (See the above special case), but we still use ViewOrigin
@@ -573,9 +573,10 @@ void FSceneView::UpdateViewMatrix()
 	ViewMatrices.InvTranslatedViewProjectionMatrix = ViewMatrices.TranslatedViewProjectionMatrix.Inverse();
 
 	ViewProjectionMatrix = ViewMatrices.GetViewProjMatrix();
-	InvViewMatrix = ViewMatrices.GetInvViewMatrix();
-	InvViewProjectionMatrix = ViewMatrices.GetInvViewProjMatrix();
 
+	// Need to use a full view matrix inverse here as there are translations present
+	InvViewMatrix = ViewMatrices.ViewMatrix.Inverse();
+	InvViewProjectionMatrix = ViewMatrices.GetInvProjMatrix() * InvViewMatrix;
 }
 
 void FSceneView::SetScaledViewRect(FIntRect InScaledViewRect)

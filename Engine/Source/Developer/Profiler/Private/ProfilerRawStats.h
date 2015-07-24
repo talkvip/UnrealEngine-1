@@ -211,8 +211,174 @@ protected:
 -----------------------------------------------------------------------------*/
 
 /** Class for managing the raw stats in the context of memory profiling. */
-class FRawStatsMemoryProfiler
+class FRawStatsMemoryProfiler : public FStatsReadFile
 {
+	friend struct FCreateStatsReader<FRawStatsMemoryProfiler>;
+	typedef FStatsReadFile Super;
 
+protected:
+
+	/** Initialization constructor. */
+	FRawStatsMemoryProfiler( const TCHAR* InFilename );
+
+	/** Called before started processing combined history. */
+	virtual void PreProcessStats() override;
+
+	/** Called after finished processing combined history. */
+	virtual void PostProcessStats() override;
+
+// 	/** Processes special message for advancing the stats frame from the game thread. */
+// 	virtual void ProcessAdvanceFrameEventGameThreadOperation( const FStatMessage& Message, const FStackState& Stack ) override
+// 	{}
+// 
+// 	/** Processes special message for advancing the stats frame from the render thread. */
+// 	virtual void ProcessAdvanceFrameEventRenderThreadOperation( const FStatMessage& Message, const FStackState& Stack ) override
+// 	{}
+// 
+// 	/** ProcessesIndicates begin of the cycle scope. */
+// 	virtual void ProcessCycleScopeStartOperation( const FStatMessage& Message, const FStackState& Stack ) override
+// 	{}
+// 
+// 	/** Indicates end of the cycle scope. */
+// 	virtual void ProcessCycleScopeEndOperation( const FStatMessage& Message, const FStackState& Stack ) override
+// 	{}
+// 
+	/** Processes special message marker used determine that we encountered a special data in the stat file. */
+	virtual void ProcessSpecialMessageMarkerOperation( const FStatMessage& Message, const FStackState& StackState ) override;
+// 
+// 	/** Processes set operation. */
+// 	virtual void ProcessSetOperation( const FStatMessage& Message, const FStackState& Stack ) override
+// 	{}
+// 
+// 	/** Processes clear operation. */
+// 	virtual void ProcessClearOperation( const FStatMessage& Message, const FStackState& Stack ) override
+// 	{}
+// 
+// 	/** Processes add operation. */
+// 	virtual void ProcessAddOperation( const FStatMessage& Message, const FStackState& Stack ) override
+// 	{}
+// 
+// 	/** Processes subtract operation. */
+// 	virtual void ProcessSubtractOperation( const FStatMessage& Message, const FStackState& Stack ) override
+// 	{}
+
+	/** Processes memory operation. @see EMemoryOperation. */
+	virtual void ProcessMemoryOperation( EMemoryOperation MemOp, uint64 Ptr, uint64 NewPtr, int64 Size, uint32 SequenceTag, const FStackState& StackState ) override;
+
+	/**
+	 * Updates process stage progress periodically, does debug logging if enabled.
+	 */
+	void UpdateGenerateMemoryMapProgress( const int32 AllocationIndex );
+
+	/**
+	 * Sorts sequence allocations.
+	 */
+	void SortSequenceAllocations();
+
+	/**
+	 *	Generates allocation map and processes all memory snapshots .
+	 */
+	void GenerateAllocationMap();
+
+	/** Processes an alloc memory operation. */
+	void ProcessAlloc( const FAllocationInfo& AllocInfo, TMap<uint64, FAllocationInfo>& AllocationMap );
+
+	/** Processes a free memory operation. */
+	void ProcessFree( const FAllocationInfo& FreeInfo, TMap<uint64, FAllocationInfo>& AllocationMap, const bool bReallocFree );
+
+	/** Dumps debug allocations. */
+	void DumpDebugAllocations();
+
+	/** Frees memory used by the debug information. */
+	void FreeDebugInformation();
+
+public:
+	/** Generates UObject allocation statistics. */
+	void ProcessAndDumpUObjectAllocations( const FName SnapshotName );
+
+	void DumpScopedAllocations( const TCHAR* Name, const TMap<FString, FCombinedAllocationInfo>& CombinedAllocations );
+
+	/** Generates callstack based allocation map. */
+	void GenerateScopedAllocations( const TMap<uint64, FAllocationInfo>& InAllocationMap, TMap<FName, FCombinedAllocationInfo>& out_CombinedAllocations, uint64& TotalAllocatedMemory, uint64& NumAllocations );
+
+	void GenerateScopedTreeAllocations( const TMap<FName, FCombinedAllocationInfo>& ScopedAllocations, FNodeAllocationInfo& out_Root );
+
+	/** Prepares data for a snapshot. */
+	void PrepareSnapshot( const FName SnapshotName, const TMap<uint64, FAllocationInfo>& InAllocationMap );
+
+	/** Compare two snapshots and saves the result for further processing. */
+	void CompareSnapshots( const FName BeginSnaphotName, const FName EndSnaphotName, TMap<FName, FCombinedAllocationInfo>& out_Result );
+
+	/** Compare two snapshots and saves the result in human readable format, results can be saved to a file. */
+	void CompareSnapshotsHumanReadable( const FName BeginSnaphotName, const FName EndSnaphotName, TMap<FString, FCombinedAllocationInfo>& out_Result );
+
+	/**
+	 * @return a set of all snapshot names.
+	 */
+	const TArray<FName> GetSnapshotNames() const
+	{
+		return SnapshotNamesArray;
+	}
+
+	/**
+	 * @return Platform's name based on the loaded ue4statsraw file.
+	 */
+	const FString& GetPlatformName() const
+	{
+		return Header.PlatformName;
+	}
+
+	/**
+	 * @return true, if the file contains any usable data.
+	 */
+	bool HasValidData() const
+	{
+		return SnapshotNamesArray.Num() >= 2;
+	}
+
+protected:
+	/**
+	 *	 All allocations ordered by the sequence tag.
+	 *	 There is an assumption that the sequence tag will not turn-around.
+	 */
+	TArray<FAllocationInfo> SequenceAllocationArray;
+
+	/** The sequence tag mapping to the named markers. */
+	TArray<TPair<uint32, FName>> Snapshots;
+
+	/** Unique snapshot names. */
+	TSet<FName> SnapshotNamesSet;
+
+	/** Unique snapshot names, the same as SnapshotNamesSet. */
+	TArray<FName> SnapshotNamesArray;
+
+	/** The sequence tag mapping to the named markers that need to processed. */
+	TArray<TPair<uint32, FName>> SnapshotsToBeProcessed;
+
+	/** Snapshots with allocation map. */
+	TMap<FName, TMap<uint64, FAllocationInfo> > SnapshotsWithAllocationMap;
+
+	/** Snapshots with callstack based allocation map. */
+	TMap<FName, TMap<FName, FCombinedAllocationInfo> > SnapshotsWithScopedAllocations;
+
+	TMap<FName, TMap<FString, FCombinedAllocationInfo> > SnapshotsWithDecodedScopedAllocations;
+
+	/** Duplicated allocation map. Debug only. */
+	TMultiMap<FString, FAllocationInfo> DuplicatedAllocMap;
+
+	/** Zero allocation map. Debug only. */
+	TMultiMap<FString, FAllocationInfo> ZeroAllocMap;
+
+	/** Number of duplicated memory operations. */
+	int32 NumDuplicatedMemoryOperations;
+
+	/** Number of Malloc(0). */
+	int32 NumZeroAllocs = 0;
+
+	/** Number of memory operations. */
+	int32 NumMemoryOperations;
+
+	/** Last sequence tag for named marker. */
+	int32 LastSequenceTagForNamedMarker;
 };
 

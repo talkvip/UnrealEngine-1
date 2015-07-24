@@ -630,6 +630,10 @@ namespace Tools.CrashReporter.CrashReportWebSite.Models
 				}
 				else if (NewCrash.RawCallStack.Contains( "FDebug::Ensure" ))
 				{
+					NewCrash.CrashType = 3;			
+				}
+				else if (NewCrash.RawCallStack.Contains( "FDebug::OptionallyLogFormattedEnsureMessageReturningFalse" ))
+				{
 					NewCrash.CrashType = 3;
 				}
 				else if (NewCrash.RawCallStack.Contains( "NewReportEnsure" ))
@@ -763,15 +767,6 @@ namespace Tools.CrashReporter.CrashReportWebSite.Models
 						where CrashDetail.Branch.Equals( FormData.BranchName )
 						select CrashDetail
 					);
-			}
-			else
-			{
-				Results =
-				(
-					from CrashDetail in Results
-					where !CrashDetail.Branch.Contains( "UE4-UT" )
-					select CrashDetail
-				);
 			}
 
 			// Filter by VersionName

@@ -25,8 +25,12 @@ public class HTML5Platform : Platform
 
 	public override void Package(ProjectParams Params, DeploymentContext SC, int WorkingCL)
 	{
-		Log("Package {0}", Params.RawProjectPath);
-		
+		LogConsole("Package {0}", Params.RawProjectPath);
+
+		LogConsole("Setting Emscripten SDK for packaging..");
+		HTML5SDKInfo.SetupEmscriptenTemp();
+		HTML5SDKInfo.SetUpEmscriptenConfigFile();
+
 		string PackagePath = Path.Combine(Path.GetDirectoryName(Params.RawProjectPath), "Binaries", "HTML5");
 		if (!Directory.Exists(PackagePath))
 		{
@@ -94,7 +98,7 @@ public class HTML5Platform : Platform
         string FullGameExePath = Path.Combine(Path.GetDirectoryName(Params.ProjectGameExeFilename), GameExe);
         if (!SC.IsCodeBasedProject && !FileExists_NoExceptions(FullGameExePath))
         {
-	        Log("Failed to find game application " + FullGameExePath);
+			LogConsole("Failed to find game application " + FullGameExePath);
 	        throw new AutomationException(ErrorCodes.Error_MissingExecutable, "Stage Failed. Could not find application {0}. You may need to build the UE4 project with your target configuration and platform.", FullGameExePath);
         }
 
@@ -129,12 +133,12 @@ public class HTML5Platform : Platform
 			if (!ConfigCache.GetInt32("BuildSettings", "HeapSize", out ConfigHeapSize))
 			{
 				ConfigHeapSize = Params.IsCodeBasedProject ? 1024 : 512;
-				Log("Could not find Heap Size setting in .ini for Client config {0}", Params.ClientConfigsToBuild[0].ToString());
+				LogConsole("Could not find Heap Size setting in .ini for Client config {0}", Params.ClientConfigsToBuild[0].ToString());
 			}
 		}
 
 		HeapSize = (ulong)ConfigHeapSize * 1024L * 1024L; // convert to bytes.
-		Log("Setting Heap size to {0} Mb ", ConfigHeapSize);
+		LogConsole("Setting Heap size to {0} Mb ", ConfigHeapSize);
 
 
 		GenerateFileFromTemplate(TemplateFile, OutputFile, Params.ShortProjectName, Params.ClientConfigsToBuild[0].ToString(), Params.StageCommandline, !Params.IsCodeBasedProject, HeapSize);
@@ -173,7 +177,7 @@ public class HTML5Platform : Platform
 
 	void CompressFile(string Source, string Destination)
 	{
-		Log(" Compressing " + Source); 
+		LogConsole(" Compressing " + Source); 
 		bool DeleteSource = false; 
 
 		if(  Source == Destination )
@@ -487,7 +491,7 @@ public class HTML5Platform : Platform
 
 		if ( !AmazonIdentity )
 		{
-			Log("Amazon S3 Incorrectly configured"); 
+			LogConsole("Amazon S3 Incorrectly configured"); 
 			return; 
 		}
 
@@ -504,7 +508,7 @@ public class HTML5Platform : Platform
 		}
 
 		Task.WaitAll(UploadTasks.ToArray());
-		Log("Upload Tasks finished.");
+		LogConsole("Upload Tasks finished.");
 	}
 
 	private static IDictionary<string, string> MimeTypeMapping = new Dictionary<string, string>(StringComparer.InvariantCultureIgnoreCase) 
@@ -516,7 +520,7 @@ public class HTML5Platform : Platform
 
 	public void UploadToS3Worker(FileInfo Info, string KeyId, string AccessKey, string BucketName, string FolderName )
 	{
-			Log(" Uploading " + Info.Name); 
+		LogConsole(" Uploading " + Info.Name); 
 
 			// force upload files even if the timestamps haven't changed. 
 			string TimeStamp = string.Format("{0:r}", DateTime.UtcNow);
@@ -579,11 +583,11 @@ public class HTML5Platform : Platform
 			}
 			catch (Exception ex)
 			{
-				Log("Could not connect to S3, incorrect S3 Keys? " + ex.ToString());
+				LogConsole("Could not connect to S3, incorrect S3 Keys? " + ex.ToString());
 				throw ex;
 			}
 
-			Log(Info.Name + " has been uploaded " ); 
+			LogConsole(Info.Name + " has been uploaded "); 
 	}
 
 #endregion 

@@ -96,6 +96,7 @@ void AActor::InitializeDefaults()
 #if WITH_EDITORONLY_DATA
 	PivotOffset = FVector::ZeroVector;
 #endif
+	SpawnCollisionHandlingMethod = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 }
 
 void FActorTickFunction::ExecuteTick(float DeltaTime, enum ELevelTick TickType, ENamedThreads::Type CurrentThread, const FGraphEventRef& MyCompletionGraphEvent)
@@ -300,7 +301,7 @@ bool AActor::TeleportTo( const FVector& DestLocation, const FRotator& DestRotati
 	UPrimitiveComponent* ActorPrimComp = Cast<UPrimitiveComponent>(RootComponent);
 	if ( ActorPrimComp )
 	{
-		if (!bNoCheck && (ActorPrimComp->IsCollisionEnabled() || (bCollideWhenPlacing && (GetNetMode() != NM_Client))) )
+		if (!bNoCheck && (ActorPrimComp->IsCollisionEnabled() || (GetNetMode() != NM_Client)) )
 		{
 			// Apply the pivot offset to the desired location
 			FVector Offset = GetRootComponent()->Bounds.Origin - PrevLocation;
@@ -443,6 +444,12 @@ void AActor::PostLoad()
 	if (GetLinkerUE4Version() < VER_UE4_PRIVATE_REMOTE_ROLE)
 	{
 		bReplicates = (RemoteRole != ROLE_None);
+	}
+
+	// Ensure that this is not set for CDO (there was a case where this might have occurred in an older version when converting actor instances to BPs - see UE-18490)
+	if (HasAnyFlags(RF_ClassDefaultObject))
+	{
+		bExchangedRoles = false;
 	}
 
 	if ( GIsEditor )
@@ -1649,7 +1656,7 @@ FVector AActor::GetPlacementExtent() const
 		FBox ActorBox(0.f);
 		for (int32 ComponentID=0; ComponentID<Components.Num(); ++ComponentID)
 		{
-			USceneComponent * SceneComp = Components[ComponentID];
+			USceneComponent* SceneComp = Components[ComponentID];
 			if (SceneComp->ShouldCollideWhenPlacing() )
 			{
 				ActorBox += SceneComp->GetPlacementExtent().GetBox();
@@ -2389,7 +2396,7 @@ static USceneComponent* FixupNativeActorComponents(AActor* Actor)
 	return SceneRootComponent;
 }
 
-void AActor::PostSpawnInitialize(FTransform const& SpawnTransform, AActor* InOwner, APawn* InInstigator, bool bRemoteOwned, bool bNoFail, bool bDeferConstruction)
+void AActor::PostSpawnInitialize(FTransform const& UserSpawnTransform, AActor* InOwner, APawn* InInstigator, bool bRemoteOwned, bool bNoFail, bool bDeferConstruction)
 {
 	// General flow here is like so
 	// - Actor sets up the basics.
@@ -2402,7 +2409,7 @@ void AActor::PostSpawnInitialize(FTransform const& SpawnTransform, AActor* InOwn
 	// This should be the same sequence for deferred or nondeferred spawning.
 
 	// It's not safe to call UWorld accessor functions till the world info has been spawned.
-	UWorld* World = GetWorld();
+	UWorld* const World = GetWorld();
 	bool const bActorsInitialized = World && World->AreActorsInitialized();
 
 	CreationTime = (World ? World->GetTimeSeconds() : 0.f);
@@ -2410,12 +2417,16 @@ void AActor::PostSpawnInitialize(FTransform const& SpawnTransform, AActor* InOwn
 	// Set network role.
 	check(Role == ROLE_Authority);
 	ExchangeNetRoles(bRemoteOwned);
-	
-	USceneComponent* SceneRootComponent = FixupNativeActorComponents(this);
-	// Set the actor's location and rotation.
+
+	USceneComponent* const SceneRootComponent = FixupNativeActorComponents(this);
 	if (SceneRootComponent != NULL)
 	{
-		SceneRootComponent->SetWorldTransform(SpawnTransform);
+		// Set the actor's location and rotation since it has a native rootcomponent
+		// Note that we respect any initial transformation the root component may have from the CDO, so the final transform
+		// might necessarily be exactly the passed-in UserSpawnTransform.
+ 		const FTransform RootTransform(SceneRootComponent->RelativeRotation, SceneRootComponent->RelativeLocation, SceneRootComponent->RelativeScale3D);
+ 		const FTransform FinalRootComponentTransform = RootTransform * UserSpawnTransform;
+		SceneRootComponent->SetWorldTransform(FinalRootComponentTransform);
 	}
 
 	// Call OnComponentCreated on all default (native) components
@@ -2452,24 +2463,28 @@ void AActor::PostSpawnInitialize(FTransform const& SpawnTransform, AActor* InOwn
 	if (!bDeferConstruction)
 	{
 		// Preserve original root component scale
-		FinishSpawning(SpawnTransform, true);
+		FinishSpawning(UserSpawnTransform, true);
 	}
 }
 
-void AActor::FinishSpawning(const FTransform& Transform, bool bIsDefaultTransform)
+void AActor::FinishSpawning(const FTransform& UserTransform, bool bIsDefaultTransform)
 {
 	if (ensure(!bHasFinishedSpawning))
 	{
 		bHasFinishedSpawning = true;
 
-		ExecuteConstruction(Transform, nullptr, bIsDefaultTransform);
+		// if we have a native root component, its transform is already set properly, so we use that.  it might not be the same as UserTransform 
+		// if the root component in the CDO has a nonzero transform.
+		const FTransform FinalRootComponentTransform = RootComponent ? RootComponent->ComponentToWorld * UserTransform : UserTransform;
+
+		ExecuteConstruction(FinalRootComponentTransform, nullptr, bIsDefaultTransform);
 		PostActorConstruction();
 	}
 }
 
 void AActor::PostActorConstruction()
 {
-	UWorld* World = GetWorld();
+	UWorld* const World = GetWorld();
 	bool const bActorsInitialized = World && World->AreActorsInitialized();
 
 	if (bActorsInitialized)
@@ -2485,15 +2500,66 @@ void AActor::PostActorConstruction()
 		// Call InitializeComponent on components
 		InitializeComponents();
 
-		PostInitializeComponents();
-		if (!bActorInitialized && !IsPendingKill())
+		// actor should have all of its components created and registered now, do any collision checking and handling that we need to do
+		if (World)
 		{
-			UE_LOG(LogActor, Fatal, TEXT("%s failed to route PostInitializeComponents.  Please call Super::PostInitializeComponents() in your <className>::PostInitializeComponents() function. "), *GetFullName() );
+			switch (SpawnCollisionHandlingMethod)
+			{
+			case ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn:
+			{
+				// Try to find a spawn position
+				FVector AdjustedLocation = GetActorLocation();
+				FRotator AdjustedRotation = GetActorRotation();
+				if (World->FindTeleportSpot(this, AdjustedLocation, AdjustedRotation))
+				{
+					SetActorLocationAndRotation(AdjustedLocation, AdjustedRotation);
+				}
+			}
+			break;
+			case ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButDontSpawnIfColliding:
+			{
+				// Try to find a spawn position			
+				FVector AdjustedLocation = GetActorLocation();
+				FRotator AdjustedRotation = GetActorRotation();
+				if (World->FindTeleportSpot(this, AdjustedLocation, AdjustedRotation))
+				{
+					SetActorLocationAndRotation(AdjustedLocation, AdjustedRotation);
+				}
+				else
+				{
+					UE_LOG(LogSpawn, Warning, TEXT("SpawnActor failed because of collision at the spawn location [%s] for [%s]"), *AdjustedLocation.ToString(), *GetClass()->GetName());
+					Destroy();
+				}
+			}
+			break;
+			case ESpawnActorCollisionHandlingMethod::DontSpawnIfColliding:
+				if (World->EncroachingBlockingGeometry(this, GetActorLocation(), GetActorRotation()))
+				{
+					UE_LOG(LogSpawn, Warning, TEXT("SpawnActor failed because of collision at the spawn location [%s] for [%s]"), *GetActorLocation().ToString(), *GetClass()->GetName());
+					Destroy();
+				}
+				break;
+			case ESpawnActorCollisionHandlingMethod::Undefined:
+			case ESpawnActorCollisionHandlingMethod::AlwaysSpawn:
+			default:
+				// note we use "always spawn" as default, so treat undefined as that
+				// nothing to do here, just proceed as normal
+				break;
+			}
 		}
 
-		if (World->HasBegunPlay() && !deferBeginPlayAndUpdateOverlaps)
+		if (!IsPendingKill())
 		{
-			BeginPlay();
+			PostInitializeComponents();
+			if (!bActorInitialized && !IsPendingKill())
+			{
+				UE_LOG(LogActor, Fatal, TEXT("%s failed to route PostInitializeComponents.  Please call Super::PostInitializeComponents() in your <className>::PostInitializeComponents() function. "), *GetFullName());
+			}
+
+			if (World->HasBegunPlay() && !deferBeginPlayAndUpdateOverlaps)
+			{
+				BeginPlay();
+			}
 		}
 	}
 	else
@@ -2506,14 +2572,17 @@ void AActor::PostActorConstruction()
 		ClearFlags(RF_PendingKill);
 	}
 
-	// Components are all there and we've begun play, init overlapping state
-	if (!deferBeginPlayAndUpdateOverlaps)
+	if (!IsPendingKill())
 	{
-		UpdateOverlaps();
-	}
+		// Components are all there and we've begun play, init overlapping state
+		if (!deferBeginPlayAndUpdateOverlaps)
+		{
+			UpdateOverlaps();
+		}
 
-	// Notify the texture streaming manager about the new actor.
-	IStreamingManager::Get().NotifyActorSpawned(this);
+		// Notify the texture streaming manager about the new actor.
+		IStreamingManager::Get().NotifyActorSpawned(this);
+	}
 }
 
 void AActor::SetReplicates(bool bInReplicates)
@@ -3102,16 +3171,6 @@ AWorldSettings * AActor::GetWorldSettings() const
 	return (World ? World->GetWorldSettings() : nullptr);
 }
 
-void AActor::PlaySoundOnActor(USoundCue* InSoundCue, float VolumeMultiplier/*=1.f*/, float PitchMultiplier/*=1.f*/)
-{
-	UGameplayStatics::PlaySoundAtLocation( this, InSoundCue, GetActorLocation(), VolumeMultiplier, PitchMultiplier );
-}
-
-void AActor::PlaySoundAtLocation(USoundCue* InSoundCue, FVector SoundLocation, float VolumeMultiplier/*=1.f*/, float PitchMultiplier/*=1.f*/)
-{
-	UGameplayStatics::PlaySoundAtLocation( this, InSoundCue, (SoundLocation.IsZero() ? GetActorLocation() : SoundLocation), VolumeMultiplier, PitchMultiplier );
-}
-
 ENetMode AActor::GetNetMode() const
 {
 	UNetDriver *NetDriver = GetNetDriver();
@@ -3364,6 +3423,7 @@ void AActor::DispatchPhysicsCollisionHit(const FRigidBodyCollisionInfo& MyInfo, 
 	FHitResult Result;
 	Result.Location = Result.ImpactPoint = ContactInfo.ContactPosition;
 	Result.Normal = Result.ImpactNormal = ContactInfo.ContactNormal;
+	Result.PenetrationDepth = ContactInfo.ContactPenetration;
 	Result.PhysMaterial = ContactInfo.PhysMaterial[1];
 	Result.Actor = OtherInfo.Actor;
 	Result.Component = OtherInfo.Component;

@@ -38,14 +38,14 @@ UENUM()
 enum ECanBeCharacterBase
 {
 	/** Character cannot step up onto this Component. */
-	ECB_No,
+	ECB_No UMETA(DisplayName="No"),
 	/** Character can step up onto this Component. */
-	ECB_Yes,
+	ECB_Yes UMETA(DisplayName="Yes"),
 	/**
 	 * Owning actor determines whether character can step up onto this Component (default true unless overridden in code).
 	 * @see AActor::CanBeBaseForCharacter()
 	 */
-	ECB_Owner,
+	ECB_Owner UMETA(DisplayName="(Owner)"),
 	ECB_MAX,
 };
 
@@ -485,6 +485,7 @@ public:
 	 * Set of actors to ignore during component sweeps in MoveComponent().
 	 * All components owned by these actors will be ignored when this component moves or updates overlaps.
 	 * Components on the other Actor may also need to be told to do the same when they move.
+	 * Does not affect movement of this component when simulating physics.
 	 * @see IgnoreActorWhenMoving()
 	 */
 	TArray<TWeakObjectPtr<AActor> > MoveIgnoreActors;
@@ -492,6 +493,7 @@ public:
 	/**
 	 * Tells this component whether to ignore collision with all components of a specific Actor when this component is moved.
 	 * Components on the other Actor may also need to be told to do the same when they move.
+	 * Does not affect movement of this component when simulating physics.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Collision", meta=(Keywords="Move MoveIgnore"))
 	void IgnoreActorWhenMoving(AActor* Actor, bool bShouldIgnore);
@@ -1503,6 +1505,11 @@ public:
 	virtual float GetDiffuseBoost(int32 ElementIndex) const		{ return 1.0f; };
 	
 	virtual bool GetShadowIndirectOnly() const { return false; }
+
+#if WITH_EDITOR
+	/** Returns mask that represents in which views this primitive is hidden */
+	virtual uint64 GetHiddenEditorViews() const;
+#endif// WITH_EDITOR
 
 	/**
 	 *	Set the angular velocity of all bodies in this component.

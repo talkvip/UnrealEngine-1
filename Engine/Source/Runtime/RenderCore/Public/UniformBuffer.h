@@ -84,7 +84,7 @@ public:
 	/** Creates a uniform buffer with the given value, and returns a structured reference to it. */
 	static TUniformBufferRef<TBufferStruct> CreateUniformBufferImmediate(const TBufferStruct& Value, EUniformBufferUsage Usage)
 	{
-		check(IsInRenderingThread());
+		check(IsInRenderingThread() || IsInRHIThread());
 		return TUniformBufferRef<TBufferStruct>(RHICreateUniformBuffer(&Value,TBufferStruct::StaticStruct.GetLayout(),Usage));
 	}
 	/** Creates a uniform buffer with the given value, and returns a structured reference to it. */
@@ -221,7 +221,7 @@ public:
 
 		if (bRegisterForAutoBinding)
 		{
-			GlobalListLink.Link(GetStructList());
+			GlobalListLink.LinkHead(GetStructList());
 			FName StrutTypeFName(StructTypeName);
 			// Verify that during FName creation there's no case conversion
 			checkSlow(FCString::Strcmp(StructTypeName, *StrutTypeFName.GetPlainNameString()) == 0);

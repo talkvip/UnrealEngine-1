@@ -6,55 +6,34 @@
 #include "SelectedKey.h"
 #include "EditorUndoClient.h"
 
+
 class UMovieScene;
 class IToolkitHost;
-class ISequencerObjectBindingManager;
+class UMovieSceneAnimation;
 class ISequencerObjectChangeListener;
 
-/** Parameters for initializing a Sequencer */
-struct FSequencerInitParams
-{
-	/** The root movie scene being edited */
-	UMovieScene* RootMovieScene;
-	
-	/** The interface for managing runtime object bindings */
-	TSharedPtr<ISequencerObjectBindingManager> ObjectBindingManager;
-	
-	/** The Object change listener for various systems that need to be notified when objects change */
-	TSharedPtr<ISequencerObjectChangeListener> ObjectChangeListener;
-	
-	/** The asset editor created for this (if any) */
-	TSharedPtr<IToolkitHost> ToolkitHost;
-
-	/** View parameters */
-	FSequencerViewParams ViewParams;
-
-	/** Whether or not sequencer should be edited within the level editor */
-	bool bEditWithinLevelEditor;
-};
 
 /**
- * Sequencer is the editing tool for MovieScene assets
+ * Sequencer is the editing tool for MovieScene assets.
  */
-class FSequencer : public ISequencer, public FGCObject, public FEditorUndoClient, public FTickableEditorObject
-{ 
+class FSequencer
+	: public ISequencer
+	, public FGCObject
+	, public FEditorUndoClient
+	, public FTickableEditorObject
+{
+public:
 
-public:	
 	static bool IsSequencerEnabled();
 
 	/**
 	 * Initializes sequencer
 	 *
-	 * @param	InitParams		Initialization options
-	 * @param	TrackEditorDelegates	Delegates to call to create auto-key handlers for this sequencer
-
+	 * @param InitParams Initialization parameters.
+	 * @param InObjectChangeListener The object change listener to use.
+	 * @param TrackEditorDelegates Delegates to call to create auto-key handlers for this sequencer.
 	 */
-	void InitSequencer( const FSequencerInitParams& InitParams, const TArray<FOnCreateTrackEditor>& TrackEditorDelegates );
-
-	/** 
-	* Closes the sequencer
-	*/
-	void OnClose();
+	void InitSequencer(const FSequencerInitParams& InitParams, const TSharedRef<ISequencerObjectChangeListener>& InObjectChangeListener, const TArray<FOnCreateTrackEditor>& TrackEditorDelegates);
 
 	/** Constructor */
 	FSequencer();
@@ -62,20 +41,29 @@ public:
 	/** Destructor */
 	virtual ~FSequencer();
 
-	/** FGCObject interface */
+public:
+
+	// FGCObject interface
+
 	virtual void AddReferencedObjects(FReferenceCollector& Collector) override;
 
+public:
+
 	// FTickableEditorObject interface
+
 	virtual void Tick(float DeltaTime) override;
 	virtual bool IsTickable() const override { return true; }
 	virtual TStatId GetStatId() const override { RETURN_QUICK_DECLARE_CYCLE_STAT(FSequencer, STATGROUP_Tickables); };
-	// End FTickableEditorObject interface
 
-	/** ISequencer interface */
+public:
+
+	// ISequencer interface
+
+	virtual void Close() override;
 	virtual TSharedRef<SWidget> GetSequencerWidget() const override { return SequencerWidget.ToSharedRef(); }
 	virtual UMovieScene* GetRootMovieScene() const override;
 	virtual UMovieScene* GetFocusedMovieScene() const override;
-	virtual void ResetToNewRootMovieScene( UMovieScene& NewRoot, TSharedRef<ISequencerObjectBindingManager> NewObjectBindingManager ) override;
+	virtual void ResetToNewAnimation(UMovieSceneAnimation& NewAnimation) override;
 	virtual TSharedRef<FMovieSceneInstance> GetRootMovieSceneInstance() const override;
 	virtual TSharedRef<FMovieSceneInstance> GetFocusedMovieSceneInstance() const override;
 	virtual void FocusSubMovieScene( TSharedRef<FMovieSceneInstance> SubMovieSceneInstance ) override;
@@ -98,11 +86,14 @@ public:
 	virtual void FilterToSelectedShotSections(bool bZoomToShotBounds = true) override;
 	virtual bool CanKeyProperty(FCanKeyPropertyParams CanKeyPropertyParams) const override;
 	virtual void KeyProperty(FKeyPropertyParams KeyPropertyParams) override;
-	virtual TSharedRef<ISequencerObjectBindingManager> GetObjectBindingManager() const override;
+	virtual UMovieSceneAnimation* GetAnimation() override;
 	virtual FSequencerSelection& GetSelection() override;
+	virtual void NotifyMapChanged(class UWorld* NewWorld, EMapChangeType MapChangeType) override;
 
 	/** @return The current view range */
 	virtual FAnimatedRange GetViewRange() const override;
+
+public:
 
 	/** Access the user-supplied settings object */
 	USequencerSettings* GetSettings() const { return Settings; }
@@ -239,9 +230,6 @@ public:
 
 	virtual TArray< UMovieScene* > GetMovieScenesBeingEdited();
 
-	/** Called by LevelEditor when the map changes */
-	void OnMapChanged(class UWorld* NewWorld, EMapChangeType::Type MapChangeType);
-
 	/** Called when an actor is dropped into Sequencer */
 	void OnActorsDropped( const TArray<TWeakObjectPtr<AActor> >& Actors );
 
@@ -253,8 +241,12 @@ public:
 	FReply OnStepToEnd();
 	FReply OnStepToBeginning();
 	FReply OnToggleLooping();
+
 	bool IsLooping() const;
 	EPlaybackMode::Type GetPlaybackMode() const;
+
+	/** Called to determine whether a frame number is set so that frame numbers can be shown */
+	bool CanShowFrameNumbers() const;
 
 	/** @return The toolkit that this sequencer is hosted in (if any) */
 	TSharedPtr<IToolkitHost> GetToolkitHost() const { return ToolkitHost.Pin(); }
@@ -264,12 +256,11 @@ public:
 
 	/** Called to save the current movie scene */
 	void SaveCurrentMovieScene();
-protected:
-	/**
-	 * Reset data about a movie scene when pushing or popping a movie scene
-	 */
-	void ResetPerMovieSceneData();
 
+protected:
+
+	/** Reset data about a movie scene when pushing or popping a movie scene. */
+	void ResetPerMovieSceneData();
 
 	/**
 	 * Destroys spawnables for all movie scenes in the stack
@@ -278,7 +269,6 @@ protected:
 
 	/** Sets the actor CDO such that it is placed in front of the active perspective viewport camera, if we have one */
 	static void PlaceActorInFrontOfCamera( AActor* ActorCDO );
-
 
 	/**
 	 * Gets the far time boundaries of the currently edited movie scene
@@ -303,10 +293,7 @@ protected:
 	 */
 	void OnViewRangeChanged( TRange<float> NewViewRange, EViewRangeInterpolation Interpolation = EViewRangeInterpolation::Animated );
 
-	/**
-	 * Calculates the amount of encroachment the specified time has into the autoscroll region, if any
-	 */
-	TOptional<float> CalculateAutoscrollEncroachment(float NewTime) const;
+
 
 	/**
 	 * Called when the scrub position is changed by the user
@@ -322,15 +309,41 @@ protected:
 	/** Called when the user has finished scrubbing */
 	void OnEndScrubbing();
 
+public:
+
+	/** Put the sequencer in a horizontally autoscrolling state with the given rate */
+	void StartAutoscroll(float UnitsPerS);
+
+	/** Stop the sequencer from autoscrolling */
+	void StopAutoscroll();
+
+protected:
+	/**
+	 * Calculates the amount of encroachment the specified time has into the autoscroll region, if any
+	 */
+	TOptional<float> CalculateAutoscrollEncroachment(float NewTime, float ThresholdPercentage = 0.1f) const;
+
 	/** Called to toggle auto-scroll on and off */
 	void OnToggleAutoScroll();
-	bool GetAutoScrollEnabled() const { return bAutoScrollEnabled; }
+
+	/**
+	 * Whether auto-scroll is enabled.
+	 *
+	 * @return true if auto-scroll is enabled, false otherwise.
+	 */
+	bool GetAutoScrollEnabled() const
+	{
+		return bAutoScrollEnabled;
+	}
+
+protected:
 
 	/** Called via UEditorEngine::GetActorRecordingStateEvent to check to see whether we need to record actor state */
 	void GetActorRecordingState( bool& bIsRecording /* In+Out */ ) const;
 	
 	/** Called when a user executes the delete command to delete sections or keys */
 	void DeleteSelectedItems();
+	bool CanDeleteSelectedItems();
 	
 	/** Transport controls */
 	void TogglePlay();
@@ -362,6 +375,8 @@ protected:
 
 	void OnSectionSelectionChanged();
 
+	void OnSelectedOutlinerNodesChanged();
+
 	/** Called before the world is going to be saved. The sequencer puts everything back to its initial state. */
 	void OnPreSaveWorld(uint32 SaveFlags, class UWorld* World);
 
@@ -372,6 +387,7 @@ protected:
 	void UpdatePreviewLevelViewportClientFromCameraCut( FLevelEditorViewportClient& InViewportClient, UObject* InCameraObject, bool bNewCameraCut ) const;
 
 private:
+
 	/** User-supplied settings object for this sequencer */
 	USequencerSettings* Settings;
 
@@ -387,8 +403,8 @@ private:
 	TWeakPtr<FMovieSceneTrackEditor> ShotTrackEditor;
 	TWeakPtr<FMovieSceneTrackEditor> AnimationTrackEditor;
 
-	/** Manager for handling runtime object bindings */
-	TSharedPtr< ISequencerObjectBindingManager > ObjectBindingManager;
+	/** The current animation being edited. */
+	UMovieSceneAnimation* Animation;
 
 	/** Listener for object changes being made while this sequencer is open*/
 	TSharedPtr< class ISequencerObjectChangeListener > ObjectChangeListener;
@@ -416,18 +432,25 @@ private:
 
 	/** The time range target to be viewed */
 	TRange<float> TargetViewRange;
+
 	/** The last time range that was viewed */
 	TRange<float> LastViewRange;
+
 	/** The view range before zooming */
 	TRange<float> ViewRangeBeforeZoom;
+
 	/** The amount of autoscroll pan offset that is currently being applied */
 	TOptional<float> AutoscrollOffset;
+
+	/** The amount of autoscrub offset that is currently being applied */
+	TOptional<float> AutoscrubOffset;
 	/** Whether or not we are allowing autoscroll */
 	bool bAutoScrollEnabled;
 
 	/** Zoom smoothing curves */
 	FCurveSequence ZoomAnimation;
 	FCurveHandle ZoomCurve;
+
 	/** Overlay fading curves */
 	FCurveSequence OverlayAnimation;
 	FCurveHandle OverlayCurve;

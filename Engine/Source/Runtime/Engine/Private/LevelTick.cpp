@@ -1035,7 +1035,7 @@ void UWorld::Tick( ELevelTick TickType, float DeltaSeconds )
 
 	if (GEngine->HMDDevice.IsValid())
 	{
-		GEngine->HMDDevice->OnStartGameFrame();
+		GEngine->HMDDevice->OnStartGameFrame( GEngine->GetWorldContextFromWorldChecked( this ) );
 	}
 
 #if ENABLE_COLLISION_ANALYZER
@@ -1179,13 +1179,9 @@ void UWorld::Tick( ELevelTick TickType, float DeltaSeconds )
 		RunTickGroup(TG_StartCloth);
 		}
 		{
-			SCOPE_CYCLE_COUNTER(STAT_TG_EndCloth);
-		RunTickGroup(TG_EndCloth);
-		}
-		{
 			SCOPE_CYCLE_COUNTER(STAT_TG_PostPhysics);
-		RunTickGroup(TG_PostPhysics);
-	}
+			RunTickGroup(TG_PostPhysics);
+		}
 	}
 	else if( bIsPaused )
 	{
@@ -1280,7 +1276,11 @@ void UWorld::Tick( ELevelTick TickType, float DeltaSeconds )
 		SCOPE_CYCLE_COUNTER(STAT_TickTime);
 		{
 			SCOPE_CYCLE_COUNTER(STAT_TG_PostUpdateWork);
-		RunTickGroup(TG_PostUpdateWork);
+			RunTickGroup(TG_PostUpdateWork);
+		}
+		{
+			SCOPE_CYCLE_COUNTER(STAT_TG_EndCloth);
+			RunTickGroup(TG_EndCloth);
 		}
 		FTickTaskManagerInterface::Get().EndFrame(); 
 
@@ -1442,7 +1442,7 @@ void UWorld::Tick( ELevelTick TickType, float DeltaSeconds )
 
 	if (GEngine->HMDDevice.IsValid())
 	{
-		GEngine->HMDDevice->OnEndGameFrame();
+		GEngine->HMDDevice->OnEndGameFrame( GEngine->GetWorldContextFromWorldChecked( this ) );
 	}
 }
 

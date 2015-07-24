@@ -32,6 +32,7 @@
 #include "GameFramework/GameUserSettings.h"
 #include "Runtime/Engine/Classes/Engine/UserInterfaceSettings.h"
 #include "SGameLayerManager.h"
+#include "ActorEditorUtils.h"
 
 #define LOCTEXT_NAMESPACE "GameViewport"
 
@@ -154,6 +155,21 @@ UGameViewportClient::UGameViewportClient(const FObjectInitializer& ObjectInitial
 	}
 }
 
+#if WITH_HOT_RELOAD_CTORS
+UGameViewportClient::UGameViewportClient(FVTableHelper& Helper)
+	: Super(Helper)
+	, EngineShowFlags(ESFIM_Game)
+	, CurrentBufferVisualizationMode(NAME_None)
+	, HighResScreenshotDialog(NULL)
+	, bIgnoreInput(false)
+	, MouseCaptureMode(EMouseCaptureMode::CapturePermanently)
+	, bHideCursorDuringCapture(false)
+	, AudioDeviceHandle(INDEX_NONE)
+	, bHasAudioFocus(false)
+{
+
+}
+#endif // WITH_HOT_RELOAD_CTORS
 
 UGameViewportClient::~UGameViewportClient()
 {
@@ -2298,7 +2314,7 @@ void UGameViewportClient::ToggleShowVolumes()
 		AVolume* Owner = Cast<AVolume>(BrushComponent->GetOwner());
 
 		// Only bother with volume brushes that belong to the world's scene
-		if (Owner && BrushComponent->GetScene() == GetWorld()->Scene)
+		if (Owner && BrushComponent->GetScene() == GetWorld()->Scene && !FActorEditorUtils::IsABuilderBrush(Owner))
 		{
 			// We're expecting this to be in the game at this point
 			check(Owner->GetWorld()->IsGameWorld());
@@ -2375,7 +2391,9 @@ void UGameViewportClient::ToggleShowCollision()
 			UPrimitiveComponent* PrimitiveComponent = *It;
 			if (!PrimitiveComponent->IsVisible() && PrimitiveComponent->IsCollisionEnabled() && PrimitiveComponent->GetScene() == World->Scene)
 			{
-				if (PrimitiveComponent->GetOwner() && PrimitiveComponent->GetOwner()->GetWorld() && PrimitiveComponent->GetOwner()->GetWorld()->IsGameWorld())
+				AActor* Owner = PrimitiveComponent->GetOwner();
+
+				if (Owner && Owner->GetWorld() && Owner->GetWorld()->IsGameWorld() && !FActorEditorUtils::IsABuilderBrush(Owner))
 				{
 					// Save state before modifying the collision visibility
 					Mapping.Add(PrimitiveComponent, CollVisibilityState(PrimitiveComponent->bHiddenInGame, PrimitiveComponent->bVisible));
@@ -2705,6 +2723,18 @@ bool UGameViewportClient::HandleToggleFullscreenCommand()
 			FullScreenMode = Viewport->IsFullscreen() ? EWindowMode::Windowed : EWindowMode::Fullscreen;
 		}
 	}
+
+	if (PLATFORM_WINDOWS && FullScreenMode == EWindowMode::Fullscreen)
+	{
+		// Handle fullscreen mode differently for D3D11/D3D12
+		static const bool bD3D12 = FParse::Param(FCommandLine::Get(), TEXT("d3d12")) || FParse::Param(FCommandLine::Get(), TEXT("dx12"));
+		if (bD3D12)
+		{
+			// Force D3D12 RHI to use windowed fullscreen mode
+			FullScreenMode = EWindowMode::WindowedFullscreen;
+		}
+	}
+
 	FSystemResolution::RequestResolutionChange(GSystemResolution.ResX, GSystemResolution.ResY, FullScreenMode);
 	return true;
 }

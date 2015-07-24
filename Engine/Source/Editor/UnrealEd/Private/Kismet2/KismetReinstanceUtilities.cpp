@@ -21,6 +21,7 @@ DECLARE_CYCLE_STAT(TEXT("Recompile Child Classes"), EKismetReinstancerStats_Reco
 DECLARE_CYCLE_STAT(TEXT("Replace Classes Without Reinstancing"), EKismetReinstancerStats_ReplaceClassNoReinsancing, STATGROUP_KismetReinstancer );
 DECLARE_CYCLE_STAT(TEXT("Reinstance Objects"), EKismetCompilerStats_ReinstanceObjects, STATGROUP_KismetCompiler);
 DECLARE_CYCLE_STAT(TEXT("Refresh Dependent Blueprints In Reinstancer"), EKismetCompilerStats_RefreshDependentBlueprintsInReinstancer, STATGROUP_KismetCompiler);
+DECLARE_CYCLE_STAT(TEXT("Recreate UberGraphPersistentFrame"), EKismetCompilerStats_RecreateUberGraphPersistentFrame, STATGROUP_KismetCompiler);
 
 struct FReplaceReferenceHelper
 {
@@ -760,6 +761,19 @@ void FActorReplacementHelper::Finalize(const TMap<UObject*, UObject*>& OldToNewI
 		NewActor->ExecuteConstruction(TargetWorldTransform, &DummyComponentData);
 	}	
 
+	// make sure that the actor is properly hidden if it's in a hidden sublevel:
+	bool bIsInHiddenLevel = false;
+	if (ULevel* Level = NewActor->GetLevel())
+	{
+		bIsInHiddenLevel = !Level->bIsVisible;
+	}
+
+	if (bIsInHiddenLevel)
+	{
+		NewActor->bHiddenEdLevel = true;
+		NewActor->MarkComponentsRenderStateDirty();
+	}
+
 	if (TargetAttachParent)
 	{
 		UObject* const* NewTargetAttachParent = OldToNewInstanceMap.Find(TargetAttachParent);
@@ -980,6 +994,16 @@ void FBlueprintCompileReinstancer::ReplaceInstancesOfClass(UClass* OldClass, UCl
 				FRotator Rotation = FRotator::ZeroRotator;
 				if (USceneComponent* OldRootComponent = OldActor->GetRootComponent())
 				{
+					// We need to make sure that the ComponentToWorld transform is up to date, but we don't want to run any initialization logic
+					// so we silence the update, cache it off, revert the change (so no events are raised), and then directly update the transform
+					// with the value calculated in ConditionalUpdateComponentToWorld:
+					FScopedMovementUpdate SilenceMovement(OldRootComponent);
+					
+					OldRootComponent->ConditionalUpdateComponentToWorld();
+					FTransform OldComponentToWorld = OldRootComponent->ComponentToWorld;
+					SilenceMovement.RevertMove();
+					
+					OldRootComponent->ComponentToWorld = OldComponentToWorld;
 					Location = OldActor->GetActorLocation();
 					Rotation = OldActor->GetActorRotation();
 				}
@@ -999,7 +1023,7 @@ void FBlueprintCompileReinstancer::ReplaceInstancesOfClass(UClass* OldClass, UCl
 				FActorSpawnParameters SpawnInfo;
 				SpawnInfo.OverrideLevel      = ActorLevel;
 				SpawnInfo.Template           = NewArchetype;
-				SpawnInfo.bNoCollisionFail   = true;
+				SpawnInfo.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 				SpawnInfo.bDeferConstruction = true;
 
 				// Temporarily remove the deprecated flag so we can respawn the Blueprint in the level
@@ -1323,4 +1347,33 @@ FBlueprintCompileReinstancer::FCDODuplicatesProvider& FBlueprintCompileReinstanc
 {
 	static FCDODuplicatesProvider Delegate;
 	return Delegate;
+}
+
+FRecreateUberGraphFrameScope::FRecreateUberGraphFrameScope(UClass* InClass, bool bRecreate)
+	: RecompiledClass(InClass)
+{
+	if (bRecreate && ensure(RecompiledClass))
+	{
+		BP_SCOPED_COMPILER_EVENT_STAT(EKismetCompilerStats_RecreateUberGraphPersistentFrame);
+
+		const bool bIncludeDerivedClasses = true;
+		GetObjectsOfClass(RecompiledClass, Objects, bIncludeDerivedClasses);
+
+		for (auto Obj : Objects)
+		{
+			RecompiledClass->DestroyPersistentUberGraphFrame(Obj, true);
+		}
+	}
+}
+
+FRecreateUberGraphFrameScope::~FRecreateUberGraphFrameScope()
+{
+	BP_SCOPED_COMPILER_EVENT_STAT(EKismetCompilerStats_RecreateUberGraphPersistentFrame);
+	for (auto Obj : Objects)
+	{
+		if (IsValid(Obj))
+		{
+			RecompiledClass->CreatePersistentUberGraphFrame(Obj, false, true);
+		}
+	}
 }

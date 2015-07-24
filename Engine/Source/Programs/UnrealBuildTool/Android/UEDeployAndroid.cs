@@ -388,7 +388,7 @@ namespace UnrealBuildTool.Android
             {
                 obbData.Append("new XAPKFile(\ntrue, // true signifies a main file\n");
                 obbData.AppendFormat("\"{0}\", // the version of the APK that the file was uploaded against\n", GetOBBVersionNumber(StoreVersion));
-                obbData.AppendFormat("{0} // the length of the file in bytes\n", File.Exists(ObbSource) ? new FileInfo(ObbSource).Length : 0);
+                obbData.AppendFormat("{0}L // the length of the file in bytes\n", File.Exists(ObbSource) ? new FileInfo(ObbSource).Length : 0);
                 obbData.AppendFormat("){0}\n", first ? "," : "");
                 first = false;
             }
@@ -557,13 +557,15 @@ namespace UnrealBuildTool.Android
 			}
 		}
 
-		//@TODO: To enable the NVIDIA Gfx Debugger
+		//@TODO: To enable the NVIDIA Gfx Debugger - these paths need to be standardized
 		private static void CopyGfxDebugger(string UE4BuildPath, string UE4Arch)
 		{
-//			string Arch = GetNDKArch(UE4Arch);
-//			Directory.CreateDirectory(UE4BuildPath + "/libs/" + Arch);
-//			File.Copy("E:/Dev2/UE4-Clean/Engine/Source/ThirdParty/NVIDIA/TegraGfxDebugger/libNvPmApi.Core.so", UE4BuildPath + "/libs/" + Arch + "/libNvPmApi.Core.so");
-//			File.Copy("E:/Dev2/UE4-Clean/Engine/Source/ThirdParty/NVIDIA/TegraGfxDebugger/libTegra_gfx_debugger.so", UE4BuildPath + "/libs/" + Arch + "/libTegra_gfx_debugger.so");
+			/*
+			string Arch = GetNDKArch(UE4Arch);
+			Directory.CreateDirectory(UE4BuildPath + "/libs/" + Arch);
+			File.Copy("F:/NVPACK/android-kk-egl-t124-a32/Stripped_libNvPmApi.Core.so", UE4BuildPath + "/libs/" + Arch + "/libNvPmApi.Core.so", true);
+			File.Copy("F:/NVPACK/android-kk-egl-t124-a32/Stripped_libNvidia_gfx_debugger.so", UE4BuildPath + "/libs/" + Arch + "/libNvidia_gfx_debugger.so", true);
+			*/
 		}
 
 		private static void RunCommandLineProgramAndThrowOnError(string WorkingDirectory, string Command, string Params, string OverrideDesc=null, bool bUseShellExecute=false)
@@ -1160,6 +1162,39 @@ namespace UnrealBuildTool.Android
 			return Text.ToString();
 		}
 
+		private bool FilesAreDifferent(string SourceFilename, string DestFilename)
+		{
+			// source must exist
+			FileInfo SourceInfo = new FileInfo(SourceFilename);
+			if (!SourceInfo.Exists)
+			{
+				throw new BuildException("Can't make an APK without file [{0}]", SourceFilename);
+			}
+
+			// different if destination doesn't exist
+			FileInfo DestInfo = new FileInfo(DestFilename);
+			if (!DestInfo.Exists)
+			{
+				return true;
+			}
+
+			// file lengths differ?
+			if (SourceInfo.Length != DestInfo.Length)
+			{
+				return true;
+			}
+
+			// validate timestamps
+			TimeSpan Diff = DestInfo.LastWriteTimeUtc - SourceInfo.LastWriteTimeUtc;
+			if (Diff.TotalSeconds < -1 || Diff.TotalSeconds > 1)
+			{
+				return true;
+			}
+
+			// could check actual bytes just to be sure, but good enough
+			return false;
+		}
+
 		private void MakeApk(string ProjectName, string ProjectDirectory, string OutputPath, string EngineDirectory, bool bForDistribution, string CookFlavor, bool bMakeSeparateApks, bool bIncrementalPackage, bool bDisallowPackagingDataInApk)
 		{
 			Log.TraceInformation("\n===={0}====PREPARING TO MAKE APK=================================================================", DateTime.Now.ToString());
@@ -1176,8 +1211,9 @@ namespace UnrealBuildTool.Android
 	                     
             // Generate Java files
             string PackageName = GetPackageName(ProjectName);
-            string TemplateDestinationBase = Path.Combine(ProjectDirectory, "Build", "Android", "src" , PackageName.Replace('.', '/'));
+            string TemplateDestinationBase = Path.Combine(ProjectDirectory, "Build", "Android", "src" , PackageName.Replace('.', Path.DirectorySeparatorChar));
             MakeDirectoryIfRequired(TemplateDestinationBase);
+
             // We'll be writing the OBB data into the same location as the download service files
             string UE4OBBDataFileName = GetUE4JavaOBBDataFileName(TemplateDestinationBase);
             string UE4DownloadShimFileName = GetUE4JavaDownloadShimFileName(UE4JavaFilePath);
@@ -1203,6 +1239,47 @@ namespace UnrealBuildTool.Android
                 { "$$PublicKey$$", GetPublicKey() }, 
                 { "$$PackageName$$",PackageName }
             });
+
+            // Sometimes old files get left behind if things change, so we'll do a clean up pass
+            {
+                string CleanUpBaseDir = Path.Combine(ProjectDirectory, "Build", "Android", "src");
+                var files = Directory.EnumerateFiles(CleanUpBaseDir, "*.java", SearchOption.AllDirectories);
+                
+                Log.TraceInformation("Cleaning up files based on template dir {0}", TemplateDestinationBase);
+
+                foreach(var filename in files)
+                {
+                    if (filename == UE4DownloadShimFileName)  // we always need the shim, and it'll get rewritten if needed anyway
+                        continue;
+
+                    string filePath = Path.GetDirectoryName(filename);  // grab the file's path
+                    if(filePath != TemplateDestinationBase)             // and check to make sure it isn't the same as the Template directory we calculated earlier
+                    {
+                        Log.TraceInformation("Cleaning up file {0} with path {1}", filename, filePath);
+                        File.Delete(filename);
+
+                        // Check to see if this file also exists in our target destination, and if so nuke it too
+                        string DestFilename = Path.Combine(UE4BuildPath, Utils.MakePathRelativeTo(filePath, UE4BuildFilesPath));
+                        if(File.Exists(filename))
+                        {
+                            File.Delete(filename);
+                        }
+                    }
+                }
+
+                // Directory clean up code
+                var directories = Directory.EnumerateDirectories(CleanUpBaseDir, "*", SearchOption.AllDirectories).OrderByDescending(x => x);
+                foreach(var directory in directories)
+                {
+                    if(Directory.Exists(directory) && Directory.GetFiles(directory, "*.*", SearchOption.AllDirectories).Count() == 0)
+                    {
+                        Log.TraceInformation("Cleaning Directory {0} as empty.", directory);
+                        Directory.Delete(directory, true);
+                    }
+                };
+
+
+            }
 
 
 			// cache if we want data in the Apk
@@ -1279,8 +1356,8 @@ namespace UnrealBuildTool.Android
             }
 
             // Now we have to spin over all the arch/gpu combinations to make sure they all match
-
-            if (BuildList.Count() == 0)
+			int BuildListComboTotal = BuildList.Count();
+            if (BuildListComboTotal == 0)
             {
                 Log.TraceInformation("Output .apk file(s) are up to date (dependencies and build settings are up to date)");
                 return;
@@ -1389,16 +1466,16 @@ namespace UnrealBuildTool.Android
                 }
 
                 String FinalSOName;
+
                 if(HasNDKPath)
                 {
                     string LibDir = UE4BuildPath + "/jni/" + GetNDKArch(Arch);
                     FinalSOName = LibDir + "/libUE4.so";
 
-                    // check to see if libUE4.so is newer than last time we copied
-                    TimeSpan Diff = File.GetLastWriteTimeUtc(FinalSOName) - File.GetLastWriteTimeUtc(SourceSOName);
-                    if (!File.Exists(FinalSOName) || Diff.TotalSeconds < -1 || Diff.TotalSeconds > 1)
+                    // check to see if libUE4.so needs to be copied
+					if (BuildListComboTotal > 1 || FilesAreDifferent(SourceSOName, FinalSOName))
                     {
-                        Log.TraceInformation("\nCopying new .so file to jni folder...");
+                        Log.TraceInformation("\nCopying new .so {0} file to jni folder...", SourceSOName);
                         Directory.CreateDirectory(LibDir);
                         // copy the binary to the standard .so location
                         File.Copy(SourceSOName, FinalSOName, true);
@@ -1409,11 +1486,11 @@ namespace UnrealBuildTool.Android
                     // if no NDK, we don't need any of the debugger stuff, so we just copy the .so to where it will end up
                     FinalSOName = UE4BuildPath + "/libs/" + GetNDKArch(Arch) + "/libUE4.so";
 
-                    // check to see if libUE4.so is newer than last time we copied
-                    TimeSpan Diff = File.GetLastWriteTimeUtc(FinalSOName) - File.GetLastWriteTimeUtc(SourceSOName);
-                    if (!File.Exists(FinalSOName) || Diff.TotalSeconds < -1 || Diff.TotalSeconds > 1)
+                    // check to see if libUE4.so needs to be copied
+					if (BuildListComboTotal > 1 || FilesAreDifferent(SourceSOName, FinalSOName))
                     {
-                        Directory.CreateDirectory(Path.GetDirectoryName(FinalSOName));
+						Log.TraceInformation("\nCopying .so {0} file to jni folder...", SourceSOName);
+						Directory.CreateDirectory(Path.GetDirectoryName(FinalSOName));
                         File.Copy(SourceSOName, FinalSOName, true);
                     }
                 }
@@ -1453,6 +1530,7 @@ namespace UnrealBuildTool.Android
                 // copy libgnustl_shared.so to library (use 4.8 if possible, otherwise 4.6)
                 CopySTL(UE4BuildPath, Arch);
                 CopyGfxDebugger(UE4BuildPath, Arch);
+				CopyPluginLibs(EngineDirectory, UE4BuildPath, Arch); 
 
                 Log.TraceInformation("\n===={0}====PERFORMING FINAL APK PACKAGE OPERATION================================================", DateTime.Now.ToString());
 
@@ -1562,5 +1640,48 @@ namespace UnrealBuildTool.Android
 				Log.TraceInformation(Line.Data);
 			}
 		}
-	}
+
+        private static void CopyPluginLibs(string EngineDirectory, string UE4BuildPath, string UE4Arch)
+        {
+            ConfigCacheIni Ini = GetConfigCacheIni("Engine");
+            string Arch = GetNDKArch(UE4Arch);
+            string PluginsDir = Path.GetFullPath(Path.Combine(EngineDirectory, "Plugins"));
+            string ThirdPartyDir = Path.GetFullPath(Path.Combine(EngineDirectory, "Source/ThirdParty"));
+
+            // Check for GearVR enabled
+            bool bPackageForGearVR = true;
+//            Ini.GetBool("/Script/AndroidRuntimeSettings.AndroidRuntimeSettings", "bPackageForGearVR", out bPackageForGearVR);
+//            Console.WriteLine("bPackageForGearVR? {0}, arch {1}", bPackageForGearVR, Arch);
+
+            // Note: only support ARMv7 at the moment
+            if (bPackageForGearVR && Arch == "armeabi-v7a")
+            {
+                string SourceVRLibFile = ThirdPartyDir + "/Oculus/LibOVRMobile/LibOVRMobile_060/VrApi/Libs/Android/armeabi-v7a/libvrapi.so";
+				string FinalVRLibFile = UE4BuildPath + "/libs/" + Arch + "/libvrapi.so";
+
+				if (File.Exists(SourceVRLibFile))
+				{
+					// check to see if newer than last time we copied
+					bool bFileExists = File.Exists(FinalVRLibFile);
+					TimeSpan Diff = File.GetLastWriteTimeUtc(FinalVRLibFile) - File.GetLastWriteTimeUtc(SourceVRLibFile);
+					if (!bFileExists || Diff.TotalSeconds < -1 || Diff.TotalSeconds > 1)
+					{
+						if (bFileExists)
+						{
+							File.Delete(FinalVRLibFile);
+						}
+						Directory.CreateDirectory(Path.GetDirectoryName(FinalVRLibFile));
+						File.Copy(SourceVRLibFile, FinalVRLibFile, true);
+	                    Console.WriteLine("File {0} copied to {1}", SourceVRLibFile, FinalVRLibFile);
+					}
+                }
+				else
+				{
+					Console.WriteLine("Failed to find the GearVR library required for packaging: {0}", SourceVRLibFile);
+				}
+            }
+
+            // Add others here...
+        }
+    }
 }

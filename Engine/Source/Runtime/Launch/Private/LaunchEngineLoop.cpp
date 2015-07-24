@@ -1451,6 +1451,8 @@ int32 FEngineLoop::PreInit( const TCHAR* CmdLine )
 	}
 	SlowTask.EnterProgressFrame(5);
 
+	RHIPostInit();
+
 	if (GUseThreadedRendering)
 	{
 		if (GRHISupportsRHIThread)
@@ -2200,6 +2202,8 @@ void FEngineLoop::Exit()
 		HotReload->SaveConfig();
 	}
 #endif
+
+	DerivedDataCachePrint();
 
 	// Unload all modules.  Note that this doesn't actually unload the module DLLs (that happens at
 	// process exit by the OS), but it does call ShutdownModule() on all loaded modules in the reverse

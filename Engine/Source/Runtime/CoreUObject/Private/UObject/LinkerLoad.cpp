@@ -3022,14 +3022,30 @@ void FLinkerLoad::Preload( UObject* Object )
 		if (Object->GetLinker() == this)
 		{
 #if USE_CIRCULAR_DEPENDENCY_LOAD_DEFERRING
+			// Because of delta serialization, we require that a parent's CDO be 
+			// fully serialized before its children's CDOs are created. However, 
+			// due to cyclic parent/child dependencies, we have some cases where 
+			// the linker breaks that expected behavior. In those cases, we 
+			// defer the child's initialization (i.e. defer copying of parent  
+			// property values, etc.), and wait until we can guarantee that the 
+			// parent CDO has been fully loaded.
+			//
+			// In a normal scenario, the order of property initialization is:
+			// Creation (zeroed) -> Initialization (copied super's values) -> Serialization (overridden values loaded)
+			// When the initialization has been deferred we have to make sure to
+			// defer serialization here as well (don't worry, it will be invoked 
+			// again from FinalizeBlueprint()->ResolveDeferredExports())
+			if (Object->HasAnyFlags(RF_ClassDefaultObject) && FDeferredObjInitializerTracker::IsCdoDeferred(Object->GetClass()))
+			{
+				return;
+			}
 			// if this is an inherited sub-object on a CDO, and that CDO has had
-			// its initialization deferred, then we shouldn't serialize in data 
-			// for this quite yet... not until the CDO owner has had a chance to
-			// initialize itself (because, as part of CDO initialization, 
-			// inherited sub-objects get filled in with values inherited from 
-			// the parent class... it is expected that this happens prior to 
-			// sub-object serialization)
-			if (Object->HasAnyFlags(RF_DefaultSubObject) && FDeferredObjInitializerTracker::DeferSubObjectPreload(Object))
+			// its initialization deferred (for reasons explained above), then 
+			// we shouldn't serialize in data for this quite yet... not until 
+			// its owner has had a chance to initialize itself (because, as part
+			// of CDO initialization, inherited sub-objects get filled in with 
+			// values inherited from the super)
+			else if (Object->HasAnyFlags(RF_DefaultSubObject) && FDeferredObjInitializerTracker::DeferSubObjectPreload(Object))
 			{
 				// don't worry, FDeferredObjInitializerTracker::DeferSubObjectPreload() 
 				// should have cached this object, and it will run Preload() on 
@@ -3096,25 +3112,21 @@ void FLinkerLoad::Preload( UObject* Object )
 						if ((LoadFlags & LOAD_DeferDependencyLoads) != 0)
 						{
 #if USE_DEFERRED_DEPENDENCY_CHECK_VERIFICATION_TESTS
-							if (!FBlueprintSupport::IsDeferredCDOSerializationDisabled())
-							{
-								check((DeferredCDOIndex == INDEX_NONE) || (DeferredCDOIndex == ExportIndex));
-#else // USE_DEFERRED_DEPENDENCY_CHECK_VERIFICATION_TESTS
-							{
+							check((DeferredCDOIndex == INDEX_NONE) || (DeferredCDOIndex == ExportIndex));
 #endif // USE_DEFERRED_DEPENDENCY_CHECK_VERIFICATION_TESTS
-								// since serializing the CDO can introduce circular 
-								// dependencies, we want to stave that off until 
-								// we're ready to handle those 
-								DeferredCDOIndex = ExportIndex;
-								// don't need to actually "consume" the data through
-								// serialization though (since we seek back to 
-								// SavedPos later on)
+							
+							// since serializing the CDO can introduce circular 
+							// dependencies, we want to stave that off until 
+							// we're ready to handle those 
+							DeferredCDOIndex = ExportIndex;
+							// don't need to actually "consume" the data through
+							// serialization though (since we seek back to 
+							// SavedPos later on)
 
-								// reset the flag and return (don't worry, we make
-								// sure to force load this later)
-								Object->SetFlags(RF_NeedLoad);
-								return;
-							}
+							// reset the flag and return (don't worry, we make
+							// sure to force load this later)
+							Object->SetFlags(RF_NeedLoad);
+							return;
 						}
 #endif // USE_CIRCULAR_DEPENDENCY_LOAD_DEFERRING
 
@@ -3158,9 +3170,9 @@ void FLinkerLoad::Preload( UObject* Object )
 							// however, sometimes DeferredExportIndex doesn't get set at all (we have to utilize FindCDOExportIndex() to set
 							// it), and that happens when the class's ClassGeneratedBy is serialized in null... this will happen for cooked 
 							// builds (because Blueprints are editor-only objects)
-							check((DeferredCDOIndex != INDEX_NONE) || FPlatformProperties::RequiresCookedData() || FBlueprintSupport::IsDeferredCDOSerializationDisabled());
+							check((DeferredCDOIndex != INDEX_NONE) || FPlatformProperties::RequiresCookedData());
 
-							if ((DeferredCDOIndex == INDEX_NONE) && !FBlueprintSupport::IsDeferredCDOSerializationDisabled())
+							if (DeferredCDOIndex == INDEX_NONE)
 							{
 								DeferredCDOIndex = FindCDOExportIndex(ObjectAsClass);
 								check(DeferredCDOIndex != INDEX_NONE);
@@ -3692,11 +3704,7 @@ UObject* FLinkerLoad::CreateExport( int32 Index )
 			bool const bIsBlueprintCDO = ((Export.ObjectFlags & RF_ClassDefaultObject) != 0) && (LoadClass->ClassGeneratedBy != nullptr);
 
 #if USE_CIRCULAR_DEPENDENCY_LOAD_DEFERRING
-			bool bDeferCDOSerialization = bIsBlueprintCDO && ((LoadFlags & LOAD_DeferDependencyLoads) != 0);
-#if USE_DEFERRED_DEPENDENCY_CHECK_VERIFICATION_TESTS
-			bDeferCDOSerialization &= !FBlueprintSupport::IsDeferredCDOSerializationDisabled();
-#endif // USE_DEFERRED_DEPENDENCY_CHECK_VERIFICATION_TESTS	
-
+			const bool bDeferCDOSerialization = bIsBlueprintCDO && ((LoadFlags & LOAD_DeferDependencyLoads) != 0);
 			if (bDeferCDOSerialization)			
 			{
 				// if LOAD_DeferDependencyLoads is set, then we're already

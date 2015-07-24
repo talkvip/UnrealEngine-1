@@ -21,7 +21,7 @@ public:
 	virtual bool GetAssets(const FARFilter& Filter, TArray<FAssetData>& OutAssetData) const override;
 	virtual FAssetData GetAssetByObjectPath( const FName ObjectPath ) const override;
 	virtual bool GetAllAssets(TArray<FAssetData>& OutAssetData) const override;
-	virtual bool GetDependencies(FName PackageName, TArray<FName>& OutDependencies, EAssetRegistryDependencyType::Type InDependencyType = EAssetRegistryDependencyType::All) const override;
+	virtual bool GetDependencies(FName PackageName, TArray<FName>& OutDependencies, EAssetRegistryDependencyType::Type InDependencyType = EAssetRegistryDependencyType::All, bool bResolveIniStringReferences = false) const override;
 	virtual bool GetReferencers(FName PackageName, TArray<FName>& OutReferencers) const override;
 	virtual bool GetAncestorClassNames(FName ClassName, TArray<FName>& OutAncestorClassNames) const override;
 	virtual void GetDerivedClassNames(const TArray<FName>& ClassNames, const TSet<FName>& ExcludedClassNames, TSet<FName>& OutDerivedClassNames) const override;
@@ -85,7 +85,7 @@ private:
 	void ScanPathsSynchronous_Internal(const TArray<FString>& InPaths, bool bForceRescan, bool bUseCache);
 
 	/** Called every tick to when data is retrieved by the background asset search. If TickStartTime is < 0, the entire list of gathered assets will be cached. Also used in sychronous searches */
-	void AssetSearchDataGathered(const double TickStartTime, TArray<FBackgroundAssetData*>& AssetResults);
+	void AssetSearchDataGathered(const double TickStartTime, TArray<IGatheredAssetData*>& AssetResults);
 
 	/** Called every tick to when data is retrieved by the background path search. If TickStartTime is < 0, the entire list of gathered assets will be cached. Also used in sychronous searches */
 	void PathDataGathered(const double TickStartTime, TArray<FString>& PathResults);
@@ -201,7 +201,7 @@ private:
 	TSharedPtr< class FAssetDataGatherer > BackgroundAssetSearch;
 
 	/** A list of results that were gathered from the background thread that are waiting to get processed by the main thread */
-	TArray<class FBackgroundAssetData*> BackgroundAssetResults;
+	TArray<class IGatheredAssetData*> BackgroundAssetResults;
 	TArray<FString> BackgroundPathResults;
 	TArray<class FPackageDependencyData> BackgroundDependencyResults;
 

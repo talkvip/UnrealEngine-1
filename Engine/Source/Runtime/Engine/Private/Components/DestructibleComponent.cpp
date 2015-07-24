@@ -362,18 +362,16 @@ void UDestructibleComponent::CreatePhysicsState()
 	PhysxChunkUserData.Reset(ChunkCount);
 	PhysxChunkUserData.AddZeroed(ChunkCount);
 
-	if(PhysScene->DeferredCommandHandler.HasPendingCommands())
 	{
 		// Lock and flush deferred command handler here to stop any currently pending deletions from affecting new actors.
-		// Only do this if we have any commands to flush to avoid the scene lock if possible
 		SCOPED_SCENE_WRITE_LOCK(PScene);
 		PhysScene->DeferredCommandHandler.Flush();
+
+		// Create an APEX NxDestructibleActor from the Destructible asset and actor descriptor, has to be in a locked scope as it affects simulation state
+		ApexDestructibleActor = static_cast<NxDestructibleActor*>(TheDestructibleMesh->ApexDestructibleAsset->createApexActor(*ActorParams, *ApexScene));
+		check(ApexDestructibleActor);
 	}
 	
-	// Create an APEX NxDestructibleActor from the Destructible asset and actor descriptor
-	ApexDestructibleActor = static_cast<NxDestructibleActor*>(TheDestructibleMesh->ApexDestructibleAsset->createApexActor(*ActorParams, *ApexScene));
-	check(ApexDestructibleActor);
-
 	// Make a backpointer to this component
 	PhysxUserData = FPhysxUserData(this);
 	ApexDestructibleActor->userData = &PhysxUserData;
@@ -887,7 +885,15 @@ void UDestructibleComponent::SetChunkVisible( int32 ChunkIndex, bool bVisible )
 			{
 				const physx::PxMat44 ChunkPoseRT = ApexDestructibleActor->getChunkPose(ChunkIndex);	// Unscaled
 				const physx::PxTransform Transform(ChunkPoseRT);
-				SetChunkWorldRT(ChunkIndex, P2UQuat(Transform.q), P2UVector(Transform.p));
+				if(IsFracturedOrInitiallyStatic())
+				{
+					SetChunkWorldRT(ChunkIndex, P2UQuat(Transform.q), P2UVector(Transform.p));
+				}
+				else
+				{
+					// Not yet fractured, sync the component to the physics body
+					UPrimitiveComponent::SyncComponentToRBPhysics();
+				}
 			}
 		}
 	}

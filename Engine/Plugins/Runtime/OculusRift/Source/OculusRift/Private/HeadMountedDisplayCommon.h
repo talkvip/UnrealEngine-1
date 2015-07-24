@@ -38,6 +38,9 @@ public:
 			/** Whether stereo is currently on or off. */
 			uint64 bStereoEnabled : 1;
 
+			/** Whether stereo was enforced by the console command. Doesn't make sense w/o bStereoEnabled == true. */
+			uint64 bStereoEnforced : 1;
+
 			/** Whether or not switching to stereo is allowed */
 			uint64 bHMDEnabled : 1;
 
@@ -295,12 +298,12 @@ public:
 	/**
 	 * This method is called when new game frame begins (called on a game thread).
 	 */
-	virtual bool OnStartGameFrame() override;
+	virtual bool OnStartGameFrame( FWorldContext& WorldContext ) override;
 
 	/**
 	 * This method is called when game frame ends (called on a game thread).
 	 */
-	virtual bool OnEndGameFrame() override;
+	virtual bool OnEndGameFrame( FWorldContext& WorldContext ) override;
 
 	virtual void SetupViewFamily(class FSceneViewFamily& InViewFamily) {}
 	virtual void SetupView(class FSceneViewFamily& InViewFamily, FSceneView& InView) {}

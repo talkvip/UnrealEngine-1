@@ -15,7 +15,7 @@ public class BuildCommonTools : BuildCommand
 {
 	public override void ExecuteBuild()
 	{
-		Log("************************* BuildCommonTools");
+		LogConsole("************************* BuildCommonTools");
 
 		// Get the list of platform names
 		string[] PlatformNames = ParseParamValue("platforms", BuildHostPlatform.Current.Platform.ToString()).Split('+');
@@ -163,21 +163,15 @@ public class ZipProjectUp : BuildCommand
 {
     public override void ExecuteBuild()
     {
-        Log(System.Diagnostics.TraceEventType.Warning, "Started zipping project up");
-
-        // Get the zip path
-        //string ZipPath = ParseParamValue("path", "");
-        //string FullZipFileName = Path.Combine(CmdEnv.LocalRoot, "FullInstall" + StaticGetHostPlatformSuffix(HostPlatform) + ".zip");
-
-        string InstallDirectory = ParseParamValue("install", "");
-        Log("Install directory: {0}", InstallDirectory);
-
-        // Get project directory and format it properly
+        // Get Directories
         string ProjectDirectory = ParseParamValue("project", "");
+        string InstallDirectory = ParseParamValue("install", "");
         ProjectDirectory = Path.GetDirectoryName(ProjectDirectory);
-        string path2 = @"C:\Users\timothy.reynolds\Documents\Unreal Projects\MyProject2";
-        Log("Project name: {0}", ProjectDirectory);
-        Log("Project path: {0}", path2);
+
+        LogConsole("Started zipping project up");
+        LogConsole("Project directory: {0}", ProjectDirectory);
+		LogConsole("Install directory: {0}", InstallDirectory);
+        LogConsole("Packaging up the project...");
 
         // Setup filters
         FileFilter Filter = new FileFilter();
@@ -186,8 +180,7 @@ public class ZipProjectUp : BuildCommand
         Filter.Include("*.uproject");
 
         ZipFiles(InstallDirectory, ProjectDirectory, Filter);
-        //ZipFiles("d:\\test.zip", path2, Filter);
 
-        Log(System.Diagnostics.TraceEventType.Warning, "Completed zipping project up");
+		LogConsole("Completed zipping project up");
     }
 }

@@ -41,6 +41,7 @@ Engine\Binaries\Mac\UE4Editor.app\Contents\MacOS\*-CameraEditor.*
 Engine\Binaries\Mac\UE4Editor.app\Contents\MacOS\*-SessionLauncher.*
 Engine\Binaries\Mac\UE4Editor.app\Contents\MacOS\*-TaskBrowser.*
 Engine\Binaries\Mac\UE4Editor.app\Contents\MacOS\*-Levels.*
+Engine\Binaries\Mac\UE4Editor.app\Contents\MacOS\NotForLicensees\*-XMPP*.*
 Engine\Binaries\Mac\*-MessagingDebugger.*
 Engine\Binaries\Win64\*-DDCUtils*.*
 Engine\Binaries\Win64\*-MessagingDebugger.*
@@ -48,12 +49,16 @@ Engine\Binaries\Win64\*-OnlineSubsystemMcp*.*
 Engine\Binaries\Win64\*-SimplygonMeshReduction*.*
 Engine\Binaries\Win64\*-TextureXboxOneFormat.*
 Engine\Binaries\Win64\*-TextureFormatATITC.*
-Engine\Binaries\Win64\*-XMPP*.*
 Shadow\Binaries\Win64\*ShadowLoadingScreen.*
 Engine\Binaries\Win64\UnrealRemoteAgent.*
+Engine\Binaries\Win64\NotForLicensees\*-XMPP*.*
 Engine\Binaries\DotNET\AutomationScripts\NoRedist\FotniteGame.Automation.*
+Engine\Build\Android\Java\libs\vrlib.jar
 Engine\Plugins\Editor\IntroTutorials\Binaries\Win64\*-IntroTutorials*.*
 Engine\Plugins\Editor\IntroTutorials\Binaries\Mac\*-IntroTutorials*.*
+Engine\Plugins\Editor\PluginCreator\Binaries\Linux\*-PluginCreator*.*
+Engine\Plugins\Editor\PluginCreator\Binaries\Mac\*-PluginCreator*.*
+Engine\Plugins\Editor\PluginCreator\Binaries\Win64\*-PluginCreator*.*
 Engine\Plugins\Script\ScriptEditorPlugin\Binaries\Mac\*
 Engine\Plugins\Script\ScriptEditorPlugin\Binaries\Win64\*
 Engine\Plugins\Script\ScriptGeneratorPlugin\Binaries\Mac\*
@@ -81,3 +86,5 @@ Engine\Binaries\Mac\UnrealFrontend.app\Contents\MacOS\UnrealFrontend-DesktopTarg
 Engine\Binaries\Win64\*-DesktopTargetPlatform*.*
 Engine\Binaries\Linux\*-DesktopTargetPlatform*.*
 Engine\Source\Runtime\ProceduralMeshComponent
+Engine\Binaries\Win64\*-GameSubCatalog.*
+Engine\Binaries\Mac\UE4Editor.app\Contents\MacOS\UE4Editor-GameSubCatalog.dylib

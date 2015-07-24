@@ -19,6 +19,7 @@ void SSection::Construct( const FArguments& InArgs, TSharedRef<FTrackNode> Secti
 	SectionIndex = InSectionIndex;
 	ParentSectionArea = SectionNode;
 	SectionInterface = SectionNode->GetSections()[InSectionIndex];
+	CachedKeyAreaHeight = 0.f;
 
 	ChildSlot
 	[
@@ -26,42 +27,50 @@ void SSection::Construct( const FArguments& InArgs, TSharedRef<FTrackNode> Secti
 	];
 }
 
-void SSection::GetKeyAreas( const TSharedPtr<FTrackNode>& SectionAreaNode, TArray<FKeyAreaElement>& OutKeyAreas ) const
+FVector2D SSection::ComputeDesiredSize(float) const
 {
-	float HeightOffset = 0;
-	TSharedPtr<FSectionKeyAreaNode> SectionKeyNode = SectionAreaNode->GetTopLevelKeyNode();
-	if( SectionKeyNode.IsValid() )
-	{
-		new( OutKeyAreas ) FKeyAreaElement( *SectionKeyNode, HeightOffset );
-	}
-
-	GetKeyAreas_Recursive( SectionAreaNode->GetChildNodes(), HeightOffset, OutKeyAreas );
+	return FVector2D(100, CachedKeyAreaHeight);
 }
 
-void SSection::GetKeyAreas_Recursive(  const TArray< TSharedRef<FSequencerDisplayNode> >& Nodes, float& HeightOffset, TArray<FKeyAreaElement>& OutKeyAreas ) const
+void SSection::GetKeyAreas( const TSharedPtr<FTrackNode>& SectionAreaNode, TArray<FKeyAreaElement>& OutKeyAreas, float* TotalHeight ) const
 {
-	const float Padding = SequencerLayoutConstants::NodePadding;
+	*TotalHeight = 0.f;
 
-	for( int32 NodeIndex = 0; NodeIndex < Nodes.Num(); ++NodeIndex )
+	float LastPadding = 0.f;
+
+	// First, layout the parent
 	{
-		FSequencerDisplayNode& Node = *Nodes[NodeIndex];
+		TSharedPtr<FSequencerDisplayNode> LayoutNode = SectionAreaNode;
 
-		if( Node.IsVisible() )
+		TSharedPtr<FSectionKeyAreaNode> SectionKeyNode = SectionAreaNode->GetTopLevelKeyNode();
+		if( SectionKeyNode.IsValid() )
 		{
-			// Compute the node height.  If this is not a key area it will contribute to the accumulated height offset
-			float NodeHeight = Node.GetNodeHeight();
-			HeightOffset += Padding + NodeHeight;
-			if( Node.GetType() == ESequencerNode::KeyArea )
-			{
-				// The node is a key area, we need to draw it
-				new( OutKeyAreas ) FKeyAreaElement( *StaticCastSharedRef<FSectionKeyAreaNode>( Nodes[NodeIndex] ), HeightOffset );
-			}
-
-			// Get any child key areas
-			GetKeyAreas_Recursive( Node.GetChildNodes(), HeightOffset, OutKeyAreas );
-
+			LayoutNode = SectionKeyNode;
+			OutKeyAreas.Add(FKeyAreaElement( *SectionKeyNode, *TotalHeight ));
 		}
+
+		LastPadding = LayoutNode->GetNodePadding().Bottom;
+		*TotalHeight += LayoutNode->GetNodeHeight() + LastPadding;
 	}
+
+	// Then any children
+	SectionAreaNode->TraverseVisible_ParentFirst([&](FSequencerDisplayNode& Node){
+		
+		*TotalHeight += Node.GetNodePadding().Top;
+
+		if( Node.GetType() == ESequencerNode::KeyArea )
+		{
+			OutKeyAreas.Add(FKeyAreaElement( static_cast<FSectionKeyAreaNode&>(Node), *TotalHeight ));
+		}
+
+		LastPadding = Node.GetNodePadding().Bottom;
+		*TotalHeight += Node.GetNodeHeight() + LastPadding;
+		return true;
+
+	}, false);
+
+	// Remove the padding from the bottom
+	*TotalHeight -= LastPadding;
 }
 
 
@@ -195,17 +204,17 @@ void SSection::CreateDragOperation( const FGeometry& MyGeometry, const FPointerE
 		if( bLeftEdgePressed || bLeftEdgeHovered )
 		{
 			// Selected the start of a section
-			DragOperation = MakeShareable( new FResizeSection( GetSequencer(), *SectionObject, false ) );
+			DragOperation = MakeShareable( new FResizeSection( GetSequencer(), GetSequencer().GetSelection().GetSelectedSections(), false ) );
 		}
 		else if( bRightEdgePressed || bRightEdgeHovered )
 		{
 			// Selected the end of a section
-			DragOperation = MakeShareable( new FResizeSection( GetSequencer(), *SectionObject, true ) );
+			DragOperation = MakeShareable( new FResizeSection( GetSequencer(), GetSequencer().GetSelection().GetSelectedSections(), true ) );
 		}
 		else
 		{
 			// Entire selection moved
-			DragOperation = MakeShareable( new FMoveSection( GetSequencer(), *SectionObject ) );
+			DragOperation = MakeShareable( new FMoveSection( GetSequencer(), GetSequencer().GetSelection().GetSelectedSections() ) );
 		}
 	}
 	
@@ -441,7 +450,7 @@ TSharedPtr<SWidget> SSection::OnSummonContextMenu( const FGeometry& MyGeometry, 
 	const bool bShouldCloseWindowAfterMenuSelection = true;
 	FMenuBuilder MenuBuilder(bShouldCloseWindowAfterMenuSelection, NULL);
 
-	if (Key.IsValid())
+	if (Key.IsValid() || Sequencer.GetSelection().GetSelectedKeys().Num())
 	{
 		MenuBuilder.AddMenuEntry(
 			NSLOCTEXT("Sequencer", "DeleteKey", "Delete"),
@@ -472,8 +481,10 @@ void SSection::Tick( const FGeometry& AllottedGeometry, const double InCurrentTi
 {	
 	if( GetVisibility() == EVisibility::Visible )
 	{
+		CachedKeyAreaHeight = 0.f;
+
 		KeyAreas.Reset();
-		GetKeyAreas( ParentSectionArea, KeyAreas );
+		GetKeyAreas( ParentSectionArea, KeyAreas, &CachedKeyAreaHeight );
 
 		SectionInterface->Tick(AllottedGeometry, ParentGeometry, InCurrentTime, InDeltaTime);
 	}
@@ -488,24 +499,30 @@ FReply SSection::OnMouseButtonDown( const FGeometry& MyGeometry, const FPointerE
 
 	bDragging = false;
 
+	FSequencer& Sequencer = GetSequencer();
+
 	if( MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton || MouseEvent.GetEffectingButton() == EKeys::RightMouseButton )
 	{
 		// Check for clicking on a key and mark it as the pressed key for drag detection (if necessary) later
 		PressedKey = GetKeyUnderMouse( MouseEvent.GetScreenSpacePosition(), MyGeometry );
+	}
 
-		if( !PressedKey.IsValid() && MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton )
+	if (MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
+	{
+		if( !PressedKey.IsValid() )
 		{
 			CheckForEdgeInteraction( MouseEvent, MyGeometry );
 		}
 
 		return FReply::Handled().CaptureMouse( AsShared() );
 	}
-	else if( MouseEvent.GetEffectingButton() == EKeys::RightMouseButton )
+	else if (MouseEvent.GetEffectingButton() == EKeys::RightMouseButton && (PressedKey.IsValid() || Sequencer.GetSelection().GetSelectedKeys().Num() || Sequencer.GetSelection().GetSelectedSections().Num()))
 	{
-		return FReply::Handled().CaptureMouse(AsShared());
+		// Don't return handled if we didn't click on a key so that right-click panning gets a look in
+		return FReply::Handled();
 	}
 
-	return FReply::Handled();
+	return FReply::Unhandled();
 }
 
 void SSection::ResetState()
@@ -535,12 +552,12 @@ FReply SSection::OnMouseButtonUp( const FGeometry& MyGeometry, const FPointerEve
 	}
 	else
 	{
-		if( ( MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton || MouseEvent.GetEffectingButton() == EKeys::RightMouseButton ) && HasMouseCapture() && MyGeometry.IsUnderLocation( MouseEvent.GetScreenSpacePosition() ) )
+		if( ( MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton || MouseEvent.GetEffectingButton() == EKeys::RightMouseButton ) && MyGeometry.IsUnderLocation( MouseEvent.GetScreenSpacePosition() ) )
 		{
 			HandleSelection( MyGeometry, MouseEvent );
 		}
 
-		if( MouseEvent.GetEffectingButton() == EKeys::RightMouseButton && HasMouseCapture() )
+		if( MouseEvent.GetEffectingButton() == EKeys::RightMouseButton )
 		{
 			TSharedPtr<SWidget> MenuContent = OnSummonContextMenu( MyGeometry, MouseEvent );
 			if (MenuContent.IsValid())
@@ -555,7 +572,7 @@ FReply SSection::OnMouseButtonUp( const FGeometry& MyGeometry, const FPointerEve
 					FPopupTransitionEffect( FPopupTransitionEffect::ContextMenu )
 					);
 
-				return FReply::Handled().ReleaseMouseCapture().SetUserFocus(MenuContent.ToSharedRef(), EFocusCause::SetDirectly);
+				return FReply::Handled().SetUserFocus(MenuContent.ToSharedRef(), EFocusCause::SetDirectly);
 			}
 		}
 	}
@@ -599,6 +616,10 @@ FReply SSection::OnMouseMove( const FGeometry& MyGeometry, const FPointerEvent& 
 			
 			FVector2D LocalMousePos = MyGeometry.AbsoluteToLocal( MouseEvent.GetScreenSpacePosition() );
 
+			FTimeToPixel TimeToPixelConverter = SectionInterface->GetSectionObject()->IsInfinite() ? 			
+				FTimeToPixel( ParentGeometry, GetSequencer().GetViewRange()) : 
+				FTimeToPixel( MyGeometry, TRange<float>( SectionInterface->GetSectionObject()->GetStartTime(), SectionInterface->GetSectionObject()->GetEndTime() ) );
+
 			if( !bDragging )
 			{
 				// If we are not dragging determine if the mouse has moved far enough to start a drag
@@ -622,7 +643,8 @@ FReply SSection::OnMouseMove( const FGeometry& MyGeometry, const FPointerEvent& 
 						// Clear selected keys when beginning to drag a section
 						GetSequencer().GetSelection().EmptySelectedKeys();
 
-						HandleSectionSelection( MouseEvent );
+						bool bSelectDueToDrag = true;
+						HandleSectionSelection( MouseEvent, bSelectDueToDrag );
 
 						bool bKeysUnderMouse = false;
 						CreateDragOperation( MyGeometry, MouseEvent, bKeysUnderMouse );
@@ -630,7 +652,7 @@ FReply SSection::OnMouseMove( const FGeometry& MyGeometry, const FPointerEvent& 
 				
 					if( DragOperation.IsValid() )
 					{
-						DragOperation->OnBeginDrag(LocalMousePos, ParentSectionArea);
+						DragOperation->OnBeginDrag(LocalMousePos, TimeToPixelConverter, ParentSectionArea);
 					}
 
 				}
@@ -638,9 +660,6 @@ FReply SSection::OnMouseMove( const FGeometry& MyGeometry, const FPointerEvent& 
 			else if( DragOperation.IsValid() )
 			{
 				// Already in a drag, tell all operations to perform their drag implementations
-				FTimeToPixel TimeToPixelConverter = SectionInterface->GetSectionObject()->IsInfinite() ? 			
-					FTimeToPixel( ParentGeometry, GetSequencer().GetViewRange()) : 
-					FTimeToPixel( MyGeometry, TRange<float>( SectionInterface->GetSectionObject()->GetStartTime(), SectionInterface->GetSectionObject()->GetEndTime() ) );
 
 				DragOperation->OnDrag( MouseEvent, LocalMousePos, TimeToPixelConverter, ParentSectionArea );
 			}
@@ -707,7 +726,8 @@ void SSection::HandleSelection( const FGeometry& MyGeometry, const FPointerEvent
 	}
 	else if( MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton ) // Only select anything but keys on left mouse button
 	{
-		HandleSectionSelection( MouseEvent );
+		bool bSelectDueToDrag = false;
+		HandleSectionSelection( MouseEvent, bSelectDueToDrag );
 	}
 }
 
@@ -716,30 +736,58 @@ void SSection::HandleKeySelection( const FSelectedKey& Key, const FPointerEvent&
 {
 	if( Key.IsValid() )
 	{
+		bool bKeyIsSelected = GetSequencer().GetSelection().IsSelected( Key );
+
 		// Clear previous key selection if:
-		// we are selecting due to drag and the key being dragged is not selected or control is not down
-		bool bShouldClearSelectionDueToDrag =  bSelectDueToDrag ? !GetSequencer().GetSelection().IsSelected( Key ) : true;
+		// we are selecting due to drag and the key being dragged is not selected
+		bool bShouldClearSelectionDueToDrag =  bSelectDueToDrag ? !bKeyIsSelected : true;
 		
 		// Keep key selection if right clicking to bring up a menu and the current key is selected
-		bool bKeepKeySelection = MouseEvent.GetEffectingButton() == EKeys::RightMouseButton && GetSequencer().GetSelection().IsSelected( Key );
+		bool bKeepKeySelection = MouseEvent.GetEffectingButton() == EKeys::RightMouseButton && bKeyIsSelected;
 
-		if( (!MouseEvent.IsControlDown() && bShouldClearSelectionDueToDrag) && !bKeepKeySelection )
+		// Toggle selection if control is down and key is selected
+		if (MouseEvent.IsControlDown() && bKeyIsSelected)
 		{
-			GetSequencer().GetSelection().EmptySelectedKeys();
+			GetSequencer().GetSelection().RemoveFromSelection( Key );
 		}
-		GetSequencer().GetSelection().AddToSelection( Key );
+		else
+		{
+			if( (!MouseEvent.IsShiftDown() && !MouseEvent.IsControlDown() && bShouldClearSelectionDueToDrag) && !bKeepKeySelection )
+			{
+				GetSequencer().GetSelection().EmptySelectedKeys();
+			}
+			GetSequencer().GetSelection().AddToSelection( Key );
+		}
 	}
 }
 
-void SSection::HandleSectionSelection( const FPointerEvent& MouseEvent )
+void SSection::HandleSectionSelection( const FPointerEvent& MouseEvent, bool bSelectDueToDrag )
 {
-	if( !MouseEvent.IsControlDown() )
-	{
-		GetSequencer().GetSelection().EmptySelectedSections();
-	}
-
 	// handle selecting sections 
 	UMovieSceneSection* Section = SectionInterface->GetSectionObject();
-	GetSequencer().GetSelection().AddToSelection(Section);
+	bool bSectionIsSelected = GetSequencer().GetSelection().IsSelected(Section);
+
+	// Clear previous section selection if:
+	// we are selecting due to drag and the section being dragged is not selected
+	bool bShouldClearSelectionDueToDrag =  bSelectDueToDrag ? !bSectionIsSelected : true;
+
+	// Keep key selection if right clicking to bring up a menu and the current key is selected
+	bool bKeepSectionSelection = MouseEvent.GetEffectingButton() == EKeys::RightMouseButton && bSectionIsSelected;
+	
+	// Don't clear selection edge is being dragged
+	bool bEdgePressed = bLeftEdgePressed || bRightEdgePressed;
+
+	if (MouseEvent.IsControlDown() && bSectionIsSelected && !bEdgePressed)
+	{
+		GetSequencer().GetSelection().RemoveFromSelection(Section);
+	}
+	else
+	{
+		if ( (!MouseEvent.IsShiftDown() && !MouseEvent.IsControlDown() && bShouldClearSelectionDueToDrag) && !bKeepSectionSelection)
+		{
+			GetSequencer().GetSelection().EmptySelectedSections();
+		}
+		GetSequencer().GetSelection().AddToSelection(Section);
+	}
 }
 

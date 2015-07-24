@@ -161,7 +161,7 @@ public:
 
 		FTransform ComponentTrans = DecalProxy.ComponentTrans;
 
-		FMatrix WorldToComponent = ComponentTrans.ToMatrixWithScale().InverseFast();
+		FMatrix WorldToComponent = ComponentTrans.ToInverseMatrixWithScale();
 
 		// Set the transform from screen space to light space.
 		if(ScreenToDecal.IsBound())
@@ -415,6 +415,20 @@ void FDecalRendering::SetShader(FRHICommandList& RHICmdList, const FViewInfo& Vi
 	const FMaterialShaderMap* MaterialShaderMap = DecalData.MaterialResource->GetRenderingThreadShaderMap();
 	auto PixelShader = MaterialShaderMap->GetShader<FDeferredDecalPS>();
 	TShaderMapRef<FDeferredDecalVS> VertexShader(View.ShaderMap);
+
+	// we don't have the Primitive uniform buffer setup for decals (later we want to batch)
+	{
+		auto& PrimitiveVS = VertexShader->GetUniformBufferParameter<FPrimitiveUniformShaderParameters>();
+		auto& PrimitivePS = PixelShader->GetUniformBufferParameter<FPrimitiveUniformShaderParameters>();
+
+		// uncomment to track down usage of the Primitive uniform buffer
+		//	check(!PrimitiveVS.IsBound());
+		//	check(!PrimitivePS.IsBound());
+
+		// to prevent potential shader error (UE-18852 ElementalDemo crashes due to nil constant buffer)
+		SetUniformBufferParameter(RHICmdList, VertexShader->GetVertexShader(), PrimitiveVS, GIdentityPrimitiveUniformBuffer);
+		SetUniformBufferParameter(RHICmdList, PixelShader->GetPixelShader(), PrimitivePS, GIdentityPrimitiveUniformBuffer);
+	}
 
 	if(bShaderComplexity)
 	{

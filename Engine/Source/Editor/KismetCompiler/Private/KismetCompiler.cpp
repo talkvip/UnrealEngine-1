@@ -13,9 +13,6 @@
 #include "Editor/UnrealEd/Public/Kismet2/KismetEditorUtilities.h"
 #include "Editor/UnrealEd/Public/ScriptDisassembler.h"
 #include "Editor/UnrealEd/Public/ComponentTypeRegistry.h"
-#include "K2Node_PlayMovieScene.h"
-#include "RuntimeMovieScenePlayer.h"
-#include "MovieSceneBindings.h"
 #include "Kismet2/Kismet2NameValidators.h"
 #include "UserDefinedStructureCompilerUtils.h"
 #include "K2Node_EnumLiteral.h"
@@ -311,7 +308,7 @@ void FKismetCompilerContext::ValidateLink(const UEdGraphPin* PinA, const UEdGrap
 	const bool bMissingConversion = (ConnectResponse.Response == CONNECT_RESPONSE_MAKE_WITH_CONVERSION_NODE);
 	if (bForbiddenConnection || bMissingConversion)
 	{
-		MessageLog.Error(*FString::Printf(*LOCTEXT("PinTypeMismatch_Error", "Can't connect pins @@ and @@: %s").ToString(), *ConnectResponse.Message.ToString()), PinA, PinB);
+		MessageLog.Warning(*FString::Printf(*LOCTEXT("PinTypeMismatch_Error", "Can't connect pins @@ and @@: %s").ToString(), *ConnectResponse.Message.ToString()), PinA, PinB);
 	}
 
 	if (PinA && PinB && PinA->Direction != PinB->Direction)
@@ -456,17 +453,12 @@ void FKismetCompilerContext::ValidateVariableNames()
 			}
 			else if (ParentClass->HasAnyFlags(RF_Native)) // the above case handles when the parent is a blueprint
 			{
-				UClass* SuperClass = ParentClass;
-				do
+				if (auto ExisingField = FindField<UField>(ParentClass, *VarNameStr))
 				{
-					if (FindObject<UObject>(SuperClass, *VarNameStr, /*ExactClass =*/false))
-					{
-						NewVarName = FBlueprintEditorUtils::FindUniqueKismetName(Blueprint, VarNameStr);
-						break;
-					}
-					SuperClass = SuperClass->GetSuperClass();
-
-				} while (SuperClass != nullptr);
+					UE_LOG(LogK2Compiler, Warning, TEXT("ValidateVariableNames name %s (used in %s) is already taken by %s")
+						, *VarNameStr, *Blueprint->GetPathName(), *ExisingField->GetPathName());
+					NewVarName = FBlueprintEditorUtils::FindUniqueKismetName(Blueprint, VarNameStr);
+				}
 			}
 
 			if (OldVarName != NewVarName)
@@ -2074,210 +2066,6 @@ void FKismetCompilerContext::ExpandTimelineNodes(UEdGraph* SourceGraph)
 	}
 }
 
-UEdGraphPin* FKismetCompilerContext::ExpandNodesToAllocateRuntimeMovieScenePlayer( UEdGraph* SourceGraph, UK2Node_PlayMovieScene* PlayMovieSceneNode, ULevel* Level, UK2Node_TemporaryVariable*& OutPlayerVariableNode )
-{
-	// Call URuntimeMovieScenePlayer::CreateRuntimeMovieScenePlayer() to create a new RuntimeMovieScenePlayer instance
-	UK2Node_CallFunction* CreatePlayerCallNode = SpawnIntermediateNode<UK2Node_CallFunction>( PlayMovieSceneNode, SourceGraph );
-	{
-		CreatePlayerCallNode->FunctionReference.SetExternalMember(GET_FUNCTION_NAME_CHECKED(URuntimeMovieScenePlayer, CreateRuntimeMovieScenePlayer), URuntimeMovieScenePlayer::StaticClass());
-		CreatePlayerCallNode->AllocateDefaultPins();
-	}
-
-	// The return value of URuntimeMovieScenePlayer::CreateRuntimeMovieScenePlayer() is the actual MovieScenePlayer we'll be operating with
-	UEdGraphPin* CreatePlayerReturnValuePin = CreatePlayerCallNode->GetReturnValuePin();
-
-	// Make a literal for the level and bind it to our function call as a parameter
-	UK2Node_Literal* LevelLiteralNode = SpawnIntermediateNode<UK2Node_Literal>( PlayMovieSceneNode, SourceGraph );
-	LevelLiteralNode->AllocateDefaultPins();
-
-	// Make a literal for the MovieSceneBindings object and bind it to our function call as a parameter
-	UK2Node_Literal* MovieSceneBindingsLiteralNode = SpawnIntermediateNode<UK2Node_Literal>( PlayMovieSceneNode, SourceGraph );
-	MovieSceneBindingsLiteralNode->AllocateDefaultPins();
-
-
-	// Create a local variable to store the URuntimeMovieScenePlayer object instance in
-	UK2Node_TemporaryVariable* PlayerVariableNode;
-	{
-		const bool bIsArray = false;
-		PlayerVariableNode = SpawnInternalVariable(
-			PlayMovieSceneNode,
-			CreatePlayerReturnValuePin->PinType.PinCategory, 
-			CreatePlayerReturnValuePin->PinType.PinSubCategory, 
-			CreatePlayerReturnValuePin->PinType.PinSubCategoryObject.Get(),
-			bIsArray );
-	}
-	UEdGraphPin* PlayerVariablePin = PlayerVariableNode->GetVariablePin();
-
-	UK2Node_AssignmentStatement* AssignResultToPlayerVariableNode = SpawnIntermediateNode<UK2Node_AssignmentStatement>( PlayMovieSceneNode, SourceGraph );
-	AssignResultToPlayerVariableNode->AllocateDefaultPins();
-
-	// Create a node that checks to see if our variable that contains the RuntimeMovieScenePlayer instance is null.
-	// If it's null, we'll allocate it now and store it in the variable.
-	UK2Node_CallFunction* ComparisonNode = SpawnIntermediateNode<UK2Node_CallFunction>( PlayMovieSceneNode, SourceGraph );
-	{
-		ComparisonNode->FunctionReference.SetExternalMember(GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, EqualEqual_ObjectObject), UKismetMathLibrary::StaticClass());
-		ComparisonNode->AllocateDefaultPins();
-	}
-
-	UK2Node_IfThenElse* IfVariableNullNode = SpawnIntermediateNode<UK2Node_IfThenElse>( PlayMovieSceneNode, SourceGraph );
-	{
-		IfVariableNullNode->AllocateDefaultPins();
-	}
-
-
-	// OK, all of our nodes are created.  Now wire everything together!
-	{
-		// The first thing we'll do is check to see if we've allocated a player yet.  If not, we need to
-		// do that now.  So we'll use an "if-then" node to check.
-
-		// Hook the "if-then" node to our comparison function, that simply checks for null
-		IfVariableNullNode->GetConditionPin()->MakeLinkTo( ComparisonNode->GetReturnValuePin() );
-
-		// We'll compare the player variable ('A')...
-		ComparisonNode->FindPinChecked(TEXT("A"))->MakeLinkTo( PlayerVariablePin );
-
-		// ...against a NULL value ('B')
-		ComparisonNode->FindPinChecked(TEXT("B"))->DefaultObject = NULL;
-
-		// If the comparison returns true (variable is null), then we need to call our function to
-		// create the player object
-		IfVariableNullNode->GetThenPin()->MakeLinkTo( CreatePlayerCallNode->GetExecPin() );
-
-		// Setup function params for "URuntimeMovieScenePlayer::CreateRuntimeMovieScenePlayer()"
-		{
-			// Our level literal just points to the level object
-			LevelLiteralNode->SetObjectRef( Level );
-
-			{
-				// Duplicate the bindings and store a copy into the level.  We want the bindings to be
-				// outered to the level so they'll be duplicated when the level is duplicated (e.g. for PIE)
-				UMovieSceneBindings* NodeMovieSceneBindings = PlayMovieSceneNode->GetMovieSceneBindings();
-				UMovieSceneBindings* LevelMovieSceneBindings = NULL;
-				if( NodeMovieSceneBindings != NULL && Level != NULL )
-				{
-					LevelMovieSceneBindings = DuplicateObject( NodeMovieSceneBindings, Level );
-					check( LevelMovieSceneBindings != NULL );
-
-					// Tell the Level about the new bindings object.
-					Level->AddMovieSceneBindings( LevelMovieSceneBindings );
-				}
-
-				MovieSceneBindingsLiteralNode->SetObjectRef( LevelMovieSceneBindings );
-			}
-
-			CreatePlayerCallNode->FindPinChecked( TEXT( "Level" ) )->MakeLinkTo( LevelLiteralNode->GetValuePin() );
-			CreatePlayerCallNode->FindPinChecked( TEXT( "MovieSceneBindings" ) )->MakeLinkTo( MovieSceneBindingsLiteralNode->GetValuePin() );
-		}
-
-
-		// Our function that creates the player returns the newly-created player object.  We'll
-		// store that in our variable
-		CreatePlayerCallNode->GetThenPin()->MakeLinkTo( AssignResultToPlayerVariableNode->GetExecPin() );
-		AssignResultToPlayerVariableNode->GetVariablePin()->MakeLinkTo( PlayerVariablePin );
-		AssignResultToPlayerVariableNode->PinConnectionListChanged( AssignResultToPlayerVariableNode->GetVariablePin() );
-		CreatePlayerReturnValuePin->MakeLinkTo( AssignResultToPlayerVariableNode->GetValuePin() );
-		AssignResultToPlayerVariableNode->PinConnectionListChanged( AssignResultToPlayerVariableNode->GetValuePin() );
-	}
-
-	OutPlayerVariableNode = PlayerVariableNode;
-	return IfVariableNullNode->GetExecPin();
-}
-
-
-void FKismetCompilerContext::ExpandPlayMovieSceneNodes( UEdGraph* SourceGraph )
-{
-	ULevel* Level = NULL;
-	if( Blueprint->IsA( ULevelScriptBlueprint::StaticClass() ) )
-	{
-		ULevelScriptBlueprint* LSB = CastChecked< ULevelScriptBlueprint >( Blueprint );
-		Level = LSB->GetLevel();
-	}
-
-	// Wipe old MovieSceneBindings on the Level.  We'll recreate them all now.
-	if( Level != NULL )
-	{
-		Level->ClearMovieSceneBindings();
-	}
-
-	for (int32 ChildIndex = 0; ChildIndex < SourceGraph->Nodes.Num(); ++ChildIndex)
-	{
-		UK2Node_PlayMovieScene* PlayMovieSceneNode = Cast<UK2Node_PlayMovieScene>( SourceGraph->Nodes[ChildIndex] );
-		if( PlayMovieSceneNode != NULL )
-		{
-			UEdGraphPin* PlayPin = PlayMovieSceneNode->GetPlayPin();
-			const bool bPlayPinConnected = PlayPin->LinkedTo.Num() > 0;
-			UEdGraphPin* PausePin = PlayMovieSceneNode->GetPausePin();
-			const bool bPausePinConnected = PausePin->LinkedTo.Num() > 0;
-
-			// Do we need to create a MovieScenePlayer?
-			const bool bNeedMovieScenePlayer = bPlayPinConnected || bPausePinConnected;
-			if( bNeedMovieScenePlayer )
-			{
-				// Generate a node network to allocate a MovieScenePlayer on demand.  All of the various input exec pins
-				// will first be routed through this network, to make sure that we have a movie scene player to work with!
-				UK2Node_TemporaryVariable* PlayerVariableNode = NULL;
-				UEdGraphPin* AllocateRuntimeMovieScenePlayerExecPin = 
-					ExpandNodesToAllocateRuntimeMovieScenePlayer( SourceGraph, PlayMovieSceneNode, Level, PlayerVariableNode );
-				UEdGraphPin* PlayerVariablePin = PlayerVariableNode->GetVariablePin();
-
-
-				// Create a call function node to call 'Play' on the RuntimeMovieScenePlayer object
-				if( bPlayPinConnected )
-				{
-					UK2Node_CallFunction* PlayCallNode = SpawnIntermediateNode<UK2Node_CallFunction>( PlayMovieSceneNode, SourceGraph );
-					{
-						PlayCallNode->FunctionReference.SetExternalMember(GET_FUNCTION_NAME_CHECKED(URuntimeMovieScenePlayer, Play), URuntimeMovieScenePlayer::StaticClass());
-						PlayCallNode->AllocateDefaultPins();
-					}
-					
-					UK2Node_ExecutionSequence* SequenceNode = SpawnIntermediateNode<UK2Node_ExecutionSequence>( PlayMovieSceneNode, SourceGraph );
-					SequenceNode->AllocateDefaultPins();
-				
-					// Move input links from 'Play' to the exec pin on the Sequence node
-					MovePinLinksToIntermediate( *PlayPin, *SequenceNode->GetExecPin() );
-
-					SequenceNode->GetThenPinGivenIndex( 0 )->MakeLinkTo( AllocateRuntimeMovieScenePlayerExecPin );
-
-					// Tell the 'Play' node which player object it's calling the function on
-					UEdGraphPin* PlaySelfPin = Schema->FindSelfPin( *PlayCallNode, EGPD_Input );
-					PlaySelfPin->MakeLinkTo( PlayerVariablePin );
-
-					// Hook our sequence up to call the function
-					UEdGraphPin* PlayExecPin = Schema->FindExecutionPin( *PlayCallNode, EGPD_Input );
-					SequenceNode->GetThenPinGivenIndex( 1 )->MakeLinkTo( PlayExecPin );
-				}
-					
-					
-				// Create a call function node to call 'Pause' on the RuntimeMovieScenePlayer object
-				if( bPausePinConnected )
-				{
-					UK2Node_CallFunction* PauseCallNode = SpawnIntermediateNode<UK2Node_CallFunction>( PlayMovieSceneNode, SourceGraph );
-					{
-						PauseCallNode->FunctionReference.SetExternalMember(GET_FUNCTION_NAME_CHECKED(URuntimeMovieScenePlayer, Pause), URuntimeMovieScenePlayer::StaticClass());
-						PauseCallNode->AllocateDefaultPins();
-					}
-
-					UK2Node_ExecutionSequence* SequenceNode = SpawnIntermediateNode<UK2Node_ExecutionSequence>( PlayMovieSceneNode, SourceGraph );
-					SequenceNode->AllocateDefaultPins();
-				
-					// Move input links from 'Pause' to the exec pin on the Sequence node
-					MovePinLinksToIntermediate( *PausePin, *SequenceNode->GetExecPin() );
-
-					SequenceNode->GetThenPinGivenIndex( 0 )->MakeLinkTo( AllocateRuntimeMovieScenePlayerExecPin );
-
-					// Tell the 'Pause' node which player object it's calling the function on
-					UEdGraphPin* PauseSelfPin = Schema->FindSelfPin( *PauseCallNode, EGPD_Input );
-					PauseSelfPin->MakeLinkTo( PlayerVariablePin );
-
-					// Hook our sequence up to call the function
-					UEdGraphPin* PauseExecPin = Schema->FindExecutionPin( *PauseCallNode, EGPD_Input );
-					SequenceNode->GetThenPinGivenIndex( 1 )->MakeLinkTo( PauseExecPin );
-				}
-			}
-		}
-	}
-}
-
 FPinConnectionResponse FKismetCompilerContext::MovePinLinksToIntermediate(UEdGraphPin& SourcePin, UEdGraphPin& IntermediatePin)
 {
 	 UEdGraphSchema_K2 const* K2Schema = GetSchema();
@@ -2557,9 +2345,6 @@ void FKismetCompilerContext::ExpansionStep(UEdGraph* Graph, bool bAllowUbergraph
 		{
 			// Expand timeline nodes
 			ExpandTimelineNodes(Graph);
-
-			// Expand PlayMovieScene nodes
-			ExpandPlayMovieSceneNodes(Graph);
 		}
 	}
 }
@@ -3276,6 +3061,17 @@ void FKismetCompilerContext::Compile()
 		}
 	}
 
+	if (CompileOptions.DoesRequireBytecodeGeneration())
+	{
+		TArray<UEdGraph*> AllGraphs;
+		Blueprint->GetAllGraphs(AllGraphs);
+		for (int32 i = 0; i < AllGraphs.Num(); i++)
+		{
+			//Reset error flags associated with nodes in each graph
+			ResetErrorFlags(AllGraphs[i]);
+		}
+	}
+
 	// Early validation
 	if (CompileOptions.CompileType == EKismetCompileType::Full)
 	{
@@ -3362,17 +3158,6 @@ void FKismetCompilerContext::Compile()
 
 	// Conform implemented interfaces here, to ensure we generate all functions required by the interface as stubs
 	FBlueprintEditorUtils::ConformImplementedInterfaces(Blueprint);
-
-	if (CompileOptions.DoesRequireBytecodeGeneration())
-	{
-		TArray<UEdGraph*> AllGraphs;
-		Blueprint->GetAllGraphs(AllGraphs);
-		for (int32 i = 0; i < AllGraphs.Num(); i++)
-		{
-			//Reset error flags associated with nodes in each graph
-			ResetErrorFlags(AllGraphs[i]);
-		}
-	}
 
 	// Run thru the class defined variables first, get them registered
 	CreateClassVariablesFromBlueprint();
@@ -3622,10 +3407,10 @@ void FKismetCompilerContext::Compile()
 		// Generate code thru the backend(s)
 		if ((bDisplayCpp && bIsFullCompile) || CompileOptions.DoesRequireCppCodeGeneration())
 		{
-			TUniquePtr<IBlueprintCompilerCppBackend> Backend_CPP(IBlueprintCompilerCppBackendModuleInterface::Get().Create(*this));
+			TUniquePtr<IBlueprintCompilerCppBackend> Backend_CPP(IBlueprintCompilerCppBackendModuleInterface::Get().Create());
 
 			// The C++ backend is currently only for debugging, so it's only run if the output will be visible
-			Backend_CPP->GenerateCodeFromClass(NewClass, CompileOptions.NewCppClassName, FunctionList, !bIsFullCompile);
+			Backend_CPP->GenerateCodeFromClass(NewClass, FunctionList, !bIsFullCompile);
 
 			if (CompileOptions.OutHeaderSourceCode.IsValid())
 			{

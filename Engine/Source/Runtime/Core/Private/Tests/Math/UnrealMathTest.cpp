@@ -105,7 +105,7 @@ bool TestVectorsEqual3( VectorRegister Vec0, VectorRegister Vec1, float Toleranc
  *
  * @return true if equal(ish)
  */
-bool TestVectorsEqual3_NoVec( const FVector& Vec0, const FVector& Vec1, float Tolerance = 0.0f)
+bool TestFVector3Equal( const FVector& Vec0, const FVector& Vec1, float Tolerance = 0.0f)
 {
 	GScratch[0] = Vec0.X;
 	GScratch[1] = Vec0.Y;
@@ -448,6 +448,54 @@ FORCENOINLINE FRotator TestQuaternionToRotator(const FQuat& Quat)
 	return RotatorFromQuat;
 }
 
+
+FORCENOINLINE FQuat FindBetween_Old(const FVector& vec1, const FVector& vec2)
+{
+	const FVector cross = vec1 ^ vec2;
+	const float crossMag = cross.Size();
+
+	// See if vectors are parallel or anti-parallel
+	if (crossMag < KINDA_SMALL_NUMBER)
+	{
+		// If these vectors are parallel - just return identity quaternion (ie no rotation).
+		const float Dot = vec1 | vec2;
+		if (Dot > -KINDA_SMALL_NUMBER)
+		{
+			return FQuat::Identity; // no rotation
+		}
+		// Exactly opposite..
+		else
+		{
+			// ..rotation by 180 degrees around a vector orthogonal to vec1 & vec2
+			FVector Vec = vec1.SizeSquared() > vec2.SizeSquared() ? vec1 : vec2;
+			Vec.Normalize();
+
+			FVector AxisA, AxisB;
+			Vec.FindBestAxisVectors(AxisA, AxisB);
+
+			return FQuat(AxisA.X, AxisA.Y, AxisA.Z, 0.f); // (axis*sin(pi/2), cos(pi/2)) = (axis, 0)
+		}
+	}
+
+	// Not parallel, so use normal code
+	float angle = FMath::Asin(crossMag);
+
+	const float dot = vec1 | vec2;
+	if (dot < 0.0f)
+	{
+		angle = PI - angle;
+	}
+
+	float sinHalfAng, cosHalfAng;
+	FMath::SinCos(&sinHalfAng, &cosHalfAng, 0.5f * angle);
+	const FVector axis = cross / crossMag;
+
+	return FQuat(
+		sinHalfAng * axis.X,
+		sinHalfAng * axis.Y,
+		sinHalfAng * axis.Z,
+		cosHalfAng);
+}
 
 
 // ROTATOR TESTS
@@ -1069,6 +1117,21 @@ bool FVectorRegisterAbstractionTest::RunTest(const FString& Parameters)
 
 	// Quat<->Rotator conversions and equality
 	{
+		// Identity conversion
+		{
+			const FRotator R0 = FRotator::ZeroRotator;
+			const FRotator R1 = FRotator(FQuat::Identity);
+			LogRotatorTest(true, TEXT("FRotator::ZeroRotator ~= FQuat::Identity : Rotator"), R0, R1, R0.Equals(R1, 0.f));
+			LogRotatorTest(true, TEXT("FRotator::ZeroRotator == FQuat::Identity : Rotator"), R0, R1, R0 == R1);
+			LogRotatorTest(true, TEXT("FRotator::ZeroRotator not != FQuat::Identity : Rotator"), R0, R1, !(R0 != R1));
+
+			Q0 = FQuat::Identity;
+			Q1 = FQuat(FRotator::ZeroRotator);
+			LogQuaternionTest(TEXT("FRotator::ZeroRotator ~= FQuat::Identity : Quaternion"), Q0, Q1, Q0.Equals(Q1, 0.f));
+			LogQuaternionTest(TEXT("FRotator::ZeroRotator == FQuat::Identity : Quaternion"), Q0, Q1, Q0 == Q1);
+			LogQuaternionTest(TEXT("FRotator::ZeroRotator not != FQuat::Identity : Quaternion"), Q0, Q1, !(Q0 != Q1));
+		}
+
 		const float Nudge = KINDA_SMALL_NUMBER * 0.25f;
 		const FRotator RotArray[] = {
 			FRotator(0.f, 0.f, 0.f),
@@ -1137,11 +1200,11 @@ bool FVectorRegisterAbstractionTest::RunTest(const FString& Parameters)
 		FVector FV0, FV1;
 		FV0 = Rotator0.Vector();
 		FV1 = FRotationMatrix( Rotator0 ).GetScaledAxis( EAxis::X );
-		LogTest( TEXT("Test0 Rotator::Vector()"), TestVectorsEqual3_NoVec(FV0, FV1, 1e-6f));
+		LogTest( TEXT("Test0 Rotator::Vector()"), TestFVector3Equal(FV0, FV1, 1e-6f));
 		
 		FV0 = FRotationMatrix( Rotator0 ).GetScaledAxis( EAxis::X );
 		FV1 = FQuatRotationMatrix( Q0 ).GetScaledAxis( EAxis::X );
-		LogTest( TEXT("Test0 FQuatRotationMatrix"), TestVectorsEqual3_NoVec(FV0, FV1, 1e-5f));
+		LogTest( TEXT("Test0 FQuatRotationMatrix"), TestFVector3Equal(FV0, FV1, 1e-5f));
 
 		Rotator0 = FRotator(45.0f,  60.0f, 120.0f);
 		Q0 = Rotator0.Quaternion();
@@ -1150,15 +1213,15 @@ bool FVectorRegisterAbstractionTest::RunTest(const FString& Parameters)
 
 		FV0 = Rotator0.Vector();
 		FV1 = FRotationMatrix( Rotator0 ).GetScaledAxis( EAxis::X );
-		LogTest( TEXT("Test1 Rotator::Vector()"), TestVectorsEqual3_NoVec(FV0, FV1, 1e-6f));
+		LogTest( TEXT("Test1 Rotator::Vector()"), TestFVector3Equal(FV0, FV1, 1e-6f));
 
 		FV0 = FRotationMatrix( Rotator0 ).GetScaledAxis( EAxis::X );
 		FV1 = FQuatRotationMatrix( Q0 ).GetScaledAxis( EAxis::X );
-		LogTest(TEXT("Test1 FQuatRotationMatrix"), TestVectorsEqual3_NoVec(FV0, FV1, 1e-5f));
+		LogTest(TEXT("Test1 FQuatRotationMatrix"), TestFVector3Equal(FV0, FV1, 1e-5f));
 
 		FV0 = FRotationMatrix(FRotator::ZeroRotator).GetScaledAxis(EAxis::X);
 		FV1 = FQuatRotationMatrix(FQuat::Identity).GetScaledAxis(EAxis::X);
-		LogTest(TEXT("Test2 FQuatRotationMatrix"), TestVectorsEqual3_NoVec(FV0, FV1, 1e-6f));
+		LogTest(TEXT("Test2 FQuatRotationMatrix"), TestFVector3Equal(FV0, FV1, 1e-6f));
 	}
 
 	// Quat Rotation tests
@@ -1180,8 +1243,9 @@ bool FVectorRegisterAbstractionTest::RunTest(const FString& Parameters)
 			FVector::RightVector,
 			FVector::UpVector,
 			FVector(45.0f, -60.0f, 120.0f),
-			FVector(0.45f, -0.60f, 1.20f),
+			FVector(-45.0f, 60.0f, -120.0f),
 			FVector(0.57735026918962576451f, 0.57735026918962576451f, 0.57735026918962576451f),
+			-FVector::ForwardVector,
 		};
 
 		// ... and test within this tolerance.
@@ -1191,7 +1255,7 @@ bool FVectorRegisterAbstractionTest::RunTest(const FString& Parameters)
 		#define TEST_QUAT_ROTATE(_QIndex, _VIndex, _Quat, _Vec, _Func, _Tolerance) \
 		{ \
 			const FString _TestName = FString::Printf(TEXT("Test Quat%d: Vec%d: %s"), _QIndex, _VIndex, TEXT(#_Func)); \
-			LogTest( *_TestName, TestVectorsEqual3_NoVec(_Quat.RotateVector(_Vec), _Func(_Quat, _Vec), _Tolerance) ); \
+			LogTest( *_TestName, TestFVector3Equal(_Quat.RotateVector(_Vec), _Func(_Quat, _Vec), _Tolerance) ); \
 		}
 
 		// Test loop
@@ -1204,6 +1268,59 @@ bool FVectorRegisterAbstractionTest::RunTest(const FString& Parameters)
 				TEST_QUAT_ROTATE(QIndex, VIndex, Q, V, TestQuaternionRotateVectorScalar, Tolerance);
 				TEST_QUAT_ROTATE(QIndex, VIndex, Q, V, TestQuaternionRotateVectorRegister, Tolerance);
 				TEST_QUAT_ROTATE(QIndex, VIndex, Q, V, TestQuaternionMultiplyVector, Tolerance);
+			}
+		}
+
+
+		// FindBetween
+		{
+			for (FVector const& A: TestVectors)
+			{
+				for (FVector const &B : TestVectors)
+				{
+					const FVector ANorm = A.GetSafeNormal();
+					const FVector BNorm = B.GetSafeNormal();
+
+					const FQuat Old = FindBetween_Old(ANorm, BNorm);
+					const FQuat NewNormal = FQuat::FindBetweenNormals(ANorm, BNorm);
+					const FQuat NewVector = FQuat::FindBetweenVectors(A, B);
+
+					const FVector RotAOld = Old.RotateVector(ANorm);
+					const FVector RotANewNormal = NewNormal.RotateVector(ANorm);
+					const FVector RotANewVector = NewVector.RotateVector(ANorm);
+
+					if (A.IsZero() || B.IsZero())
+					{
+						LogTest(TEXT("FindBetween: Old == New (normal)"), TestQuatsEqual(Old, NewNormal, 1e-6f));
+						LogTest(TEXT("FindBetween: Old == New (vector)"), TestQuatsEqual(Old, NewVector, 1e-6f));
+					}
+					else
+					{
+						LogTest(TEXT("FindBetween: Old A->B"), TestFVector3Equal(RotAOld, BNorm, KINDA_SMALL_NUMBER));
+						LogTest(TEXT("FindBetween: New A->B (normal)"), TestFVector3Equal(RotANewNormal, BNorm, KINDA_SMALL_NUMBER));
+						LogTest(TEXT("FindBetween: New A->B (vector)"), TestFVector3Equal(RotANewVector, BNorm, KINDA_SMALL_NUMBER));
+					}
+				}
+			}
+		}
+
+
+		// FVector::ToOrientationRotator(), FVector::ToOrientationQuat()
+		{
+			for (FVector const& V: TestVectors)
+			{
+				const FVector VNormal = V.GetSafeNormal();
+
+				Q0 = FQuat::FindBetweenNormals(FVector::ForwardVector, VNormal);
+				Q1 = V.ToOrientationQuat();
+				const FRotator R0 = V.ToOrientationRotator();
+
+				const FVector Rotated0 = Q0.RotateVector(FVector::ForwardVector);
+				const FVector Rotated1 = Q1.RotateVector(FVector::ForwardVector);
+				const FVector Rotated2 = R0.RotateVector(FVector::ForwardVector);
+
+				LogTest(TEXT("V.ToOrientationQuat() rotate"), TestFVector3Equal(Rotated0, Rotated1, KINDA_SMALL_NUMBER));
+				LogTest(TEXT("V.ToOrientationRotator() rotate"), TestFVector3Equal(Rotated0, Rotated2, KINDA_SMALL_NUMBER));
 			}
 		}
 	}

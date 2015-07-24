@@ -8,6 +8,7 @@ using System.Threading;
 using System.Diagnostics;
 using UnrealBuildTool;
 using System.Reflection;
+using Tools.DotNETCommon;
 
 namespace AutomationTool
 {
@@ -28,17 +29,17 @@ namespace AutomationTool
             {
                 HostPlatform.Initialize();
 
-                Log.WriteLine(TraceEventType.Information, "Running on {0}", HostPlatform.Current.GetType().Name);
+                Log.TraceVerbose("Running on {0}", HostPlatform.Current.GetType().Name);
 
                 XmlConfigLoader.Init();
 
                 // Log if we're running from the launcher
-                var ExecutingAssemblyLocation = CommandUtils.CombinePaths(Assembly.GetExecutingAssembly().Location);
-                if (String.Compare(ExecutingAssemblyLocation, CommandUtils.CombinePaths(InternalUtils.ExecutingAssemblyLocation), true) != 0)
+                var ExecutingAssemblyLocation = Assembly.GetExecutingAssembly().Location;
+                if (string.Compare(ExecutingAssemblyLocation, Assembly.GetEntryAssembly().GetOriginalLocation(), StringComparison.OrdinalIgnoreCase) != 0)
                 {
-                    Log.WriteLine(TraceEventType.Information, "Executed from AutomationToolLauncher ({0})", ExecutingAssemblyLocation);
+                    Log.TraceVerbose("Executed from AutomationToolLauncher ({0})", ExecutingAssemblyLocation);
                 }
-                Log.WriteLine(TraceEventType.Information, "CWD={0}", Environment.CurrentDirectory);
+                Log.TraceVerbose("CWD={0}", Environment.CurrentDirectory);
 
                 // Hook up exit callbacks
                 var Domain = AppDomain.CurrentDomain;
@@ -46,8 +47,8 @@ namespace AutomationTool
                 Domain.DomainUnload += Domain_ProcessExit;
                 HostPlatform.Current.SetConsoleCtrlHandler(ProgramCtrlHandler);
 
-                var Version = InternalUtils.ExecutableVersion;
-                Log.WriteLine(TraceEventType.Verbose, "{0} ver. {1}", Version.ProductName, Version.ProductVersion);
+                var Version = AssemblyUtils.ExecutableVersion;
+                Log.TraceVerbose("{0} ver. {1}", Version.ProductName, Version.ProductVersion);
 
                 // Don't allow simultaneous execution of AT (in the same branch)
                 InternalUtils.RunSingleInstance(MainProc, CommandLine);
@@ -56,8 +57,8 @@ namespace AutomationTool
             catch (Exception Ex)
             {
                 // Catch all exceptions and propagate the ErrorCode if we are given one.
-                Log.WriteLine(TraceEventType.Error, "AutomationTool terminated with exception:");
-                Log.WriteLine(TraceEventType.Error, LogUtils.FormatException(Ex));
+                Log.TraceError("AutomationTool terminated with exception:");
+                Log.TraceError(LogUtils.FormatException(Ex));
                 // set the exit code of the process
                 if (Ex is AutomationException)
                 {
@@ -78,7 +79,7 @@ namespace AutomationTool
                 // Try to kill process before app domain exits to leave the other KillAll call to extreme edge cases
                 NoThrow(() => { if (ShouldKillProcesses && !Utils.IsRunningOnMono) ProcessManager.KillAll(); }, "Kill All Processes");
 
-                Log.WriteLine(TraceEventType.Information, "AutomationTool exiting with ExitCode={0}", ReturnCode);
+                Log.TraceInformation("AutomationTool exiting with ExitCode={0}", ReturnCode);
 
                 // Can't use NoThrow here because the code logs exceptions. We're shutting down logging!
                 LogUtils.ShutdownLogging();
@@ -103,7 +104,7 @@ namespace AutomationTool
             }
             catch (Exception Ex)
             {
-                Log.WriteLine(TraceEventType.Error, "Exception performing nothrow action \"{0}\": {1}", ActionDesc, LogUtils.FormatException(Ex));
+                Log.TraceError("Exception performing nothrow action \"{0}\": {1}", ActionDesc, LogUtils.FormatException(Ex));
             }
         }
 

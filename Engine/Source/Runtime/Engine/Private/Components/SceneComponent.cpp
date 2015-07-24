@@ -1845,8 +1845,8 @@ void USceneComponent::SetPhysicsVolume( APhysicsVolume * NewVolume,  bool bTrigg
 			if( PhysicsVolume.IsValid() )
 			{
 				PhysicsVolume->ActorLeavingVolume(A);
-				PhysicsVolumeChangedDelegate.Broadcast(NewVolume);
 			}
+			PhysicsVolumeChangedDelegate.Broadcast(NewVolume);
 			PhysicsVolume = NewVolume;
 			if( PhysicsVolume.IsValid() )
 			{
@@ -2417,7 +2417,6 @@ void FScopedMovementUpdate::AppendOverlapsAfterMove(const TArray<FOverlapInfo>& 
 	else
 	{
 		// We don't expect any pending overlaps in the case of a teleport.
-		checkSlow(!bSweep);
 		checkSlow(NewPendingOverlaps.Num() == 0);
 		CurrentOverlapState = EOverlapState::eUnknown;
 		FinalOverlapCandidatesIndex = INDEX_NONE;

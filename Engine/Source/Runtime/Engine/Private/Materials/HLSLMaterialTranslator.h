@@ -1660,6 +1660,7 @@ protected:
 			{MEVP_FieldOfView, MCT_Float2, TEXT("View.<PREV>FieldOfViewWideAngles"), nullptr},
 			{MEVP_TanHalfFieldOfView, MCT_Float2, TEXT("Get<PREV>TanHalfFieldOfView()"), TEXT("Get<PREV>CotanHalfFieldOfView()")},
 			{MEVP_ViewSize, MCT_Float2, TEXT("View.ViewSizeAndInvSize.xy"), TEXT("View.ViewSizeAndInvSize.zw")},
+			{MEVP_WorldSpaceCameraPosition, MCT_Float3, TEXT("View.<PREV>ViewOrigin"), nullptr},
 		};
 		static_assert((sizeof(ViewPropertyMetaArray) / sizeof(ViewPropertyMetaArray[0])) == MEVP_MAX, "incoherency between EMaterialExposedViewProperty and ViewPropertyMetaArray");
 
@@ -1922,11 +1923,6 @@ protected:
 		return AddInlinedCodeChunk(MCT_Float3,TEXT("Parameters.CameraVector"));
 	}
 
-	virtual int32 CameraWorldPosition() override
-	{
-		return AddInlinedCodeChunk(MCT_Float3,TEXT("View.ViewOrigin.xyz"));
-	}
-
 	virtual int32 LightVector() override
 	{
 		if (ShaderFrequency != SF_Pixel && ShaderFrequency != SF_Compute)
@@ -2165,12 +2161,12 @@ protected:
 
 	virtual int32 ObjectRadius() override
 	{
-		return AddInlinedCodeChunk(MCT_Float,TEXT("Primitive.ObjectWorldPositionAndRadius.w"));		
+		return GetPrimitiveProperty(MCT_Float, TEXT("ObjectRadius"), TEXT("ObjectWorldPositionAndRadius.w"));		
 	}
 
 	virtual int32 ObjectBounds() override
 	{
-		return AddInlinedCodeChunk(MCT_Float3,TEXT("Primitive.ObjectBounds.xyz"));		
+		return GetPrimitiveProperty(MCT_Float3, TEXT("ObjectBounds"), TEXT("ObjectBounds.xyz"));
 	}
 
 	virtual int32 DistanceCullFade() override
@@ -3293,7 +3289,7 @@ protected:
 				}
 				else if (DestCoordBasis == MCB_View)
 				{
-					CodeStr = TEXT("mul(<A>, <MATRIX>(View.<PREV>TranslatedWorldToView))");
+					CodeStr = TEXT("mul(<A>, <MATRIX>(View.<PREV>TranslatedWorldToCameraView))");
 				}
 				// else use MCB_World as intermediary basis
 				break;
@@ -3306,8 +3302,17 @@ protected:
 				}
 				else if (DestCoordBasis == MCB_Local)
 				{
-					//TODO: need Primitive.PrevWorldToLocal
-					//TODO: inconsistent with TransformLocal<TO>World with instancing
+					const EMaterialDomain Domain = (const EMaterialDomain)Material->GetMaterialDomain();
+
+					if(Domain != MD_Surface)
+					{
+						// TODO: for decals we could support it
+						Errorf(TEXT("This transformation is only supported in the 'Surface' material domain."));
+						return INDEX_NONE;
+					}
+
+					// TODO: need Primitive.PrevWorldToLocal
+					// TODO: inconsistent with TransformLocal<TO>World with instancing
 					CodeStr = TEXT("mul(<A>, <MATRIX>(Primitive.WorldToLocal))");
 				}
 				else if (DestCoordBasis == MCB_TranslatedWorld)
@@ -3329,7 +3334,7 @@ protected:
 			{
 				if (DestCoordBasis == MCB_TranslatedWorld)
 				{
-					CodeStr = TEXT("mul(<A>, <MATRIX>(View.<PREV>ViewToTranslatedWorld))");
+					CodeStr = TEXT("mul(<A>, <MATRIX>(View.<PREV>CameraViewToTranslatedWorld))");
 				}
 				// else use MCB_TranslatedWorld as intermediary basis
 				IntermediaryBasis = MCB_TranslatedWorld;
@@ -3471,7 +3476,7 @@ protected:
 
 	virtual int32 ObjectOrientation() override
 	{ 
-		return AddInlinedCodeChunk(MCT_Float3,TEXT("Primitive.ObjectOrientation.xyz"));	
+		return GetPrimitiveProperty(MCT_Float3, TEXT("ObjectOrientation"), TEXT("ObjectOrientation.xyz"));
 	}
 
 	virtual int32 RotateAboutAxis(int32 NormalizedRotationAxisAndAngleIndex, int32 PositionOnAxisIndex, int32 PositionIndex) override
@@ -3781,14 +3786,14 @@ protected:
 			case MCT_Texture2D:
 				InputParamDecl += TEXT("Texture2D ");
 				InputParamDecl += Custom->Inputs[i].InputName;
-				InputParamDecl += TEXT(", sampler ");
+				InputParamDecl += TEXT(", SamplerState ");
 				InputParamDecl += Custom->Inputs[i].InputName;
 				InputParamDecl += TEXT("Sampler ");
 				break;
 			case MCT_TextureCube:
 				InputParamDecl += TEXT("TextureCube ");
 				InputParamDecl += Custom->Inputs[i].InputName;
-				InputParamDecl += TEXT(", sampler ");
+				InputParamDecl += TEXT(", SamplerState ");
 				InputParamDecl += Custom->Inputs[i].InputName;
 				InputParamDecl += TEXT("Sampler ");
 				break;
@@ -3985,6 +3990,21 @@ protected:
 		MaterialCompilationOutput.bUsesEyeAdaptation = true;
 
 		return AddInlinedCodeChunk(MCT_Float, TEXT("EyeAdaptationLookup()"));
+	}
+
+	// to only have one piece of code dealing with error handling if the Primitive constant buffer is not used.
+	// @param Name e.g. TEXT("ObjectWorldPositionAndRadius.w")
+	int32 GetPrimitiveProperty(EMaterialValueType Type, const TCHAR* ExpressionName, const TCHAR* HLSLName)
+	{
+		const EMaterialDomain Domain = (const EMaterialDomain)Material->GetMaterialDomain();
+
+		if(Domain != MD_Surface)
+		{
+			Errorf(TEXT("The material expression '%s' is only supported in the 'Surface' material domain."), ExpressionName);
+			return INDEX_NONE;
+		}
+
+		return AddInlinedCodeChunk(Type, TEXT("Primitive.%s"), HLSLName);
 	}
 };
 

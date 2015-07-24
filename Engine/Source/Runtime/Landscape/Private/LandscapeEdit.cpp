@@ -4434,31 +4434,9 @@ struct FMobileLayerAllocation
 	}
 };
 
-void ULandscapeComponent::GeneratePlatformPixelData(bool bIsCooking)
+void ULandscapeComponent::GeneratePlatformPixelData()
 {
 	check(!IsTemplate())
-
-	if (!bIsCooking)
-	{
-		// Calculate hash of source data and skip generation if the data we have in memory is unchanged
-		FBufferArchive ComponentStateAr;
-		SerializeStateHashes(ComponentStateAr);
-
-		uint32 Hash[5];
-		FSHA1::HashBuffer(ComponentStateAr.GetData(), ComponentStateAr.Num(), (uint8*)Hash);
-		FGuid NewSourceHash = FGuid(Hash[0] ^ Hash[4], Hash[1], Hash[2], Hash[3]);
-	
-		// Skip generation if the source hash matches
-		if (MobilePixelDataSourceHash.IsValid() && 
-			MobilePixelDataSourceHash == NewSourceHash &&
-			MobileMaterialInterface != nullptr &&
-			MobileWeightNormalmapTexture != nullptr)
-		{
-			return;
-		}
-			
-		MobilePixelDataSourceHash = NewSourceHash;
-	}
 
 	TArray<FMobileLayerAllocation> MobileLayerAllocations;
 	MobileLayerAllocations.Reserve(WeightmapLayerAllocations.Num());
@@ -4537,7 +4515,6 @@ void ULandscapeComponent::GeneratePlatformPixelData(bool bIsCooking)
 
 	MobileWeightNormalmapTexture = NewWeightNormalmapTexture;
 
-
 	FLinearColor Masks[5];
 	Masks[0] = FLinearColor(1, 0, 0, 0);
 	Masks[1] = FLinearColor(0, 1, 0, 0);
@@ -4545,8 +4522,10 @@ void ULandscapeComponent::GeneratePlatformPixelData(bool bIsCooking)
 	Masks[3] = FLinearColor(0, 0, 0, 1);
 	Masks[4] = FLinearColor(0, 0, 0, 0); // mask out layers 4+ altogether
 
-	if (!bIsCooking)
+	if (!GIsEditor)
 	{
+		// This path is used by game mode running with uncooked data, eg Mobile Preview.
+		// Game mode cannot create MICs, so we use a MaterialInstanceDynamic here.
 		UMaterialInstanceDynamic* NewMobileMaterialInstance = UMaterialInstanceDynamic::Create(MaterialInstance, GetOutermost());
 
 		MobileBlendableLayerMask = 0;
@@ -4566,8 +4545,11 @@ void ULandscapeComponent::GeneratePlatformPixelData(bool bIsCooking)
 		}
 		MobileMaterialInterface = NewMobileMaterialInstance;
 	}
-	else // for cooking
+	else
 	{
+		// When cooking, we need to make a persistent MIC. In the editor we also do so in
+		// case we start a Cook in Editor operation, which will reuse the MIC we create now.
+
 		UMaterialInstanceConstant* CombinationMaterialInstance = GetCombinationMaterial(true);
 		UMaterialInstanceConstant* NewMobileMaterialInstance = NewObject<ULandscapeMaterialInstanceConstant>(GetOutermost());
 
@@ -4620,13 +4602,16 @@ void ULandscapeComponent::GeneratePlatformVertexData()
 	NewPlatformData.AddZeroed(NewPlatformDataSize);
 
 	// Get the required mip data
+	TArray<TArray<uint8>> HeightmapMipRawData;
 	TArray<FColor*> HeightmapMipData;
 	for (int32 MipIdx = 0; MipIdx < FMath::Min(LANDSCAPE_MAX_ES_LOD, HeightmapTexture->Source.GetNumMips()); MipIdx++)
 	{
 		int32 MipSubsectionSizeVerts = (SubsectionSizeVerts) >> MipIdx;
 		if (MipSubsectionSizeVerts > 1)
 		{
-			HeightmapMipData.Add((FColor*)HeightmapTexture->Source.LockMip(MipIdx));
+			new(HeightmapMipRawData) TArray<uint8>();
+			HeightmapTexture->Source.GetMipData(HeightmapMipRawData.Last(), MipIdx);
+			HeightmapMipData.Add((FColor*)HeightmapMipRawData.Last().GetData());
 		}
 	}
 
@@ -4749,11 +4734,6 @@ void ULandscapeComponent::GeneratePlatformVertexData()
 		}
 
 		DstVert++;
-	}
-
-	for (int32 MipIdx = 0; MipIdx < HeightmapTexture->Source.GetNumMips(); MipIdx++)
-	{
-		HeightmapTexture->Source.UnlockMip(MipIdx);
 	}
 
 	// Copy to PlatformData as Compressed

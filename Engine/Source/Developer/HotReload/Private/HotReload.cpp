@@ -8,6 +8,7 @@
 #include "HotReloadClassReinstancer.h"
 #include "EngineAnalytics.h"
 #include "Runtime/Engine/Classes/Engine/BlueprintGeneratedClass.h"
+#include "KismetEditorUtilities.h"
 #endif
 
 DEFINE_LOG_CATEGORY(LogHotReload);
@@ -158,6 +159,13 @@ private:
 	 * only one needed.
 	 */
 	void ReplaceReferencesToReconstructedCDOs();
+
+#if WITH_ENGINE
+	/**
+	 * Recompiles blueprints that were touched during this hot-reload.
+	 */
+	void RecompileTouchedBlueprints();
+#endif // WITH_ENGINE
 
 	/**
 	* Callback for async ompilation
@@ -588,6 +596,9 @@ inline uint32 GetTypeHash(Native A)
 /** Map from old function pointer to new function pointer for hot reload. */
 static TMap<Native, Native> HotReloadFunctionRemap;
 
+static TSet<UBlueprint*> HotReloadBPSetToRecompile;
+static TSet<UBlueprint*> HotReloadBPSetToRecompileBytecodeOnly;
+
 /** Adds and entry for the UFunction native pointer remap table */
 void FHotReloadModule::AddHotReloadFunctionRemap(Native NewFunctionPointer, Native OldFunctionPointer)
 {
@@ -766,6 +777,10 @@ ECompilationResult::Type FHotReloadModule::DoHotReloadInternal(bool bRecompileFi
 			}
 			HotReloadAr.Logf(ELogVerbosity::Warning, TEXT("HotReload successful (%d functions remapped  %d scriptstructs remapped)"), Count, ScriptStructs.Num());
 
+#if WITH_ENGINE
+			RecompileTouchedBlueprints();
+#endif // WITH_ENGINE
+
 			HotReloadFunctionRemap.Empty();
 
 			ReplaceReferencesToReconstructedCDOs();
@@ -835,6 +850,45 @@ void FHotReloadModule::ReplaceReferencesToReconstructedCDOs()
 
 	ReconstructedCDOsMap.Empty();
 }
+
+#if WITH_ENGINE
+void FHotReloadModule::RecompileTouchedBlueprints()
+{
+	bool bCollectGarbage = HotReloadBPSetToRecompile.Num() > 0;
+
+	while (HotReloadBPSetToRecompile.Num())
+	{
+		auto Iter = HotReloadBPSetToRecompile.CreateIterator();
+		TWeakObjectPtr<UBlueprint> BPPtr = *Iter;
+		Iter.RemoveCurrent();
+		if (auto BP = BPPtr.Get())
+		{
+			FKismetEditorUtilities::CompileBlueprint(BP, false, true);
+		}
+	}
+
+	if (bCollectGarbage)
+	{
+		// Garbage collect to make sure the old class and actors are disposed of
+		CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS);
+	}
+
+	HotReloadBPSetToRecompile.Empty();
+
+	while (HotReloadBPSetToRecompileBytecodeOnly.Num())
+	{
+		auto Iter = HotReloadBPSetToRecompileBytecodeOnly.CreateIterator();
+		TWeakObjectPtr<UBlueprint> BPPtr = *Iter;
+		Iter.RemoveCurrent();
+		if (auto BP = BPPtr.Get())
+		{
+			FKismetEditorUtilities::RecompileBlueprintBytecode(BP);
+		}
+	}
+
+	HotReloadBPSetToRecompileBytecodeOnly.Empty();
+}
+#endif // WITH_ENGINE
 
 ECompilationResult::Type FHotReloadModule::RebindPackages(TArray<UPackage*> InPackages, TArray<FName> DependentModules, const bool bWaitForCompletion, FOutputDevice &Ar)
 {
@@ -935,7 +989,7 @@ ECompilationResult::Type FHotReloadModule::RebindPackagesInternal(TArray<UPackag
 #if WITH_ENGINE
 void FHotReloadModule::ReinstanceClass(UClass* OldClass, UClass* NewClass)
 {	
-	auto ReinstanceHelper = FHotReloadClassReinstancer::Create(NewClass, OldClass, ReconstructedCDOsMap);
+	auto ReinstanceHelper = FHotReloadClassReinstancer::Create(NewClass, OldClass, ReconstructedCDOsMap, HotReloadBPSetToRecompile, HotReloadBPSetToRecompileBytecodeOnly);
 	if (ReinstanceHelper->ClassNeedsReinstancing())
 	{
 		UE_LOG(LogHotReload, Log, TEXT("Re-instancing %s after hot-reload."), NewClass ? *NewClass->GetName() : *OldClass->GetName());

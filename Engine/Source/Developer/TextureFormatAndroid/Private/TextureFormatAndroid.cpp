@@ -243,18 +243,41 @@ class FTextureFormatAndroid : public ITextureFormat
  */
 static ITextureFormat* Singleton = NULL;
 
+
+
+#if PLATFORM_WINDOWS
+	HMODULE	TextureConverterHandle = NULL;
+	FString QualCommBinariesRoot = FPaths::EngineDir() / TEXT("Binaries/ThirdParty/QualComm/Win64/");
+#endif
+
+
 class FTextureFormatAndroidModule : public ITextureFormatModule
 {
 public:
+
+	FTextureFormatAndroidModule()
+	{
+#if PLATFORM_WINDOWS
+		TextureConverterHandle = LoadLibraryW(*(QualCommBinariesRoot + "TextureConverter.dll"));
+#endif
+	}
+
 	virtual ~FTextureFormatAndroidModule()
 	{
 		delete Singleton;
 		Singleton = NULL;
+
+#if PLATFORM_WINDOWS
+		FreeLibrary(TextureConverterHandle);
+#endif
 	}
 	virtual ITextureFormat* GetTextureFormat()
 	{
 		if (!Singleton)
 		{
+#if PLATFORM_WINDOWS
+			TextureConverterHandle = LoadLibraryW(*(QualCommBinariesRoot + "TextureConverter.dll"));
+#endif
 			Singleton = new FTextureFormatAndroid();
 		}
 		return Singleton;

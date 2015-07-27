@@ -51,5 +51,47 @@ namespace AutomationTool
 			System.Diagnostics.Trace.TraceWarning("Implicit conversion from NodeInfo to string\n{0}", Environment.StackTrace);
 			return Name;
 		}
+
+		// Legacy stuff that should probably be removed
+
+		public abstract bool IsTest
+		{
+			get;
+		}
+
+		public abstract string DisplayGroupName
+		{
+			get;
+		}
+	}
+
+	public class LegacyBuildNode : BuildNode
+	{
+		public LegacyBuildNode(GUBP.GUBPNode InNode)
+		{
+			Name = InNode.GetFullName();
+			Node = InNode;
+			AgentRequirements = Node.ECAgentString();
+			AgentSharingGroup = Node.AgentSharingGroup;
+			AgentMemoryRequirement = Node.AgentMemoryRequirement();
+			TimeoutInMinutes = Node.TimeoutInMinutes();
+			SendSuccessEmail = Node.SendSuccessEmail();
+			Priority = Node.Priority();
+		}
+
+		public override bool IsSticky
+		{
+			get { return Node.IsSticky(); }
+		}
+
+		public override bool IsTest
+		{
+			get { return Node.IsTest(); }
+		}
+
+		public override string DisplayGroupName
+		{
+			get { return Node.GetDisplayGroupName(); }
+		}
 	}
 }

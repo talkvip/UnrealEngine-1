@@ -2208,7 +2208,7 @@ void UNavigationSystem::InitializeForWorld(UWorld* World, FNavigationSystemRunMo
 
 		// Remove old/stale chunk data from all levels, when navigation auto-update is enabled
 		// In case navigation system will be created chunks will be regenerated anyway
-		if (Mode == FNavigationSystemRunMode::EditorMode)
+		if (Mode == FNavigationSystemRunMode::EditorMode && bNavigationAutoUpdateEnabled == true)
 		{
 			DiscardNavigationDataChunks(World);
 		}
@@ -3202,9 +3202,10 @@ ANavigationData* UNavigationSystem::CreateNavigationDataInstance(const FNavDataC
 			}
 
 			// Set descriptive name
-			Instance->Rename(*StrName);
+			Instance->Rename(*StrName, NULL, REN_DoNotDirty);
 #if WITH_EDITOR
-			Instance->SetActorLabel(StrName);
+			const bool bMarkDirty = false;
+			Instance->SetActorLabel(StrName, bMarkDirty );
 #endif // WITH_EDITOR
 		}
 	}

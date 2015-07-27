@@ -68,14 +68,14 @@ FSymbolDebugger_AsyncSyncFiles::FSymbolDebugger_AsyncSyncFiles(const FString& In
 
 void FSymbolDebugger_AsyncSyncFiles::DoWork()
 {
-	if (CrashHelperModule->SyncRequiredFilesForDebuggingFromLabel(SourceControlLabel, Platform) == true)
-	{
-		bResult_Succeeded = true;
-	}
-	else
-	{
-		bResult_Succeeded = false;
-	}
+// 	if (CrashHelperModule->SyncRequiredFilesForDebuggingFromLabel(SourceControlLabel, Platform) == true)
+// 	{
+// 		bResult_Succeeded = true;
+// 	}
+// 	else
+// 	{
+// 		bResult_Succeeded = false;
+// 	}
 }
 
 //-----------------------------------------------------------------------------
@@ -120,11 +120,11 @@ void FSymbolDebugger_ProcessCrashDump::DoWork()
 		Result_EngineVersionName = FString::FromInt(CrashDebugInfo.EngineVersion);
 		Result_PlatformName = CrashDebugInfo.PlatformName;
 
-		if (CrashHelperModule->SyncRequiredFilesForDebuggingFromLabel(Result_LabelName, Result_PlatformName) == true)
-		{
-			FPlatformProcess::LaunchFileInDefaultExternalApplication(*CrashDumpName);
-			bResult_Succeeded = true;
-		}
+// 		if (CrashHelperModule->SyncRequiredFilesForDebuggingFromLabel(Result_LabelName, Result_PlatformName) == true)
+// 		{
+// 			FPlatformProcess::LaunchFileInDefaultExternalApplication(*CrashDumpName);
+// 			bResult_Succeeded = true;
+// 		}
 	}
 }
 

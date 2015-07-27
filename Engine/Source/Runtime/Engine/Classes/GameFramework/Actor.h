@@ -13,6 +13,7 @@
 struct FHitResult;
 class AActor;
 class FTimerManager; 
+class UNetDriver;
 
 #include "Actor.generated.h"
 
@@ -319,6 +320,9 @@ public:
 
 	/** Called on the actor right before replication occurs */
 	virtual void PreReplication( IRepChangedPropertyTracker & ChangedPropertyTracker );
+
+	/** Called by the networking system to call PreReplication on this actor and its components using the given NetDriver to find or create RepChangedPropertyTrackers. */
+	void CallPreReplication(UNetDriver* NetDriver);
 
 	/** If true then destroy self when "finished", meaning all relevant components report that they are done and no timelines or timers are in flight. */
 	UPROPERTY(BlueprintReadWrite, Category=Actor)
@@ -1597,8 +1601,9 @@ public:
 	/**
 	 * Assigns a new label to this actor.  Actor labels are only available in development builds.
 	 * @param	NewActorLabel	The new label string to assign to the actor.  If empty, the actor will have a default label.
+	 * @param	bMarkDirty		If true the actor's package will be marked dirty for saving.  Otherwise it will not be.  You should pass false for this parameter if dirtying is not allowed (like during loads)
 	 */
-	void SetActorLabel( const FString& NewActorLabel );
+	void SetActorLabel( const FString& NewActorLabel, bool bMarkDirty = true );
 
 	/** Advanced - clear the actor label. */
 	void ClearActorLabel();
@@ -2534,7 +2539,7 @@ private:
 #endif // ENABLE_VISUAL_LOG
 
 	//* Sets the friendly actor label and name */
-	void SetActorLabelInternal( const FString& NewActorLabelDirty, bool bMakeGloballyUniqueFName );
+	void SetActorLabelInternal( const FString& NewActorLabelDirty, bool bMakeGloballyUniqueFName, bool bMarkDirty );
 
 	static FMakeNoiseDelegate MakeNoiseDelegate;
 

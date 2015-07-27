@@ -359,6 +359,7 @@ bool UDemoNetDriver::InitConnectInternal( FString& Error )
 		{
 			GEngine->DestroyNamedNetDriver( WorldContext->PendingNetGame, NetDriverName );
 			WorldContext->PendingNetGame = NULL;
+			GEngine->BrowseToDefaultMap( *WorldContext );
 		}
 
 		Error = LoadMapError;
@@ -883,7 +884,7 @@ void UDemoNetDriver::SaveCheckpoint()
 	{
 		if ( CheckpointConnection->ActorChannels.Contains( Actor ) )
 		{
-			Actor->PreReplication( *FindOrCreateRepChangedPropertyTracker( Actor ).Get() );
+			Actor->CallPreReplication( this );
 			DemoReplicateActor( Actor, CheckpointConnection, false );
 		}
 	}
@@ -997,7 +998,7 @@ void UDemoNetDriver::TickDemoRecord( float DeltaSeconds )
 			continue;
 		}
 
-		Actor->PreReplication( *FindOrCreateRepChangedPropertyTracker( Actor ).Get() );
+		Actor->CallPreReplication( this );
 		DemoReplicateActor( Actor, ClientConnections[0], IsNetClient );
 	}
 
@@ -1447,7 +1448,12 @@ void UDemoNetDriver::SpawnDemoRecSpectator( UNetConnection* Connection )
 {
 	check( Connection != NULL );
 
-	UClass* C = GetWorld()->GetAuthGameMode()->ReplaySpectatorPlayerControllerClass;
+	// Get the replay spectator controller class from the default game mode object,
+	// since the game mode instance isn't replicated to clients of live games.
+	AGameState* GameState = GetWorld() != nullptr ? GetWorld()->GetGameState() : nullptr;
+	TSubclassOf<AGameMode> DefaultGameModeClass = GameState != nullptr ? GameState->GameModeClass : nullptr;
+	AGameMode* DefaultGameMode = CastChecked<AGameMode>(DefaultGameModeClass.GetDefaultObject());
+	UClass* C = DefaultGameMode != nullptr ? DefaultGameMode->ReplaySpectatorPlayerControllerClass : nullptr;
 
 	if ( C == NULL )
 	{

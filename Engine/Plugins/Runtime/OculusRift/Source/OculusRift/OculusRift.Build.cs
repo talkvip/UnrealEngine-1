@@ -10,6 +10,7 @@ namespace UnrealBuildTool.Rules
 				new string[] {
 					"OculusRift/Private",
  					"../../../../Source/Runtime/Renderer/Private",
+ 					"../../../../Source/ThirdParty/Oculus/Common",
 					// ... add other private include paths required here ...
 				}
 				);

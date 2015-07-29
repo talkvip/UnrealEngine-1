@@ -499,35 +499,33 @@ void FMacApplication::ProcessEvent(const FDeferredMacEvent& Event)
 	TSharedPtr<FMacWindow> EventWindow = FindWindowByNSWindow(Event.Window);
 	if (Event.Type)
 	{
-		bool bModifiersValid = false;
-		
 		switch (Event.Type)
 		{
 			case NSMouseMoved:
 			case NSLeftMouseDragged:
 			case NSRightMouseDragged:
 			case NSOtherMouseDragged:
+				ConditionallyUpdateModifierKeys(Event);
 				ProcessMouseMovedEvent(Event, EventWindow);
-				bModifiersValid = true;
 				break;
 
 			case NSLeftMouseDown:
 			case NSRightMouseDown:
 			case NSOtherMouseDown:
+				ConditionallyUpdateModifierKeys(Event);
 				ProcessMouseDownEvent(Event, EventWindow);
-				bModifiersValid = true;
 				break;
 
 			case NSLeftMouseUp:
 			case NSRightMouseUp:
 			case NSOtherMouseUp:
+				ConditionallyUpdateModifierKeys(Event);
 				ProcessMouseUpEvent(Event, EventWindow);
-				bModifiersValid = true;
 				break;
 
 			case NSScrollWheel:
+				ConditionallyUpdateModifierKeys(Event);
 				ProcessScrollWheelEvent(Event, EventWindow);
-				bModifiersValid = true;
 				break;
 
 			case NSEventTypeMagnify:
@@ -535,45 +533,28 @@ void FMacApplication::ProcessEvent(const FDeferredMacEvent& Event)
 			case NSEventTypeRotate:
 			case NSEventTypeBeginGesture:
 			case NSEventTypeEndGesture:
+				ConditionallyUpdateModifierKeys(Event);
 				ProcessGestureEvent(Event);
-				bModifiersValid = true;
 				break;
 
 			case NSKeyDown:
+				ConditionallyUpdateModifierKeys(Event);
 				ProcessKeyDownEvent(Event, EventWindow);
-				bModifiersValid = true;
 				break;
 
 			case NSKeyUp:
+				ConditionallyUpdateModifierKeys(Event);
 				ProcessKeyUpEvent(Event);
-				bModifiersValid = true;
 				break;
 				
 			case NSFlagsChanged:
-				bModifiersValid = true;
+				ConditionallyUpdateModifierKeys(Event);
 				break;
 				
 			case NSMouseEntered:
 			case NSMouseExited:
-				bModifiersValid = true;
+				ConditionallyUpdateModifierKeys(Event);
 				break;
-		}
-		
-		if (bModifiersValid && CurrentModifierFlags != Event.ModifierFlags)
-		{
-			NSUInteger ModifierFlags = Event.ModifierFlags;
-			
-			HandleModifierChange(ModifierFlags, (1<<4), 7, MMK_RightCommand);
-			HandleModifierChange(ModifierFlags, (1<<3), 6, MMK_LeftCommand);
-			HandleModifierChange(ModifierFlags, (1<<1), 0, MMK_LeftShift);
-			HandleModifierChange(ModifierFlags, (1<<16), 8, MMK_CapsLock);
-			HandleModifierChange(ModifierFlags, (1<<5), 4, MMK_LeftAlt);
-			HandleModifierChange(ModifierFlags, (1<<0), 2, MMK_LeftControl);
-			HandleModifierChange(ModifierFlags, (1<<2), 1, MMK_RightShift);
-			HandleModifierChange(ModifierFlags, (1<<6), 5, MMK_RightAlt);
-			HandleModifierChange(ModifierFlags, (1<<13), 3, MMK_RightControl);
-			
-			CurrentModifierFlags = ModifierFlags;
 		}
 	}
 	else if (EventWindow.IsValid())
@@ -667,8 +648,9 @@ void FMacApplication::ProcessMouseMovedEvent(const FDeferredMacEvent& Event, TSh
 {
 	if (EventWindow.IsValid() && EventWindow->IsRegularWindow())
 	{
-		bool IsMouseOverTitleBar = false;
-		const bool IsMovable = IsWindowMovable(EventWindow.ToSharedRef(), &IsMouseOverTitleBar);
+		const EWindowZone::Type Zone = GetCurrentWindowZone(EventWindow.ToSharedRef());
+		bool IsMouseOverTitleBar = (Zone == EWindowZone::TitleBar);
+		const bool IsMovable = IsMouseOverTitleBar || IsEdgeZone(Zone);
 		[EventWindow->GetWindowHandle() setMovable:IsMovable];
 		[EventWindow->GetWindowHandle() setMovableByWindowBackground:IsMouseOverTitleBar];
 	}
@@ -735,7 +717,7 @@ void FMacApplication::ProcessMouseMovedEvent(const FDeferredMacEvent& Event, TSh
 		}
 		else
 		{
-			MacCursor->UpdateCurrentPosition(CurrentPosition);
+			MacCursor->UpdateCurrentPosition(CurrentPosition / MouseScaling);
 		}
 
 		if (EventWindow.IsValid())
@@ -784,11 +766,10 @@ void FMacApplication::ProcessMouseDownEvent(const FDeferredMacEvent& Event, TSha
 
 	if (EventWindow.IsValid())
 	{
+		const EWindowZone::Type Zone = GetCurrentWindowZone(EventWindow.ToSharedRef());
 		if (Button == LastPressedMouseButton && (Event.ClickCount % 2) == 0)
 		{
-			bool IsMouseOverTitleBar = false;
-			const bool IsMovable = IsWindowMovable(EventWindow.ToSharedRef(), &IsMouseOverTitleBar);
-			if (IsMouseOverTitleBar)
+			if (Zone == EWindowZone::TitleBar)
 			{
 				const bool bShouldMinimize = [[NSUserDefaults standardUserDefaults] boolForKey:@"AppleMiniaturizeOnDoubleClick"];
 				FCocoaWindow* WindowHandle = EventWindow->GetWindowHandle();
@@ -806,7 +787,8 @@ void FMacApplication::ProcessMouseDownEvent(const FDeferredMacEvent& Event, TSha
 				MessageHandler->OnMouseDoubleClick(EventWindow, Button);
 			}
 		}
-		else
+		// Only forward left mouse button down events if it's not inside the resize edge zone of a normal resizable window.
+		else if (!EventWindow->IsRegularWindow() || Button != EMouseButtons::Left || !IsEdgeZone(Zone))
 		{
 			MessageHandler->OnMouseDown(EventWindow, Button);
 		}
@@ -1140,6 +1122,26 @@ void FMacApplication::OnWindowsReordered(bool bIsAppInBackground)
 	}
 }
 
+void FMacApplication::ConditionallyUpdateModifierKeys(const FDeferredMacEvent& Event)
+{
+	if (CurrentModifierFlags != Event.ModifierFlags)
+	{
+		NSUInteger ModifierFlags = Event.ModifierFlags;
+		
+		HandleModifierChange(ModifierFlags, (1<<4), 7, MMK_RightCommand);
+		HandleModifierChange(ModifierFlags, (1<<3), 6, MMK_LeftCommand);
+		HandleModifierChange(ModifierFlags, (1<<1), 0, MMK_LeftShift);
+		HandleModifierChange(ModifierFlags, (1<<16), 8, MMK_CapsLock);
+		HandleModifierChange(ModifierFlags, (1<<5), 4, MMK_LeftAlt);
+		HandleModifierChange(ModifierFlags, (1<<0), 2, MMK_LeftControl);
+		HandleModifierChange(ModifierFlags, (1<<2), 1, MMK_RightShift);
+		HandleModifierChange(ModifierFlags, (1<<6), 5, MMK_RightAlt);
+		HandleModifierChange(ModifierFlags, (1<<13), 3, MMK_RightControl);
+		
+		CurrentModifierFlags = ModifierFlags;
+	}
+}
+
 void FMacApplication::HandleModifierChange(NSUInteger NewModifierFlags, NSUInteger FlagsShift, NSUInteger UE4Shift, EMacModifierKeys TranslatedCode)
 {
 	const bool CurrentPressed = (CurrentModifierFlags & FlagsShift) != 0;
@@ -1208,19 +1210,16 @@ NSScreen* FMacApplication::FindScreenByPoint(int32 X, int32 Y) const
 	return TargetScreen;
 }
 
-bool FMacApplication::IsWindowMovable(TSharedRef<FMacWindow> Window, bool* OutMovableByBackground) const
+EWindowZone::Type FMacApplication::GetCurrentWindowZone(const TSharedRef<FMacWindow>& Window) const
 {
-	if (OutMovableByBackground)
-	{
-		*OutMovableByBackground = false;
-	}
-
 	const FVector2D CursorPos = ((FMacCursor*)Cursor.Get())->GetPosition();
 	const int32 LocalMouseX = CursorPos.X - Window->PositionX;
 	const int32 LocalMouseY = CursorPos.Y - Window->PositionY;
+	return MessageHandler->GetWindowZoneForPoint(Window, LocalMouseX, LocalMouseY);
+}
 
-	const EWindowZone::Type Zone = MessageHandler->GetWindowZoneForPoint(Window, LocalMouseX, LocalMouseY);
-	const bool IsMouseOverTitleBar = Zone == EWindowZone::TitleBar;
+bool FMacApplication::IsEdgeZone(EWindowZone::Type Zone) const
+{
 	switch (Zone)
 	{
 		case EWindowZone::NotInWindow:
@@ -1234,11 +1233,6 @@ bool FMacApplication::IsWindowMovable(TSharedRef<FMacWindow> Window, bool* OutMo
 		case EWindowZone::BottomRightBorder:
 			return true;
 		case EWindowZone::TitleBar:
-			if (OutMovableByBackground)
-			{
-				*OutMovableByBackground = true;
-			}
-			return true;
 		case EWindowZone::ClientArea:
 		case EWindowZone::MinimizeButton:
 		case EWindowZone::MaximizeButton:

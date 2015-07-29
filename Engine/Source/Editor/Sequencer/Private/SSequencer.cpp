@@ -26,7 +26,7 @@
 #include "SNumericDropDown.h"
 #include "EditorWidgetsModule.h"
 #include "SSequencerTreeView.h"
-
+#include "MovieSceneSequence.h"
 #include "SSequencerSplitterOverlay.h"
 #include "IKeyArea.h"
 
@@ -193,7 +193,9 @@ void SSequencer::Construct( const FArguments& InArgs, TSharedRef< class FSequenc
 
 	FTimeSliderArgs TimeSliderArgs;
 	TimeSliderArgs.ViewRange = InArgs._ViewRange;
+	TimeSliderArgs.ClampRange = InArgs._ClampRange;
 	TimeSliderArgs.OnViewRangeChanged = InArgs._OnViewRangeChanged;
+	TimeSliderArgs.OnClampRangeChanged = InArgs._OnClampRangeChanged;
 	TimeSliderArgs.ScrubPosition = InArgs._ScrubPosition;
 	TimeSliderArgs.OnBeginScrubberMovement = InArgs._OnBeginScrubbing;
 	TimeSliderArgs.OnEndScrubberMovement = InArgs._OnEndScrubbing;
@@ -205,9 +207,11 @@ void SSequencer::Construct( const FArguments& InArgs, TSharedRef< class FSequenc
 	bool bMirrorLabels = false;
 	// Create the top and bottom sliders
 	TSharedRef<ITimeSlider> TopTimeSlider = SequencerWidgets.CreateTimeSlider( TimeSliderController, bMirrorLabels );
-
 	bMirrorLabels = true;
-	TSharedRef<ITimeSlider> BottomTimeSlider = SequencerWidgets.CreateTimeSlider( TimeSliderController, bMirrorLabels);
+	TSharedRef<ITimeSlider> BottomTimeSlider = SequencerWidgets.CreateTimeSlider( TimeSliderController, TAttribute<EVisibility>(this, &SSequencer::GetBottomTimeSliderVisibility), bMirrorLabels );
+
+	// Create bottom time range slider
+	TSharedRef<ITimeSlider> BottomTimeRange = SequencerWidgets.CreateTimeRange( TimeSliderController, TAttribute<EVisibility>(this, &SSequencer::GetTimeRangeVisibility), TAttribute<bool>(this, &SSequencer::ShowFrameNumbers));
 
 	OnGetAddMenuContent = InArgs._OnGetAddMenuContent;
 
@@ -387,7 +391,17 @@ void SSequencer::Construct( const FArguments& InArgs, TSharedRef< class FSequenc
 							+ SVerticalBox::Slot()
 							.AutoHeight()
 							[
-								BottomTimeSlider
+								SNew( SOverlay )
+
+								+ SOverlay::Slot()
+								[
+									BottomTimeSlider
+								]
+
+								+ SOverlay::Slot()
+								[
+									BottomTimeRange
+								]
 							]
 
 							+ SVerticalBox::Slot()
@@ -586,9 +600,11 @@ TSharedRef<SWidget> SSequencer::MakeSnapMenu()
 {
 	FMenuBuilder MenuBuilder( false, Sequencer.Pin()->GetCommandBindings() );
 
-	MenuBuilder.BeginSection("Frames", LOCTEXT("SnappingMenuFramesHeader", "Frames") );
+	MenuBuilder.BeginSection("FramesRanges", LOCTEXT("SnappingMenuFrameRangesHeader", "Frame Ranges") );
 	{
 		MenuBuilder.AddMenuEntry( FSequencerCommands::Get().ToggleShowFrameNumbers );
+		MenuBuilder.AddMenuEntry( FSequencerCommands::Get().ToggleShowRangeSlider );
+		MenuBuilder.AddMenuEntry( FSequencerCommands::Get().ToggleLockInOutToStartEndRange );
 	}
 	MenuBuilder.EndSection();
 
@@ -717,7 +733,7 @@ void SSequencer::UpdateLayoutTree()
 
 void SSequencer::UpdateBreadcrumbs(const TArray< TWeakObjectPtr<class UMovieSceneSection> >& FilteringShots)
 {
-	TSharedRef<FMovieSceneInstance> FocusedMovieSceneInstance = Sequencer.Pin()->GetFocusedMovieSceneInstance();
+	TSharedRef<FMovieSceneSequenceInstance> FocusedMovieSceneInstance = Sequencer.Pin()->GetFocusedMovieSceneSequenceInstance();
 
 	if (BreadcrumbTrail->PeekCrumb().BreadcrumbType == FSequencerBreadcrumb::ShotType)
 	{
@@ -726,8 +742,9 @@ void SSequencer::UpdateBreadcrumbs(const TArray< TWeakObjectPtr<class UMovieScen
 
 	if( BreadcrumbTrail->PeekCrumb().BreadcrumbType == FSequencerBreadcrumb::MovieSceneType && BreadcrumbTrail->PeekCrumb().MovieSceneInstance.Pin() != FocusedMovieSceneInstance )
 	{
+		FText CrumbName = FText::FromString( FocusedMovieSceneInstance->GetSequence()->GetName() );
 		// The current breadcrumb is not a moviescene so we need to make a new breadcrumb in order return to the parent moviescene later
-		BreadcrumbTrail->PushCrumb( FText::FromString(FocusedMovieSceneInstance->GetMovieScene()->GetName()), FSequencerBreadcrumb( FocusedMovieSceneInstance ) );
+		BreadcrumbTrail->PushCrumb( CrumbName, FSequencerBreadcrumb( FocusedMovieSceneInstance ) );
 	}
 
 	if (Sequencer.Pin()->IsShotFilteringOn())
@@ -751,7 +768,7 @@ void SSequencer::UpdateBreadcrumbs(const TArray< TWeakObjectPtr<class UMovieScen
 void SSequencer::ResetBreadcrumbs()
 {
 	BreadcrumbTrail->ClearCrumbs();
-	BreadcrumbTrail->PushCrumb(TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateSP(this, &SSequencer::GetRootMovieSceneName)), FSequencerBreadcrumb(Sequencer.Pin()->GetRootMovieSceneInstance()));
+	BreadcrumbTrail->PushCrumb(TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateSP(this, &SSequencer::GetRootAnimationName)), FSequencerBreadcrumb(Sequencer.Pin()->GetRootMovieSceneSequenceInstance()));
 }
 
 void SSequencer::OnOutlinerSearchChanged( const FText& Filter )
@@ -933,7 +950,7 @@ void SSequencer::OnAssetsDropped( const FAssetDragDropOp& DragDropOp )
 
 	if( bSpawnableAdded )
 	{
-		SequencerRef.SpawnOrDestroyPuppetObjects( SequencerRef.GetFocusedMovieSceneInstance() );
+		SequencerRef.SpawnOrDestroyPuppetObjects( SequencerRef.GetFocusedMovieSceneSequenceInstance() );
 	}
 
 	if( bObjectAdded )
@@ -965,7 +982,7 @@ void SSequencer::OnClassesDropped( const FClassDragDropOp& DragDropOp )
 
 	if( bSpawnableAdded )
 	{
-		SequencerRef.SpawnOrDestroyPuppetObjects( SequencerRef.GetFocusedMovieSceneInstance() );
+		SequencerRef.SpawnOrDestroyPuppetObjects( SequencerRef.GetFocusedMovieSceneSequenceInstance() );
 
 		// Update the sequencers view of the movie scene data
 		SequencerRef.NotifyMovieSceneDataChanged();
@@ -1020,7 +1037,7 @@ void SSequencer::OnUnloadedClassesDropped( const FUnloadedClassDragDropOp& DragD
 
 	if( bSpawnableAdded )
 	{
-		SequencerRef.SpawnOrDestroyPuppetObjects( SequencerRef.GetFocusedMovieSceneInstance() );
+		SequencerRef.SpawnOrDestroyPuppetObjects( SequencerRef.GetFocusedMovieSceneSequenceInstance() );
 
 		SequencerRef.NotifyMovieSceneDataChanged();
 	}
@@ -1057,7 +1074,7 @@ void SSequencer::OnActorSelectionChanged(UObject*)
 	{
 		TSharedRef<FObjectBindingNode> ObjectBindingNode = StaticCastSharedRef<FObjectBindingNode>(Node);
 		TArray<UObject*> RuntimeObjects;
-		Sequencer.Pin()->GetRuntimeObjects( Sequencer.Pin()->GetFocusedMovieSceneInstance(), ObjectBindingNode->GetObjectBinding(), RuntimeObjects );
+		Sequencer.Pin()->GetRuntimeObjects( Sequencer.Pin()->GetFocusedMovieSceneSequenceInstance(), ObjectBindingNode->GetObjectBinding(), RuntimeObjects );
 		
 		bool bDoSelect = false;
 		for (int32 RuntimeIndex = 0; RuntimeIndex < RuntimeObjects.Num(); ++RuntimeIndex )
@@ -1087,7 +1104,7 @@ void SSequencer::OnCrumbClicked(const FSequencerBreadcrumb& Item)
 {
 	if (Item.BreadcrumbType != FSequencerBreadcrumb::ShotType)
 	{
-		if( Sequencer.Pin()->GetFocusedMovieSceneInstance() == Item.MovieSceneInstance.Pin() ) 
+		if( Sequencer.Pin()->GetFocusedMovieSceneSequenceInstance() == Item.MovieSceneInstance.Pin() ) 
 		{
 			// then do zooming
 		}
@@ -1105,9 +1122,9 @@ void SSequencer::OnCrumbClicked(const FSequencerBreadcrumb& Item)
 	}
 }
 
-FText SSequencer::GetRootMovieSceneName() const
+FText SSequencer::GetRootAnimationName() const
 {
-	return FText::FromString(Sequencer.Pin()->GetRootMovieScene()->GetName());
+	return FText::FromName(Sequencer.Pin()->GetRootMovieSceneSequence()->GetFName());
 }
 
 FText SSequencer::GetShotSectionTitle(UMovieSceneSection* ShotSection) const
@@ -1195,7 +1212,7 @@ void SSequencer::StepToKey(bool bStepToNextKey, bool bCameraOnly)
 		{
 			TSharedRef<FObjectBindingNode> ObjectBindingNode = StaticCastSharedRef<FObjectBindingNode>(RootNode);
 			TArray<UObject*> RuntimeObjects;
-			Sequencer.Pin()->GetRuntimeObjects( Sequencer.Pin()->GetFocusedMovieSceneInstance(), ObjectBindingNode->GetObjectBinding(), RuntimeObjects );
+			Sequencer.Pin()->GetRuntimeObjects( Sequencer.Pin()->GetFocusedMovieSceneSequenceInstance(), ObjectBindingNode->GetObjectBinding(), RuntimeObjects );
 		
 			for (int32 RuntimeIndex = 0; RuntimeIndex < RuntimeObjects.Num(); ++RuntimeIndex )
 			{
@@ -1227,7 +1244,7 @@ void SSequencer::StepToKey(bool bStepToNextKey, bool bCameraOnly)
 	if (Nodes.Num() > 0)
 	{
 		float ClosestKeyDistance = MAX_FLT;
-		float CurrentTime = Sequencer.Pin()->GetCurrentLocalTime(*Sequencer.Pin()->GetFocusedMovieScene());
+		float CurrentTime = Sequencer.Pin()->GetCurrentLocalTime(*Sequencer.Pin()->GetFocusedMovieSceneSequence());
 		float StepToTime = 0;
 		bool StepToKeyFound = false;
 
@@ -1281,6 +1298,21 @@ EVisibility SSequencer::GetBreadcrumbTrailVisibility() const
 EVisibility SSequencer::GetCurveEditorToolBarVisibility() const
 {
 	return Settings->GetShowCurveEditor() ? EVisibility::Visible : EVisibility::Collapsed;
+}
+
+EVisibility SSequencer::GetBottomTimeSliderVisibility() const
+{
+	return Settings->GetShowRangeSlider() ? EVisibility::Hidden : EVisibility::Visible;
+}
+
+EVisibility SSequencer::GetTimeRangeVisibility() const
+{
+	return Settings->GetShowRangeSlider() ? EVisibility::Visible : EVisibility::Hidden;
+}
+
+bool SSequencer::ShowFrameNumbers() const
+{
+	return Sequencer.Pin()->CanShowFrameNumbers() && Settings->GetShowFrameNumbers();
 }
 
 float SSequencer::GetOutlinerSpacerFill() const

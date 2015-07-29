@@ -1,7 +1,7 @@
 // Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
 
 #include "SequencerPrivatePCH.h"
-#include "MovieSceneAnimation.h"
+#include "MovieSceneSequence.h"
 #include "MovieSceneSection.h"
 #include "SequencerNodeTree.h"
 #include "Sequencer.h"
@@ -27,7 +27,7 @@ void FSequencerNodeTree::Update()
 	// @todo Sequencer - This update pass is too aggressive.  Some nodes may still be valid
 	Empty();
 
-	UMovieScene* MovieScene = Sequencer.GetFocusedMovieScene();
+	UMovieScene* MovieScene = Sequencer.GetFocusedMovieSceneSequence()->GetMovieScene();
 
 	TArray< TSharedRef<FSequencerDisplayNode> > NewRootNodes;
 
@@ -116,13 +116,15 @@ void FSequencerNodeTree::Update()
 	// Add all other nodes after the shot track
 	RootNodes.Append( NewRootNodes );
 
+	// Set up virtual offsets, and expansion states
 	float VerticalOffset = 0.f;
 	for (auto& Node : RootNodes)
 	{
 		Node->Traverse_ParentFirst([&](FSequencerDisplayNode& InNode){
-			InNode.VirtualTop = VerticalOffset;
+
+			float VerticalTop = VerticalOffset;
 			VerticalOffset += InNode.GetNodeHeight() + InNode.GetNodePadding().Combined();
-			InNode.VirtualBottom = VerticalOffset;
+			InNode.Initialize(VerticalTop, VerticalOffset);
 			return true;
 		});
 
@@ -201,7 +203,7 @@ TSharedRef<FObjectBindingNode> FSequencerNodeTree::AddObjectBinding(const FStrin
 		// Try to get the parent object node if there is one.
 		TSharedPtr<FObjectBindingNode> ParentNode;
 		TArray<UObject*> RuntimeObjects;
-		UMovieSceneAnimation* Animation = Sequencer.GetAnimation();
+		UMovieSceneSequence* Animation = Sequencer.GetFocusedMovieSceneSequence();
 		UObject* RuntimeObject = Animation->FindObject(ObjectBinding);
 		if ( RuntimeObject != nullptr)
 		{
@@ -245,32 +247,29 @@ TSharedRef<FObjectBindingNode> FSequencerNodeTree::AddObjectBinding(const FStrin
 
 void FSequencerNodeTree::SaveExpansionState( const FSequencerDisplayNode& Node, bool bExpanded )
 {	
-	UMovieScene* MovieScene = Sequencer.GetFocusedMovieScene();
+	// @todo Sequencer - This should be moved to the sequence level
+	UMovieScene* MovieScene = Sequencer.GetFocusedMovieSceneSequence()->GetMovieScene();
 
 	FMovieSceneEditorData& EditorData = MovieScene->GetEditorData();
 
-	if( bExpanded )
-	{
-		EditorData.CollapsedSequencerNodes.Remove( Node.GetPathName() );
-	}
-	else
-	{
-		// Collapsed nodes are stored instead of expanded so that new nodes are expanded by default
-		EditorData.CollapsedSequencerNodes.AddUnique( Node.GetPathName() ) ;
-	}
-
+	EditorData.ExpansionStates.Add( Node.GetPathName(), FMovieSceneExpansionState(bExpanded) );
 }
 
 bool FSequencerNodeTree::GetSavedExpansionState( const FSequencerDisplayNode& Node ) const
 {
-	UMovieScene* MovieScene = Sequencer.GetFocusedMovieScene();
+	// @todo Sequencer - This should be moved to the sequence level
+	UMovieScene* MovieScene = Sequencer.GetFocusedMovieSceneSequence()->GetMovieScene();
 
 	FMovieSceneEditorData& EditorData = MovieScene->GetEditorData();
+	FMovieSceneExpansionState* ExpansionState = EditorData.ExpansionStates.Find( Node.GetPathName() );
 
-	// Collapsed nodes are stored instead of expanded so that new nodes are expanded by default
-	bool bCollapsed = EditorData.CollapsedSequencerNodes.Contains( Node.GetPathName() );
+	return ExpansionState ? ExpansionState->bExpanded : GetDefaultExpansionState(Node);
+}
 
-	return !bCollapsed;
+bool FSequencerNodeTree::GetDefaultExpansionState( const FSequencerDisplayNode& Node ) const
+{
+	// For now, all types except categories and key areas are expanded by default
+	return Node.GetType() != ESequencerNode::Category && Node.GetType() != ESequencerNode::KeyArea;
 }
 
 bool FSequencerNodeTree::IsNodeFiltered( const TSharedRef<const FSequencerDisplayNode> Node ) const

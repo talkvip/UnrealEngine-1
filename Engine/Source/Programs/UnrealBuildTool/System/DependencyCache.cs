@@ -125,13 +125,25 @@ namespace UnrealBuildTool
 			DependencyCache Result = null;
 			try
 			{
-				using (FileStream Stream = new FileStream(Cache.AbsolutePath, FileMode.Open, FileAccess.Read))
+				string CacheBuildMutexPath = Cache.AbsolutePath + ".buildmutex";
+
+				// If the .buildmutex file for the cache is present, it means that something went wrong between loading
+				// and saving the cache last time (most likely the UBT process being terminated), so we don't want to load
+				// it.
+				if (!File.Exists(CacheBuildMutexPath))
 				{
-					BinaryFormatter Formatter = new BinaryFormatter();
-					Result = Formatter.Deserialize(Stream) as DependencyCache;
+					using (File.Create(CacheBuildMutexPath))
+					{
+					}
+
+					using (FileStream Stream = new FileStream(Cache.AbsolutePath, FileMode.Open, FileAccess.Read))
+					{
+						BinaryFormatter Formatter = new BinaryFormatter();
+						Result = Formatter.Deserialize(Stream) as DependencyCache;
+					}
+					Result.CreateFileExistsInfo();
+					Result.ResetUnresolvedDependencies();
 				}
-				Result.CreateFileExistsInfo();
-				Result.ResetUnresolvedDependencies();
 			}
 			catch (Exception Ex)
 			{
@@ -201,6 +213,15 @@ namespace UnrealBuildTool
 				{
 					Log.TraceInformation("IncludeFileCache did not need to be saved (bIsDirty=false)");
 				}
+			}
+
+			try
+			{
+				File.Delete(CachePath + ".buildmutex");
+			}
+			catch
+			{
+				// We don't care if we couldn't delete this file, as maybe it couldn't have been created in the first place.
 			}
 		}
 

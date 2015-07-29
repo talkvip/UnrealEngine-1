@@ -1,5 +1,7 @@
 // Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
 
+#include "EdGraphSchema_K2.h"
+
 // Generates single if scope. It's condition checks context of given term.
 struct FSafeContextScopedEmmitter
 {
@@ -18,8 +20,7 @@ public:
 		return bSafeContextUsed;
 	}
 
-	FSafeContextScopedEmmitter(FString& InBody, const FBPTerminal* Term, FBlueprintCompilerCppBackend& CppBackend, const TCHAR* InCurrentIndent)
-		: Body(InBody), bSafeContextUsed(false), CurrentIndent(InCurrentIndent)
+	static FString ValidationChain(const FBPTerminal* Term, FBlueprintCompilerCppBackend& CppBackend)
 	{
 		TArray<FString> SafetyConditions;
 		for (; Term; Term = Term->Context)
@@ -27,25 +28,36 @@ public:
 			if (!Term->IsStructContextType() && (Term->Type.PinSubCategory != TEXT("self")))
 			{
 				ensure(!Term->bIsLiteral);
-				SafetyConditions.Add(CppBackend.TermToText(Term));
+				SafetyConditions.Add(CppBackend.TermToText(Term, false));
 			}
 		}
 
-		if (SafetyConditions.Num())
+		FString Result;
+		for (int32 Iter = SafetyConditions.Num() - 1; Iter >= 0; --Iter)
+		{
+			Result += FString(TEXT("IsValid("));
+			Result += SafetyConditions[Iter];
+			Result += FString(TEXT(")"));
+			if (Iter)
+			{
+				Result += FString(TEXT(" && "));
+			}
+		}
+
+		return Result;
+	}
+
+	FSafeContextScopedEmmitter(FString& InBody, const FBPTerminal* Term, FBlueprintCompilerCppBackend& CppBackend, const TCHAR* InCurrentIndent)
+		: Body(InBody), bSafeContextUsed(false), CurrentIndent(InCurrentIndent)
+	{
+		const FString Conditions = ValidationChain(Term, CppBackend);
+
+		if (!Conditions.IsEmpty())
 		{
 			bSafeContextUsed = true;
 			Body += CurrentIndent;
 			Body += TEXT("if (");
-			for (int32 Iter = SafetyConditions.Num() - 1; Iter >= 0; --Iter)
-			{
-				Body += FString(TEXT("IsValid("));
-				Body += SafetyConditions[Iter];
-				Body += FString(TEXT(")"));
-				if (Iter)
-				{
-					Body += FString(TEXT(" && "));
-				}
-			}
+			Body += Conditions;
 			Body += TEXT(")\n");
 			Body += CurrentIndent;
 			Body += TEXT("{\n");
@@ -105,7 +117,7 @@ struct FEmitHelper
 		return true;
 	}
 
-	static FString HandleMetaData(const UField* Field, bool AddCategory = true)
+	static FString HandleMetaData(const UField* Field, bool AddCategory = true, TArray<FString>* AdditinalMetaData = nullptr)
 	{
 		FString MetaDataStr;
 
@@ -138,6 +150,10 @@ struct FEmitHelper
 		if (AddCategory && (!ValuesMap || !ValuesMap->Find(TEXT("Category"))))
 		{
 			MetaDataStrings.Emplace(TEXT("Category"));
+		}
+		if (AdditinalMetaData)
+		{
+			MetaDataStrings.Append(*AdditinalMetaData);
 		}
 		MetaDataStrings.Remove(FString());
 		if (MetaDataStrings.Num())
@@ -206,27 +222,27 @@ struct FEmitHelper
 
 		// OTHER
 		HANDLE_CPF_TAG(TEXT("Transient"), CPF_Transient)
-			HANDLE_CPF_TAG(TEXT("DuplicateTransient"), CPF_DuplicateTransient)
-			HANDLE_CPF_TAG(TEXT("TextExportTransient"), CPF_TextExportTransient)
-			HANDLE_CPF_TAG(TEXT("NonPIEDuplicateTransient"), CPF_NonPIEDuplicateTransient)
-			HANDLE_CPF_TAG(TEXT("Export"), CPF_ExportObject)
-			HANDLE_CPF_TAG(TEXT("NoClear"), CPF_NoClear)
-			HANDLE_CPF_TAG(TEXT("EditFixedSize"), CPF_EditFixedSize)
-			HANDLE_CPF_TAG(TEXT("NotReplicated"), CPF_RepSkip)
-			HANDLE_CPF_TAG(TEXT("Interp"), CPF_Edit | CPF_BlueprintVisible | CPF_Interp)
-			HANDLE_CPF_TAG(TEXT("NonTransactional"), CPF_NonTransactional)
-			HANDLE_CPF_TAG(TEXT("BlueprintAssignable"), CPF_BlueprintAssignable)
-			HANDLE_CPF_TAG(TEXT("BlueprintCallable"), CPF_BlueprintCallable)
-			HANDLE_CPF_TAG(TEXT("BlueprintAuthorityOnly"), CPF_BlueprintAuthorityOnly)
-			HANDLE_CPF_TAG(TEXT("AssetRegistrySearchable"), CPF_AssetRegistrySearchable)
-			HANDLE_CPF_TAG(TEXT("SimpleDisplay"), CPF_SimpleDisplay)
-			HANDLE_CPF_TAG(TEXT("AdvancedDisplay"), CPF_AdvancedDisplay)
-			HANDLE_CPF_TAG(TEXT("SaveGame"), CPF_SaveGame)
+		HANDLE_CPF_TAG(TEXT("DuplicateTransient"), CPF_DuplicateTransient)
+		HANDLE_CPF_TAG(TEXT("TextExportTransient"), CPF_TextExportTransient)
+		HANDLE_CPF_TAG(TEXT("NonPIEDuplicateTransient"), CPF_NonPIEDuplicateTransient)
+		HANDLE_CPF_TAG(TEXT("Export"), CPF_ExportObject)
+		HANDLE_CPF_TAG(TEXT("NoClear"), CPF_NoClear)
+		HANDLE_CPF_TAG(TEXT("EditFixedSize"), CPF_EditFixedSize)
+		HANDLE_CPF_TAG(TEXT("NotReplicated"), CPF_RepSkip)
+		HANDLE_CPF_TAG(TEXT("Interp"), CPF_Edit | CPF_BlueprintVisible | CPF_Interp)
+		HANDLE_CPF_TAG(TEXT("NonTransactional"), CPF_NonTransactional)
+		HANDLE_CPF_TAG(TEXT("BlueprintAssignable"), CPF_BlueprintAssignable)
+		HANDLE_CPF_TAG(TEXT("BlueprintCallable"), CPF_BlueprintCallable)
+		HANDLE_CPF_TAG(TEXT("BlueprintAuthorityOnly"), CPF_BlueprintAuthorityOnly)
+		HANDLE_CPF_TAG(TEXT("AssetRegistrySearchable"), CPF_AssetRegistrySearchable)
+		HANDLE_CPF_TAG(TEXT("SimpleDisplay"), CPF_SimpleDisplay)
+		HANDLE_CPF_TAG(TEXT("AdvancedDisplay"), CPF_AdvancedDisplay)
+		HANDLE_CPF_TAG(TEXT("SaveGame"), CPF_SaveGame)
 
-			//TODO:
-			//HANDLE_CPF_TAG(TEXT("Instanced"), CPF_PersistentInstance | CPF_ExportObject | CPF_InstancedReference)
+		//TODO:
+		//HANDLE_CPF_TAG(TEXT("Instanced"), CPF_PersistentInstance | CPF_ExportObject | CPF_InstancedReference)
 
-			return Tags;
+		return Tags;
 	}
 
 	static TArray<FString> FunctionFlagsToTags(uint64 Flags)
@@ -234,24 +250,24 @@ struct FEmitHelper
 		TArray<FString> Tags;
 
 		//Pointless: BlueprintNativeEvent, BlueprintImplementableEvent
-		//Pointless: CustomThunk ?
+		//Pointless: CustomThunk
 
 		//TODO: SealedEvent
 		//TODO: Unreliable
 		//TODO: ServiceRequest, ServiceResponse
 
 		HANDLE_CPF_TAG(TEXT("Exec"), FUNC_Exec)
-			HANDLE_CPF_TAG(TEXT("Server"), FUNC_Net | FUNC_NetServer)
-			HANDLE_CPF_TAG(TEXT("Client"), FUNC_Net | FUNC_NetClient)
-			HANDLE_CPF_TAG(TEXT("NetMulticast"), FUNC_Net | FUNC_NetMulticast)
-			HANDLE_CPF_TAG(TEXT("Reliable"), FUNC_NetReliable)
-			HANDLE_CPF_TAG(TEXT("BlueprintCallable"), FUNC_BlueprintCallable)
-			HANDLE_CPF_TAG(TEXT("BlueprintPure"), FUNC_BlueprintCallable | FUNC_BlueprintPure)
-			HANDLE_CPF_TAG(TEXT("BlueprintAuthorityOnly"), FUNC_BlueprintAuthorityOnly)
-			HANDLE_CPF_TAG(TEXT("BlueprintCosmetic"), FUNC_BlueprintCosmetic)
-			HANDLE_CPF_TAG(TEXT("WithValidation"), FUNC_NetValidate)
+		HANDLE_CPF_TAG(TEXT("Server"), FUNC_Net | FUNC_NetServer)
+		HANDLE_CPF_TAG(TEXT("Client"), FUNC_Net | FUNC_NetClient)
+		HANDLE_CPF_TAG(TEXT("NetMulticast"), FUNC_Net | FUNC_NetMulticast)
+		HANDLE_CPF_TAG(TEXT("Reliable"), FUNC_NetReliable)
+		HANDLE_CPF_TAG(TEXT("BlueprintCallable"), FUNC_BlueprintCallable)
+		HANDLE_CPF_TAG(TEXT("BlueprintPure"), FUNC_BlueprintCallable | FUNC_BlueprintPure)
+		HANDLE_CPF_TAG(TEXT("BlueprintAuthorityOnly"), FUNC_BlueprintAuthorityOnly)
+		HANDLE_CPF_TAG(TEXT("BlueprintCosmetic"), FUNC_BlueprintCosmetic)
+		HANDLE_CPF_TAG(TEXT("WithValidation"), FUNC_NetValidate)
 
-			return Tags;
+		return Tags;
 	}
 
 #undef HANDLE_CPF_TAG
@@ -266,11 +282,18 @@ struct FEmitHelper
 		return HasAllFlags(FunctionFlags, FUNC_Event | FUNC_BlueprintEvent) && !HasAllFlags(FunctionFlags, FUNC_Native);
 	}
 
-	static FString EmitUFuntion(UFunction* Function)
+	static FString EmitUFuntion(UFunction* Function, TArray<FString>* AdditinalMetaData = nullptr)
 	{
 		TArray<FString> Tags = FEmitHelper::FunctionFlagsToTags(Function->FunctionFlags);
+
+		auto FunctionOwnerClass = Function->GetOwnerClass();
+		if (FunctionOwnerClass->IsChildOf<UInterface>())
+		{
+			Tags.Emplace(TEXT("BlueprintNativeEvent"));
+		}
+
 		const bool bMustHaveCategory = (Function->FunctionFlags & (FUNC_BlueprintCallable | FUNC_BlueprintPure)) != 0;
-		Tags.Emplace(FEmitHelper::HandleMetaData(Function, bMustHaveCategory));
+		Tags.Emplace(FEmitHelper::HandleMetaData(Function, bMustHaveCategory, AdditinalMetaData));
 		Tags.Remove(FString());
 
 		FString AllTags;
@@ -371,7 +394,7 @@ struct FEmitHelper
 		return Result;
 	}
 
-	static FString GatherHeadersToInclude(UClass* SourceClass, const TArray<FString>& PersistentHeaders)
+	static FString GatherNativeHeadersToInclude(UField* SourceItem, const TArray<FString>& PersistentHeaders)
 	{
 		TSet<FString> HeaderFiles;
 		HeaderFiles.Append(PersistentHeaders);
@@ -380,7 +403,7 @@ struct FEmitHelper
 			{
 				FReferenceFinder ReferenceFinder(ReferencedObjects, NULL, false, false, false, true);
 				TArray<UObject*> ObjectsToCheck;
-				GetObjectsWithOuter(SourceClass, ObjectsToCheck, true);
+				GetObjectsWithOuter(SourceItem, ObjectsToCheck, true);
 				//CDO?
 				for (auto Obj : ObjectsToCheck)
 				{
@@ -390,7 +413,7 @@ struct FEmitHelper
 
 			auto EngineSourceDir = FPaths::EngineSourceDir();
 			auto GameSourceDir = FPaths::GameSourceDir();
-			auto CurrentPackage = SourceClass->GetTypedOuter<UPackage>();
+			auto CurrentPackage = SourceItem->GetTypedOuter<UPackage>();
 			for (auto Obj : ReferencedObjects)
 			{
 				auto Field = Cast<UField>(Obj);
@@ -419,5 +442,213 @@ struct FEmitHelper
 
 		return Result;
 	}
-};
 
+	static FString LiteralTerm(const FEdGraphPinType& Type, const FString& CustomValue, UObject* LiteralObject)
+	{
+		auto Schema = GetDefault<UEdGraphSchema_K2>();
+
+		if (UEdGraphSchema_K2::PC_String == Type.PinCategory)
+		{
+			return FString::Printf(TEXT("TEXT(\"%s\")"), *CustomValue);
+		}
+		else if (UEdGraphSchema_K2::PC_Text == Type.PinCategory)
+		{
+			return FString::Printf(TEXT("FText::FromString(TEXT(\"%s\"))"), *CustomValue);
+		}
+		else if (UEdGraphSchema_K2::PC_Float == Type.PinCategory)
+		{
+			float Value = CustomValue.IsEmpty() ? 0.0f : FCString::Atof(*CustomValue);
+			return FString::Printf(TEXT("%f"), Value);
+		}
+		else if (UEdGraphSchema_K2::PC_Int == Type.PinCategory)
+		{
+			int32 Value = CustomValue.IsEmpty() ? 0 : FCString::Atoi(*CustomValue);
+			return FString::Printf(TEXT("%d"), Value);
+		}
+		else if ((UEdGraphSchema_K2::PC_Byte == Type.PinCategory) || (UEdGraphSchema_K2::PC_Enum == Type.PinCategory))
+		{
+			auto TypeEnum = Cast<UEnum>(Type.PinSubCategoryObject.Get());
+			if (TypeEnum)
+			{
+				return FString::Printf(TEXT("%s::%s"), *TypeEnum->GetName(), CustomValue.IsEmpty() 
+					? *TypeEnum->GetEnumName(TypeEnum->NumEnums()-1)
+					: *CustomValue);
+			}
+			else
+			{
+				uint8 Value = CustomValue.IsEmpty() ? 0 : FCString::Atoi(*CustomValue);
+				return FString::Printf(TEXT("%u"), Value);
+			}
+		}
+		else if (UEdGraphSchema_K2::PC_Boolean == Type.PinCategory)
+		{
+			const bool bValue = CustomValue.ToBool();
+			return bValue ? TEXT("true") : TEXT("false");
+		}
+		else if (UEdGraphSchema_K2::PC_Name == Type.PinCategory)
+		{
+			return CustomValue.IsEmpty() 
+				? TEXT("FName()") 
+				: FString::Printf(TEXT("FName(TEXT(\"%s\"))"), *(FName(*CustomValue).ToString()));
+		}
+		else if (UEdGraphSchema_K2::PC_Struct == Type.PinCategory)
+		{
+			auto StructType = Cast<UScriptStruct>(Type.PinSubCategoryObject.Get());
+			ensure(StructType);
+			if (StructType == TBaseStructure<FVector>::Get())
+			{
+				FVector Vect = FVector::ZeroVector;
+				FDefaultValueHelper::ParseVector(CustomValue, /*out*/ Vect);
+				return FString::Printf(TEXT("FVector(%f,%f,%f)"), Vect.X, Vect.Y, Vect.Z);
+			}
+			else if (StructType == TBaseStructure<FRotator>::Get())
+			{
+				FRotator Rot = FRotator::ZeroRotator;
+				FDefaultValueHelper::ParseRotator(CustomValue, /*out*/ Rot);
+				return FString::Printf(TEXT("FRotator(%f,%f,%f)"), Rot.Pitch, Rot.Yaw, Rot.Roll);
+			}
+			else if (StructType == TBaseStructure<FTransform>::Get())
+			{
+				FTransform Trans = FTransform::Identity;
+				Trans.InitFromString(CustomValue);
+				const FQuat Rot = Trans.GetRotation();
+				const FVector Translation = Trans.GetTranslation();
+				const FVector Scale = Trans.GetScale3D();
+				return FString::Printf(TEXT("FTransform( FQuat(%f,%f,%f,%f), FVector(%f,%f,%f), FVector(%f,%f,%f) )"),
+					Rot.X, Rot.Y, Rot.Z, Rot.W, Translation.X, Translation.Y, Translation.Z, Scale.X, Scale.Y, Scale.Z);
+			}
+			else if (StructType == TBaseStructure<FLinearColor>::Get())
+			{
+				FLinearColor LinearColor;
+				LinearColor.InitFromString(CustomValue);
+				return FString::Printf(TEXT("FLinearColor(%f,%f,%f,%f)"), LinearColor.R, LinearColor.G, LinearColor.B, LinearColor.A);
+			}
+			else if (StructType == TBaseStructure<FColor>::Get())
+			{
+				FColor Color;
+				Color.InitFromString(CustomValue);
+				return FString::Printf(TEXT("FColor(%d,%d,%d,%d)"), Color.R, Color.G, Color.B, Color.A);
+			}
+			if (StructType == TBaseStructure<FVector2D>::Get())
+			{
+				FVector2D Vect = FVector2D::ZeroVector;
+				Vect.InitFromString(CustomValue);
+				return FString::Printf(TEXT("FVector2D(%f,%f)"), Vect.X, Vect.Y);
+			}
+			else
+			{
+				//@todo:  This needs to be more robust, since import text isn't really proper for struct construction.
+				return FString(TEXT("F")) + StructType->GetName() + (CustomValue.IsEmpty() ? TEXT("{}") : *CustomValue);
+			}
+		}
+		else if (Type.PinSubCategory == UEdGraphSchema_K2::PSC_Self)
+		{
+			return TEXT("this");
+		}
+		else if (UEdGraphSchema_K2::PC_Class == Type.PinCategory)
+		{
+			if (auto FoundClass = Cast<const UClass>(LiteralObject))
+			{
+				return FString::Printf(TEXT("%s%s::StaticClass()"), FoundClass->GetPrefixCPP(), *FoundClass->GetName());
+			}
+			return FString(TEXT("nullptr"));
+		}
+		else if((UEdGraphSchema_K2::PC_AssetClass == Type.PinCategory) || (UEdGraphSchema_K2::PC_Asset == Type.PinCategory))
+		{
+			return LiteralObject
+				? FString::Printf(TEXT("FStringAssetReference(TEXT(\"%s\"))"), *(LiteralObject->GetPathName()))
+				: FString(TEXT("nullptr"));
+		}
+		else if (UEdGraphSchema_K2::PC_Object == Type.PinCategory)
+		{
+			if (LiteralObject)
+			{
+				UClass* FoundClass = Cast<UClass>(Type.PinSubCategoryObject.Get());
+				FString ClassString = FoundClass ? (FString(FoundClass->GetPrefixCPP()) + FoundClass->GetName()) : TEXT("UObject");
+				return FString::Printf(TEXT("FindObject<%s>(ANY_PACKAGE, TEXT(\"%s\"))"), *ClassString, *(LiteralObject->GetPathName()));
+			}
+			else
+			{
+				return FString(TEXT("nullptr"));
+			}
+		}
+		/*
+		else if (CoerceProperty->IsA(UInterfaceProperty::StaticClass()))
+		{
+			if (Term->Type.PinSubCategory == PSC_Self)
+			{
+				return TEXT("this");
+			}
+			else
+			{
+				ensureMsgf(false, TEXT("It is not possible to express this interface property as a literal value!"));
+				return Term->Name;
+			}
+		}
+		*/
+		ensureMsgf(false, TEXT("It is not possible to express this type as a literal value!"));
+		return CustomValue;
+	}
+
+	static FString DefaultValue(const FEdGraphPinType& Type)
+	{
+		return LiteralTerm(Type, FString(), nullptr);
+	}
+
+	static UFunction* GetOriginalFunction(UFunction* Function)
+	{
+		check(Function);
+		const FName FunctionName = Function->GetFName();
+
+		UClass* Owner = Function->GetOwnerClass();
+		check(Owner);
+		for (auto& Inter : Owner->Interfaces)
+		{
+			if (UFunction* Result = Inter.Class->FindFunctionByName(FunctionName))
+			{
+				return GetOriginalFunction(Result);
+			}
+		}
+
+		for (UClass* SearchClass = Owner->GetSuperClass(); SearchClass; SearchClass = SearchClass->GetSuperClass())
+		{
+			if (UFunction* Result = SearchClass->FindFunctionByName(FunctionName))
+			{
+				return GetOriginalFunction(Result);
+			}
+		}
+
+		return Function;
+	}
+
+	static bool ShoulsHandleAsNativeEvent(UFunction* Function)
+	{
+		check(Function);
+		auto OriginalFunction = FEmitHelper::GetOriginalFunction(Function);
+		check(OriginalFunction);
+		if (OriginalFunction != Function)
+		{
+			const uint32 FlagsToCheckMask = EFunctionFlags::FUNC_Event | EFunctionFlags::FUNC_BlueprintEvent | EFunctionFlags::FUNC_Native;
+			const uint32 FlagsToCheck = OriginalFunction->FunctionFlags & FlagsToCheckMask;
+
+			auto OriginalOwner = OriginalFunction->GetOwnerClass();
+			const bool bBPInterface = Cast<UBlueprintGeneratedClass>(OriginalOwner) && OriginalOwner->IsChildOf<UInterface>();
+			return (FlagsToCheck == FlagsToCheckMask) || bBPInterface;
+		}
+		return false;
+	}
+
+	static bool ShoulsHandleAsImplementableEvent(UFunction* Function)
+	{
+		check(Function);
+		auto OriginalFunction = FEmitHelper::GetOriginalFunction(Function);
+		check(OriginalFunction);
+		if (OriginalFunction != Function)
+		{
+			const uint32 FlagsToCheckMask = EFunctionFlags::FUNC_Event | EFunctionFlags::FUNC_BlueprintEvent | EFunctionFlags::FUNC_Native;
+			const uint32 FlagsToCheck = OriginalFunction->FunctionFlags & FlagsToCheckMask;
+			return (FlagsToCheck == (EFunctionFlags::FUNC_Event | EFunctionFlags::FUNC_BlueprintEvent));
+		}
+		return false;
+	}
+};

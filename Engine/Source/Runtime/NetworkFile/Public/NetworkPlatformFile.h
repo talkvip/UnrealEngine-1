@@ -101,8 +101,14 @@ public:
 	virtual bool		CreateDirectory(const TCHAR* Directory) override;
 	virtual bool		DeleteDirectory(const TCHAR* Directory) override;
 
+	virtual FFileStatData GetStatData(const TCHAR* FilenameOrDirectory) override;
+
 	virtual bool		IterateDirectory(const TCHAR* Directory, IPlatformFile::FDirectoryVisitor& Visitor) override;
 	virtual bool		IterateDirectoryRecursively(const TCHAR* Directory, IPlatformFile::FDirectoryVisitor& Visitor) override;
+
+	virtual bool		IterateDirectoryStat(const TCHAR* Directory, IPlatformFile::FDirectoryStatVisitor& Visitor) override;
+	virtual bool		IterateDirectoryStatRecursively(const TCHAR* Directory, IPlatformFile::FDirectoryStatVisitor& Visitor) override;
+
 	virtual bool		DeleteDirectoryRecursively(const TCHAR* Directory) override;
 	virtual bool		CopyFile(const TCHAR* To, const TCHAR* From) override;
 
@@ -146,6 +152,15 @@ protected:
 	virtual void ProcessServerInitialResponse(FArrayReader& InResponse, int32 OutServerPackageVersion, int32 OutServerPackageLicenseeVersion);
 
 private:
+
+	/**
+	* Returns whether the passed in extension is a video
+	* extension. Extensions with and without trailing dots are supported.
+	*
+	* @param	Extension to test.
+	* @return	True if Ext is a video extension.  e.g. .mp4
+	*/
+	static bool IsMediaExtension(const TCHAR* Ext);
 
 	/**
 	 * @return true if the path exists in a directory that should always use the local filesystem
@@ -216,6 +231,8 @@ private:
 
     // Our network Transport. 
 	class ITransport* Transport; 
+
+	static FString MP4Extension;
 };
 
 class SOCKETS_API FNetworkFileHandle : public IFileHandle

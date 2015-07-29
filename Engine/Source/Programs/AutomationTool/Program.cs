@@ -29,7 +29,7 @@ namespace AutomationTool
             {
                 HostPlatform.Initialize();
 
-                Log.TraceVerbose("Running on {0}", HostPlatform.Current.GetType().Name);
+                Log.TraceVerbose("Running on {0} as a {1}-bit process.", HostPlatform.Current.GetType().Name, Environment.Is64BitProcess ? 64 : 32);
 
                 XmlConfigLoader.Init();
 

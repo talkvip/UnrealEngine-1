@@ -8,11 +8,11 @@
 #include "SSequencer.h"
 #include "SSequencerSectionAreaView.h"
 #include "MovieSceneSection.h"
-#include "MovieSceneAnimation.h"
+#include "MovieSceneSequence.h"
 #include "MovieSceneTrack.h"
 #include "CommonMovieSceneTools.h"
 #include "IKeyArea.h"
-
+#include "GroupedKeyArea.h"
 
 #define LOCTEXT_NAMESPACE "SequencerDisplayNode"
 
@@ -130,7 +130,15 @@ FSequencerDisplayNode::FSequencerDisplayNode( FName InNodeName, TSharedPtr<FSequ
 	, bCachedShotFilteredVisibility( true )
 	, bNodeIsPinned( false )
 {
+	
+}
+
+void FSequencerDisplayNode::Initialize(float InVirtualTop, float InVirtualBottom)
+{
 	bExpanded = ParentTree.GetSavedExpansionState( *this );
+
+	VirtualTop = InVirtualTop;
+	VirtualBottom = InVirtualBottom;
 }
 
 void FSequencerDisplayNode::AddObjectBindingNode(TSharedRef<FObjectBindingNode> ObjectBindingNode)
@@ -419,6 +427,39 @@ void FSequencerDisplayNode::PinNode()
 	bNodeIsPinned = true;
 }
 
+TSharedRef<FGroupedKeyArea> FSequencerDisplayNode::GetKeyGrouping(int32 InSectionIndex)
+{
+	if (!KeyGroupings.IsValidIndex(InSectionIndex))
+	{
+		KeyGroupings.SetNum(InSectionIndex + 1);
+	}
+
+	if (!KeyGroupings[InSectionIndex].IsValid())
+	{
+		KeyGroupings[InSectionIndex] = MakeShareable(new FGroupedKeyArea(*this, InSectionIndex));
+	}
+
+	return KeyGroupings[InSectionIndex].ToSharedRef();
+}
+
+TSharedRef<FGroupedKeyArea> FSequencerDisplayNode::UpdateKeyGrouping(int32 InSectionIndex)
+{
+	if (!KeyGroupings.IsValidIndex(InSectionIndex))
+	{
+		KeyGroupings.SetNum(InSectionIndex + 1);
+	}
+
+	if (!KeyGroupings[InSectionIndex].IsValid())
+	{
+		KeyGroupings[InSectionIndex] = MakeShareable(new FGroupedKeyArea(*this, InSectionIndex));
+	}
+	else
+	{
+		*KeyGroupings[InSectionIndex] = FGroupedKeyArea(*this, InSectionIndex);
+	}
+
+	return KeyGroupings[InSectionIndex].ToSharedRef();
+}
 
 
 float FSectionKeyAreaNode::GetNodeHeight() const
@@ -576,7 +617,7 @@ void FTrackNode::FixRowIndices()
 FText FObjectBindingNode::GetDisplayName() const
 {
 	FText DisplayName;
-	return GetSequencer().GetAnimation()->TryGetObjectDisplayName(ObjectBinding, DisplayName) ?
+	return GetSequencer().GetFocusedMovieSceneSequence()->TryGetObjectDisplayName(ObjectBinding, DisplayName) ?
 		DisplayName : DefaultDisplayName;
 }
 
@@ -601,7 +642,7 @@ const UClass* FObjectBindingNode::GetClassForObjectBinding()
 {
 	FSequencer& ParentSequencer = GetSequencer();
 
-	UMovieScene* MovieScene = GetSequencer().GetFocusedMovieScene();
+	UMovieScene* MovieScene = GetSequencer().GetFocusedMovieSceneSequence()->GetMovieScene();
 
 	FMovieSceneSpawnable* Spawnable = MovieScene->FindSpawnable(ObjectBinding);
 	FMovieScenePossessable* Possessable = MovieScene->FindPossessable(ObjectBinding);
@@ -697,7 +738,7 @@ TSharedRef<SWidget> FObjectBindingNode::OnGetAddPropertyTrackMenuContent()
 {
 	TArray<TArray<UProperty*>> KeyablePropertyPaths;
 	FSequencer& Sequencer = GetSequencer();
-	UObject* BoundObject = Sequencer.GetAnimation()->FindObject(ObjectBinding);
+	UObject* BoundObject = Sequencer.GetFocusedMovieSceneSequence()->FindObject(ObjectBinding);
 
 	if (BoundObject != nullptr)
 	{
@@ -744,7 +785,7 @@ TSharedRef<SWidget> FObjectBindingNode::OnGetAddPropertyTrackMenuContent()
 void FObjectBindingNode::AddTrackForProperty(TArray<UProperty*> PropertyPath)
 {
 	FSequencer& Sequencer = GetSequencer();
-	UObject* BoundObject = Sequencer.GetAnimation()->FindObject(ObjectBinding);
+	UObject* BoundObject = Sequencer.GetFocusedMovieSceneSequence()->FindObject(ObjectBinding);
 
 	TArray<UObject*> KeyableBoundObjects;
 	if (BoundObject != nullptr)

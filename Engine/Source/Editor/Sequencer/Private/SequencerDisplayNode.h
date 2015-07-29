@@ -5,6 +5,7 @@
 class IKeyArea;
 class ISequencerSection;
 class SSequencerTreeViewRow;
+class FGroupedKeyArea;
 
 /** Structure used to define padding for a particular node */
 struct FNodePadding
@@ -237,7 +238,22 @@ public:
 
 	/** Pins this node, forcing it to the top of the sequencer. Affects visibility */
 	void PinNode();
+
+	/** Initialize this node with expansion states and virtual offsets */
+	void Initialize(float InVirtualTop, float InVirtualBottom);
+
+	/** @return this node's virtual offset from the top of the tree, irrespective of expansion states */
+	float GetVirtualTop() const { return VirtualTop; }
 	
+	/** @return this node's virtual offset plus its virtual height, irrespective of expansion states */
+	float GetVirtualBottom() const { return VirtualBottom; }
+
+	/** Get the key grouping for the specified section index, ensuring it is fully up to date */
+	TSharedRef<FGroupedKeyArea> UpdateKeyGrouping(int32 InSectionIndex);
+
+	/** Get the key grouping for the specified section index */
+	TSharedRef<FGroupedKeyArea> GetKeyGrouping(int32 InSectionIndex);
+
 protected:
 	/**
 	 * Visibility of nodes is a complex situation. There are 7 different factors to account for:
@@ -272,9 +288,13 @@ protected:
 	
 	/** Whether this node has visible children, based on cached shot filtering visibility only */
 	bool HasVisibleChildren() const;
-public:
+
+protected:
+	/** The virtual offset of this item from the top of the tree, irrespective of expansion states */
 	float VirtualTop;
+	/** The virtual offset + virtual heightof this item, irrespective of expansion states */
 	float VirtualBottom;
+
 protected:
 	/** The parent of this node*/
 	TWeakPtr< FSequencerDisplayNode > ParentNode;
@@ -290,6 +310,8 @@ protected:
 	bool bCachedShotFilteredVisibility;
 	/** Whether this node is pinned to the top of the sequencer */
 	bool bNodeIsPinned;
+	/** Transient grouped keys for this node */
+	TArray< TSharedPtr<FGroupedKeyArea> > KeyGroupings;
 };
 
 /**

@@ -1,13 +1,17 @@
 // Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
 
 #include "AppFrameworkPrivatePCH.h"
+#include "STestSuite.h"
+
+#if !UE_BUILD_SHIPPING
+
+#include "ISlateReflectorModule.h"
 #include "STableViewTesting.h"
 #include "SLayoutExample.h"
 #include "SWidgetGallery.h"
 #include "TestStyle.h"
 #include "RichTextLayoutMarshaller.h"
 #include "SyntaxHighlighterTextLayoutMarshaller.h"
-#include "STestSuite.h"
 #include "SScissorRectBox.h"
 #include "TransformCalculus3D.h"
 #include "SlateRenderTransform.h"
@@ -3950,6 +3954,44 @@ private:
 	TSharedPtr<SInvalidationPanel> CachePanel1;
 };
 
+class SGammaTest : public SCompoundWidget
+{
+	SLATE_BEGIN_ARGS(SGammaTest)
+	{}
+	SLATE_END_ARGS()
+	
+	void Construct(const FArguments& InArgs)
+	{
+		FColor Orange(200, 80, 15);
+		
+		ChildSlot
+		.Padding(10)
+		[
+			SNew(SVerticalBox)
+			
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			[
+				SNew(SHorizontalBox)
+			 
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				[
+					SNew(SColorBlock)
+					.Color(Orange)
+				]
+			 
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				[
+					SNew(STextBlock)
+					.Text(FText::FromString(Orange.ToString()))
+				]
+			]
+		];
+	}
+};
+
 class SColorPickerTest : public SCompoundWidget
 {
 public:
@@ -5331,6 +5373,15 @@ TSharedRef<SDockTab> SpawnTab(const FSpawnTabArgs& Args, FName TabIdentifier)
 				]
 			];
 	}
+	else if ( TabIdentifier == FName(TEXT("GammaTest")) )
+	{
+		return SNew(SDockTab)
+		[
+			SNew(SGammaTest)
+			.RenderTransform_Static(&::GetTestRenderTransform)
+			.RenderTransformPivot_Static(&::GetTestRenderTransformPivot)
+		];
+	}
 	else if (TabIdentifier == FName(TEXT("NotificationListTestTab")))
 	{
 		return SNew(SDockTab)
@@ -5553,6 +5604,7 @@ TSharedRef<SDockTab> SpawnTestSuite2( const FSpawnTabArgs& Args )
 			->AddTab("GridPanelTest", ETabState::OpenedTab)
 			->AddTab("DPIScalingTest", ETabState::OpenedTab)
 			->AddTab("InvalidationTest", ETabState::OpenedTab)
+			->AddTab("GammaTest", ETabState::OpenedTab)
 		)
 	);
 
@@ -5590,6 +5642,10 @@ TSharedRef<SDockTab> SpawnTestSuite2( const FSpawnTabArgs& Args )
 
 		TestSuite2TabManager->RegisterTabSpawner("InvalidationTest", FOnSpawnTab::CreateStatic(&SpawnTab, FName("InvalidationTest")))
 			.SetDisplayName(NSLOCTEXT("TestSuite1", "InvalidationTest", "Invalidtion"))
+			.SetGroup(TestSuiteMenu::SuiteTabs);
+		
+		TestSuite2TabManager->RegisterTabSpawner("GammaTest", FOnSpawnTab::CreateStatic(&SpawnTab, FName("GammaTest")))
+			.SetDisplayName(NSLOCTEXT("TestSuite1", "GammaTest", "Gamma"))
 			.SetGroup(TestSuiteMenu::SuiteTabs);
 	}
 
@@ -5649,6 +5705,9 @@ TSharedRef<SDockTab> SpawnWidgetGallery(const FSpawnTabArgs& Args)
 
 void RestoreSlateTestSuite()
 {
+	// Need to load this module so we have the widget reflector tab available
+	FModuleManager::LoadModuleChecked<ISlateReflectorModule>("SlateReflector");
+
 	FTestStyle::ResetToDefault();
 
 	FGlobalTabmanager::Get()->RegisterTabSpawner("TestSuite1", FOnSpawnTab::CreateStatic( &SpawnTestSuite1 ) );
@@ -5706,3 +5765,5 @@ void MakeSplitterTest()
 END_SLATE_FUNCTION_BUILD_OPTIMIZATION
 
 #undef LOCTEXT_NAMESPACE
+
+#endif // #if !UE_BUILD_SHIPPING

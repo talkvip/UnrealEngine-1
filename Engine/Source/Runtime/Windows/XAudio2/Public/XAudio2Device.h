@@ -52,6 +52,12 @@ enum ChannelOutputs
 	CHANNELOUT_COUNT
 };
 
+// We are supporting spatializing non-mono assets, so our channel output will be a "matrix" 
+// of channel-out mappings per input channel only supporting stereo 3d spatialization, but 
+// if we support 3d spatialization of other N channel source files, we'd bump this up
+#define MAX_INPUT_CHANNELS_SPATIALIZED (2)
+#define CHANNEL_MATRIX_COUNT (MAX_INPUT_CHANNELS_SPATIALIZED*CHANNELOUT_COUNT)
+
 #define SPEAKER_5POINT0          ( SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT | SPEAKER_FRONT_CENTER | SPEAKER_SIDE_LEFT | SPEAKER_SIDE_RIGHT )
 #define SPEAKER_6POINT1          ( SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT | SPEAKER_FRONT_CENTER | SPEAKER_LOW_FREQUENCY | SPEAKER_SIDE_LEFT | SPEAKER_SIDE_RIGHT | SPEAKER_BACK_CENTER )
 
@@ -67,6 +73,28 @@ enum ESoundFormat
 	SoundFormat_XWMA,
 	SoundFormat_Streaming
 };
+
+
+/** 
+* Simple async task to destroy an xaudio2 source voice without blocking the main thread.
+*/
+class FAsyncXAudio2SourceDestroyer : public FNonAbandonableTask
+{
+protected:
+	struct IXAudio2SourceVoice* SourceVoice;
+	FXAudio2Device* AudioDevice;
+
+public:
+	FAsyncXAudio2SourceDestroyer(FXAudio2Device* InAudioDevice, struct IXAudio2SourceVoice* InSourceVoice);
+	~FAsyncXAudio2SourceDestroyer();
+	void DoWork();
+
+	FORCEINLINE TStatId GetStatId() const
+	{
+		RETURN_QUICK_DECLARE_CYCLE_STAT(FAsyncXAudio2SourceDestroyer, STATGROUP_ThreadPoolAsyncTasks);
+	}
+};
+
 
 class FXAudio2SoundBuffer;
 class FXAudio2SoundSource;
@@ -138,6 +166,12 @@ class FXAudio2Device : public FAudioDevice
 	 */
 	virtual bool Exec( UWorld* InWorld, const TCHAR* Cmd, FOutputDevice& Ar ) override;
 
+public:
+	/** 
+	 * Safely destroy an XAudio2 source asynchronously.
+	*/
+	void AsyncDestroyXAudio2Source(struct IXAudio2SourceVoice* Source);
+
 protected:
 
 	/**
@@ -162,17 +196,19 @@ protected:
 	void TimeTest( FOutputDevice& Ar, const TCHAR* WaveAssetName );
 
 	/** Inverse listener transformation, used for spatialization */
-	FMatrix								InverseTransform;
+	FMatrix InverseListenerTransform;
 
 	// For calculating spatialised volumes
-	static FSpatializationHelper		SpatializationHelper;
+	static FSpatializationHelper SpatializationHelper;
 
 	friend class FXAudio2SoundBuffer;
 	friend class FXAudio2SoundSource;
 	friend class FXAudio2EffectsManager;
+	friend class FAsyncXAudio2SourceDestroyer;
 
 private:
 	struct FXAudioDeviceProperties* DeviceProperties;
+	FThreadSafeCounter NumSourcesDestroying;
 
 #if PLATFORM_WINDOWS
 	// We need to keep track whether com was successfully initialized so we can clean 

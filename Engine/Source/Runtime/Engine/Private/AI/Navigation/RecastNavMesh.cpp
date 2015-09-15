@@ -134,8 +134,6 @@ void ARecastNavMesh::Serialize( FArchive& Ar )
 #include "RecastNavMeshGenerator.h"
 #include "DetourNavMeshQuery.h"
 
-#define DO_NAVMESH_DEBUG_DRAWING_PER_TILE 0
-
 //----------------------------------------------------------------------//
 // FRecastDebugGeometry
 //----------------------------------------------------------------------//
@@ -398,71 +396,17 @@ ANavigationData* ARecastNavMesh::CreateNavigationInstances(UNavigationSystem* Na
 
 UPrimitiveComponent* ARecastNavMesh::ConstructRenderingComponent() 
 {
-	return ConstructRenderingComponentImpl();
-}
-
-UPrimitiveComponent* ARecastNavMesh::ConstructRenderingComponentImpl() 
-{
-#if DO_NAVMESH_DEBUG_DRAWING_PER_TILE
-	const bool bIsGameThread = IsInGameThread();
-
-	if (RecastNavMeshImpl != NULL)
-	{
-		bool bComponentsRemoved = false;
-
-		for (int i = 0; i < TileRenderingComponents.Num(); ++i)
-		{
-			if (TileRenderingComponents[i] != NULL)
-			{
-				TileRenderingComponents[i]->UnregisterComponent();
-				Components.Remove(TileRenderingComponents[i]);
-				bComponentsRemoved = true;
-			}
-		}
-
-		TileRenderingComponents.Reset();
-		RecastNavMeshImpl->GenerateTileRenderingComponents(TileRenderingComponents);
-
-		//Components.Append(TileRenderingComponents);
-		for (int i = 0; i < TileRenderingComponents.Num(); ++i)
-		{
-			if (TileRenderingComponents[i] != NULL)
-			{
-				TileRenderingComponents[i]->RegisterComponent();
-			}
-		}
-
-		if (bComponentsRemoved || TileRenderingComponents.Num() > 0)
-		{
-			//RegisterAllComponents();
-			//MarkComponentsRenderStateDirty();
-		}
-	}
-
-	return NULL;
-#else
 	return NewObject<UNavMeshRenderingComponent>(this, TEXT("NavRenderingComp"), RF_Transient);
-#endif // DO_NAVMESH_DEBUG_DRAWING_PER_TILE
 }
 
 void ARecastNavMesh::UpdateNavMeshDrawing()
 {
 #if !UE_BUILD_SHIPPING
-#if DO_NAVMESH_DEBUG_DRAWING_PER_TILE
-	// @todo - we shouldn't be updating _every_ tile renderer, just the ones that have been changed
-	for (int i = 0; i < TileRenderingComponents.Num(); ++i)
-	{
-		if (TileRenderingComponents[i] != NULL && TileRenderingComponents[i]->bVisible)
-		{
-			TileRenderingComponents[i]->MarkRenderStateDirty();
-		}
-	}
-#else // DO_NAVMESH_DEBUG_DRAWING_PER_TILE
-	if (RenderingComp != NULL && RenderingComp->bVisible && UNavMeshRenderingComponent::IsNavigationShowFlagSet(GetWorld()))
+	UNavMeshRenderingComponent* NavMeshRenderComp = Cast<UNavMeshRenderingComponent>(RenderingComp);
+	if (NavMeshRenderComp != nullptr && NavMeshRenderComp->bVisible && (NavMeshRenderComp->IsForcingUpdate() || UNavMeshRenderingComponent::IsNavigationShowFlagSet(GetWorld())))
 	{
 		RenderingComp->MarkRenderStateDirty();
 	}
-#endif // DO_NAVMESH_DEBUG_DRAWING_PER_TILE
 #endif // UE_BUILD_SHIPPING
 }
 
@@ -850,22 +794,12 @@ FBox ARecastNavMesh::GetNavMeshTileBounds(int32 TileIndex) const
 
 bool ARecastNavMesh::GetNavMeshTileXY(int32 TileIndex, int32& OutX, int32& OutY, int32& OutLayer) const
 {
-	if (RecastNavMeshImpl)
-	{
-		return RecastNavMeshImpl->GetNavMeshTileXY(TileIndex, OutX, OutY, OutLayer);
-	}
-
-	return false;
+	return RecastNavMeshImpl && RecastNavMeshImpl->GetNavMeshTileXY(TileIndex, OutX, OutY, OutLayer);
 }
 
 bool ARecastNavMesh::GetNavMeshTileXY(const FVector& Point, int32& OutX, int32& OutY) const
 {
-	if (RecastNavMeshImpl)
-	{
-		return RecastNavMeshImpl->GetNavMeshTileXY(Point, OutX, OutY);
-	}
-
-	return false;
+	return RecastNavMeshImpl && RecastNavMeshImpl->GetNavMeshTileXY(Point, OutX, OutY);
 }
 
 void ARecastNavMesh::GetNavMeshTilesAt(int32 TileX, int32 TileY, TArray<int32>& Indices) const
@@ -878,13 +812,7 @@ void ARecastNavMesh::GetNavMeshTilesAt(int32 TileX, int32 TileY, TArray<int32>& 
 
 bool ARecastNavMesh::GetPolysInTile(int32 TileIndex, TArray<FNavPoly>& Polys) const
 {
-	bool bSuccess = false;
-	if (RecastNavMeshImpl)
-	{
-		bSuccess = RecastNavMeshImpl->GetPolysInTile(TileIndex, Polys);
-	}
-
-	return bSuccess;
+	return RecastNavMeshImpl && RecastNavMeshImpl->GetPolysInTile(TileIndex, Polys);
 }
 
 int32 ARecastNavMesh::GetNavMeshTilesCount() const
@@ -1019,13 +947,7 @@ bool ARecastNavMesh::GetRandomPointInNavigableRadius(const FVector& Origin, floa
 
 bool ARecastNavMesh::GetRandomPointInCluster(NavNodeRef ClusterRef, FNavLocation& OutLocation) const
 {
-	bool bSuccess = false;
-	if (RecastNavMeshImpl)
-	{
-		bSuccess = RecastNavMeshImpl->GetRandomPointInCluster(ClusterRef, OutLocation);
-	}
-
-	return bSuccess;
+	return RecastNavMeshImpl && RecastNavMeshImpl->GetRandomPointInCluster(ClusterRef, OutLocation);
 }
 
 NavNodeRef ARecastNavMesh::GetClusterRef(NavNodeRef PolyRef) const
@@ -1041,13 +963,7 @@ NavNodeRef ARecastNavMesh::GetClusterRef(NavNodeRef PolyRef) const
 
 bool ARecastNavMesh::ProjectPoint(const FVector& Point, FNavLocation& OutLocation, const FVector& Extent, TSharedPtr<const FNavigationQueryFilter> Filter, const UObject* QueryOwner) const
 {
-	bool bSuccess = false;
-	if (RecastNavMeshImpl)
-	{
-		bSuccess = RecastNavMeshImpl->ProjectPointToNavMesh(Point, OutLocation, Extent, GetRightFilterRef(Filter), QueryOwner);
-	}
-
-	return bSuccess;
+	return RecastNavMeshImpl && RecastNavMeshImpl->ProjectPointToNavMesh(Point, OutLocation, Extent, GetRightFilterRef(Filter), QueryOwner);
 }
 
 void ARecastNavMesh::BatchProjectPoints(TArray<FNavigationProjectionWork>& Workload, const FVector& Extent, TSharedPtr<const FNavigationQueryFilter> Filter, const UObject* Querier) const 
@@ -1090,16 +1006,71 @@ void ARecastNavMesh::BatchProjectPoints(TArray<FNavigationProjectionWork>& Workl
 	}
 }
 
-bool ARecastNavMesh::ProjectPointMulti(const FVector& Point, TArray<FNavLocation>& OutLocations, const FVector& Extent,
-	float MinZ, float MaxZ, TSharedPtr<const FNavigationQueryFilter> Filter, const UObject* QueryOwner) const
+bool ARecastNavMesh::GetPolysInBox(const FBox& Box, TArray<FNavPoly>& Polys, TSharedPtr<const FNavigationQueryFilter> Filter, const UObject* Owner) const
 {
-	bool bSuccess = false;
-	if (RecastNavMeshImpl)
+	// sanity check
+	if (RecastNavMeshImpl->GetRecastMesh() == NULL)
 	{
-		bSuccess = RecastNavMeshImpl->ProjectPointMulti(Point, OutLocations, Extent, MinZ, MaxZ, GetRightFilterRef(Filter), QueryOwner);
+		return false;
+	}
+
+	bool bSuccess = false;
+
+	const FNavigationQueryFilter& FilterToUse = GetRightFilterRef(Filter);
+	FRecastSpeciaLinkFilter LinkFilter(UNavigationSystem::GetCurrent(GetWorld()), Owner);
+	INITIALIZE_NAVQUERY_WLINKFILTER(NavQuery, FilterToUse.GetMaxSearchNodes(), LinkFilter);
+
+	const dtQueryFilter* QueryFilter = ((const FRecastQueryFilter*)(FilterToUse.GetImplementation()))->GetAsDetourQueryFilter();
+	ensure(QueryFilter);
+	if (QueryFilter)
+	{
+		const FVector ModifiedExtent = GetModifiedQueryExtent(Box.GetExtent());
+
+		const FVector RcPoint = Unreal2RecastPoint( Box.GetCenter() );
+		const FVector RcExtent = Unreal2RecastPoint( ModifiedExtent ).GetAbs();
+
+		const int32 MaxHitPolys = 256;
+		dtPolyRef HitPolys[MaxHitPolys];
+		int32 NumHitPolys = 0;
+
+		dtStatus status = NavQuery.queryPolygons(&RcPoint.X, &RcExtent.X, QueryFilter, HitPolys, &NumHitPolys, MaxHitPolys);
+		if (dtStatusSucceed(status))
+		{
+			// only ground type polys
+			int32 BaseIdx = Polys.Num();
+			Polys.AddZeroed(NumHitPolys);
+
+			for (int32 i = 0; i < NumHitPolys; i++)
+			{
+				dtPoly const* Poly;
+				dtMeshTile const* Tile;
+				dtStatus Status = RecastNavMeshImpl->GetRecastMesh()->getTileAndPolyByRef(HitPolys[i], &Tile, &Poly);
+				if (dtStatusSucceed(Status))
+				{
+					FVector PolyCenter(0);
+					for (int k = 0; k < Poly->vertCount; ++k)
+					{
+						PolyCenter += Recast2UnrealPoint(&Tile->verts[Poly->verts[k]*3]);
+					}
+					PolyCenter /= Poly->vertCount;
+
+					FNavPoly& OutPoly = Polys[BaseIdx + i];
+					OutPoly.Ref = HitPolys[i];
+					OutPoly.Center = PolyCenter;
+				}
+			}
+
+			bSuccess = true;
+		}
 	}
 
 	return bSuccess;
+}
+
+bool ARecastNavMesh::ProjectPointMulti(const FVector& Point, TArray<FNavLocation>& OutLocations, const FVector& Extent,
+	float MinZ, float MaxZ, TSharedPtr<const FNavigationQueryFilter> Filter, const UObject* QueryOwner) const
+{
+	return RecastNavMeshImpl && RecastNavMeshImpl->ProjectPointMulti(Point, OutLocations, Extent, MinZ, MaxZ, GetRightFilterRef(Filter), QueryOwner);
 }
 
 ENavigationQueryResult::Type ARecastNavMesh::CalcPathCost(const FVector& PathStart, const FVector& PathEnd, float& OutPathCost, TSharedPtr<const FNavigationQueryFilter> QueryFilter, const UObject* QueryOwner) const
@@ -1255,24 +1226,12 @@ void ARecastNavMesh::UpdateSegmentLinkArea(int32 UserId, TSubclassOf<UNavArea> A
 
 bool ARecastNavMesh::GetPolyCenter(NavNodeRef PolyID, FVector& OutCenter) const
 {
-	bool bSuccess = false;
-	if (RecastNavMeshImpl)
-	{
-		bSuccess = RecastNavMeshImpl->GetPolyCenter(PolyID, OutCenter);
-	}
-
-	return bSuccess;
+	return RecastNavMeshImpl && RecastNavMeshImpl->GetPolyCenter(PolyID, OutCenter);
 }
 
 bool ARecastNavMesh::GetPolyVerts(NavNodeRef PolyID, TArray<FVector>& OutVerts) const
 {
-	bool bSuccess = false;
-	if (RecastNavMeshImpl)
-	{
-		bSuccess = RecastNavMeshImpl->GetPolyVerts(PolyID, OutVerts);
-	}
-
-	return bSuccess;
+	return RecastNavMeshImpl && RecastNavMeshImpl->GetPolyVerts(PolyID, OutVerts);
 }
 
 uint32 ARecastNavMesh::GetPolyAreaID(NavNodeRef PolyID) const
@@ -1284,6 +1243,23 @@ uint32 ARecastNavMesh::GetPolyAreaID(NavNodeRef PolyID) const
 	}
 
 	return AreaID;
+}
+
+void ARecastNavMesh::SetPolyAreaID(NavNodeRef PolyID, uint8 AreaID)
+{
+	if (RecastNavMeshImpl)
+	{
+		RecastNavMeshImpl->SetPolyAreaID(PolyID, AreaID);
+	}
+}
+
+void ARecastNavMesh::SetPolyArrayAreaID(const TArray<FNavPoly>& Polys, uint8 AreaID)
+{
+	dtNavMesh* NavMesh = RecastNavMeshImpl->GetRecastMesh();
+	for(const auto& Poly : Polys)
+	{
+		NavMesh->setPolyArea(Poly.Ref, AreaID);
+	}
 }
 
 bool ARecastNavMesh::GetPolyFlags(NavNodeRef PolyID, uint16& PolyFlags, uint16& AreaFlags) const
@@ -1324,71 +1300,45 @@ bool ARecastNavMesh::GetPolyFlags(NavNodeRef PolyID, FNavMeshNodeFlags& Flags) c
 	return bFound;
 }
 
+bool ARecastNavMesh::GetPolyNeighbors(NavNodeRef PolyID, TArray<FNavigationPortalEdge>& Neighbors) const
+{
+	return RecastNavMeshImpl && RecastNavMeshImpl->GetPolyNeighbors(PolyID, Neighbors);
+}
+
+bool ARecastNavMesh::GetPolyNeighbors(NavNodeRef PolyID, TArray<NavNodeRef>& Neighbors) const
+{
+	return RecastNavMeshImpl && RecastNavMeshImpl->GetPolyNeighbors(PolyID, Neighbors);
+}
+
 bool ARecastNavMesh::GetClosestPointOnPoly(NavNodeRef PolyID, const FVector& TestPt, FVector& PointOnPoly) const
 {
-	bool bFound = false;
-	if (RecastNavMeshImpl)
-	{
-		bFound = RecastNavMeshImpl->GetClosestPointOnPoly(PolyID, TestPt, PointOnPoly);
-	}
-
-	return bFound;
+	return RecastNavMeshImpl && RecastNavMeshImpl->GetClosestPointOnPoly(PolyID, TestPt, PointOnPoly);
 }
 
 bool ARecastNavMesh::GetPolyTileIndex(NavNodeRef PolyID, uint32& PolyIndex, uint32& TileIndex) const
 {
-	bool bFound = false;
-	if (RecastNavMeshImpl)
-	{
-		bFound = RecastNavMeshImpl->GetPolyTileIndex(PolyID, PolyIndex, TileIndex);
-	}
-
-	return bFound;
+	return RecastNavMeshImpl && RecastNavMeshImpl->GetPolyTileIndex(PolyID, PolyIndex, TileIndex);
 }
 
 bool ARecastNavMesh::GetLinkEndPoints(NavNodeRef LinkPolyID, FVector& PointA, FVector& PointB) const
 {
-	bool bSuccess = false;
-	if (RecastNavMeshImpl)
-	{
-		bSuccess = RecastNavMeshImpl->GetLinkEndPoints(LinkPolyID, PointA, PointB);
-	}
-
-	return bSuccess;
+	return RecastNavMeshImpl && RecastNavMeshImpl->GetLinkEndPoints(LinkPolyID, PointA, PointB);
 }
 
 bool ARecastNavMesh::IsCustomLink(NavNodeRef LinkPolyID) const
 {
-	bool bSuccess = false;
-	if (RecastNavMeshImpl)
-	{
-		bSuccess = RecastNavMeshImpl->IsCustomLink(LinkPolyID);
-	}
-
-	return bSuccess;
+	return RecastNavMeshImpl && RecastNavMeshImpl->IsCustomLink(LinkPolyID);
 }
 
 bool ARecastNavMesh::GetClusterBounds(NavNodeRef ClusterRef, FBox& OutBounds) const
 {
-	bool bSuccess = false;
-	if (RecastNavMeshImpl)
-	{
-		bSuccess = RecastNavMeshImpl->GetClusterBounds(ClusterRef, OutBounds);
-	}
-
-	return bSuccess;
+	return RecastNavMeshImpl && RecastNavMeshImpl->GetClusterBounds(ClusterRef, OutBounds);
 }
 
 bool ARecastNavMesh::GetPolysWithinPathingDistance(FVector const& StartLoc, const float PathingDistance, TArray<NavNodeRef>& FoundPolys,
 	TSharedPtr<const FNavigationQueryFilter> Filter, const UObject* QueryOwner, FRecastDebugPathfindingData* DebugData) const
 {
-	bool bSuccess = false;
-	if (RecastNavMeshImpl)
-	{
-		bSuccess = RecastNavMeshImpl->GetPolysWithinPathingDistance(StartLoc, PathingDistance, GetRightFilterRef(Filter), QueryOwner, FoundPolys, DebugData);
-	}
-
-	return bSuccess;
+	return RecastNavMeshImpl && RecastNavMeshImpl->GetPolysWithinPathingDistance(StartLoc, PathingDistance, GetRightFilterRef(Filter), QueryOwner, FoundPolys, DebugData);
 }
 
 void ARecastNavMesh::GetDebugGeometry(FRecastDebugGeometry& OutGeometry, int32 TileIndex) const
@@ -1399,11 +1349,16 @@ void ARecastNavMesh::GetDebugGeometry(FRecastDebugGeometry& OutGeometry, int32 T
 	}
 }
 
-void ARecastNavMesh::RequestDrawingUpdate()
+void ARecastNavMesh::RequestDrawingUpdate(bool bForce)
 {
 #if !UE_BUILD_SHIPPING
-	if (UNavMeshRenderingComponent::IsNavigationShowFlagSet(GetWorld()))
+	if (bForce || UNavMeshRenderingComponent::IsNavigationShowFlagSet(GetWorld()))
 	{
+		if (bForce && Cast<UNavMeshRenderingComponent>(RenderingComp))
+		{
+			Cast<UNavMeshRenderingComponent>(RenderingComp)->ForceUpdate();
+		}
+
 		DECLARE_CYCLE_STAT(TEXT("FSimpleDelegateGraphTask.Requesting navmesh redraw"),
 		STAT_FSimpleDelegateGraphTask_RequestingNavmeshRedraw,
 			STATGROUP_TaskGraphTasks);
@@ -1417,9 +1372,6 @@ void ARecastNavMesh::RequestDrawingUpdate()
 
 void ARecastNavMesh::UpdateDrawing()
 {
-#if DO_NAVMESH_DEBUG_DRAWING_PER_TILE
-	ConstructRenderingComponentImpl();
-#endif
 	UpdateNavMeshDrawing();
 }
 
@@ -1576,6 +1528,9 @@ void ARecastNavMesh::OnNavMeshGenerationFinished()
 				}
 			}
 		}
+
+		// force navmesh drawing update
+		RequestDrawingUpdate(/*bForce=*/true);		
 #endif// WITH_EDITOR
 
 		if (World->GetNavigationSystem())
@@ -1903,9 +1858,13 @@ void ARecastNavMesh::BatchRaycast(TArray<FNavigationRaycastWork>& Workload, TSha
 
 		if (StartNode != INVALID_NAVNODEREF)
 		{
+			float RecastHitNormal[3];
+
 			const dtStatus RaycastStatus = NavQuery.raycast(StartNode, &RecastStart.X, &RecastEnd.X
-				, QueryFilter, &RaycastResult.HitTime, &RaycastResult.HitNormal.X
+				, QueryFilter, &RaycastResult.HitTime, RecastHitNormal
 				, RaycastResult.CorridorPolys, &RaycastResult.CorridorPolysCount, RaycastResult.GetMaxCorridorSize());
+
+			RaycastResult.HitNormal = Recast2UnrealPoint(RecastHitNormal);
 
 			if (dtStatusSucceed(RaycastStatus) && RaycastResult.HasHit())
 			{

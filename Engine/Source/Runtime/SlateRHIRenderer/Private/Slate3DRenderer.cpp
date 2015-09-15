@@ -85,15 +85,18 @@ void FSlate3DRenderer::DrawWindow_GameThread(FSlateDrawBuffer& DrawBuffer)
 void FSlate3DRenderer::DrawWindowToTarget_RenderThread( FRHICommandListImmediate& RHICmdList, UTextureRenderTarget2D* RenderTarget, FSlateDrawBuffer& InDrawBuffer )
 {
 	FSlateBatchData& BatchData = InDrawBuffer.GetWindowElementLists()[0]->GetBatchData();
+	FElementBatchMap& RootBatchMap = InDrawBuffer.GetWindowElementLists()[0]->GetRootDrawLayer().GetElementBatchMap();
 
-	BatchData.CreateRenderBatches();
+	BatchData.CreateRenderBatches(RootBatchMap);
 	RenderTargetPolicy->BeginDrawingWindows();
 
 	RenderTargetPolicy->UpdateVertexAndIndexBuffers( RHICmdList, BatchData );
 	FTextureRenderTarget2DResource* RenderTargetResource = static_cast<FTextureRenderTarget2DResource*>( RenderTarget->GetRenderTargetResource() );
 	
 	// Set render target and clear.
-	FRHIRenderTargetView ColorRTV(RenderTargetResource->GetTextureRHI());
+	FTexture2DRHIRef RTResource = RenderTargetResource->GetTextureRHI();
+	FRHIRenderTargetView ColorRTV(RTResource);
+	ColorRTV.LoadAction = ERenderTargetLoadAction::EClear;
 	FRHISetRenderTargetsInfo Info(1, &ColorRTV, FTextureRHIParamRef());
 	Info.bClearColor = true;
 	ensure(ColorRTV.Texture->GetClearColor() == RenderTarget->ClearColor);
@@ -121,4 +124,6 @@ void FSlate3DRenderer::DrawWindowToTarget_RenderThread( FRHICommandListImmediate
 	InDrawBuffer.Unlock();
 
 	RenderTargetPolicy->EndDrawingWindows();
+
+	RHICmdList.CopyToResolveTarget(RenderTargetResource->GetTextureRHI(), RTResource, true, FResolveParams());
 }

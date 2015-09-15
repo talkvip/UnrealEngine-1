@@ -16,6 +16,8 @@
 
 UUserWidget::UUserWidget(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
+	, bCanEverTick(true)
+	, bCanEverPaint(true)
 {
 	ViewportAnchors = FAnchors(0, 0, 1, 1);
 	Visiblity_DEPRECATED = Visibility = ESlateVisibility::SelfHitTestInvisible;
@@ -46,6 +48,10 @@ bool UUserWidget::Initialize()
 		if ( BGClass != nullptr )
 		{
 			BGClass->InitializeWidget(this);
+		}
+		else
+		{
+			CustomNativeInitilize();
 		}
 
 		if ( WidgetTree == nullptr )
@@ -164,6 +170,11 @@ void UUserWidget::PostInitProperties()
 
 UWorld* UUserWidget::GetWorld() const
 {
+	if ( UWorld* LastWorld = CachedWorld.Get() )
+	{
+		return LastWorld;
+	}
+
 	if ( HasAllFlags(RF_ClassDefaultObject) )
 	{
 		// If we are a CDO, we must return nullptr instead of calling Outer->GetWorld() to fool UObject::ImplementsGetWorld.
@@ -176,6 +187,7 @@ UWorld* UUserWidget::GetWorld() const
 	{
 		if ( UWorld* World = PlayerContext.GetWorld() )
 		{
+			CachedWorld = World;
 			return World;
 		}
 	}
@@ -189,6 +201,7 @@ UWorld* UUserWidget::GetWorld() const
 		UWorld* World = Outer->GetWorld();
 		if ( World )
 		{
+			CachedWorld = World;
 			return World;
 		}
 
@@ -266,7 +279,26 @@ float UUserWidget::PauseAnimation(const UWidgetAnimation* InAnimation)
 	return 0;
 }
 
-void UUserWidget::OnAnimationFinishedPlaying( UUMGSequencePlayer& Player )
+bool UUserWidget::IsAnimationPlaying(const UWidgetAnimation* InAnimation) const
+{
+	if (InAnimation)
+	{
+		UUMGSequencePlayer* const* FoundPlayer = ActiveSequencePlayers.FindByPredicate(
+			[ &](const UUMGSequencePlayer* Player)
+		{
+			return Player->GetAnimation() == InAnimation;
+		});
+
+		if (FoundPlayer)
+		{
+			return (*FoundPlayer)->GetPlaybackStatus() == EMovieScenePlayerStatus::Playing;
+		}
+	}
+
+	return false;
+}
+
+void UUserWidget::OnAnimationFinishedPlaying(UUMGSequencePlayer& Player)
 {
 	OnAnimationFinished( Player.GetAnimation() );
 	StoppedSequencePlayers.Add( &Player );
@@ -410,11 +442,14 @@ void UUserWidget::SetContentForSlot(FName SlotName, UWidget* Content)
 	}
 
 	// Dynamically insert the new widget into the hierarchy if it exists.
-	if ( WidgetTree )
+	if (WidgetTree)
 	{
 		UNamedSlot* NamedSlot = Cast<UNamedSlot>(WidgetTree->FindWidget(SlotName));
-		NamedSlot->ClearChildren();
-		NamedSlot->AddChild(Content);
+		if (NamedSlot)
+		{
+			NamedSlot->ClearChildren();
+			NamedSlot->AddChild(Content);
+		}
 	}
 }
 
@@ -655,6 +690,20 @@ FVector2D UUserWidget::GetFullScreenAlignment() const
 	return ViewportAlignment;
 }
 
+void UUserWidget::RemoveObsoleteBindings(const TArray<FName>& NamedSlots)
+{
+	for (int32 BindingIndex = 0; BindingIndex < NamedSlotBindings.Num(); BindingIndex++)
+	{
+		const FNamedSlotBinding& Binding = NamedSlotBindings[BindingIndex];
+
+		if (!NamedSlots.Contains(Binding.Name))
+		{
+			NamedSlotBindings.RemoveAt(BindingIndex);
+			BindingIndex--;
+		}
+	}
+}
+
 void UUserWidget::PreSave()
 {
 	Super::PreSave();
@@ -662,16 +711,7 @@ void UUserWidget::PreSave()
 	// Remove bindings that are no longer contained in the class.
 	if ( UWidgetBlueprintGeneratedClass* BGClass = Cast<UWidgetBlueprintGeneratedClass>(GetClass()) )
 	{
-		for ( int32 BindingIndex = 0; BindingIndex < NamedSlotBindings.Num(); BindingIndex++ )
-		{
-			const FNamedSlotBinding& Binding = NamedSlotBindings[BindingIndex];
-
-			if ( !BGClass->NamedSlots.Contains(Binding.Name) )
-			{
-				NamedSlotBindings.RemoveAt(BindingIndex);
-				BindingIndex--;
-			}
-		}
+		RemoveObsoleteBindings(BGClass->NamedSlots);
 	}
 }
 
@@ -726,7 +766,10 @@ void UUserWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 
 	TickActionsAndAnimation(MyGeometry, InDeltaTime);
 
-	Tick(MyGeometry, InDeltaTime);
+	if ( bCanEverTick )
+	{
+		Tick(MyGeometry, InDeltaTime);
+	}
 }
 
 void UUserWidget::TickActionsAndAnimation(const FGeometry& MyGeometry, float InDeltaTime)
@@ -773,7 +816,10 @@ void UUserWidget::TickActionsAndAnimation(const FGeometry& MyGeometry, float InD
 
 void UUserWidget::NativePaint( FPaintContext& InContext ) const 
 {
-	OnPaint( InContext );
+	if ( bCanEverPaint )
+	{
+		OnPaint(InContext);
+	}
 }
 
 bool UUserWidget::NativeIsInteractable() const

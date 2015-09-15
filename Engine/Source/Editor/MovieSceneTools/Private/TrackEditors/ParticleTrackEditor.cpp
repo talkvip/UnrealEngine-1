@@ -62,6 +62,8 @@ float FParticleSection::GetSectionHeight() const
 
 int32 FParticleSection::OnPaintSection( const FGeometry& AllottedGeometry, const FSlateRect& SectionClippingRect, FSlateWindowElementList& OutDrawElements, int32 LayerId, bool bParentEnabled ) const
 {
+	const ESlateDrawEffect::Type DrawEffects = bParentEnabled ? ESlateDrawEffect::None : ESlateDrawEffect::DisabledEffect;
+
 	UMovieSceneParticleSection* AnimSection = Cast<UMovieSceneParticleSection>(&Section);
 	
 	FTimeToPixel TimeToPixelConverter( AllottedGeometry, TRange<float>( Section.GetStartTime(), Section.GetEndTime() ) );
@@ -78,7 +80,7 @@ int32 FParticleSection::OnPaintSection( const FGeometry& AllottedGeometry, const
 			AllottedGeometry.ToPaintGeometry(),
 			FEditorStyle::GetBrush("Sequencer.GenericSection.Background"),
 			SectionClippingRect,
-			ESlateDrawEffect::None,
+			DrawEffects,
 			FLinearColor(0.6f, 0.4f, 0.3f, 1.f)
 		);
 	}
@@ -90,7 +92,7 @@ int32 FParticleSection::OnPaintSection( const FGeometry& AllottedGeometry, const
 			AllottedGeometry.ToPaintGeometry(),
 			FEditorStyle::GetBrush("Sequencer.GenericSection.Background"),
 			SectionClippingRect,
-			ESlateDrawEffect::None,
+			DrawEffects,
 			FLinearColor(0.8f, 0.4f, 0.3f, 1.f)
 		);
 	}
@@ -133,7 +135,7 @@ TSharedRef<ISequencerSection> FParticleTrackEditor::MakeSectionInterface( UMovie
 	return NewSection;
 }
 
-void FParticleTrackEditor::BuildObjectBindingContextMenu(FMenuBuilder& MenuBuilder, const FGuid& ObjectBinding, const UClass* ObjectClass)
+void FParticleTrackEditor::BuildObjectBindingTrackMenu(FMenuBuilder& MenuBuilder, const FGuid& ObjectBinding, const UClass* ObjectClass)
 {
 	if (ObjectClass->IsChildOf(AEmitter::StaticClass()))
 	{
@@ -159,7 +161,7 @@ void FParticleTrackEditor::AddParticleKey(const FGuid ObjectGuid, bool bTrigger)
 	TArray<UObject*> OutObjects;
 	GetSequencer()->GetRuntimeObjects( GetSequencer()->GetFocusedMovieSceneSequenceInstance(), ObjectGuid, OutObjects );
 
-	AnimatablePropertyChanged( UMovieSceneParticleTrack::StaticClass(), false,
+	AnimatablePropertyChanged( UMovieSceneParticleTrack::StaticClass(), 
 		FOnKeyProperty::CreateRaw( this, &FParticleTrackEditor::AddKeyInternal, OutObjects, bTrigger) );
 }
 

@@ -140,6 +140,7 @@ namespace AutomationTool
         {
             RunCommandlet(ProjectName, UE4Exe, "UpdateGameProject", Parameters);
         }
+
 		/// <summary>
 		/// Runs a commandlet using Engine/Binaries/Win64/UE4Editor-Cmd.exe.
 		/// </summary>
@@ -149,7 +150,7 @@ namespace AutomationTool
 		/// <param name="Parameters">Command line parameters (without -run=)</param>
 		public static void RunCommandlet(string ProjectName, string UE4Exe, string Commandlet, string Parameters = null)
 		{
-			LogConsole("Running UE4Editor {0} for project {1}", Commandlet, ProjectName);
+			Log("Running UE4Editor {0} for project {1}", Commandlet, ProjectName);
 
             var CWD = Path.GetDirectoryName(UE4Exe);
 
@@ -164,7 +165,7 @@ namespace AutomationTool
 			PushDir(CWD);
 
 			string LocalLogFile = LogUtils.GetUniqueLogName(CombinePaths(CmdEnv.EngineSavedFolder, Commandlet));
-			LogConsole("Commandlet log file is {0}", LocalLogFile);
+			Log("Commandlet log file is {0}", LocalLogFile);
 			string Args = String.Format(
 				"{0} -run={1} {2} -abslog={3} -stdout -FORCELOGFLUSH -CrashForUAT -unattended {5}{4}",
 				(ProjectName == null) ? "" : CommandUtils.MakePathSafeToUseWithCommandLine(ProjectName),
@@ -183,6 +184,19 @@ namespace AutomationTool
 			var RunResult = Run(EditorExe, Args, Options: Opts);
 			PopDir();
 
+			// Draw attention to signal exit codes on Posix systems, rather than just printing the exit code
+			if(RunResult.ExitCode > 128 && RunResult.ExitCode < 128 + 32)
+			{
+				if(RunResult.ExitCode == 139)
+				{
+					CommandUtils.LogError("Editor terminated abnormally due to a segmentation fault");
+				}
+				else
+				{
+					CommandUtils.LogError("Editor terminated abnormally with signal {0}", RunResult.ExitCode - 128);
+				}
+			}
+
 			// Copy the local commandlet log to the destination folder.
 			string DestLogFile = LogUtils.GetUniqueLogName(CombinePaths(CmdEnv.LogFolder, Commandlet));
 			if (!CommandUtils.CopyFile_NoExceptions(LocalLogFile, DestLogFile))
@@ -192,14 +206,34 @@ namespace AutomationTool
 			// copy the ddc access log to the destination folder
 			string DestDDCLogFile = LogUtils.GetUniqueLogName(CombinePaths(CmdEnv.LogFolder, Commandlet + "-DDC"));
 			string LocalDDCLogFile = CombinePaths(CmdEnv.EngineSavedFolder, "CookRunDDC.txt");
-			if (!CommandUtils.CopyFile_NoExceptions(LocalDDCLogFile, DestDDCLogFile))
+			if (!CommandUtils.FileExists(LocalDDCLogFile) || !CommandUtils.CopyFile_NoExceptions(LocalDDCLogFile, DestDDCLogFile))
 			{
 				CommandUtils.LogWarning("Commandlet {0} failed to copy the local log file from {1} to {2}. The log file will be lost.", Commandlet, LocalDDCLogFile, DestDDCLogFile);
 			}
 
+            string ProjectStatsDirectory = CombinePaths(Path.GetDirectoryName(ProjectName), "Saved", "Stats");
+            if (Directory.Exists(ProjectStatsDirectory))
+            {
+                string DestCookerStats = CmdEnv.LogFolder;
+                foreach (var StatsFile in Directory.EnumerateFiles(ProjectStatsDirectory, "*.csv"))
+                {
+                    if (!CommandUtils.CopyFile_NoExceptions(StatsFile, CombinePaths(DestCookerStats, Path.GetFileName(StatsFile))))
+                    {
+                        CommandUtils.LogWarning("Commandlet {0} failed to copy the local log file from {1} to {2}. The log file will be lost.", Commandlet, LocalDDCLogFile, DestDDCLogFile);
+                    }
+                }
+            }
+            else
+            {
+                CommandUtils.LogWarning("Failed to find directory {0} will not save stats", ProjectStatsDirectory);
+            }
+
 			// Whether it was copied correctly or not, delete the local log as it was only a temporary file. 
 			CommandUtils.DeleteFile_NoExceptions(LocalLogFile);
-			CommandUtils.DeleteFile_NoExceptions(LocalDDCLogFile);
+			if (CommandUtils.FileExists(LocalDDCLogFile))
+			{
+				CommandUtils.DeleteFile_NoExceptions(LocalDDCLogFile);
+			}
 
 			if (RunResult.ExitCode != 0)
 			{
@@ -224,7 +258,7 @@ namespace AutomationTool
 				case UnrealBuildTool.UnrealTargetPlatform.Linux:
 					return CommandUtils.CombinePaths(BuildRoot, "Engine/Binaries/Linux/UE4Editor");
 				default:
-					throw new NotImplementedException();
+					throw new AutomationException("EditorCommandlet is not supported for platform {0}", HostPlatform);
 			}
 		}
 

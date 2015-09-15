@@ -454,8 +454,16 @@ public:
 			GrassWeightArrays.Empty(GrassTypes.Num());
 			for (auto GrassType : GrassTypes)
 			{
-				int32 Index = GrassWeightArrays.Add(&NewGrassData->WeightData.Add(GrassType));
-				GrassWeightArrays[Index]->Empty(FMath::Square(ComponentSizeVerts));
+				NewGrassData->WeightData.Add(GrassType);
+			}
+
+			// need a second loop because the WeightData map will reallocate its arrays as grass types are added
+			for (auto GrassType : GrassTypes)
+			{
+				TArray<uint8>* DataArray = NewGrassData->WeightData.Find(GrassType);
+				check(DataArray);
+				DataArray->Empty(FMath::Square(ComponentSizeVerts));
+				GrassWeightArrays.Add(DataArray);
 			}
 
 			for (int32 PassIdx = 0; PassIdx < NumPasses; PassIdx++)
@@ -506,6 +514,9 @@ public:
 					}
 				}
 			}
+
+			// remove null grass type if we had one (can occur if the node has null entries)
+			NewGrassData->WeightData.Remove(nullptr);
 
 			// Assign the new data (thread-safe)
 			ComponentInfo.Component->GrassData = MakeShareable(NewGrassData);
@@ -617,10 +628,7 @@ void ULandscapeComponent::RenderGrassMap()
 			GrassTypes.Empty(GrassExpressions[0]->GrassTypes.Num());
 			for (auto& GrassTypeInput : GrassExpressions[0]->GrassTypes)
 			{
-				if (GrassTypeInput.GrassType)
-				{
-					GrassTypes.Add(GrassTypeInput.GrassType);
-				}
+				GrassTypes.Add(GrassTypeInput.GrassType);
 			}
 
 			TArray<ULandscapeComponent*> LandscapeComponents;
@@ -777,25 +785,27 @@ void ULandscapeGrassType::PostEditChangeProperty(FPropertyChangedEvent& Property
 
 	if (GIsEditor)
 	{
-		// Only care current world object
-		for (TActorIterator<ALandscapeProxy> It(GetWorld()); It; ++It)
+		for (TObjectIterator<ALandscapeProxy> It; It; ++It)
 		{
 			ALandscapeProxy* Proxy = *It;
-			const UMaterialInterface* MaterialInterface = Proxy->LandscapeMaterial;
-			if (MaterialInterface)
+			if (Proxy->GetWorld() && !Proxy->GetWorld()->IsPlayInEditor())
 			{
-				TArray<const UMaterialExpressionLandscapeGrassOutput*> GrassExpressions;
-				MaterialInterface->GetMaterial()->GetAllExpressionsOfType<UMaterialExpressionLandscapeGrassOutput>(GrassExpressions);
-
-				// Should only be one grass type node
-				if (GrassExpressions.Num() > 0)
+				const UMaterialInterface* MaterialInterface = Proxy->LandscapeMaterial;
+				if (MaterialInterface)
 				{
-					for (auto& Output : GrassExpressions[0]->GrassTypes)
+					TArray<const UMaterialExpressionLandscapeGrassOutput*> GrassExpressions;
+					MaterialInterface->GetMaterial()->GetAllExpressionsOfType<UMaterialExpressionLandscapeGrassOutput>(GrassExpressions);
+
+					// Should only be one grass type node
+					if (GrassExpressions.Num() > 0)
 					{
-						if (Output.GrassType == this)
+						for (auto& Output : GrassExpressions[0]->GrassTypes)
 						{
-							Proxy->FlushGrassComponents();
-							break;
+							if (Output.GrassType == this)
+							{
+								Proxy->FlushGrassComponents();
+								break;
+							}
 						}
 					}
 				}

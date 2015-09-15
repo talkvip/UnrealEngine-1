@@ -1617,18 +1617,37 @@ float FMath::GetTForSegmentPlaneIntersect(const FVector& StartPoint, const FVect
 	return ( Plane.W - (StartPoint|Plane) ) / ( (EndPoint - StartPoint)|Plane);	
 }
 
-bool FMath::SegmentPlaneIntersection(const FVector& StartPoint, const FVector& EndPoint, const FPlane& Plane, FVector& out_IntersectPoint)
+bool FMath::SegmentPlaneIntersection(const FVector& StartPoint, const FVector& EndPoint, const FPlane& Plane, FVector& out_IntersectionPoint)
 {
-	float T = FMath::GetTForSegmentPlaneIntersect(StartPoint,EndPoint,Plane);
+	float T = FMath::GetTForSegmentPlaneIntersect(StartPoint, EndPoint, Plane);
 	// If the parameter value is not between 0 and 1, there is no intersection
-	if( T > -KINDA_SMALL_NUMBER && T < 1.f+KINDA_SMALL_NUMBER )
+	if (T > -KINDA_SMALL_NUMBER && T < 1.f + KINDA_SMALL_NUMBER)
 	{
-		out_IntersectPoint = StartPoint + T * (EndPoint - StartPoint);
+		out_IntersectionPoint = StartPoint + T * (EndPoint - StartPoint);
 		return true;
 	}
 	return false;
 }
 
+bool FMath::SegmentIntersection2D(const FVector& SegmentStartA, const FVector& SegmentEndA, const FVector& SegmentStartB, const FVector& SegmentEndB, FVector& out_IntersectionPoint)
+{
+	const FVector VectorA = SegmentEndA - SegmentStartA;
+	const FVector VectorB = SegmentEndB - SegmentStartB;
+
+	const float S = (-VectorA.Y * (SegmentStartA.X - SegmentStartB.X) + VectorA.X * (SegmentStartA.Y - SegmentStartB.Y)) / (-VectorB.X * VectorA.Y + VectorA.X * VectorB.Y);
+	const float T = (VectorB.X * (SegmentStartA.Y - SegmentStartB.Y) - VectorB.Y * (SegmentStartA.X - SegmentStartB.X)) / (-VectorB.X * VectorA.Y + VectorA.X * VectorB.Y);
+
+	const bool bIntersects = (S >= 0 && S <= 1 && T >= 0 && T <= 1);
+
+	if (bIntersects)
+	{
+		out_IntersectionPoint.X = SegmentStartA.X + (T * VectorA.X);
+		out_IntersectionPoint.Y = SegmentStartA.Y + (T * VectorA.Y);
+		out_IntersectionPoint.Z = SegmentStartA.Z + (T * VectorA.Z);
+	}
+
+	return bIntersects;
+}
 
 /**
  * Compute the screen bounds of a point light along one axis.
@@ -1702,7 +1721,7 @@ static bool ComputeProjectedSphereShaft(
 uint32 FMath::ComputeProjectedSphereScissorRect(FIntRect& InOutScissorRect, FVector SphereOrigin, float Radius, FVector ViewOrigin, const FMatrix& ViewMatrix, const FMatrix& ProjMatrix)
 {
 	// Calculate a scissor rectangle for the light's radius.
-	if((SphereOrigin - ViewOrigin).Size() > Radius)
+	if((SphereOrigin - ViewOrigin).SizeSquared() > FMath::Square(Radius))
 	{
 		FVector LightVector = ViewMatrix.TransformPosition(SphereOrigin);
 
@@ -2556,13 +2575,13 @@ void FVector::GenerateClusterCenters(TArray<FVector>& Clusters, const TArray<FVe
 
 			// Iterate over all clusters to find closes one
 			int32 NearestClusterIndex = INDEX_NONE;
-			float NearestClusterDist = BIG_NUMBER;
+			float NearestClusterDistSqr = BIG_NUMBER;
 			for(int32 j=0; j<Clusters.Num() ; j++)
 			{
-				const float Dist = (Pos - Clusters[j]).Size();
-				if(Dist < NearestClusterDist)
+				const float DistSqr = (Pos - Clusters[j]).SizeSquared();
+				if(DistSqr < NearestClusterDistSqr)
 				{
-					NearestClusterDist = Dist;
+					NearestClusterDistSqr = DistSqr;
 					NearestClusterIndex = j;
 				}
 			}
@@ -2592,6 +2611,99 @@ void FVector::GenerateClusterCenters(TArray<FVector>& Clusters, const TArray<FVe
 			Clusters.RemoveAt(i);
 		}
 	}
+}
+
+namespace MathRoundingUtil
+{
+
+float TruncateToHalfIfClose(float F)
+{
+	float ValueToFudgeIntegralPart = 0.0f;
+	float ValueToFudgeFractionalPart = FMath::Modf(F, &ValueToFudgeIntegralPart);
+	if (F < 0.0f)
+	{
+		return ValueToFudgeIntegralPart + ((FMath::IsNearlyEqual(ValueToFudgeFractionalPart, -0.5f)) ? -0.5f : ValueToFudgeFractionalPart);
+	}
+	else
+	{
+		return ValueToFudgeIntegralPart + ((FMath::IsNearlyEqual(ValueToFudgeFractionalPart, 0.5f)) ? 0.5f : ValueToFudgeFractionalPart);
+	}
+}
+
+double TruncateToHalfIfClose(double F)
+{
+	double ValueToFudgeIntegralPart = 0.0;
+	double ValueToFudgeFractionalPart = FMath::Modf(F, &ValueToFudgeIntegralPart);
+	if (F < 0.0)
+	{
+		return ValueToFudgeIntegralPart + ((FMath::IsNearlyEqual(ValueToFudgeFractionalPart, -0.5)) ? -0.5 : ValueToFudgeFractionalPart);
+	}
+	else
+	{
+		return ValueToFudgeIntegralPart + ((FMath::IsNearlyEqual(ValueToFudgeFractionalPart, 0.5)) ? 0.5 : ValueToFudgeFractionalPart);
+	}
+}
+
+} // namespace GenericPlatformMathInternal
+
+float FMath::RoundHalfToEven(float F)
+{
+	F = MathRoundingUtil::TruncateToHalfIfClose(F);
+
+	const bool bIsNegative = F < 0.0f;
+	const bool bValueIsEven = static_cast<uint32>(FloorToFloat(((bIsNegative) ? -F : F))) % 2 == 0;
+	if (bValueIsEven)
+	{
+		// Round towards value (eg, value is -2.5 or 2.5, and should become -2 or 2)
+		return (bIsNegative) ? FloorToFloat(F + 0.5f) : CeilToFloat(F - 0.5f);
+	}
+	else
+	{
+		// Round away from value (eg, value is -3.5 or 3.5, and should become -4 or 4)
+		return (bIsNegative) ? CeilToFloat(F - 0.5f) : FloorToFloat(F + 0.5f);
+	}
+}
+
+double FMath::RoundHalfToEven(double F)
+{
+	F = MathRoundingUtil::TruncateToHalfIfClose(F);
+
+	const bool bIsNegative = F < 0.0;
+	const bool bValueIsEven = static_cast<uint64>(FMath::FloorToDouble(((bIsNegative) ? -F : F))) % 2 == 0;
+	if (bValueIsEven)
+	{
+		// Round towards value (eg, value is -2.5 or 2.5, and should become -2 or 2)
+		return (bIsNegative) ? FloorToDouble(F + 0.5) : CeilToDouble(F - 0.5);
+	}
+	else
+	{
+		// Round away from value (eg, value is -3.5 or 3.5, and should become -4 or 4)
+		return (bIsNegative) ? CeilToDouble(F - 0.5) : FloorToDouble(F + 0.5);
+	}
+}
+
+float FMath::RoundHalfFromZero(float F)
+{
+	F = MathRoundingUtil::TruncateToHalfIfClose(F);
+	return (F < 0.0f) ? CeilToFloat(F - 0.5f) : FloorToFloat(F + 0.5f);
+}
+
+double FMath::RoundHalfFromZero(double F)
+{
+	F = MathRoundingUtil::TruncateToHalfIfClose(F);
+	return (F < 0.0) ? CeilToDouble(F - 0.5) : FloorToDouble(F + 0.5);
+}
+
+float FMath::RoundHalfToZero(float F)
+{
+	F = MathRoundingUtil::TruncateToHalfIfClose(F);
+	return (F < 0.0f) ? FloorToFloat(F + 0.5f) : CeilToFloat(F - 0.5f);
+}
+
+double FMath::RoundHalfToZero(double F)
+{
+	F = MathRoundingUtil::TruncateToHalfIfClose(F);
+	return (F < 0.0) ? FloorToDouble(F + 0.5) : CeilToDouble(F - 0.5);
 }
 
 bool FMath::MemoryTest( void* BaseAddress, uint32 NumBytes )

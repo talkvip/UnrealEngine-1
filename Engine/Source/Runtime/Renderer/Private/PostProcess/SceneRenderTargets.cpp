@@ -1318,7 +1318,7 @@ int32 FSceneRenderTargets::GetEditorMSAACompositingSampleCount() const
 	int32 Value = 1;
 
 	// only supported on SM5 yet (SM4 doesn't have MSAA sample load functionality which makes it harder to implement)
-	if (CurrentFeatureLevel >= ERHIFeatureLevel::SM5)
+	if (CurrentFeatureLevel >= ERHIFeatureLevel::SM5 && GRHISupportsMSAADepthSampleAccess)
 	{
 		static const auto CVar = IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.MSAA.CompositingSampleCount"));
 
@@ -1771,12 +1771,6 @@ void FSceneRenderTargets::AllocateRenderTargets()
 {
 	if (BufferSize.X > 0 && BufferSize.Y > 0 && !AreShadingPathRenderTargetsAllocated(CurrentShadingPath))
 	{
-		// start with a defined state for the scissor rect (D3D11 was returning (0,0,0,0) which caused a clear to not execute correctly)
-		// todo: move this to an earlier place (for dx9 is has to be after device creation which is after window creation)
-		// todo: potentially redundant now? Seems like a strange thing to have here anyway???
-		FRHICommandListImmediate& RHICmdList = FRHICommandListExecutor::GetImmediateCommandList();
-		RHICmdList.SetScissorRect(false, 0, 0, 0, 0);
-
 		if ((EShadingPath)CurrentShadingPath == EShadingPath::Forward)
 		{
 			AllocateForwardShadingPathRenderTargets();
@@ -1788,14 +1782,19 @@ void FSceneRenderTargets::AllocateRenderTargets()
 	}
 }
 
-void FSceneRenderTargets::ReleaseAllTargets()
+void FSceneRenderTargets::ReleaseSceneColor()
 {
-	ReleaseGBufferTargets();
-
 	for (auto i = 0; i < (int32)EShadingPath::Num; ++i)
 	{
 		SceneColor[i].SafeRelease();
 	}
+}
+
+void FSceneRenderTargets::ReleaseAllTargets()
+{
+	ReleaseGBufferTargets();
+
+	ReleaseSceneColor();
 
 	SceneAlphaCopy.SafeRelease();
 	SceneDepthZ.SafeRelease();
@@ -1927,6 +1926,41 @@ const FTextureRHIRef& FSceneRenderTargets::GetSceneColorTexture() const
 
 	return (const FTextureRHIRef&)GetSceneColor()->GetRenderTargetItem().ShaderResourceTexture; 
 }
+
+const FTexture2DRHIRef* FSceneRenderTargets::GetActualDepthTexture() const
+{
+	const FTexture2DRHIRef* DepthTexture = NULL;
+	if((CurrentFeatureLevel >= ERHIFeatureLevel::SM4) || IsPCPlatform(GShaderPlatformForFeatureLevel[CurrentFeatureLevel]))
+	{
+		if(GSupportsDepthFetchDuringDepthTest)
+		{
+			DepthTexture = &GetSceneDepthTexture();
+		}
+		else
+		{
+			DepthTexture = &GetAuxiliarySceneDepthSurface();
+		}
+	}
+	else if (IsMobilePlatform(GShaderPlatformForFeatureLevel[CurrentFeatureLevel]))
+	{
+		bool bSceneDepthInAlpha = (GetSceneColor()->GetDesc().Format == PF_FloatRGBA);
+		bool bOnChipDepthFetch = (GSupportsShaderDepthStencilFetch || (bSceneDepthInAlpha && GSupportsShaderFramebufferFetch));
+		
+		if (bOnChipDepthFetch)
+		{
+			DepthTexture = (const FTexture2DRHIRef*)(&GSystemTextures.DepthDummy->GetRenderTargetItem().ShaderResourceTexture);
+		}
+		else
+		{
+			DepthTexture = &GetSceneDepthTexture();
+		}
+	}
+
+	check(DepthTexture != NULL);
+
+	return DepthTexture;
+}
+
 
 IPooledRenderTarget* FSceneRenderTargets::GetGBufferVelocityRT()
 {
@@ -2178,14 +2212,6 @@ void FSceneTextureShaderParameters::Set(
 			&& !SceneDepthTextureParameter.IsBound()
 			&& !SceneColorSurfaceParameter.IsBound()
 			&& !SceneDepthSurfaceParameter.IsBound());
-	}
-	else if( TextureMode == ESceneRenderTargetsMode::NonSceneAlignedPass )
-	{
-		FSamplerStateRHIParamRef DefaultSampler = TStaticSamplerState<SF_Point,AM_Clamp,AM_Clamp,AM_Clamp>::GetRHI();
-		SetTextureParameter(RHICmdList, ShaderRHI, SceneColorTextureParameter, SceneColorTextureParameterSampler, DefaultSampler, GBlackTexture->TextureRHI);
-		SetTextureParameter(RHICmdList, ShaderRHI, SceneDepthTextureParameter, SceneDepthTextureParameterSampler, DefaultSampler, GBlackTexture->TextureRHI);
-		SetTextureParameter(RHICmdList, ShaderRHI, SceneColorSurfaceParameter, GBlackTexture->TextureRHI);
-		SetTextureParameter(RHICmdList, ShaderRHI, SceneDepthSurfaceParameter, GBlackTexture->TextureRHI);
 	}
 
 	if( DirectionalOcclusionSampler.IsBound() )

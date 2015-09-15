@@ -181,7 +181,7 @@ namespace UnrealBuildTool.IOS
 
 			// get the settings from the ini file
 			// plist replacements
-			ConfigCacheIni Ini = new ConfigCacheIni(UnrealTargetPlatform.IOS, "Engine", UnrealBuildTool.GetUProjectPath());
+			ConfigCacheIni Ini = ConfigCacheIni.CreateConfigCacheIni(UnrealTargetPlatform.IOS, "Engine", UnrealBuildTool.GetUProjectPath());
 
 			// orientations
 			string SupportedOrientations = "";
@@ -302,6 +302,8 @@ namespace UnrealBuildTool.IOS
 			Text.AppendLine("\t<true/>");
 			Text.AppendLine("\t<key>UIStatusBarHidden</key>");
 			Text.AppendLine("\t<true/>");
+			Text.AppendLine("\t<key>UIViewControllerBasedStatusBarAppearance</key>");
+			Text.AppendLine("\t<false/>");
 			Text.AppendLine("\t<key>UISupportedInterfaceOrientations</key>");
 			Text.AppendLine("\t<array>");
 			foreach (string Line in SupportedOrientations.Split("\r\n".ToCharArray()))
@@ -679,8 +681,8 @@ namespace UnrealBuildTool.IOS
 		public override bool PrepTargetForDeployment(UEBuildTarget InTarget)
 		{
 			string GameName = InTarget.TargetName;
-			string BuildPath = (GameName == "UE4Game" ? "../../Engine" : InTarget.ProjectDirectory) + "/Binaries/IOS";
-			string ProjectDirectory = InTarget.ProjectDirectory;
+			string BuildPath = (GameName == "UE4Game" ? "../../Engine" : InTarget.ProjectDirectory.FullName) + "/Binaries/IOS";
+			string ProjectDirectory = InTarget.ProjectDirectory.FullName;
 			bool bIsUE4Game = GameName.Contains("UE4Game");
 
 			string DecoratedGameName;
@@ -708,7 +710,7 @@ namespace UnrealBuildTool.IOS
 
 					try
 					{
-						string BinaryDir = Path.GetDirectoryName(InTarget.OutputPath) + "\\";
+						string BinaryDir = Path.GetDirectoryName(InTarget.OutputPath.FullName) + "\\";
 						if (BinaryDir.EndsWith(InTarget.AppName + "\\Binaries\\IOS\\") && InTarget.TargetType != TargetRules.TargetType.Game)
 						{
 							BinaryDir = BinaryDir.Replace(InTarget.TargetType.ToString(), "Game");
@@ -722,7 +724,7 @@ namespace UnrealBuildTool.IOS
 							AppFullName += "-" + InTarget.Configuration.ToString();
 						}
 
-						foreach (string BinaryPath in Toolchain.BuiltBinaries)
+						foreach (string BinaryPath in Toolchain.BuiltBinaries.Select(x => x.FullName))
 						{
 							if (!BinaryPath.Contains("Dummy"))
 							{
@@ -737,7 +739,7 @@ namespace UnrealBuildTool.IOS
 					}
 				}
 
-				GeneratePList(ProjectDirectory, bIsUE4Game, GameName, Path.GetFileNameWithoutExtension(UnrealBuildTool.GetUProjectFile()), "../../Engine", "");
+				GeneratePList(ProjectDirectory, bIsUE4Game, GameName, UnrealBuildTool.GetUProjectFile() == null ? "" : Path.GetFileNameWithoutExtension(UnrealBuildTool.GetUProjectFile().FullName), "../../Engine", "");
 			}
 			return true;
 		}
@@ -746,7 +748,7 @@ namespace UnrealBuildTool.IOS
 		{
 			// get the settings from the ini file
 			// plist replacements
-			ConfigCacheIni Ini = new ConfigCacheIni(UnrealTargetPlatform.IOS, "Engine", UnrealBuildTool.GetUProjectPath());
+			ConfigCacheIni Ini = ConfigCacheIni.CreateConfigCacheIni(UnrealTargetPlatform.IOS, "Engine", UnrealBuildTool.GetUProjectPath());
 			bool bSupported = false;
 			Ini.GetBool("/Script/IOSRuntimeSettings.IOSRuntimeSettings", "bEnableCloudKitSupport", out bSupported);
 

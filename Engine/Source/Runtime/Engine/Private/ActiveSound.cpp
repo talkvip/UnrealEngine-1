@@ -12,6 +12,7 @@ FActiveSound::FActiveSound()
 	: Sound(NULL)
 	, World(NULL)
 	, AudioComponent(NULL)
+	, AudioComponentIndex(0)
 	, SoundClassOverride(NULL)
 	, bOccluded(false)
 	, bAllowSpatialization(true)
@@ -44,6 +45,7 @@ FActiveSound::FActiveSound()
 	, PitchMultiplier(1.f)
 	, HighFrequencyGainMultiplier(1.f)
 	, SubtitlePriority(0.f)
+	, VolumeWeightedPriorityScale(1.0f)
 	, OcclusionCheckInterval(0.f)
 	, LastOcclusionCheckTime(0.f)
 	, LastLocation(FVector::ZeroVector)
@@ -174,6 +176,7 @@ void FActiveSound::UpdateWaveInstances( FAudioDevice* AudioDevice, TArray<FWaveI
 	// final value that is correct
 	UpdateAdjustVolumeMultiplier(DeltaTime);
 	ParseParams.VolumeMultiplier = VolumeMultiplier * Sound->GetVolumeMultiplier() * CurrentAdjustVolumeMultiplier * AudioDevice->TransientMasterVolume * (bOccluded ? 0.5f : 1.0f);
+	ParseParams.VolumeWeightedPriorityScale = VolumeWeightedPriorityScale;
 	ParseParams.Pitch *= PitchMultiplier * Sound->GetPitchMultiplier();
 	ParseParams.HighFrequencyGain *= HighFrequencyGainMultiplier;
 
@@ -206,6 +209,7 @@ void FActiveSound::UpdateWaveInstances( FAudioDevice* AudioDevice, TArray<FWaveI
 		{
 			AttenuationSettings.ApplyAttenuation(ParseParams.Transform, Listener.Transform.GetTranslation(), ParseParams.Volume, ParseParams.HighFrequencyGain );
 			ParseParams.OmniRadius = AttenuationSettings.OmniRadius;
+			ParseParams.StereoSpread = AttenuationSettings.StereoSpread;
 			ParseParams.bUseSpatialization = AttenuationSettings.bSpatialize;
 			if (AttenuationSettings.SpatializationAlgorithm == SPATIALIZATION_Default && AudioDevice->IsHRTFEnabledForAll())
 			{
@@ -275,7 +279,7 @@ FWaveInstance* FActiveSound::FindWaveInstance( const UPTRINT WaveInstanceHash )
 void FActiveSound::UpdateAdjustVolumeMultiplier( const float DeltaTime )
 {
 	// keep stepping towards our target until we hit our stop time
-	if( PlaybackTime <= TargetAdjustVolumeStopTime )
+	if( PlaybackTime < TargetAdjustVolumeStopTime )
 	{
 		CurrentAdjustVolumeMultiplier += (TargetAdjustVolumeMultiplier - CurrentAdjustVolumeMultiplier) * DeltaTime / (TargetAdjustVolumeStopTime - PlaybackTime);
 	}

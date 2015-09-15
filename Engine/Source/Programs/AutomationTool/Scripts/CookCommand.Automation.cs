@@ -27,7 +27,7 @@ public partial class Project : CommandUtils
 		}
 		Params.ValidateAndLog();
 
-		LogConsole("********** COOK COMMAND STARTED **********");
+		Log("********** COOK COMMAND STARTED **********");
 
 		string UE4EditorExe = HostPlatform.Current.GetUE4ExePath(Params.UE4Exe);
 		if (!FileExists(UE4EditorExe))
@@ -56,6 +56,10 @@ public partial class Project : CommandUtils
 				{
 					COTFCommandLine += " -iterate";
 				}
+				if (Params.UseDebugParamForEditorExe)
+				{
+					COTFCommandLine += " -debug";
+				}
 
 				var ServerLogFile = CombinePaths(LogFolderOutsideOfSandbox, "Server.log");
 				Platform ClientPlatformInst = Params.ClientTargetPlatformInstances[0];
@@ -64,7 +68,7 @@ public partial class Project : CommandUtils
 
 				if (ServerProcess != null)
 				{
-					LogConsole("Waiting a few seconds for the server to start...");
+					Log("Waiting a few seconds for the server to start...");
 					Thread.Sleep(5000);
 				}
 			}
@@ -83,7 +87,7 @@ public partial class Project : CommandUtils
 				{
 					// Use the data platform, sometimes we will copy another platform's data
 					var DataPlatform = Params.GetCookedDataPlatformForClientTarget(ClientPlatform);
-					PlatformsToCook.Add(Params.GetTargetPlatformInstance(DataPlatform).GetCookPlatform(false, Params.HasDedicatedServerAndClient, Params.CookFlavor));
+					PlatformsToCook.Add(Params.GetTargetPlatformInstance(DataPlatform).GetCookPlatform(false, Params.Client, Params.CookFlavor));
 				}
 			}
 			if (Params.DedicatedServer)
@@ -98,7 +102,7 @@ public partial class Project : CommandUtils
 
 			if (Params.Clean.HasValue && Params.Clean.Value && !Params.IterativeCooking)
 			{
-				LogConsole("Cleaning cooked data.");
+				Log("Cleaning cooked data.");
 				CleanupCookedData(PlatformsToCook.ToList(), Params);
 			}
 
@@ -109,11 +113,11 @@ public partial class Project : CommandUtils
 				Maps = Params.MapsToCook.ToArray();
                 foreach (var M in Maps)
                 {
-					LogConsole("HasMapsToCook " + M.ToString());
+					Log("HasMapsToCook " + M.ToString());
                 }
                 foreach (var M in Params.MapsToCook)
                 {
-					LogConsole("Params.HasMapsToCook " + M.ToString());
+					Log("Params.HasMapsToCook " + M.ToString());
                 }
 			}
 
@@ -137,7 +141,7 @@ public partial class Project : CommandUtils
 
             try
             {
-                var CommandletParams = "-buildmachine -fileopenlog";
+                var CommandletParams = IsBuildMachine ? "-buildmachine -fileopenlog" : "-fileopenlog";
                 if (Params.UnversionedCookedContent)
                 {
                     CommandletParams += " -unversioned";
@@ -241,15 +245,153 @@ public partial class Project : CommandUtils
 				else
 				{
 					// Delete cooked data (if any) as it may be incomplete / corrupted.
-					LogConsole("Cook failed. Deleting cooked data.");
+					Log("Cook failed. Deleting cooked data.");
 					CleanupCookedData(PlatformsToCook.ToList(), Params);
-					throw new AutomationException(ErrorCodes.Error_UnknownCookFailure, Ex, "Cook failed.");
+					throw new AutomationException(ExitCode.Error_UnknownCookFailure, Ex, "Cook failed.");
 				}
 			}
+
+            if (Params.HasDiffCookedContentPath)
+            {
+                try
+                {
+                    DiffCookedContent(Params);
+                }
+                catch ( Exception Ex )
+                {
+                    // Delete cooked data (if any) as it may be incomplete / corrupted.
+                    Log("Cook failed. Deleting cooked data.");
+                    CleanupCookedData(PlatformsToCook.ToList(), Params);
+                    throw new AutomationException(ExitCode.Error_UnknownCookFailure, Ex, "Cook failed.");
+                }
+            }
+            
 		}
 
-		LogConsole("********** COOK COMMAND COMPLETED **********");
+
+		Log("********** COOK COMMAND COMPLETED **********");
 	}
+
+    private static void DiffCookedContent( ProjectParams Params)
+    {
+        List<UnrealTargetPlatform> PlatformsToCook = Params.ClientTargetPlatforms;
+        string ProjectPath = Path.GetFullPath(Params.RawProjectPath);
+
+        var CookedSandboxesPath = CombinePaths(GetDirectoryName(ProjectPath), "Saved", "Cooked");
+
+        for (int CookPlatformIndex = 0; CookPlatformIndex < PlatformsToCook.Count; ++CookPlatformIndex)
+        {
+            // temporary directory to save the pak file to (pak file is usually not local and on network drive)
+            var TemporaryPakPath = CombinePaths(GetDirectoryName(ProjectPath), "Saved", "Temp", "LocalPKG");
+            // extracted files from pak file
+            var TemporaryFilesPath = CombinePaths(GetDirectoryName(ProjectPath), "Saved", "Temp", "LocalFiles");
+
+            
+
+            try
+            {
+                Directory.Delete(TemporaryPakPath, true);
+                Directory.Delete(TemporaryFilesPath, true);
+            }
+            catch(Exception )
+            {
+                Log("Failed deleting temporary directories "+TemporaryPakPath+" "+TemporaryFilesPath+" continuing.");
+            }
+
+            Directory.CreateDirectory(TemporaryPakPath);
+            Directory.CreateDirectory(TemporaryFilesPath);
+
+            Platform CurrentPlatform = Params.GetTargetPlatformInstance(PlatformsToCook[CookPlatformIndex]);
+
+            string SourceCookedContentPath = Params.DiffCookedContentPath;
+
+            List<string> PakFiles = new List<string>();
+
+            if (Path.HasExtension(SourceCookedContentPath) && (!SourceCookedContentPath.EndsWith(".pak")))
+            {
+                // must be a per platform pkg file try this
+                CurrentPlatform.ExtractPackage(Params, Params.DiffCookedContentPath, TemporaryPakPath);
+
+                // find the pak file
+                PakFiles = Directory.EnumerateFiles(TemporaryPakPath, "*.pak").ToList();
+            }
+
+            string CookPlatformString = CurrentPlatform.GetCookPlatform(false, Params.HasDedicatedServerAndClient, Params.CookFlavor);
+
+            if (!Path.HasExtension(SourceCookedContentPath))
+            {
+                // try find the pak or pkg file
+                string SourceCookedContentPlatformPath = CombinePaths(SourceCookedContentPath, CookPlatformString);
+
+                foreach (var PakName in Directory.EnumerateFiles(SourceCookedContentPlatformPath, "*.pak"))
+                {
+                    string TemporaryPakFilename = CombinePaths(TemporaryPakPath, Path.GetFileName(PakName ));
+                    File.Copy(PakName , TemporaryPakFilename);
+                    PakFiles.Add(TemporaryPakFilename);
+                }
+            }
+            else if (SourceCookedContentPath.EndsWith(".pak"))
+            {
+                string TemporaryPakFilename = CombinePaths(TemporaryPakPath, Path.GetFileName(SourceCookedContentPath));
+                File.Copy(SourceCookedContentPath, TemporaryPakFilename);
+                PakFiles.Add(TemporaryPakFilename);
+            }
+
+
+            string FullCookPath = CombinePaths(CookedSandboxesPath, CookPlatformString);
+
+            var UnrealPakExe = CombinePaths(CmdEnv.LocalRoot, "Engine/Binaries/Win64/UnrealPak.exe");
+
+            
+            foreach (var Name in PakFiles)
+            {
+                string UnrealPakParams = Name + " -Extract " + " " + TemporaryFilesPath;
+
+                RunAndLog(CmdEnv, UnrealPakExe, UnrealPakParams, Options: ERunOptions.Default | ERunOptions.UTF8Output);
+            }
+
+            const string RootFailedContentDirectory = "\\\\epicgames.net\\root\\Developers\\Daniel.Lamb\\";
+
+            string FailedContentDirectory = CombinePaths( RootFailedContentDirectory, CommandUtils.P4Env.BuildRootP4 + CommandUtils.P4Env.ChangelistString, Params.ShortProjectName, CookPlatformString );
+
+
+            // diff the content
+            List<string> AllFiles = Directory.EnumerateFiles(FullCookPath, "*.uasset", System.IO.SearchOption.AllDirectories).ToList();
+            AllFiles.AddRange(Directory.EnumerateFiles(FullCookPath, "*.map", System.IO.SearchOption.AllDirectories).ToList());
+            foreach (string SourceFilename in AllFiles)
+            {
+                // Filename.StartsWith( CookedSandboxesPath );
+                string RelativeFilename = SourceFilename.Remove(0, FullCookPath.Length);
+                
+                string DestFilename = TemporaryFilesPath + RelativeFilename;
+
+                byte[] SourceFile = File.ReadAllBytes(SourceFilename);
+
+                byte[] DestFile = File.ReadAllBytes(DestFilename);
+
+                if ( SourceFile.LongLength == DestFile.LongLength )
+                {
+                    for ( long Index = 0; Index < SourceFile.LongLength; ++Index )
+                    {
+                        if ( SourceFile[Index] != DestFile[Index] )
+                        {
+					        Log("Diff cooked content failed on file " +SourceFilename + " when comparing against "+DestFilename + " at offset " + Index.ToString() );
+                            string SavedSourceFilename = CombinePaths( FailedContentDirectory, "Source" + Path.GetFileName(SourceFilename));
+                            string SavedDestFilename = CombinePaths( FailedContentDirectory, "Dest" + Path.GetFileName(DestFilename));
+                            File.Copy(SourceFilename, SavedSourceFilename);
+                            File.Copy(DestFilename, SavedDestFilename);
+                            Log("Content temporarily saved to " +SavedSourceFilename + " and "+SavedDestFilename + " at offset " + Index.ToString() );
+                            break;
+                        }
+                    }
+                }
+                else
+                {
+                    Log("Diff cooked content failed on file " +SourceFilename + " when comparing against "+DestFilename + " files are different sizes " + SourceFile.LongLength.ToString() + " " + DestFile.LongLength.ToString() );
+                }
+            } 
+        }
+    }
 
 	private static void CleanupCookedData(List<string> PlatformsToCook, ProjectParams Params)
 	{

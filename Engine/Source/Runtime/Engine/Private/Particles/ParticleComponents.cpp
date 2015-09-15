@@ -1791,6 +1791,23 @@ void UParticleSystem::PostEditChangeProperty(FPropertyChangedEvent& PropertyChan
 		}
 	}
 
+	// Ensure the bounds have a positive size
+	if (FixedRelativeBoundingBox.IsValid)
+	{
+		if (FixedRelativeBoundingBox.Min.X > FixedRelativeBoundingBox.Max.X)
+		{
+			Swap(FixedRelativeBoundingBox.Min.X, FixedRelativeBoundingBox.Max.X);
+		}
+		if (FixedRelativeBoundingBox.Min.Y > FixedRelativeBoundingBox.Max.Y)
+		{
+			Swap(FixedRelativeBoundingBox.Min.Y, FixedRelativeBoundingBox.Max.Y);
+		}
+		if (FixedRelativeBoundingBox.Min.Z > FixedRelativeBoundingBox.Max.Z)
+		{
+			Swap(FixedRelativeBoundingBox.Min.Z, FixedRelativeBoundingBox.Max.Z);
+		}
+	}
+
 	//cap the WarmupTickRate to realistic values
 	if (WarmupTickRate <= 0)
 	{
@@ -2043,6 +2060,33 @@ void UParticleSystem::UpdateColorModuleClampAlpha(UParticleModuleColorBase* Colo
 void UParticleSystem::GetAssetRegistryTags(TArray<FAssetRegistryTag>& OutTags) const
 {
 	OutTags.Add( FAssetRegistryTag("HasGPUEmitter", HasGPUEmitter() ? TEXT("True") : TEXT("False"), FAssetRegistryTag::TT_Alphabetical) );
+
+	const float BoundsSize = FixedRelativeBoundingBox.GetSize().GetMax();
+	OutTags.Add(FAssetRegistryTag("FixedBoundsSize", bUseFixedRelativeBoundingBox ? FString::Printf(TEXT("%.2f"), BoundsSize) : FString(TEXT("None")), FAssetRegistryTag::TT_Numerical));
+
+	OutTags.Add(FAssetRegistryTag("NumEmitters", LexicalConversion::ToString(Emitters.Num()), FAssetRegistryTag::TT_Numerical));
+
+	OutTags.Add(FAssetRegistryTag("NumLODs", LexicalConversion::ToString(LODDistances.Num()), FAssetRegistryTag::TT_Numerical));
+
+	// Done here instead of as an AssetRegistrySearchable string to avoid the long prefix on the enum value string
+	FString LODMethodString = TEXT("Unknown");
+	switch (LODMethod)
+	{
+	case PARTICLESYSTEMLODMETHOD_Automatic:
+		LODMethodString = TEXT("Automatic");
+		break;
+	case PARTICLESYSTEMLODMETHOD_DirectSet:
+		LODMethodString = TEXT("DirectSet");
+		break;
+	case PARTICLESYSTEMLODMETHOD_ActivateAutomatic:
+		LODMethodString = TEXT("Activate Automatic");
+		break;
+	default:
+		check(false); // Missing enum entry
+		break;
+	}
+	OutTags.Add(FAssetRegistryTag("LODMethod", LODMethodString, FAssetRegistryTag::TT_Alphabetical));
+
 	Super::GetAssetRegistryTags(OutTags);
 }
 
@@ -2100,25 +2144,17 @@ void UParticleSystem::SetupSoloing()
 		if (Emitters.Num())
 		{
 			// Store the settings of bEnabled for each LODLevel in each emitter
-			UParticleEmitter* ZeroEmitter = NULL;
+			SoloTracking.Empty(Emitters.Num());
+			SoloTracking.AddZeroed(Emitters.Num());
 			for (int32 EmitterIdx = 0; EmitterIdx < Emitters.Num(); EmitterIdx++)
 			{
 				UParticleEmitter* Emitter = Emitters[EmitterIdx];
-				if ((Emitter != NULL) && (ZeroEmitter == NULL))
+				if (Emitter != nullptr)
 				{
-					ZeroEmitter = Emitter;
-					break;
+					FLODSoloTrack& SoloTrack = SoloTracking[EmitterIdx];
+					SoloTrack.SoloEnableSetting.Empty(Emitter->LODLevels.Num());
+					SoloTrack.SoloEnableSetting.AddZeroed(Emitter->LODLevels.Num());
 				}
-			}
-			check(ZeroEmitter != NULL);
-
-			SoloTracking.Empty(Emitters.Num());
-			SoloTracking.AddZeroed(Emitters.Num());
-			for (int32 SoloIdx = 0; SoloIdx < SoloTracking.Num(); SoloIdx++)
-			{
-				FLODSoloTrack& SoloTrack = SoloTracking[SoloIdx];
-				SoloTrack.SoloEnableSetting.Empty(ZeroEmitter->LODLevels.Num());
-				SoloTrack.SoloEnableSetting.AddZeroed(ZeroEmitter->LODLevels.Num());
 			}
 
 			for (int32 EmitterIdx = 0; EmitterIdx < Emitters.Num(); EmitterIdx++)
@@ -2127,7 +2163,8 @@ void UParticleSystem::SetupSoloing()
 				if (Emitter != NULL)
 				{
 					FLODSoloTrack& SoloTrack = SoloTracking[EmitterIdx];
-					for (int32 LODIdx = 0; LODIdx < Emitter->LODLevels.Num(); LODIdx++)
+					int32 MaxLOD = FMath::Min(SoloTrack.SoloEnableSetting.Num(), Emitter->LODLevels.Num());
+					for (int32 LODIdx = 0; LODIdx < MaxLOD; LODIdx++)
 					{
 						UParticleLODLevel* LODLevel = Emitter->LODLevels[LODIdx];
 						check(LODLevel);
@@ -2678,6 +2715,8 @@ UParticleSystemComponent::UParticleSystemComponent(const FObjectInitializer& Obj
 
 	// Disable receiving decals by default.
 	bReceivesDecals = false;
+
+	SavedAutoAttachRelativeScale3D = FVector(1.f, 1.f, 1.f);
 }
 
 #if WITH_EDITOR
@@ -2820,6 +2859,39 @@ void UParticleSystemComponent::OnRegister()
 	if (World->Scene)
 	{
 		FXSystem = World->Scene->GetFXSystem();
+	}
+
+	if (bAutoManageAttachment && !IsActive())
+	{
+		// Detach from current parent, we are supposed to wait for activation.
+		if (AttachParent)
+		{
+			// If no auto attach parent override, use the current parent when we activate
+			if (!AutoAttachParent.IsValid())
+			{
+				AutoAttachParent = AttachParent;
+			}
+			// If no auto attach socket override, use current socket when we activate
+			if (AutoAttachSocketName == NAME_None)
+			{
+				AutoAttachSocketName = AttachSocketName;
+			}
+
+			// Prevent attachment before Super::OnRegister() tries to attach us, since we only attach when activated.
+			if (AttachParent->AttachChildren.Contains(this))
+			{
+				DetachFromParent(/*bMaintainWorldPosition=*/ false, /*bCallModify=*/ false);
+			}
+			else
+			{
+				AttachParent = nullptr;
+				AttachSocketName = NAME_None;
+			}
+
+			SavedAutoAttachRelativeLocation = RelativeLocation;
+			SavedAutoAttachRelativeRotation = RelativeRotation;
+			SavedAutoAttachRelativeScale3D = RelativeScale3D;
+		}
 	}
 
 	Super::OnRegister();
@@ -2977,7 +3049,7 @@ FDynamicEmitterDataBase* UParticleSystemComponent::CreateDynamicDataFromReplay( 
 		case DET_Sprite:
 			{
 				// Allocate the dynamic data
-				FDynamicSpriteEmitterData* NewEmitterData = ::new FDynamicSpriteEmitterData(EmitterInstance->CurrentLODLevel->RequiredModule);
+				FDynamicSpriteEmitterData* NewEmitterData = new FDynamicSpriteEmitterData(EmitterInstance->CurrentLODLevel->RequiredModule);
 
 				// Fill in the source data
 				const FDynamicSpriteEmitterReplayData* SpriteEmitterReplayData =
@@ -3026,7 +3098,7 @@ FDynamicEmitterDataBase* UParticleSystemComponent::CreateDynamicDataFromReplay( 
 		case DET_Beam2:
 			{
 				// Allocate the dynamic data
-				FDynamicBeam2EmitterData* NewEmitterData = ::new FDynamicBeam2EmitterData(EmitterInstance->CurrentLODLevel->RequiredModule);
+				FDynamicBeam2EmitterData* NewEmitterData = new FDynamicBeam2EmitterData(EmitterInstance->CurrentLODLevel->RequiredModule);
 
 				// Fill in the source data
 				const FDynamicBeam2EmitterReplayData* Beam2EmitterReplayData =
@@ -3043,7 +3115,7 @@ FDynamicEmitterDataBase* UParticleSystemComponent::CreateDynamicDataFromReplay( 
 		case DET_Ribbon:
 			{
 				// Allocate the dynamic data
-				FDynamicRibbonEmitterData* NewEmitterData = ::new FDynamicRibbonEmitterData(EmitterInstance->CurrentLODLevel->RequiredModule);
+				FDynamicRibbonEmitterData* NewEmitterData = new FDynamicRibbonEmitterData(EmitterInstance->CurrentLODLevel->RequiredModule);
 
 				// Fill in the source data
 				const FDynamicRibbonEmitterReplayData* Trail2EmitterReplayData = static_cast<const FDynamicRibbonEmitterReplayData*>(EmitterReplayData);
@@ -3057,7 +3129,7 @@ FDynamicEmitterDataBase* UParticleSystemComponent::CreateDynamicDataFromReplay( 
 		case DET_AnimTrail:
 			{
 				// Allocate the dynamic data
-				FDynamicAnimTrailEmitterData* NewEmitterData = ::new FDynamicAnimTrailEmitterData(EmitterInstance->CurrentLODLevel->RequiredModule);
+				FDynamicAnimTrailEmitterData* NewEmitterData = new FDynamicAnimTrailEmitterData(EmitterInstance->CurrentLODLevel->RequiredModule);
 				// Fill in the source data
 				const FDynamicTrailsEmitterReplayData* AnimTrailEmitterReplayData = static_cast<const FDynamicTrailsEmitterReplayData*>(EmitterReplayData);
 				NewEmitterData->Source = *AnimTrailEmitterReplayData;
@@ -3108,12 +3180,11 @@ FParticleDynamicData* UParticleSystemComponent::CreateDynamicData()
 		}
 	}
 
+
 	FParticleDynamicData* ParticleDynamicData = new FParticleDynamicData();
-	{
-		SCOPE_CYCLE_COUNTER(STAT_ParticleMemTime);
-		INC_DWORD_STAT(STAT_DynamicPSysCompCount);
-		INC_DWORD_STAT_BY(STAT_DynamicPSysCompMem, sizeof(FParticleDynamicData));
-	}
+	INC_DWORD_STAT(STAT_DynamicPSysCompCount);
+	INC_DWORD_STAT_BY(STAT_DynamicPSysCompMem, sizeof(FParticleDynamicData));
+
 	if (Template)
 	{
 		ParticleDynamicData->SystemPositionForMacroUVs = ComponentToWorld.TransformPosition(Template->MacroUVPosition);
@@ -3122,6 +3193,7 @@ FParticleDynamicData* UParticleSystemComponent::CreateDynamicData()
 
 	if( ReplayState == PRS_Replaying )
 	{
+		QUICK_SCOPE_CYCLE_COUNTER(STAT_ParticleSystemComponent_CreateDynamicData_Replay);
 		// Do we have any replay data to play back?
 		UParticleSystemReplay* ReplayData = FindReplayClipForIDNumber( ReplayClipIDNumber );
 		if( ReplayData != NULL )
@@ -3134,7 +3206,8 @@ FParticleDynamicData* UParticleSystemComponent::CreateDynamicData()
 
 
 				// Fill the emitter dynamic buffers with data from our replay
-				ParticleDynamicData->DynamicEmitterDataArray.Empty( CurReplayFrame.Emitters.Num() );
+				ParticleDynamicData->DynamicEmitterDataArray.Reset();
+				ParticleDynamicData->DynamicEmitterDataArray.Reserve(CurReplayFrame.Emitters.Num());
 				for( int32 CurEmitterIndex = 0; CurEmitterIndex < CurReplayFrame.Emitters.Num(); ++CurEmitterIndex )
 				{
 					const FParticleEmitterReplayFrame& CurEmitter = CurReplayFrame.Emitters[ CurEmitterIndex ];
@@ -3164,6 +3237,7 @@ FParticleDynamicData* UParticleSystemComponent::CreateDynamicData()
 		FParticleSystemReplayFrame* NewReplayFrame = NULL;
 		if( ReplayState == PRS_Capturing )
 		{
+			QUICK_SCOPE_CYCLE_COUNTER(STAT_ParticleSystemComponent_CreateDynamicData_Capture);
 			ForceAsyncWorkCompletion(ENSURE_AND_STALL);
 			check(IsInGameThread());
 			// If we don't have any replay data for this component yet, create some now
@@ -3198,7 +3272,9 @@ FParticleDynamicData* UParticleSystemComponent::CreateDynamicData()
 		// Is the particle system allowed to run?
 		if( bForcedInActive == false )
 		{
-			ParticleDynamicData->DynamicEmitterDataArray.Empty(EmitterInstances.Num());
+			QUICK_SCOPE_CYCLE_COUNTER(STAT_ParticleSystemComponent_CreateDynamicData_Gather);
+			ParticleDynamicData->DynamicEmitterDataArray.Reset();
+			ParticleDynamicData->DynamicEmitterDataArray.Reserve(EmitterInstances.Num());
 
 			for (int32 EmitterIndex = 0; EmitterIndex < EmitterInstances.Num(); EmitterIndex++)
 			{
@@ -3207,7 +3283,17 @@ FParticleDynamicData* UParticleSystemComponent::CreateDynamicData()
 				if (EmitterInst)
 				{
 					// Generate the dynamic data for this emitter
-					NewDynamicEmitterData = EmitterInst->GetDynamicData( IsOwnerSelected() );
+					{
+						QUICK_SCOPE_CYCLE_COUNTER(STAT_ParticleSystemComponent_GetDynamicData);
+						bool bIsOwnerSeleted = false;
+#if WITH_EDITOR
+						{
+							QUICK_SCOPE_CYCLE_COUNTER(STAT_ParticleSystemComponent_GetDynamicData_Selected);
+							bIsOwnerSeleted = IsOwnerSelected();
+						}
+#endif
+						NewDynamicEmitterData = EmitterInst->GetDynamicData(bIsOwnerSeleted);
+					}
 					if( NewDynamicEmitterData != NULL )
 					{
 						NewDynamicEmitterData->bValid = true;
@@ -3215,6 +3301,7 @@ FParticleDynamicData* UParticleSystemComponent::CreateDynamicData()
 						// Are we current capturing particle state?
 						if( ReplayState == PRS_Capturing )
 						{
+							QUICK_SCOPE_CYCLE_COUNTER(STAT_ParticleSystemComponent_CreateDynamicData_GatherCapture);
 							// Capture replay data for this particle system
 							// NOTE: This call should always succeed if GetDynamicData succeeded earlier
 							FDynamicEmitterReplayDataBase* NewEmitterReplayData = EmitterInst->GetReplayData();
@@ -3314,6 +3401,7 @@ void UParticleSystemComponent::UpdateDynamicData(FParticleSystemSceneProxy* Prox
 		//@todo.SAS. Remove thisline  - it is used for debugging purposes...
 		Proxy->SetLastDynamicData(Proxy->GetDynamicData());
 		//@todo.SAS. END
+		Proxy->SetVisualizeLODIndex(GetCurrentLODIndex());
 #endif // !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
 		Proxy->UpdateData( ParticleDynamicData );
 	}
@@ -3383,7 +3471,11 @@ void UParticleSystemComponent::OrientZAxisTowardCamera()
 	ForceAsyncWorkCompletion(ENSURE_AND_STALL);
 
 	//@TODO: CAMERA: How does this work for stereo and/or split-screen?
-	APlayerController* PlayerController = GetWorld()->GetFirstPlayerController();
+	APlayerController* PlayerController = nullptr;
+	if (GetWorld() && GetWorld()->GetGameInstance())
+	{
+		PlayerController = GetWorld()->GetGameInstance()->GetFirstLocalPlayerController();
+	}
 
 	// Orient the Z axis toward the camera
 	if (PlayerController && PlayerController->PlayerCameraManager)
@@ -3598,6 +3690,10 @@ void UParticleSystemComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 		{
 			// We need to destroy the component if the user is expecting us to do it automatically otherwise this component will live forever because HasCompleted() will never get checked
 			DestroyComponent();
+		}
+		else
+		{
+			SetComponentTickEnabled(false);
 		}
 		return;
 	}
@@ -3881,6 +3977,10 @@ void UParticleSystemComponent::FinalizeTickComponent()
 		if (bAutoDestroy)
 		{
 			DestroyComponent();
+		}
+		else if (bAutoManageAttachment)
+		{
+			CancelAutoAttachment(/*bDetachFromParent=*/ true);
 		}
 	}
 	bWasCompleted = bIsCompleted;
@@ -4315,6 +4415,23 @@ void UParticleSystemComponent::ActivateSystem(bool bFlagAsJustAttached)
 
 	if( GIsAllowingParticles && bDetailModeAllowsRendering )
 	{
+		// Auto attach if requested
+		bDidAutoAttach = false;
+		if (bAutoManageAttachment)
+		{
+			USceneComponent* NewParent = AutoAttachParent.Get();
+			if (NewParent)
+			{
+				SavedAutoAttachRelativeLocation = RelativeLocation;
+				SavedAutoAttachRelativeRotation = RelativeRotation;
+				SavedAutoAttachRelativeScale3D = RelativeScale3D;
+
+				AttachTo(NewParent, AutoAttachSocketName, AutoAttachLocationType);
+				bDidAutoAttach = true;
+				bFlagAsJustAttached = true;
+			}
+		}
+
 		if (bFlagAsJustAttached)
 		{
 			bJustRegistered = true;
@@ -4480,6 +4597,26 @@ void UParticleSystemComponent::DeactivateSystem()
 	}
 
 	LastRenderTime = GetWorld()->GetTimeSeconds();
+}
+
+void UParticleSystemComponent::CancelAutoAttachment(bool bDetachFromParent)
+{
+	if (bAutoManageAttachment)
+	{
+		if (bDidAutoAttach)
+		{
+			// Restore relative transform from before attachment. Actual transform will be updated as part of DetachFromParent().
+			RelativeLocation = SavedAutoAttachRelativeLocation;
+			RelativeRotation = SavedAutoAttachRelativeRotation;
+			RelativeScale3D = SavedAutoAttachRelativeScale3D;
+			bDidAutoAttach = false;
+		}
+
+		if (bDetachFromParent)
+		{
+			DetachFromParent(/*bMaintainWorldPosition=*/ false);
+		}
+	}
 }
 
 void UParticleSystemComponent::ComputeCanTickInAnyThread()
@@ -5069,26 +5206,21 @@ int32 UParticleSystemComponent::DetermineLODLevelForLocation(const FVector& Effe
 		}
 
 		// This will now put everything in LODLevel 0 (high detail) by default
-		float LODDistance = 0.0f;
-		if (PlayerViewLocations.Num())
+		float LODDistanceSqr = (PlayerViewLocations.Num() ? FMath::Square(WORLD_MAX) : 0.0f);
+		for (const FVector& ViewLocation : PlayerViewLocations)
 		{
-			LODDistance = WORLD_MAX;
-			int32 NumLocations = PlayerViewLocations.Num();
-			for (int32 i = 0; i < NumLocations; ++i)
+			const float DistanceToEffectSqr = FVector(ViewLocation - EffectLocation).SizeSquared();
+			if (DistanceToEffectSqr < LODDistanceSqr)
 			{
-				float DistanceToEffect = FVector(PlayerViewLocations[i] - EffectLocation).Size();
-				if (DistanceToEffect < LODDistance)
-				{
-					LODDistance = DistanceToEffect;
-				}
+				LODDistanceSqr = DistanceToEffectSqr;
 			}
 		}
 
 		// Find appropriate LOD based on distance
 		Retval = Template->LODDistances.Num() - 1;
-		for (int32 LODIdx = 1; LODIdx < Template->LODDistances.Num(); LODIdx++)
+		for (int32 LODIdx = 1; LODIdx < Template->LODDistances.Num(); ++LODIdx)
 		{
-			if (LODDistance < Template->LODDistances[LODIdx])
+			if (LODDistanceSqr < FMath::Square(Template->LODDistances[LODIdx]))
 			{
 				Retval = LODIdx - 1;
 				break;
@@ -5576,7 +5708,7 @@ void UParticleSystemComponent::GetUsedMaterials( TArray<UMaterialInterface*>& Ou
 							const UParticleModuleTypeDataMesh* TypeDataModule = Cast<UParticleModuleTypeDataMesh>( LOD->TypeDataModule );
 							if( !TypeDataModule->bOverrideMaterial )
 							{
-								// If the material isnt being overriden by the required module, for each mesh section, find the corresponding entry in the mesh material module
+								// If the material isnt being overridden by the required module, for each mesh section, find the corresponding entry in the mesh material module
 								// If that entry does not exist, take the material directly off the mesh section
 								const UParticleModuleMeshMaterial* MaterialModule = Cast<UParticleModuleMeshMaterial>( LOD->Modules[ ModuleIdx ] );
 								if( TypeDataModule->Mesh )

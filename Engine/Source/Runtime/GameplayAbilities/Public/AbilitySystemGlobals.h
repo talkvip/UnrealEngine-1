@@ -17,6 +17,9 @@ struct FGameplayEffectContext;
 struct FGameplayTag;
 struct FAttributeSetInitter;
 struct FGameplayEffectSpec;
+struct FGameplayEffectSpecForRPC;
+struct FGameplayCueParameters;
+struct FGameplayEffectContextHandle;
 
 /** Holds global data for the ability system. Can be configured per project via config file */
 UCLASS(config=Game)
@@ -159,6 +162,15 @@ class GAMEPLAYABILITIES_API UAbilitySystemGlobals : public UObject
 			ActivateFailNetworkingTag = IGameplayTagsModule::RequestGameplayTag(ActivateFailNetworkingName);
 		}
 	}
+
+	// GameplayCue Parameters
+	virtual void InitGameplayCueParameters(FGameplayCueParameters& CueParameters, const FGameplayEffectSpecForRPC &Spec);
+	virtual void InitGameplayCueParameters(FGameplayCueParameters& CueParameters, const FGameplayEffectContextHandle& EffectContext);
+
+	// Trigger async loading of the gameplay cue object libraries. By default, the manager will do this on creation,
+	// but that behaviour can be changed by a derived class overriding ShouldAsyncLoadObjectLibrariesAtStart and returning false.
+	// In that case, this function must be called to begin the load
+	virtual void StartAsyncLoadingObjectLibraries();
 
 protected:
 

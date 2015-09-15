@@ -235,7 +235,8 @@ public:
 	void SetTickFunctionEnable(bool bInEnabled);
 	/** Returns whether the tick function is currently enabled */
 	bool IsTickFunctionEnabled() const { return TickState != ETickState::Disabled; }
-
+	/** Returns whether it is valid to access this tick function's completion handle */
+	bool IsCompletionHandleValid() const { return TaskPointer != nullptr; }
 	/**
 	* Gets the current completion handle of this tick function, so it can be delayed until a later point when some additional
 	* tasks have been completed.  Only valid after TG_PreAsyncWork has started and then only until the TickFunction finishes
@@ -297,8 +298,9 @@ private:
 	 * Queues a tick function for execution from the game thread
 	 * @param TickContext - context to tick in
 	 * @param StackForCycleDetection - Stack For Cycle Detection
+	 * @param bWasInterval - true if this was an interval tick
 	 */
-	void QueueTickFunctionParallel(const struct FTickContext& TickContext, TArray<FTickFunction*, TInlineAllocator<4> >& StackForCycleDetection, struct FTickGroupCompletionItem* AllCompletionEvents, int32 Index, bool bWasInterval);
+	void QueueTickFunctionParallel(const struct FTickContext& TickContext, TArray<FTickFunction*, TInlineAllocator<8> >& StackForCycleDetection, bool bWasInterval);
 
 	/** 
 	 * Logs the prerequisites
@@ -726,14 +728,16 @@ enum EViewModeIndex
 	VMI_LitLightmapDensity = 10,
 	VMI_ReflectionOverride = 11,
 	VMI_VisualizeBuffer = 12,
-//	VMI_VoxelLighting = 13,
+	//	VMI_VoxelLighting = 13,
 
 	/** Colored according to stationary light overlap. */
 	VMI_StationaryLightOverlap = 14,
-//	VMI_VertexDensity = 15,
 
 	VMI_CollisionPawn = 15, 
 	VMI_CollisionVisibility = 16, 
+	VMI_VertexDensities = 17,
+	/** Colored according to the current LOD index. */
+	VMI_LODColoration = 18,
 	VMI_Max UMETA(Hidden),
 
 	VMI_Unknown = 255 UMETA(Hidden),

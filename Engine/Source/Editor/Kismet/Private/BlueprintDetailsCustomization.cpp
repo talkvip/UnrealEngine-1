@@ -8,6 +8,7 @@
 #include "PropertyRestriction.h"
 #include "BlueprintEditor.h"
 #include "BlueprintEditorModes.h"
+#include "BlueprintEditorSettings.h"
 #include "Editor/PropertyEditor/Public/PropertyEditing.h"
 #include "SColorPicker.h"
 #include "SKismetInspector.h"
@@ -191,6 +192,9 @@ void FBlueprintVarActionDetails::CustomizeDetails( IDetailLayoutBuilder& DetailL
 	{
 		return;
 	}
+
+	// Help in tracking UE-20390
+	UE_LOG(LogBlueprintUserMessages, Log, TEXT("CustomizeDetails for Blueprint '%s', cached variable property's owner is '%s'"), *GetBlueprintObj()->GetName(), *CachedVariableProperty->GetOwnerClass()->GetPathName());
 
 	CachedVariableName = GetVariableName();
 
@@ -390,7 +394,7 @@ void FBlueprintVarActionDetails::CustomizeDetails( IDetailLayoutBuilder& DetailL
 		ConfigTooltipArgs.Add(TEXT("ConfigPath"), FText::FromString(OwnerClass->GetDefaultConfigFilename()));
 		ConfigTooltipArgs.Add(TEXT("ConfigSection"), FText::FromString(OwnerClass->GetPathName()));
 	}
-	const FText LocalisedTooltip = FText::Format(LOCTEXT("VariableExposeToConfig_Tooltip", "Should this variable read it's default value from a config file if it is present?\r\n\r\nThis is used for customising variable default values and behavior between different projects and configurations.\r\n\r\nConfig file [{ConfigPath}]\r\nConfig section [{ConfigSection}]"), ConfigTooltipArgs); 
+	const FText LocalisedTooltip = FText::Format(LOCTEXT("VariableExposeToConfig_Tooltip", "Should this variable read its default value from a config file if it is present?\r\n\r\nThis is used for customising variable default values and behavior between different projects and configurations.\r\n\r\nConfig file [{ConfigPath}]\r\nConfig section [{ConfigSection}]"), ConfigTooltipArgs); 
 
 	TSharedPtr<SToolTip> ExposeToConfigTooltip = IDocumentation::Get()->CreateToolTip(LocalisedTooltip, NULL, DocLink, TEXT("ExposeToConfig"));
 
@@ -722,7 +726,7 @@ void FBlueprintVarActionDetails::CustomizeDetails( IDetailLayoutBuilder& DetailL
 				IDetailPropertyRow* Row = DefaultValueCategory.AddExternalProperty(ObjectList, VariableProperty->GetFName());
 				if (Row != nullptr)
 				{
-					Row->IsEnabled(IsVariableInBlueprint());
+					Row->IsEnabled(IsVariableInheritedByBlueprint());
 				}
 			}
 		}
@@ -1833,6 +1837,12 @@ void FBlueprintVarActionDetails::OnPostEditorRefresh()
 {
 	CachedVariableProperty = SelectionAsProperty();
 	CachedVariableName = GetVariableName();
+
+	// Help in tracking UE-20390
+	if (CachedVariableProperty.IsValid())
+	{
+		UE_LOG(LogBlueprintUserMessages, Log, TEXT("PostEditorRefresh for Blueprint '%s', cached variable property's owner is '%s'"), *GetBlueprintObj()->GetName(), *CachedVariableProperty->GetOwnerClass()->GetPathName());
+	}
 }
 
 EVisibility FBlueprintVarActionDetails::GetTransientVisibility() const
@@ -2889,8 +2899,10 @@ void FBlueprintGraphActionDetails::SetNetFlags( TWeakObjectPtr<UK2Node_EditableP
 
 			if (UK2Node_FunctionEntry* TypedEntryNode = Cast<UK2Node_FunctionEntry>(FunctionEntryNode.Get()))
 			{
-				TypedEntryNode->ExtraFlags &= ~FlagsToClear;
-				TypedEntryNode->ExtraFlags |= FlagsToSet;
+				int32 ExtraFlags = TypedEntryNode->GetFunctionFlags();
+				ExtraFlags &= ~FlagsToClear;
+				ExtraFlags |= FlagsToSet;
+				TypedEntryNode->SetExtraFlags(ExtraFlags);
 				bBlueprintModified = true;
 			}
 			if (UK2Node_CustomEvent * CustomEventNode = Cast<UK2Node_CustomEvent>(FunctionEntryNode.Get()))
@@ -3357,6 +3369,12 @@ bool FBaseBlueprintGraphActionDetails::OnVerifyPinRename(UK2Node_EditablePinBase
 		return true;
 	}
 
+	if( InNewName.Len() > NAME_SIZE )
+	{
+		OutErrorMessage = FText::Format( LOCTEXT("PinNameTooLong", "The name you entered is too long. Names must be less than {0} characters"), FText::AsNumber( NAME_SIZE ) );
+		return false;
+	}
+
 	if (InTargetNode)
 	{
 		// Check if the name conflicts with any of the other internal UFunction's property names (local variables and parameters).
@@ -3773,7 +3791,7 @@ FText FBlueprintGraphActionDetails::GetCurrentAccessSpecifierName() const
 	UK2Node_EditablePinBase * FunctionEntryNode = FunctionEntryNodePtr.Get();
 	if(UK2Node_FunctionEntry* EntryNode = Cast<UK2Node_FunctionEntry>(FunctionEntryNode))
 	{
-		AccessSpecifierFlag = FUNC_AccessSpecifiers & EntryNode->ExtraFlags;
+		AccessSpecifierFlag = FUNC_AccessSpecifiers & EntryNode->GetFunctionFlags();
 	}
 	else if(UK2Node_CustomEvent* CustomEventNode = Cast<UK2Node_CustomEvent>(FunctionEntryNode))
 	{
@@ -3820,8 +3838,10 @@ void FBlueprintGraphActionDetails::OnAccessSpecifierSelected( TSharedPtr<FAccess
 		const uint32 ClearAccessSpecifierMask = ~FUNC_AccessSpecifiers;
 		if(UK2Node_FunctionEntry* EntryNode = Cast<UK2Node_FunctionEntry>(FunctionEntryNode))
 		{
-			EntryNode->ExtraFlags &= ClearAccessSpecifierMask;
-			EntryNode->ExtraFlags |= SpecifierName->SpecifierFlag;
+			int32 ExtraFlags = EntryNode->GetFunctionFlags();
+			ExtraFlags &= ClearAccessSpecifierMask;
+			ExtraFlags |= SpecifierName->SpecifierFlag;
+			EntryNode->SetExtraFlags(ExtraFlags);
 		}
 		else if(UK2Node_Event* EventNode = Cast<UK2Node_Event>(FunctionEntryNode))
 		{
@@ -3912,7 +3932,7 @@ void FBlueprintGraphActionDetails::OnIsReliableReplicationFunctionModified(const
 		{
 			if (UK2Node_FunctionEntry* TypedEntryNode = Cast<UK2Node_FunctionEntry>(FunctionEntryNode))
 			{
-				TypedEntryNode->ExtraFlags |= FUNC_NetReliable;
+				TypedEntryNode->SetExtraFlags(TypedEntryNode->GetFunctionFlags() | FUNC_NetReliable);
 			}
 			if (UK2Node_CustomEvent * CustomEventNode = Cast<UK2Node_CustomEvent>(FunctionEntryNode))
 			{
@@ -3923,7 +3943,7 @@ void FBlueprintGraphActionDetails::OnIsReliableReplicationFunctionModified(const
 		{
 			if (UK2Node_FunctionEntry* TypedEntryNode = Cast<UK2Node_FunctionEntry>(FunctionEntryNode))
 			{
-				TypedEntryNode->ExtraFlags &= ~FUNC_NetReliable;
+				TypedEntryNode->SetExtraFlags(TypedEntryNode->GetFunctionFlags() & ~FUNC_NetReliable);
 			}
 			if (UK2Node_CustomEvent * CustomEventNode = Cast<UK2Node_CustomEvent>(FunctionEntryNode))
 			{
@@ -3981,8 +4001,8 @@ void FBlueprintGraphActionDetails::OnIsPureFunctionModified( const ECheckBoxStat
 		Function->Modify();
 
 		//set flags on function entry node also
-		EntryNode->ExtraFlags	^= FUNC_BlueprintPure;
 		Function->FunctionFlags ^= FUNC_BlueprintPure;
+		EntryNode->SetExtraFlags(Function->FunctionFlags);
 		OnParamsChanged(FunctionEntryNode);
 	}
 }
@@ -3995,7 +4015,7 @@ ECheckBoxState FBlueprintGraphActionDetails::GetIsPureFunction() const
 	{
 		return ECheckBoxState::Undetermined;
 	}
-	return (EntryNode->ExtraFlags & FUNC_BlueprintPure) ? ECheckBoxState::Checked :  ECheckBoxState::Unchecked;
+	return (EntryNode->GetFunctionFlags() & FUNC_BlueprintPure) ? ECheckBoxState::Checked :  ECheckBoxState::Unchecked;
 }
 
 bool FBlueprintGraphActionDetails::IsConstFunctionVisible() const
@@ -4025,8 +4045,8 @@ void FBlueprintGraphActionDetails::OnIsConstFunctionModified( const ECheckBoxSta
 		Function->Modify();
 
 		//set flags on function entry node also
-		EntryNode->ExtraFlags	^= FUNC_Const;
 		Function->FunctionFlags ^= FUNC_Const;
+		EntryNode->SetExtraFlags(Function->FunctionFlags);
 		OnParamsChanged(FunctionEntryNode);
 	}
 }
@@ -4039,7 +4059,7 @@ ECheckBoxState FBlueprintGraphActionDetails::GetIsConstFunction() const
 	{
 		return ECheckBoxState::Undetermined;
 	}
-	return (EntryNode->ExtraFlags & FUNC_Const) ? ECheckBoxState::Checked :  ECheckBoxState::Unchecked;
+	return (EntryNode->GetFunctionFlags() & FUNC_Const) ? ECheckBoxState::Checked :  ECheckBoxState::Unchecked;
 }
 
 FReply FBaseBlueprintGraphActionDetails::OnAddNewInputClicked()
@@ -4523,6 +4543,14 @@ void FBlueprintGlobalOptionsDetails::CustomizeDetails(IDetailLayoutBuilder& Deta
 		// Hide the bDeprecate, we override the functionality.
 		static FName DeprecatePropName(TEXT("bDeprecate"));
 		DetailLayout.HideProperty(DetailLayout.GetProperty(DeprecatePropName));
+
+		// Hide the experimental CompileMode setting (if not enabled)
+		const UBlueprintEditorSettings* EditorSettings = GetDefault<UBlueprintEditorSettings>();
+		if (EditorSettings && !EditorSettings->bAllowExplicitImpureNodeDisabling)
+		{
+			static FName CompileModePropertyName(TEXT("CompileMode"));
+			DetailLayout.HideProperty(DetailLayout.GetProperty(CompileModePropertyName));
+		}
 
 		// Hide 'run on drag' for LevelBP
 		if (bIsLevelScriptBP)

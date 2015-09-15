@@ -302,29 +302,7 @@ public:
 		Ar << AssetData.PackageName;
 		Ar << AssetData.AssetName;
 
-		static const FName BlueprintClassName = TEXT("Blueprint");
-		if ((Ar.IsSaving() || Ar.IsLoading()) && Ar.IsFilterEditorOnly() && AssetData.AssetClass == BlueprintClassName)
-		{
-			// Exclude FiB data from serialization
-			static FName FiBName = TEXT("FiB");
-			if (Ar.IsSaving())
-			{
-				auto LocalTagsAndValues = AssetData.TagsAndValues.GetMap();
-				LocalTagsAndValues.Remove(FiBName);
-				Ar << LocalTagsAndValues;
-			}
-			else // if (Ar.IsLoading())
-			{
-				TMap<FName, FString> LocalTagsAndValues;
-				Ar << LocalTagsAndValues;
-				LocalTagsAndValues.Remove(FiBName);
-				AssetData.TagsAndValues = MakeSharedMapView(MoveTemp(LocalTagsAndValues));
-			}
-		}
-		else
-		{
-			Ar << const_cast<TMap<FName, FString>&>(AssetData.TagsAndValues.GetMap());
-		}
+		Ar << const_cast<TMap<FName, FString>&>(AssetData.TagsAndValues.GetMap());
 
 		if (Ar.UE4Ver() >= VER_UE4_CHANGED_CHUNKID_TO_BE_AN_ARRAY_OF_CHUNKIDS)
 		{

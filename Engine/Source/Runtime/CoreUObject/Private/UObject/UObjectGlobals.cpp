@@ -89,23 +89,23 @@ static FORCEINLINE bool IsGarbageCollectingOnGameThread()
 namespace
 {
 	/**
-	* Legacy static find object helper, that helps to find reflected types, that
-	* are no longer a subobjects of UCLASS defined in the same header.
-	*
-	* If the class looked for is of one of the relocated types (or theirs subclass)
-	* then it performs another search in containing package.
-	*
-	* If the class match wasn't exact (i.e. either nullptr or subclass of allowed
-	* ones) and we've found an object we're revalidating it to make sure the
-	* legacy search was valid.
-	*
-	* @param ObjectClass Class of the object to find.
-	* @param ObjectPackage Package of the object to find.
-	* @param ObjectName Name of the object to find.
-	* @param ExactClass If the class match has to be exact. I.e. ObjectClass == FoundObjects.GetClass()
-	*
-	* @returns Found object.
-	*/
+	 * Legacy static find object helper, that helps to find reflected types, that
+	 * are no longer a subobjects of UCLASS defined in the same header.
+	 *
+	 * If the class looked for is of one of the relocated types (or theirs subclass)
+	 * then it performs another search in containing package.
+	 *
+	 * If the class match wasn't exact (i.e. either nullptr or subclass of allowed
+	 * ones) and we've found an object we're revalidating it to make sure the
+	 * legacy search was valid.
+	 *
+	 * @param ObjectClass Class of the object to find.
+	 * @param ObjectPackage Package of the object to find.
+	 * @param ObjectName Name of the object to find.
+	 * @param ExactClass If the class match has to be exact. I.e. ObjectClass == FoundObjects.GetClass()
+	 *
+	 * @returns Found object.
+	 */
 	UObject* StaticFindObjectWithChangedLegacyPath(UClass* ObjectClass, UObject* ObjectPackage, FName ObjectName, bool ExactClass)
 	{
 		UObject* MatchingObject = nullptr;
@@ -587,7 +587,7 @@ FString ResolveIniObjectsReference(const FString& ObjectReference, const FString
 	if (!GConfig->GetString(*Section, *Key, Output, *IniFilename))
 	{
 		if (bThrow == true)
-		{
+{
 			UE_LOG(LogUObjectGlobals, Error, TEXT(" %s %s "), *FString::Printf(TEXT("Can't find '%s' in configuration file section=%s key=%s"), *ObjectReference, *Section, *Key), **IniFilename);
 		}
 	}
@@ -622,11 +622,11 @@ const FString* GetIniFilenameFromObjectsReference(const FString& Name)
 // Resolve a package and name.
 //
 bool ResolveName( UObject*& InPackage, FString& InOutName, bool Create, bool Throw )
-{
+	{
 	const FString* IniFilename = GetIniFilenameFromObjectsReference(InOutName);
 
 	if (IniFilename && InOutName.Contains(TEXT("."), ESearchCase::CaseSensitive))
-	{
+		{
 		InOutName = ResolveIniObjectsReference(InOutName, IniFilename, Throw);
 	}
 
@@ -831,6 +831,12 @@ UObject* StaticLoadObjectInternal(UClass* ObjectClass, UObject* InOuter, const T
 		StrName += FPackageName::GetShortName(InName);
 		Result = StaticLoadObjectInternal(ObjectClass, InOuter, *StrName, Filename, LoadFlags, Sandbox, bAllowObjectReconciliation);
 	}
+#if WITH_EDITORONLY_DATA
+	else if (Result)
+	{
+		Result->GetOutermost()->SetLoadedByEditorPropertiesOnly(false);
+	}
+#endif
 
 	return Result;
 }
@@ -887,7 +893,7 @@ UClass* StaticLoadClass( UClass* BaseClass, UObject* InOuter, const TCHAR* InNam
 * @param	ImportLinker	Linker that requests this package through one of its imports
 * @return	Loaded package if successful, NULL otherwise
 */
-UPackage* LoadPackageInternal(UPackage* InOuter, const TCHAR* InLongPackageName, uint32 LoadFlags, FLinkerLoad* ImportLinker)
+UPackage* LoadPackageInternal(UPackage* InOuter, const TCHAR* InLongPackageName, uint32 LoadFlags, FLinkerLoad* ImportLinker, TSet<FName>& InDependencyTracker, IAssetRegistryInterface* InAssetRegistry)
 {
 	DECLARE_SCOPE_CYCLE_COUNTER(TEXT("LoadPackageInternal"), STAT_LoadPackageInternal, STATGROUP_ObjectVerbose);
 
@@ -930,6 +936,22 @@ UPackage* LoadPackageInternal(UPackage* InOuter, const TCHAR* InLongPackageName,
 	
 	SlowTask.EnterProgressFrame(10);
 
+	if (InAssetRegistry)
+	{
+		FName PackageName(InLongPackageName);
+		TArray<FName> PackageDependencies;
+		InAssetRegistry->GetDependencies(PackageName, PackageDependencies, EAssetRegistryDependencyType::Hard);
+
+		for (auto Dependency : PackageDependencies)
+		{
+			if (!InDependencyTracker.Contains(Dependency) && FindObjectFast<UPackage>(NULL, Dependency, false, false) == nullptr)
+			{
+				InDependencyTracker.Add(Dependency);
+				LoadPackageInternal(InOuter, *Dependency.ToString(), LoadFlags, nullptr, InDependencyTracker, InAssetRegistry);
+			}
+		}
+	}
+
 	// Try to load.
 	BeginLoad();
 
@@ -960,6 +982,16 @@ UPackage* LoadPackageInternal(UPackage* InOuter, const TCHAR* InLongPackageName,
 			Result->ThisRequiresLocalizationGather(Linker->RequiresLocalizationGather());
 		};
 
+#if WITH_EDITORONLY_DATA
+		if (!(LoadFlags & LOAD_IsVerifying) &&
+			(!ImportLinker || !ImportLinker->GetSerializedProperty() || !ImportLinker->GetSerializedProperty()->IsEditorOnlyProperty()))
+		{
+			// If this package hasn't been loaded as part of import verification and there's no import linker or the
+			// currently serialized property is not editor-only mark this package as runtime.
+			Result->SetLoadedByEditorPropertiesOnly(false);
+		}
+#endif
+
 		if (Result && Result->HasAnyFlags(RF_WasLoaded))
 		{
 			// The linker is associated with a package that has already been loaded.
@@ -970,36 +1002,6 @@ UPackage* LoadPackageInternal(UPackage* InOuter, const TCHAR* InLongPackageName,
 
 		// The time tracker keeps track of time spent in LoadPackage.
 		FExclusiveLoadPackageTimeTracker::FScopedPackageTracker Tracker(Result);
-
-#if !WITH_EDITOR
-		static auto CVarPreloadDependencies = IConsoleManager::Get().FindConsoleVariable(TEXT("s.PreloadPackageDependencies"));
-		if (CVarPreloadDependencies && CVarPreloadDependencies->GetInt() != 0)
-		{
-			if (Result->PackageFlags & PKG_ProcessingDependencies)
-			{
-				// We've currently already processing the dependencies of this package, so there is a circular dependency
-				EndLoad();
-				return nullptr;
-			}
-
-			auto AssetRegistry = IAssetRegistryInterface::GetPtr();
-
-			if (AssetRegistry)
-			{
-				TArray<FName> PackageDependencies;
-				FName PackageName(InLongPackageName);
-
-				AssetRegistry->GetDependencies(PackageName, PackageDependencies, EAssetRegistryDependencyType::Hard);
-
-				Result->PackageFlags |= PKG_ProcessingDependencies;
-				for (auto Dependency : PackageDependencies)
-				{
-					LoadPackage(InOuter, *Dependency.ToString(), LoadFlags);
-				}
-				Result->PackageFlags &= ~PKG_ProcessingDependencies;
-			}
-		}
-#endif
 
 		// If we are loading a package for diff'ing, set the package flag
 		if(LoadFlags & LOAD_ForDiff)
@@ -1035,15 +1037,8 @@ UPackage* LoadPackageInternal(UPackage* InOuter, const TCHAR* InLongPackageName,
 		{
 			// Make sure we pass the property that's currently being serialized by the linker that owns the import 
 			// that triggered this LoadPackage call
-			UProperty* OldSerializedProperty = Linker->GetSerializedProperty();
-			if (ImportLinker)
-			{
-				Linker->SetSerializedProperty(ImportLinker->GetSerializedProperty());
-			}
-
+			FSerializedPropertyScope SerializedProperty(*Linker, ImportLinker ? ImportLinker->GetSerializedProperty() : Linker->GetSerializedProperty());
 			Linker->LoadAllObjects();
-
-			Linker->SetSerializedProperty(OldSerializedProperty);
 		}
 		else
 		{
@@ -1134,6 +1129,23 @@ UPackage* LoadPackageInternal(UPackage* InOuter, const TCHAR* InLongPackageName,
 	}
 
 	return Result;
+}
+
+UPackage* LoadPackageInternal(UPackage* InOuter, const TCHAR* InLongPackageName, uint32 LoadFlags, FLinkerLoad* ImportLinker)
+{
+	IAssetRegistryInterface* AssetRegistry = nullptr;
+#if !WITH_EDITOR
+	bool bAllowDependencyPreloading = ((LoadFlags & LOAD_DisableDependencyPreloading) == 0);
+	static auto CVarPreloadDependencies = IConsoleManager::Get().FindConsoleVariable(TEXT("s.PreloadPackageDependencies"));
+	
+	if (bAllowDependencyPreloading && CVarPreloadDependencies && CVarPreloadDependencies->GetInt() != 0)
+	{
+		AssetRegistry = IAssetRegistryInterface::GetPtr();
+	}
+#endif
+
+	TSet<FName> DependencyTracker;
+	return LoadPackageInternal(InOuter, InLongPackageName, LoadFlags, ImportLinker, DependencyTracker, AssetRegistry);
 }
 
 UPackage* LoadPackage(UPackage* InOuter, const TCHAR* InLongPackageName, uint32 LoadFlags)
@@ -1571,6 +1583,7 @@ UObject* StaticDuplicateObject(UObject const* SourceObject, UObject* DestOuter, 
 
 UObject* StaticDuplicateObjectEx( FObjectDuplicationParameters& Parameters )
 {
+	QUICK_SCOPE_CYCLE_COUNTER(STAT_StaticDuplicateObject);
 	// make sure the two classes are the same size, as this hopefully will mean they are serialization
 	// compatible. It's not a guarantee, but will help find errors
 	checkf( (Parameters.DestClass->GetPropertiesSize() >= Parameters.SourceObject->GetClass()->GetPropertiesSize()),
@@ -2324,7 +2337,18 @@ void FObjectInitializer::PostConstructInit()
 
 	bool bNeedInstancing = false;
 	// if HasAnyFlags(RF_NeedLoad), we do these steps later
+#if !USE_CIRCULAR_DEPENDENCY_LOAD_DEFERRING
 	if (!Obj->HasAnyFlags(RF_NeedLoad))
+#else 
+	// we defer this initialization in special set of cases (when Obj is a CDO 
+	// and its parent hasn't been serialized yet)... in those cases, Obj (the 
+	// CDO) wouldn't have had RF_NeedLoad set (not yet, because it is created 
+	// from Class->GetDefualtObject() without that flag); since we've deferred
+	// all this, it is likely that this flag is now present... these steps 
+	// (specifically sub-object instancing) is important for us to run on the
+	// CDO, so we allow all this when the bIsDeferredInitializer is true as well
+	if (!Obj->HasAnyFlags(RF_NeedLoad) || bIsDeferredInitializer)
+#endif // !USE_CIRCULAR_DEPENDENCY_LOAD_DEFERRING
 	{
 		if (bIsCDO || Class->HasAnyClassFlags(CLASS_PerObjectConfig))
 		{
@@ -2356,7 +2380,18 @@ void FObjectInitializer::PostConstructInit()
 		UE_LOG(LogUObjectGlobals, Fatal, TEXT("%s failed to route PostInitProperties. Call Super::PostInitProperties() in %s::PostInitProperties()."), *Obj->GetClass()->GetName(), *Obj->GetClass()->GetName());
 	}
 	// Check if all TSubobjectPtr properties have been initialized.
+#if !USE_CIRCULAR_DEPENDENCY_LOAD_DEFERRING
 	if (!Obj->HasAnyFlags(RF_NeedLoad))
+#else 
+	// we defer this initialization in special set of cases (when Obj is a CDO 
+	// and its parent hasn't been serialized yet)... in those cases, Obj (the 
+	// CDO) wouldn't have had RF_NeedLoad set (not yet, because it is created 
+	// from Class->GetDefualtObject() without that flag); since we've deferred
+	// all this, it is likely that this flag is now present... we want to run 
+	// all this as if the object was just created, so we check 
+	// bIsDeferredInitializer as well
+	if (!Obj->HasAnyFlags(RF_NeedLoad) || bIsDeferredInitializer)
+#endif // !USE_CIRCULAR_DEPENDENCY_LOAD_DEFERRING
 	{
 		for (UProperty* P = Class->RefLink; P; P = P->NextRef)
 		{
@@ -2381,8 +2416,20 @@ void FObjectInitializer::PostConstructInit()
 			}
 		}
 	}
-#endif
+#endif // !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+
+#if !USE_CIRCULAR_DEPENDENCY_LOAD_DEFERRING
 	if (!Obj->HasAnyFlags(RF_NeedLoad) 
+#else 
+	// we defer this initialization in special set of cases (when Obj is a CDO 
+	// and its parent hasn't been serialized yet)... in those cases, Obj (the 
+	// CDO) wouldn't have had RF_NeedLoad set (not yet, because it is created 
+	// from Class->GetDefualtObject() without that flag); since we've deferred
+	// all this, it is likely that this flag is now present... we want to run 
+	// all this as if the object was just created, so we check 
+	// bIsDeferredInitializer as well
+	if ( (!Obj->HasAnyFlags(RF_NeedLoad) || bIsDeferredInitializer)
+#endif // !USE_CIRCULAR_DEPENDENCY_LOAD_DEFERRING
 		// if component instancing is not enabled, then we leave the components in an invalid state, which will presumably be fixed by the caller
 		&& ((InstanceGraph == NULL) || InstanceGraph->IsSubobjectInstancingEnabled())) 
 	{
@@ -2490,6 +2537,7 @@ void FObjectInitializer::InitProperties(UObject* Obj, UClass* DefaultsClass, UOb
 		{
 			if (Class->GetDefaultObject(false) != DefaultData)
 			{
+				QUICK_SCOPE_CYCLE_COUNTER(STAT_InitProperties_FromTemplate);
 				for (UProperty* P = Class->PropertyLink; P; P = P->PropertyLinkNext)
 				{
 					P->CopyCompleteValue_InContainer(Obj, DefaultData);
@@ -2497,6 +2545,7 @@ void FObjectInitializer::InitProperties(UObject* Obj, UClass* DefaultsClass, UOb
 			}
 			else
 			{
+				QUICK_SCOPE_CYCLE_COUNTER(STAT_InitProperties_ConfigEtcOnly);
 				// Copy all properties that require additional initialization (e.g. CPF_Config).
 				for (UProperty* P = Class->PostConstructLink; P; P = P->PostConstructLinkNext)
 				{
@@ -2507,6 +2556,7 @@ void FObjectInitializer::InitProperties(UObject* Obj, UClass* DefaultsClass, UOb
 	}
 	else
 	{
+		QUICK_SCOPE_CYCLE_COUNTER(STAT_InitProperties_Blueprint);
 		UObject* ClassDefaults = bCopyTransientsFromClassDefaults ? DefaultsClass->GetDefaultObject() : NULL;		
 		for (UProperty* P = Class->PropertyLink; P; P = P->PropertyLinkNext)
 		{

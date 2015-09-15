@@ -7,8 +7,8 @@
 /**
  * A simple static text widget.
  *
- * ● No Children
- * ● Text
+ * * No Children
+ * * Text
  */
 UCLASS(meta=(DisplayName="Text"))
 class UMG_API UTextBlock : public UWidget
@@ -124,6 +124,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category=Appearance, AdvancedDisplay)
 	float LineHeightPercentage;
 
+	/** If true, it will automatically wrap this text widget with an invalidation panel */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = Performance, AdvancedDisplay)
+	bool bWrapWithInvalidationPanel;
+
 	///** Called when this text is double clicked */
 	//SLATE_EVENT(FOnClicked, OnDoubleClicked)
 
@@ -142,24 +146,24 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Widget", meta=(DisplayName="SetText (Text)"))
 	void SetText(FText InText);
 
-	// UWidget interface
+	//~ Begin UWidget Interface
 	virtual void SynchronizeProperties() override;
-	// End of UWidget interface
+	//~ End UWidget Interface
 
-	// UVisual interface
+	//~ Begin UVisual Interface
 	virtual void ReleaseSlateResources(bool bReleaseChildren) override;
-	// End of UVisual interface
+	//~ End UVisual Interface
 
-	// Begin UObject interface
+	//~ Begin UObject Interface
 	virtual void PostLoad() override;
-	// End of UObject interface
+	//~ End UObject Interface
 
 #if WITH_EDITOR
-	// UWidget interface
+	//~ Begin UWidget Interface
 	virtual const FSlateBrush* GetEditorIcon() override;
 	virtual const FText GetPaletteCategory() override;
 	virtual void OnCreationFromPalette() override;
-	// End UWidget interface
+	//~ End UWidget Interface
 
 	virtual FString GetLabelMetadata() const override;
 
@@ -167,10 +171,10 @@ public:
 #endif
 
 protected:
-	// UWidget interface
+	//~ Begin UWidget Interface
 	virtual TSharedRef<SWidget> RebuildWidget() override;
 	virtual void OnBindingChanged(const FName& Property) override;
-	// End of UWidget interface
+	//~ End UWidget Interface
 
 protected:
 

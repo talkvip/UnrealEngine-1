@@ -90,15 +90,17 @@ namespace UnrealBuildTool
 			EngineHeaders = new List<Header>();
 			ThirdPartyHeaders = new List<Header>();
 
+			// Create a rules assembly for the engine
+			RulesAssembly EngineRulesAssembly = RulesCompiler.CreateEngineRulesAssembly();
+
 			// Find all modules referenced by the current target
-			List<string> ModuleFileNames = RulesCompiler.FindAllRulesSourceFiles( RulesCompiler.RulesFileType.Module, AdditionalSearchPaths:null );
-			foreach (string ModuleFileName in ModuleFileNames)
+			List<FileReference> ModuleFileNames = RulesCompiler.FindAllRulesSourceFiles( RulesCompiler.RulesFileType.Module, GameFolders:null, ForeignPlugins:null, AdditionalSearchPaths:null );
+			foreach (FileReference ModuleFileName in ModuleFileNames)
 			{
-				string ModuleName = Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(ModuleFileName));
+				string ModuleName = Path.GetFileNameWithoutExtension(ModuleFileName.GetFileNameWithoutExtension());
 				try
 				{
-					string UnusedModuleFilename;
-					ModuleRules RulesObject = RulesCompiler.CreateModuleRules(ModuleName, Target, out UnusedModuleFilename);
+					ModuleRules RulesObject = EngineRulesAssembly.CreateModuleRules(ModuleName, Target);
 					bool bEngineHeaders = RulesObject.Type != ModuleRules.ModuleType.External;
 					foreach (string SystemIncludePath in RulesObject.PublicSystemIncludePaths)
 					{

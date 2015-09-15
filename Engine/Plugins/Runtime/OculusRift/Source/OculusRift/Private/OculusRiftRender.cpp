@@ -110,6 +110,38 @@ void FOculusRiftHMD::RenderTexture_RenderThread(class FRHICommandListImmediate& 
 	}
 }
 
+static void DrawOcclusionMesh(FRHICommandList& RHICmdList, EStereoscopicPass StereoPass, const FHMDViewMesh MeshAssets[])
+{
+	check(IsInRenderingThread());
+	check(StereoPass != eSSP_FULL);
+
+	const uint32 MeshIndex = (StereoPass == eSSP_LEFT_EYE) ? 0 : 1;
+	const FHMDViewMesh& Mesh = MeshAssets[MeshIndex];
+	check(Mesh.IsValid());
+
+	DrawIndexedPrimitiveUP(
+		RHICmdList,
+		PT_TriangleList,
+		0,
+		Mesh.NumVertices,
+		Mesh.NumTriangles,
+		Mesh.pIndices,
+		sizeof(Mesh.pIndices[0]),
+		Mesh.pVertices,
+		sizeof(Mesh.pVertices[0])
+		);
+}
+
+void FOculusRiftHMD::DrawHiddenAreaMesh_RenderThread(FRHICommandList& RHICmdList, EStereoscopicPass StereoPass) const
+{
+	DrawOcclusionMesh(RHICmdList, StereoPass, HiddenAreaMeshes);
+}
+
+void FOculusRiftHMD::DrawVisibleAreaMesh_RenderThread(FRHICommandList& RHICmdList, EStereoscopicPass StereoPass) const
+{
+	DrawOcclusionMesh(RHICmdList, StereoPass, VisibleAreaMeshes);
+}
+
 void FViewExtension::PreRenderViewFamily_RenderThread(FRHICommandListImmediate& RHICmdList, FSceneViewFamily& ViewFamily)
 {
 	check(IsInRenderingThread());
@@ -144,7 +176,7 @@ void FViewExtension::PreRenderViewFamily_RenderThread(FRHICommandListImmediate& 
 	
 	pPresentBridge->BeginRendering(RenderContext, ViewFamily.RenderTarget->GetRenderTargetTexture());
 
-	ovrHmd_GetFrameTiming(Hmd, RenderContext.RenderFrame->FrameNumber);
+	ovr_GetFrameTiming(Hmd, RenderContext.RenderFrame->FrameNumber);
 
 	RenderContext.bFrameBegun = true;
 
@@ -463,7 +495,8 @@ void FOculusRiftHMD::DrawDebug(UCanvas* Canvas)
 			Canvas->Canvas->DrawShadowedString(X, Y, *Str, Font, TextColor);
 			Y += RowHeight;
 
-			Str = FString::Printf(TEXT("QueueAhead: %s"), (FrameSettings->bQueueAheadEnabled) ? TEXT("ON") : TEXT("OFF"));
+			Str = FString::Printf(TEXT("QueueAhead: %s"), (FrameSettings->QueueAheadStatus == FSettings::EQA_Enabled) ? TEXT("ON") : 
+				((FrameSettings->QueueAheadStatus == FSettings::EQA_Default) ? TEXT("DEFLT") : TEXT("OFF")));
 			Canvas->Canvas->DrawShadowedString(X, Y, *Str, Font, TextColor);
 			Y += RowHeight;
 
@@ -475,11 +508,11 @@ void FOculusRiftHMD::DrawDebug(UCanvas* Canvas)
 			Str = FString::Printf(TEXT("W-to-m scale: %.2f uu/m"), frame->WorldToMetersScale);
 			Canvas->Canvas->DrawShadowedString(X, Y, *Str, Font, TextColor);
 
-			if ((FrameSettings->SupportedHmdCaps & ovrHmdCap_DynamicPrediction) != 0)
+			//if ((FrameSettings->SupportedHmdCaps & ovrHmdCap_DynamicPrediction) != 0)
 			{
 				float latencies[5] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
 				const int numOfEntries = sizeof(latencies) / sizeof(latencies[0]);
-				if (ovrHmd_GetFloatArray(Hmd, "DK2Latency", latencies, numOfEntries) == numOfEntries)
+				if (ovr_GetFloatArray(Hmd, "DK2Latency", latencies, numOfEntries) == numOfEntries)
 				{
 					Y += RowHeight;
 
@@ -516,11 +549,11 @@ void FOculusRiftHMD::DrawDebug(UCanvas* Canvas)
 			Canvas->Canvas->DrawShadowedString(X, Y, *Str, Font, TextColor);
 			Y += RowHeight;
 
-			StatusStr = ((FrameSettings->SupportedHmdCaps & ovrHmdCap_LowPersistence) != 0) ?
-				((FrameSettings->Flags.bLowPersistenceMode) ? TEXT("ON") : TEXT("OFF")) : TEXT("UNSUP");
-			Str = FString::Printf(TEXT("LowPers: %s"), *StatusStr);
-			Canvas->Canvas->DrawShadowedString(X, Y, *Str, Font, TextColor);
-			Y += RowHeight;
+// 			StatusStr = ((FrameSettings->SupportedHmdCaps & ovrHmdCap_LowPersistence) != 0) ?
+// 				((FrameSettings->Flags.bLowPersistenceMode) ? TEXT("ON") : TEXT("OFF")) : TEXT("UNSUP");
+// 			Str = FString::Printf(TEXT("LowPers: %s"), *StatusStr);
+// 			Canvas->Canvas->DrawShadowedString(X, Y, *Str, Font, TextColor);
+// 			Y += RowHeight;
 
 // 			StatusStr = ((FrameSettings->SupportedDistortionCaps & ovrDistortionCap_Overdrive) != 0) ?
 // 				((FrameSettings->Flags.bOverdrive) ? TEXT("ON") : TEXT("OFF")) : TEXT("UNSUP");
@@ -560,12 +593,19 @@ void FOculusRiftHMD::UpdateViewport(bool bUseSeparateRenderTarget, const FViewpo
 
 	FRHIViewport* const ViewportRHI = InViewport.GetViewportRHI().GetReference();
 
-	TSharedPtr<SWindow> Window;
-	if (ViewportWidget && !IsFullscreenAllowed())
+	TSharedPtr<SWindow> Window = CachedWindow.Pin();
+	if (ViewportWidget)
 	{
-		FWidgetPath WidgetPath;
+		TSharedPtr<SWidget> CurrentlyCachedWidget = CachedViewportWidget.Pin();
 		TSharedRef<SWidget> Widget = ViewportWidget->AsShared();
-		Window = FSlateApplication::Get().FindWidgetWindow(Widget, WidgetPath);
+		if (!Window.IsValid() || Widget != CurrentlyCachedWidget)
+		{
+			FWidgetPath WidgetPath;
+			Window = FSlateApplication::Get().FindWidgetWindow(Widget, WidgetPath);
+
+			CachedViewportWidget = Widget;
+			CachedWindow = Window;
+		}
 	}
 	if (!Settings->IsStereoEnabled())
 	{
@@ -576,12 +616,9 @@ void FOculusRiftHMD::UpdateViewport(bool bUseSeparateRenderTarget, const FViewpo
 		// Restore AutoResizeViewport mode for the window
 		if (ViewportWidget && !IsFullscreenAllowed() && Settings->MirrorWindowSize.X != 0 && Settings->MirrorWindowSize.Y != 0)
 		{
-			FWidgetPath WidgetPath;
-			TSharedRef<SWidget> Widget = ViewportWidget->AsShared();
-			TSharedPtr<SWindow> WidgetWindow = FSlateApplication::Get().FindWidgetWindow(Widget, WidgetPath);
-			if (WidgetWindow.IsValid())
+			if (Window.IsValid())
 			{
-				WidgetWindow->SetViewportSizeDrivenByWindow(true);
+				Window->SetViewportSizeDrivenByWindow(true);
 			}
 		}
 		return;
@@ -594,7 +631,7 @@ void FOculusRiftHMD::UpdateViewport(bool bUseSeparateRenderTarget, const FViewpo
 	check(CurrentFrame);
 
 	CurrentFrame->ViewportSize = InViewport.GetSizeXY();
-	CurrentFrame->WindowSize = Window->GetSizeInScreen();
+	CurrentFrame->WindowSize = (Window.IsValid()) ? Window->GetSizeInScreen() : CurrentFrame->ViewportSize;
 
 	check(pCustomPresent);
 

@@ -21,6 +21,7 @@ import android.text.InputType;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.res.AssetManager;
 import android.content.res.Configuration;
 import android.content.IntentSender.SendIntentException;
@@ -62,6 +63,8 @@ import java.net.HttpURLConnection;
 import com.epicgames.ue4.GooglePlayStoreHelper;
 import com.epicgames.ue4.GooglePlayLicensing;
 
+// Console commands listener, only for debug builds
+import com.epicgames.ue4.ConsoleCmdReceiver;
 
 // TODO: use the resources from the UE4 lib project once we've got the packager up and running
 //import com.epicgames.ue4.R;
@@ -94,6 +97,9 @@ public class GameActivity extends NativeActivity
 	
 	static GameActivity _activity;
 
+	protected Dialog mSplashDialog;
+	private int noActionAnimID = -1;
+
 	// Console
 	AlertDialog consoleAlert;
 	EditText consoleInputBox;
@@ -105,6 +111,9 @@ public class GameActivity extends NativeActivity
 	// Virtual keyboard
 	AlertDialog virtualKeyboardAlert;
 	EditText virtualKeyboardInputBox;
+
+	// Console commands receiver
+	ConsoleCmdReceiver consoleCmdReceiver;
 
 	// default the PackageDataInsideApk to an invalid value to make sure we don't get it too early
 	private static int PackageDataInsideApkValue = -1;
@@ -157,6 +166,9 @@ public class GameActivity extends NativeActivity
 	private boolean InitCompletedOK = false;
 	
 	private boolean ShouldHideUI = false;
+
+	/** Whether this application is for distribution */
+	private boolean IsForDistribution = false;
 	
 	/** Access singleton activity for game. **/
 	public static GameActivity Get()
@@ -178,6 +190,13 @@ public class GameActivity extends NativeActivity
 	public void onStart()
 	{
 		super.onStart();
+		
+		if (IsForDistribution == false)
+		{
+			// Create console command broadcast listener
+			consoleCmdReceiver = new ConsoleCmdReceiver(this);
+			registerReceiver(consoleCmdReceiver, new IntentFilter(Intent.ACTION_RUN));
+		}
 		
 		Log.debug("==================================> Inside onStart function in GameActivity");
 	}
@@ -205,10 +224,43 @@ public class GameActivity extends NativeActivity
 		}
 	}
 
+	private int getResourceId(String VariableName, String ResourceName, String PackageName)
+	{
+		try {
+			return getResources().getIdentifier(VariableName, ResourceName, PackageName);
+		}
+		catch (Exception e) {
+			e.printStackTrace();
+			return -1;
+		} 
+	}
+
 	@Override
 	public void onCreate(Bundle savedInstanceState)
 	{
 		super.onCreate(savedInstanceState);
+
+		// create splashscreen dialog (if launched by SplashActivity)
+		Bundle intentBundle = getIntent().getExtras();
+		if (intentBundle != null && intentBundle.getString("UseSplashScreen") != null)
+		{
+			try {
+				// try to get the splash theme (can't use R.style.UE4SplashTheme since we don't know the package name until runtime)
+				int SplashThemeId = getResources().getIdentifier("UE4SplashTheme", "style", getPackageName());
+				mSplashDialog = new Dialog(this, SplashThemeId);
+				mSplashDialog.setCancelable(false);
+				mSplashDialog.show();
+			}
+			catch (Exception e) {
+				e.printStackTrace();
+			}
+			try {
+				noActionAnimID = getResources().getIdentifier("noaction", "anim", getPackageName());
+			}
+			catch (Exception e) {
+				e.printStackTrace();
+			}
+		}
 		
 		// Suppress java logs in Shipping builds
 		if (nativeIsShippingBuild())
@@ -303,6 +355,11 @@ public class GameActivity extends NativeActivity
 			ApplicationInfo ai = getPackageManager().getApplicationInfo(getPackageName(), PackageManager.GET_META_DATA);
 			Bundle bundle = ai.metaData;
 
+			if ((ai.flags & ApplicationInfo.FLAG_DEBUGGABLE) == 0) 
+			{
+				IsForDistribution = true;
+			}
+
 			// Get the preferred depth buffer size from AndroidManifest.xml
 			if (bundle.containsKey("com.epicgames.ue4.GameActivity.DepthBufferPreference"))
 			{
@@ -374,6 +431,8 @@ public class GameActivity extends NativeActivity
 				PackagedForGearVR = true;
 				String VRMode = bundle.getString("com.samsung.android.vr.application.mode");
 				Log.debug("Found GearVR mode = " + VRMode);
+
+				com.oculus.svclib.OVREntitlementChecker.doAutomatedCheck(this);
 			}
 			else
 			{
@@ -610,11 +669,16 @@ public class GameActivity extends NativeActivity
 		else
 		{
 			// Start the check activity here
-			Log.debug("==============> Starting activity to check files and download if required");			
+			Log.debug("==============> Starting activity to check files and download if required");
 			Intent intent = new Intent(this, DownloadShim.GetDownloaderType());
+			intent.addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION);
 			startActivityForResult(intent, DOWNLOAD_ACTIVITY_ID);
+			if (noActionAnimID != -1)
+			{
+				overridePendingTransition(noActionAnimID, noActionAnimID);
+			}
 		}
-		
+
 		Log.debug("==============> GameActive.onResume complete!");
 	}
 
@@ -622,6 +686,11 @@ public class GameActivity extends NativeActivity
 	public void onStop()
 	{
 		super.onStop();
+
+		if (consoleCmdReceiver != null)
+		{
+			unregisterReceiver(consoleCmdReceiver);
+		}
 	}
 
 	// handle ad popup visibility and requests
@@ -754,7 +823,8 @@ public class GameActivity extends NativeActivity
 
 		// Set label and starting contents
 		virtualKeyboardAlert.setTitle(Label);
-		virtualKeyboardInputBox.setText(Contents);
+		virtualKeyboardInputBox.setText("");
+		virtualKeyboardInputBox.append(Contents);
 
 		// configure for type of input
 		virtualKeyboardInputBox.setInputType(InputType);
@@ -1126,7 +1196,10 @@ public class GameActivity extends NativeActivity
 			|| errorCode == DOWNLOAD_FAILED 
 			|| errorCode == DOWNLOAD_INVALID
 			|| errorCode == DOWNLOAD_NO_PLAY_KEY)
+			{
 				finish();
+				return;
+			}
 		}
 		else if( IapStoreHelper != null )
 		{
@@ -1180,6 +1253,15 @@ public class GameActivity extends NativeActivity
 		return bIsAllowedToMakePurchase;
 	}
 
+	public void AndroidThunkJava_DismissSplashScreen()
+	{
+		if (mSplashDialog != null)
+		{
+			mSplashDialog.dismiss();
+			mSplashDialog = null;
+		}
+	}
+
 	public native boolean nativeIsShippingBuild();
 	public native void nativeSetGlobalActivity();
 	public native void nativeSetWindowInfo(boolean bIsPortrait, int DepthBufferPreference);
@@ -1198,6 +1280,14 @@ public class GameActivity extends NativeActivity
 	static
 	{
 		System.loadLibrary("gnustl_shared");
+		try
+		{
+			System.loadLibrary("vrapi");
+		}
+		catch (java.lang.UnsatisfiedLinkError e)
+		{
+			Log.debug("GearVR library not loaded. Ignore this if GearVR plugin intentionally disabled.");
+		}
 		System.loadLibrary("UE4");
 	}
 }

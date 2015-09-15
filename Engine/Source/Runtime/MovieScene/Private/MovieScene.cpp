@@ -161,6 +161,33 @@ bool UMovieScene::RemovePossessable( const FGuid& PossessableGuid )
 }
 
 
+bool UMovieScene::ReplacePossessable( const FGuid& OldGuid, const FGuid& NewGuid, const FString& NewName )
+{
+	bool bAnythingReplaced = false;
+
+	for( auto PossessableIter( Possessables.CreateIterator() ); PossessableIter; ++PossessableIter )
+	{
+		auto& CurPossessable = *PossessableIter;
+
+		if( CurPossessable.GetGuid() == OldGuid )
+		{	
+			Modify();
+
+			// Found it!
+			CurPossessable.SetGuid(NewGuid);
+			CurPossessable.SetName(NewName);
+
+			ReplaceBinding( OldGuid, NewGuid, NewName );
+
+			bAnythingReplaced = true;
+			break;
+		}
+	}
+
+	return bAnythingReplaced;
+}
+
+
 FMovieScenePossessable* UMovieScene::FindPossessable( const FGuid& Guid )
 {
 	for( auto CurPossessableIt( Possessables.CreateIterator() ); CurPossessableIt; ++CurPossessableIt )
@@ -190,6 +217,24 @@ FMovieScenePossessable& UMovieScene::GetPossessable( const int32 Index )
 
 TRange<float> UMovieScene::GetTimeRange() const
 {
+	if (InTime == FLT_MAX || OutTime == -FLT_MAX)
+	{
+		// Get the range of all sections combined
+		TArray< TRange<float> > Bounds;
+
+		for (int32 TypeIndex = 0; TypeIndex < MasterTracks.Num(); ++TypeIndex)
+		{
+			Bounds.Add(MasterTracks[TypeIndex]->GetSectionBoundaries());
+		}
+
+		for (int32 BindingIndex = 0; BindingIndex < ObjectBindings.Num(); ++BindingIndex)
+		{
+			Bounds.Add(ObjectBindings[BindingIndex].GetTimeRange());
+		}
+
+		return TRange<float>::Hull(Bounds);
+	}
+
 	return TRange<float>(InTime, OutTime);
 }
 
@@ -386,6 +431,19 @@ void UMovieScene::RemoveBinding(const FGuid& Guid)
 		if (ObjectBindings[BindingIndex].GetObjectGuid() == Guid)
 		{
 			ObjectBindings.RemoveAt(BindingIndex);
+			break;
+		}
+	}
+}
+
+void UMovieScene::ReplaceBinding(const FGuid& OldGuid, const FGuid& NewGuid, const FString& Name)
+{
+	for (int32 BindingIndex = 0; BindingIndex < ObjectBindings.Num(); ++BindingIndex)
+	{
+		if (ObjectBindings[BindingIndex].GetObjectGuid() == OldGuid)
+		{
+			ObjectBindings[BindingIndex].SetObjectGuid(NewGuid);
+			ObjectBindings[BindingIndex].SetName(Name);
 			break;
 		}
 	}

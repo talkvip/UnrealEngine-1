@@ -374,7 +374,7 @@ struct FEndPhysicsTickFunction : public FTickFunction
 * Tick function that starts the cloth tick
 **/
 USTRUCT()
-struct FStartClothSimulationFunction : public FTickFunction
+struct FStartClothAndAsyncSimulationFunction : public FTickFunction
 {
 	GENERATED_USTRUCT_BODY()
 
@@ -458,27 +458,6 @@ struct ENGINE_API FActorSpawnParameters
 	/* Flags used to describe the spawned actor/object instance. */
 	EObjectFlags ObjectFlags;		
 };
-
-// Deprecation warnings disabled to initialize bNoCollisionFail
-PRAGMA_DISABLE_DEPRECATION_WARNINGS
-
-	inline FActorSpawnParameters::FActorSpawnParameters()
-		: Name(NAME_None)
-		, Template(NULL)
-		, Owner(NULL)
-		, Instigator(NULL)
-		, OverrideLevel(NULL)
-		, SpawnCollisionHandlingOverride(ESpawnActorCollisionHandlingMethod::Undefined)
-		, bNoCollisionFail(false)
-		, bRemoteOwned(false)
-		, bNoFail(false)
-		, bDeferConstruction(false)
-		, bAllowDuringConstructionScript(false)
-		, ObjectFlags(RF_Transactional)
-	{
-	}
-
-PRAGMA_ENABLE_DEPRECATION_WARNINGS
 
 
 /**
@@ -891,7 +870,7 @@ public:
 	FEndPhysicsTickFunction EndPhysicsTickFunction;
 
 	/** Tick function for starting cloth simulation																				*/
-	FStartClothSimulationFunction StartClothTickFunction;
+	FStartClothAndAsyncSimulationFunction StartClothTickFunction;
 	/** Tick function for ending cloth simulation																				*/
 	FEndClothSimulationFunction EndClothTickFunction;
 
@@ -2133,6 +2112,14 @@ public:
 	/** Returns a reference to the game viewport displaying this world if one exists. */
 	UGameViewportClient* GetGameViewport() const;
 
+private:
+	/** Begin cloth and async simulation */
+	void StartClothAndAsyncSim();
+
+	friend FStartClothAndAsyncSimulationFunction;
+
+public:
+
 	DEPRECATED(4.3, "GetBrush is deprecated use GetDefaultBrush instead.")
 	ABrush* GetBrush() const;
 	/** 
@@ -2325,7 +2312,7 @@ public:
 	 */
 	virtual bool AllowAudioPlayback();
 
-	// Begin UObject Interface
+	//~ Begin UObject Interface
 	virtual void Serialize( FArchive& Ar ) override;
 	virtual void FinishDestroy() override;
 	virtual void PostLoad() override;
@@ -2338,7 +2325,7 @@ public:
 	virtual void GetAssetRegistryTags(TArray<FAssetRegistryTag>& OutTags) const override;
 #endif
 	virtual void PostDuplicate(bool bDuplicateForPIE) override;
-	// End UObject Interface
+	//~ End UObject Interface
 	
 	/**
 	 * Clears all level components and world components like e.g. line batcher.
@@ -2746,6 +2733,15 @@ private:
 	/** Utility function to handle Exec/Console Commands related to stopping demo playback */
 	bool HandleDemoStopCommand( const TCHAR* Cmd, FOutputDevice& Ar, UWorld* InWorld );
 
+	/** Utility function to handle Exec/Console Command for scrubbing to a specific time */
+	bool HandleDemoScrubCommand(const TCHAR* Cmd, FOutputDevice& Ar, UWorld* InWorld);
+
+	/** Utility function to handle Exec/Console Command for pausing and unpausing a replay */
+	bool HandleDemoPauseCommand(const TCHAR* Cmd, FOutputDevice& Ar, UWorld* InWorld);
+
+	/** Utility function to handle Exec/Console Command for setting the speed of a replay */
+	bool HandleDemoSpeedCommand(const TCHAR* Cmd, FOutputDevice& Ar, UWorld* InWorld);
+
 public:
 
 	// Destroys the current demo net driver
@@ -2798,7 +2794,7 @@ public:
 	 * @param	Class					Class to Spawn
 	 * @param	Location				Location To Spawn
 	 * @param	Rotation				Rotation To Spawn
-	 * @param	SpawmParameters			Spawn Parameters
+	 * @param	SpawnParameters			Spawn Parameters
 	 *
 	 * @return	Actor that just spawned
 	 */
@@ -2808,11 +2804,22 @@ public:
 	 * 
 	 * @param	Class					Class to Spawn
 	 * @param	Transform				World Transform to spawn on
-	 * @param	SpawmParameters			Spawm Parameters
+	 * @param	SpawnParameters			Spawn Parameters
 	 *
 	 * @return	Actor that just spawned
 	 */
 	AActor* SpawnActor( UClass* Class, FTransform const* Transform, const FActorSpawnParameters& SpawnParameters = FActorSpawnParameters());
+
+	/**
+	 * Spawn Actors with given absolute transform (override root component transform) and SpawnParameters
+	 * 
+	 * @param	Class					Class to Spawn
+	 * @param	AbsoluteTransform		World Transform to spawn on - without considering CDO's relative transform, thus Absolute
+	 * @param	SpawnParameters			Spawn Parameters
+	 *
+	 * @return	Actor that just spawned
+	 */
+	AActor* SpawnActorAbsolute( UClass* Class, FTransform const& AbsoluteTransform, const FActorSpawnParameters& SpawnParameters = FActorSpawnParameters());
 
 	/** Templated version of SpawnActor that allows you to specify a class type via the template type */
 	template< class T >
@@ -2853,7 +2860,23 @@ public:
 	{
 		return CastChecked<T>(SpawnActor(Class, &Transform, SpawnParameters), ECastCheckedType::NullAllowed);
 	}
-	
+
+	/** Templated version of SpawnActorAbsolute that allows you to specify absolute location and rotation in addition to class type via the template type */
+	template< class T >
+	T* SpawnActorAbsolute(FVector const& AbsoluteLocation, FRotator const& AbsoluteRotation, const FActorSpawnParameters& SpawnParameters = FActorSpawnParameters())
+	{
+		return CastChecked<T>(SpawnActorAbsolute(T::StaticClass(), FTransform(AbsoluteRotation, AbsoluteLocation), SpawnParameters), ECastCheckedType::NullAllowed);
+	}
+
+	/** 
+	 *  Templated version of SpawnActorAbsolute that allows you to specify whole absolute Transform
+	 *  class type via parameter while the return type is a parent class of that type 
+	 */
+	template< class T >
+	T* SpawnActorAbsolute(UClass* Class, FTransform const& Transform,const FActorSpawnParameters& SpawnParameters = FActorSpawnParameters())
+	{
+		return CastChecked<T>(SpawnActorAbsolute(Class, Transform, SpawnParameters), ECastCheckedType::NullAllowed);
+	}
 	/**
 	* Spawns given class and returns class T pointer, forcibly sets world position. WILL NOT run Construction Script of Blueprints 
 	* to give caller an opportunity to set parameters beforehand.  Caller is responsible for invoking construction
@@ -2966,9 +2989,6 @@ public:
 	/** Waits for the physics scene to be done processing */
 	void FinishPhysicsSim();
 
-	/** Begin cloth simulation */
-	void StartClothSim();
-
 	/** Spawns GameMode for the level. */
 	bool SetGameMode(const FURL& InURL);
 
@@ -2992,12 +3012,12 @@ public:
 	 */
 	bool DestroySwappedPC(UNetConnection* Connection);
 
-	// Begin FNetworkNotify interface
+	//~ Begin FNetworkNotify Interface
 	virtual EAcceptConnection::Type NotifyAcceptingConnection() override;
 	virtual void NotifyAcceptedConnection( class UNetConnection* Connection ) override;
 	virtual bool NotifyAcceptingChannel( class UChannel* Channel ) override;
 	virtual void NotifyControlMessage(UNetConnection* Connection, uint8 MessageType, class FInBunch& Bunch) override;
-	// End FNetworkNotify interface
+	//~ End FNetworkNotify Interface
 
 	/** Welcome a new player joining this server. */
 	void WelcomePlayer(UNetConnection* Connection);
@@ -3031,6 +3051,11 @@ public:
 	{
 		NetDriver = NewDriver;
 	}
+
+	/**
+	 * Returns true if the game net driver exists and is a client and the demo net driver exists and is a server.
+	 */
+	bool IsRecordingClientReplay() const;
 
 	/**
 	 * Sets the number of frames to delay Streaming Volume updating, 
@@ -3106,6 +3131,9 @@ public:
 
 	/** Returns true if this world is any kind of game world (including PIE worlds) */
 	bool IsGameWorld() const;
+
+	/** Returns true if this world is a preview game world (blueprint editor) */
+	bool IsPreviewWorld() const;
 
 	/** Returns true if this world should look at game hidden flags instead of editor hidden flags for the purposes of rendering */
 	bool UsesGameHiddenFlags() const;

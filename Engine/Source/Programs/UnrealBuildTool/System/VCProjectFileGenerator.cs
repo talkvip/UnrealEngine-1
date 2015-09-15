@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 using System.IO;
+using System.Linq;
 
 namespace UnrealBuildTool
 {
@@ -50,45 +51,45 @@ namespace UnrealBuildTool
 
 		/// <summary>
 		/// </summary>
-		public override void CleanProjectFiles(string InMasterProjectRelativePath, string InMasterProjectName, string InIntermediateProjectFilesPath)
+		public override void CleanProjectFiles(DirectoryReference InMasterProjectDirectory, string InMasterProjectName, DirectoryReference InIntermediateProjectFilesDirectory)
 		{
-			string MasterProjectFile = Path.Combine(InMasterProjectRelativePath, InMasterProjectName);
-			string MasterProjDeleteFilename = MasterProjectFile + ".sln";
-			if (File.Exists(MasterProjDeleteFilename))
+			FileReference MasterProjectFile = FileReference.Combine(InMasterProjectDirectory, InMasterProjectName);
+			FileReference MasterProjDeleteFilename = MasterProjectFile + ".sln";
+			if (MasterProjDeleteFilename.Exists())
 			{
-				File.Delete(MasterProjDeleteFilename);
+				MasterProjDeleteFilename.Delete();
 			}
 			MasterProjDeleteFilename = MasterProjectFile + ".sdf";
-			if (File.Exists(MasterProjDeleteFilename))
+			if (MasterProjDeleteFilename.Exists())
 			{
-				File.Delete(MasterProjDeleteFilename);
+				MasterProjDeleteFilename.Delete();
 			}
 			MasterProjDeleteFilename = MasterProjectFile + ".suo";
-			if (File.Exists(MasterProjDeleteFilename))
+			if (MasterProjDeleteFilename.Exists())
 			{
-				File.Delete(MasterProjDeleteFilename);
+				MasterProjDeleteFilename.Delete();
 			}
 			MasterProjDeleteFilename = MasterProjectFile + ".v11.suo";
-			if (File.Exists(MasterProjDeleteFilename))
+			if (MasterProjDeleteFilename.Exists())
 			{
-				File.Delete(MasterProjDeleteFilename);
+				MasterProjDeleteFilename.Delete();
 			}
 			MasterProjDeleteFilename = MasterProjectFile + ".v12.suo";
-			if (File.Exists(MasterProjDeleteFilename))
+			if (MasterProjDeleteFilename.Exists())
 			{
-				File.Delete(MasterProjDeleteFilename);
+				MasterProjDeleteFilename.Delete();
 			}
 
 			// Delete the project files folder
-			if (Directory.Exists(InIntermediateProjectFilesPath))
+			if (InIntermediateProjectFilesDirectory.Exists())
 			{
 				try
 				{
-					Directory.Delete(InIntermediateProjectFilesPath, true);
+					Directory.Delete(InIntermediateProjectFilesDirectory.FullName, true);
 				}
 				catch (Exception Ex)
 				{
-					Log.TraceInformation("Error while trying to clean project files path {0}. Ignored.", InIntermediateProjectFilesPath);
+					Log.TraceInformation("Error while trying to clean project files path {0}. Ignored.", InIntermediateProjectFilesDirectory);
 					Log.TraceInformation("\t" + Ex.Message);
 				}
 			}
@@ -99,7 +100,7 @@ namespace UnrealBuildTool
 		/// </summary>
 		/// <param name="InitFilePath">Path to the project file</param>
 		/// <returns>The newly allocated project file object</returns>
-		protected override ProjectFile AllocateProjectFile( string InitFilePath )
+		protected override ProjectFile AllocateProjectFile( FileReference InitFilePath )
 		{
 			return new VCProjectFile( InitFilePath );
 		}
@@ -361,6 +362,20 @@ namespace UnrealBuildTool
 				throw new BuildException( "Unexpected ProjectFileFormat" );
 			}
 
+			// Find the project for ShaderCompileWorker
+			ProjectFile ShaderCompileWorkerProject = null;
+			foreach(ProjectFile Project in AllProjectFiles)
+			{
+				if(Project.ProjectTargets.Count == 1)
+				{
+					FileReference TargetFilePath = Project.ProjectTargets[0].TargetFilePath;
+					if(TargetFilePath != null && TargetFilePath.GetFileNameWithoutAnyExtensions().Equals("ShaderCompileWorker", StringComparison.InvariantCultureIgnoreCase))
+					{
+						ShaderCompileWorkerProject = Project;
+						break;
+					}
+				}
+			}
 
 			// Solution folders, files and project entries
 			{
@@ -417,13 +432,13 @@ namespace UnrealBuildTool
 
 					// NOTE: The project name in the solution doesn't actually *have* to match the project file name on disk.  However,
 					//       we prefer it when it does match so we use the actual file name here.
-					var ProjectNameInSolution = Path.GetFileNameWithoutExtension(CurProject.ProjectFilePath);
+					var ProjectNameInSolution = CurProject.ProjectFilePath.GetFileNameWithoutExtension();
 
 					// Use the existing project's GUID that's already known to us
 					var ProjectGUID = CurProject.ProjectGUID.ToString( "B" ).ToUpperInvariant();
 
 					VCSolutionFileContent.Append(
-							"Project(\"" + ProjectTypeGUID + "\") = \"" + ProjectNameInSolution + "\", \"" + CurProject.RelativeProjectFilePath + "\", \"" + ProjectGUID + "\"" + ProjectFileGenerator.NewLine );
+							"Project(\"" + ProjectTypeGUID + "\") = \"" + ProjectNameInSolution + "\", \"" + CurProject.ProjectFilePath.MakeRelativeTo(ProjectFileGenerator.MasterProjectPath) + "\", \"" + ProjectGUID + "\"" + ProjectFileGenerator.NewLine );
 
 					// Setup dependency on UnrealBuildTool, if we need that.  This makes sure that UnrealBuildTool is
 					// freshly compiled before kicking off any build operations on this target project
@@ -434,6 +449,10 @@ namespace UnrealBuildTool
 						{
 							Dependencies.Add(UBTProject);
 							Dependencies.AddRange(UBTProject.DependsOnProjects);
+						}
+						if(CurProject.IsGeneratedProject && ShaderCompileWorkerProject != null && CurProject.ProjectTargets.Any(x => x.TargetRules != null && x.TargetRules.Type == TargetRules.TargetType.Editor))
+						{
+							Dependencies.Add(ShaderCompileWorkerProject);
 						}
 						Dependencies.AddRange(CurProject.DependsOnProjects);
 
@@ -690,6 +709,14 @@ namespace UnrealBuildTool
 											}
 										}
 
+										// Always allow SCW to build in editor configurations
+										if(MatchingProjectTarget == null && CurProject == ShaderCompileWorkerProject)
+										{
+											if(SolutionConfigCombination.TargetConfigurationName == TargetRules.TargetType.Editor.ToString() && SolutionConfigCombination.Platform == UnrealTargetPlatform.Win64)
+											{
+												MatchingProjectTarget = ShaderCompileWorkerProject.ProjectTargets[0];
+											}
+										}
 
 										string ProjectConfigName;
 										string ProjectPlatformName;
@@ -706,16 +733,26 @@ namespace UnrealBuildTool
 										// Set whether this project configuration should be built when the user initiates "build solution"
 										if( MatchingProjectTarget != null && CurProject.ShouldBuildByDefaultForSolutionTargets )
 										{
-											VCSolutionFileContent.Append(
-													"		" + CurProjectGUID + "." + SolutionConfigCombination.VCSolutionConfigAndPlatformName + ".Build.0 = " + ProjectConfigAndPlatformPair + ProjectFileGenerator.NewLine );
+                                            // Some targets are "dummy targets"; they only exist to show user friendly errors in VS. Weed them out here, and don't set them to build by default.
+                                            List<UnrealTargetPlatform> SupportedPlatforms = null;
+                                            if (MatchingProjectTarget.TargetRules != null)
+                                            {
+                                                SupportedPlatforms = new List<UnrealTargetPlatform>();
+                                                MatchingProjectTarget.TargetRules.GetSupportedPlatforms(ref SupportedPlatforms);
+                                            }
+                                            if(SupportedPlatforms == null || SupportedPlatforms.Contains(SolutionConfigCombination.Platform))
+                                            {
+                                                VCSolutionFileContent.Append(
+                                                        "		" + CurProjectGUID + "." + SolutionConfigCombination.VCSolutionConfigAndPlatformName + ".Build.0 = " + ProjectConfigAndPlatformPair + ProjectFileGenerator.NewLine);
 
-											var ProjGen = UEPlatformProjectGenerator.GetPlatformProjectGenerator(SolutionConfigCombination.Platform, true);
-											if (MatchingProjectTarget.ProjectDeploys ||
-												((ProjGen != null) && (ProjGen.GetVisualStudioDeploymentEnabled(SolutionPlatform, SolutionConfiguration) == true)))
-											{
-												VCSolutionFileContent.Append(
-														"		" + CurProjectGUID + "." + SolutionConfigCombination.VCSolutionConfigAndPlatformName + ".Deploy.0 = " + ProjectConfigAndPlatformPair + ProjectFileGenerator.NewLine );
-											}
+                                                var ProjGen = UEPlatformProjectGenerator.GetPlatformProjectGenerator(SolutionConfigCombination.Platform, true);
+                                                if (MatchingProjectTarget.ProjectDeploys ||
+                                                    ((ProjGen != null) && (ProjGen.GetVisualStudioDeploymentEnabled(SolutionPlatform, SolutionConfiguration) == true)))
+                                                {
+                                                    VCSolutionFileContent.Append(
+                                                            "		" + CurProjectGUID + "." + SolutionConfigCombination.VCSolutionConfigAndPlatformName + ".Deploy.0 = " + ProjectConfigAndPlatformPair + ProjectFileGenerator.NewLine);
+                                                }
+                                            }
 										}
 
 										CombinationsThatWereMatchedToProjects.Add( SolutionConfigCombination );
@@ -802,7 +839,7 @@ namespace UnrealBuildTool
 			// Save the solution file
 			if( bSuccess )
 			{
-				var SolutionFilePath = Path.Combine( MasterProjectRelativePath, SolutionFileName );
+				var SolutionFilePath = FileReference.Combine( MasterProjectPath, SolutionFileName ).FullName;
 				bSuccess = WriteFileIfChanged( SolutionFilePath, VCSolutionFileContent.ToString() );
 			}
 
@@ -826,7 +863,12 @@ namespace UnrealBuildTool
 				}
 
 				// Check it doesn't exist before overwriting it. Since these files store the user's preferences, it'd be bad form to overwrite them.
-				string SolutionOptionsFileName = Path.Combine(MasterProjectRelativePath, Path.ChangeExtension(SolutionFileName, SolutionOptionsExtension));
+				string SolutionOptionsFileName = Path.Combine(MasterProjectPath.FullName, Path.ChangeExtension(SolutionFileName, SolutionOptionsExtension));
+				if (ProjectFileFormat == VCProjectFileFormat.VisualStudio2015)
+				{
+					SolutionOptionsFileName = Path.Combine(MasterProjectPath.FullName, ".vs", Path.GetFileNameWithoutExtension(SolutionFileName), "v14", ".suo");
+					Directory.CreateDirectory(Path.Combine(MasterProjectPath.FullName, ".vs", Path.GetFileNameWithoutExtension(SolutionFileName), "v14"));
+				}
 				if(!File.Exists(SolutionOptionsFileName))
 				{
 					VCSolutionOptions Options = new VCSolutionOptions();
@@ -848,7 +890,7 @@ namespace UnrealBuildTool
 					VCSolutionExplorerState ExplorerState = new VCSolutionExplorerState();
 					foreach(ProjectFile ProjectFile in AllProjectFiles)
 					{
-						string ProjectName = Path.GetFileNameWithoutExtension(ProjectFile.ProjectFilePath);
+						string ProjectName = ProjectFile.ProjectFilePath.GetFileNameWithoutExtension();
 						if(ProjectFile == DefaultProject)
 						{
 							ExplorerState.OpenProjects.Add(new Tuple<string, string[]>(ProjectName, new string[]{ ProjectName }));

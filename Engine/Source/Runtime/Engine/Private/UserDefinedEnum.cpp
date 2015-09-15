@@ -12,6 +12,21 @@ UUserDefinedEnum::UUserDefinedEnum(const FObjectInitializer& ObjectInitializer)
 
 }
 
+void UUserDefinedEnum::Serialize(FArchive& Ar)
+{
+	Super::Serialize(Ar);
+
+#if WITH_EDITOR
+	if (Ar.IsLoading() && Ar.IsPersistent())
+	{
+		for (int32 i = 0; i < Names.Num(); ++i)
+		{
+			Names[i].Value = i;
+		}
+	}
+#endif // WITH_EDITOR
+}
+
 FString UUserDefinedEnum::GenerateFullEnumName(const TCHAR* InEnumName) const
 {
 	check(CppForm == ECppForm::Namespaced);
@@ -54,6 +69,11 @@ void UUserDefinedEnum::PostLoad()
 	Super::PostLoad();
 	FEnumEditorUtils::UpdateAfterPathChanged(this);
 	FEnumEditorUtils::EnsureAllDisplayNamesExist(this);
+
+	for (int32 i = 0; i < Names.Num(); ++i)
+	{
+		Names[i].Value = i;
+	}
 }
 
 void UUserDefinedEnum::PostEditUndo()
@@ -97,7 +117,7 @@ FText UUserDefinedEnum::GetEnumText(int32 InIndex) const
 	return Super::GetEnumText(InIndex);
 }
 
-bool UUserDefinedEnum::SetEnums(TArray<TPair<FName, int8>>& InNames, ECppForm InCppForm)
+bool UUserDefinedEnum::SetEnums(TArray<TPair<FName, uint8>>& InNames, ECppForm InCppForm)
 {
 	if (Names.Num() > 0)
 	{
@@ -117,7 +137,8 @@ bool UUserDefinedEnum::SetEnums(TArray<TPair<FName, int8>>& InNames, ECppForm In
 		const int32 MaxEnumItemIndex = GetValueByName(MaxEnumItem);
 		if ((MaxEnumItemIndex == INDEX_NONE) && (LookupEnumName(MaxEnumItem) == INDEX_NONE))
 		{
-			Names.Add(TPairInitializer<FName, int8>(MaxEnumItem, GetMaxEnumValue() + 1));
+			int MaxEnumValue = (InNames.Num() == 0)? 0 : GetMaxEnumValue() + 1;
+			Names.Add(TPairInitializer<FName, uint8>(MaxEnumItem, MaxEnumValue));
 			AddNamesToMasterList();
 			return true;
 		}

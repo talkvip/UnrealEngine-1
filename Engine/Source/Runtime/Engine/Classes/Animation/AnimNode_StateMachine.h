@@ -51,10 +51,16 @@ struct FAnimationActiveTransitionEntry
 
 	TArray<FAnimNode_TransitionPoseEvaluator*> PoseEvaluators;
 
+	// Blend data used for per-bone animation evaluation
+	TArray<FBlendSampleData> StateBlendData;
+
 #if WITH_EDITORONLY_DATA
 	TArray<int32, TInlineAllocator<3>> SourceTransitionIndices;
 #endif
 
+	// Blend profile to use for this transition. Specifying this will make the transition evaluate per-bone
+	UPROPERTY()
+	UBlendProfile* BlendProfile;
 
 public:
 	FAnimationActiveTransitionEntry();
@@ -123,6 +129,8 @@ public:
 	{
 		return ElapsedTime;
 	}
+
+	FName GetCurrentStateName() const;
 
 #if WITH_EDITORONLY_DATA
 	bool IsTransitionActive(int32 TransIndex) const;

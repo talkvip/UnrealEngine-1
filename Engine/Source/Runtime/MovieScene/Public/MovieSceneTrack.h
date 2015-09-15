@@ -50,6 +50,11 @@ public:
 	virtual bool HasShowableData() const {return true;}
 
 	/**
+	 * @returns True if this track should generate a display node even when it's empty.
+	 */
+	virtual bool IsVisibleWhenEmpty() const { return false; }
+
+	/**
 	 * @return Whether or not this track supports multiple row indices
 	 */
 	virtual bool SupportsMultipleRows() const { return false; }
@@ -68,6 +73,13 @@ public:
 	 * @return			True if the section is in this track
 	 */
 	virtual bool HasSection( UMovieSceneSection* Section ) const PURE_VIRTUAL( UMovieSceneSection::HasSection, return false; );
+
+	/**
+	 * Add a section to this track
+	 *
+	 * @param Section	The section to add
+	 */
+	virtual void AddSection( UMovieSceneSection* Section ) PURE_VIRTUAL( UMovieSceneSection::AddSection, );
 
 	/**
 	 * Removes a section from this track

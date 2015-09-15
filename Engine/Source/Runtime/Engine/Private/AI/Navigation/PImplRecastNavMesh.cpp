@@ -745,9 +745,13 @@ void FPImplRecastNavMesh::Raycast2D(const FVector& StartLoc, const FVector& EndL
 
 	if (StartNode != INVALID_NAVNODEREF)
 	{
+		float RecastHitNormal[3];
+
 		const dtStatus RaycastStatus = NavQuery.raycast(StartNode, &RecastStart.X, &RecastEnd.X
-			, QueryFilter, &RaycastResult.HitTime, &RaycastResult.HitNormal.X
+			, QueryFilter, &RaycastResult.HitTime, RecastHitNormal
 			, RaycastResult.CorridorPolys, &RaycastResult.CorridorPolysCount, RaycastResult.GetMaxCorridorSize());
+
+		RaycastResult.HitNormal = Recast2UnrVector(RecastHitNormal);
 
 		if (dtStatusSucceed(RaycastStatus) == false)
 		{
@@ -784,9 +788,13 @@ void FPImplRecastNavMesh::Raycast2D(NavNodeRef StartNode, const FVector& StartLo
 
 	if (StartNode != INVALID_NAVNODEREF)
 	{
+		float RecastHitNormal[3];
+
 		const dtStatus RaycastStatus = NavQuery.raycast(StartNode, &RecastStart.X, &RecastEnd.X
-					, QueryFilter, &RaycastResult.HitTime, &RaycastResult.HitNormal.X
-					, RaycastResult.CorridorPolys, &RaycastResult.CorridorPolysCount, RaycastResult.GetMaxCorridorSize());
+			, QueryFilter, &RaycastResult.HitTime, RecastHitNormal
+			, RaycastResult.CorridorPolys, &RaycastResult.CorridorPolysCount, RaycastResult.GetMaxCorridorSize());
+
+		RaycastResult.HitNormal = Recast2UnrVector(RecastHitNormal);
 
 		if (dtStatusSucceed(RaycastStatus) == false)
 		{
@@ -1681,6 +1689,14 @@ uint32 FPImplRecastNavMesh::GetPolyAreaID(NavNodeRef PolyID) const
 	return AreaID;
 }
 
+void FPImplRecastNavMesh::SetPolyAreaID(NavNodeRef PolyID, uint8 AreaID)
+{
+	if (DetourNavMesh)
+	{
+		DetourNavMesh->setPolyArea((dtPolyRef)PolyID, AreaID);
+	}
+}
+
 bool FPImplRecastNavMesh::GetPolyData(NavNodeRef PolyID, uint16& Flags, uint8& AreaType) const
 {
 	if (DetourNavMesh)
@@ -1693,6 +1709,77 @@ bool FPImplRecastNavMesh::GetPolyData(NavNodeRef PolyID, uint16& Flags, uint8& A
 		{
 			Flags = Poly->flags;
 			AreaType = Poly->getArea();
+			return true;
+		}
+	}
+
+	return false;
+}
+
+bool FPImplRecastNavMesh::GetPolyNeighbors(NavNodeRef PolyID, TArray<FNavigationPortalEdge>& Neighbors) const
+{
+	if (DetourNavMesh)
+	{
+		dtPolyRef PolyRef = (dtPolyRef)PolyID;
+		dtPoly const* Poly = 0;
+		dtMeshTile const* Tile = 0;
+
+		dtStatus Status = DetourNavMesh->getTileAndPolyByRef(PolyRef, &Tile, &Poly);
+		if (dtStatusSucceed(Status))
+		{
+			INITIALIZE_NAVQUERY_SIMPLE(NavQuery, RECAST_MAX_SEARCH_NODES);
+
+			float RcLeft[3], RcRight[3];
+			uint8 DummyType1, DummyType2;
+
+			uint32 LinkIdx = Poly->firstLink;
+			while (LinkIdx != DT_NULL_LINK)
+			{
+				const dtLink& Link = DetourNavMesh->getLink(Tile, LinkIdx);
+				LinkIdx = Link.next;
+				
+				Status = NavQuery.getPortalPoints(PolyRef, Link.ref, RcLeft, RcRight, DummyType1, DummyType2);
+				if (dtStatusSucceed(Status))
+				{
+					FNavigationPortalEdge NeiData;
+					NeiData.ToRef = Link.ref;
+					NeiData.Left = Recast2UnrealPoint(RcLeft);
+					NeiData.Right = Recast2UnrealPoint(RcRight);
+
+					Neighbors.Add(NeiData);
+				}
+			}
+
+			return true;
+		}
+	}
+
+	return false;
+}
+
+bool FPImplRecastNavMesh::GetPolyNeighbors(NavNodeRef PolyID, TArray<NavNodeRef>& Neighbors) const
+{
+	if (DetourNavMesh)
+	{
+		const dtPolyRef PolyRef = static_cast<dtPolyRef>(PolyID);
+		dtPoly const* Poly = 0;
+		dtMeshTile const* Tile = 0;
+
+		const dtStatus Status = DetourNavMesh->getTileAndPolyByRef(PolyRef, &Tile, &Poly);
+
+		if (dtStatusSucceed(Status))
+		{
+			uint32 LinkIdx = Poly->firstLink;
+			Neighbors.Reserve(DT_VERTS_PER_POLYGON);
+
+			while (LinkIdx != DT_NULL_LINK)
+			{
+				const dtLink& Link = DetourNavMesh->getLink(Tile, LinkIdx);
+				LinkIdx = Link.next;
+
+				Neighbors.Add(Link.ref);
+			}
+
 			return true;
 		}
 	}

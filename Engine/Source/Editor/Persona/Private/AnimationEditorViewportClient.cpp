@@ -126,7 +126,7 @@ FAnimationViewportClient::FAnimationViewportClient(FAnimationEditorPreviewScene&
 	ViewFOV = FMath::Clamp<float>(ConfigOption->ViewFOV, FOVMin, FOVMax);
 
 	EngineShowFlags.DisableAdvancedFeatures();
-	EngineShowFlags.CompositeEditorPrimitives = true;
+	EngineShowFlags.SetCompositeEditorPrimitives(true);
 
 	// set camera mode
 	bCameraFollow = false;
@@ -556,7 +556,7 @@ void FAnimationViewportClient::DrawCanvas( FViewport& InViewport, FSceneView& Vi
 
 void FAnimationViewportClient::DrawUVsForMesh(FViewport* InViewport, FCanvas* InCanvas, int32 InTextYPos)
 {
-	//use the overriden LOD level
+	//use the overridden LOD level
 	const uint32 LODLevel = FMath::Clamp(PreviewSkelMeshComp->ForcedLodModel - 1, 0, PreviewSkelMeshComp->SkeletalMesh->LODInfo.Num() - 1);
 
 	TArray<FVector2D> SelectedEdgeTexCoords; //No functionality in Persona for this (yet?)
@@ -835,6 +835,8 @@ void FAnimationViewportClient::DisplayInfo(FCanvas* Canvas, FSceneView* View, bo
 
 	// it is weird, but unless it's completely black, it's too bright, so just making it white if only black
 	const FLinearColor TextColor = (SelectedHSVColor.B < 0.3f) ? FLinearColor::White : FLinearColor::Black;
+	const FColor HeadlineColour(255, 83, 0);
+	const FColor SubHeadlineColour(202, 66, 0);
 
 	// if not valid skeletalmesh
 	if (!PreviewSkelMeshComp.IsValid() || !PreviewSkelMeshComp->SkeletalMesh)
@@ -844,9 +846,6 @@ void FAnimationViewportClient::DisplayInfo(FCanvas* Canvas, FSceneView* View, bo
 
 	if (PreviewSkelMeshComp->SkeletalMesh->MorphTargets.Num() > 0)
 	{
-		FColor HeadlineColour(255,83,0);
-		FColor SubHeadlineColour(202,66,0);
-
 		int32 SubHeadingIndent = CurXOffset + 10;
 
 		TArray<UMaterial*> ProcessedMaterials;
@@ -915,7 +914,6 @@ void FAnimationViewportClient::DisplayInfo(FCanvas* Canvas, FSceneView* View, bo
 		UAnimSequence* Sequence = Cast<UAnimSequence>(PreviewInstance->CurrentAsset);
 		if ( Sequence && Sequence->DoesNeedRebake() )
 		{
-			FColor SubHeadlineColour(202, 66, 0);
 			InfoString = TEXT("Animation is being edited. To apply to raw animation data, click \"Apply\"");
 			Canvas->DrawShadowedString(CurXOffset, CurYOffset, *InfoString, GEngine->GetSmallFont(), SubHeadlineColour);
 			CurYOffset += YL + 2;
@@ -1029,7 +1027,6 @@ void FAnimationViewportClient::DisplayInfo(FCanvas* Canvas, FSceneView* View, bo
 			if (PreviewSkelMeshComp->BonesOfInterest.Num() > 0)
 			{
 				int32 BoneIndex = PreviewSkelMeshComp->BonesOfInterest[0];
-				const FName BoneName = PreviewSkelMeshComp->SkeletalMesh->RefSkeleton.GetBoneName(BoneIndex);
 				FTransform ReferenceTransform = PreviewSkelMeshComp->SkeletalMesh->RefSkeleton.GetRefBonePose()[BoneIndex];
 				FTransform LocalTransform = PreviewSkelMeshComp->LocalAtoms[BoneIndex];
 				FTransform ComponentTransform = PreviewSkelMeshComp->GetSpaceBases()[BoneIndex];
@@ -1121,6 +1118,15 @@ void FAnimationViewportClient::DisplayInfo(FCanvas* Canvas, FSceneView* View, bo
 				FMath::RoundToInt(PreviewSkelMeshComp->Bounds.BoxExtent.Z * 2.0f));
 			Canvas->DrawShadowedString(CurXOffset, CurYOffset, *InfoString, GEngine->GetSmallFont(), TextColor);
 		}
+	}
+
+	if (PreviewSkelMeshComp->SectionIndexPreview != INDEX_NONE)
+	{
+		// Notify the user if they are isolating a mesh section.
+		CurYOffset += YL + 2;
+		InfoString = FString::Printf(*LOCTEXT("MeshSectionsHiddenWarning", "Mesh Sections Hidden").ToString());
+		Canvas->DrawShadowedString(CurXOffset, CurYOffset, *InfoString, GEngine->GetSmallFont(), SubHeadlineColour);
+		
 	}
 }
 

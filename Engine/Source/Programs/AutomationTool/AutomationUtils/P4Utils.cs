@@ -25,7 +25,7 @@ namespace AutomationTool
 		public P4Exception(string Msg)
 			: base(Msg) { }
 		public P4Exception(string Msg, Exception InnerException)
-			: base(Msg, InnerException) { }
+			: base(InnerException, Msg) { }
 
 		public P4Exception(string Format, params object[] Args)
 			: base(Format, Args) { }
@@ -73,6 +73,7 @@ namespace AutomationTool
 		public string RootPath;
 		public string Host;
 		public string Owner;
+		public string Stream;
 		public DateTime Access;
         public P4LineEnd LineEnd;
         public P4ClientOption Options;
@@ -85,6 +86,7 @@ namespace AutomationTool
 				&& RootPath == Other.RootPath 
 				&& Host == Other.Host 
 				&& Owner == Other.Owner 
+				&& Stream == Other.Stream
 				&& LineEnd == Other.LineEnd 
 				&& Options == Other.Options 
 				&& SubmitOptions == Other.SubmitOptions
@@ -1273,10 +1275,10 @@ namespace AutomationTool
 		/// Invokes revert command.
 		/// </summary>
 		/// <param name="CommandLine">Commandline for the command.</param>
-		public void Revert(string CommandLine)
+		public void Revert(string CommandLine, bool AllowSpew = true)
 		{
 			CheckP4Enabled();
-			LogP4("revert " + CommandLine);
+			LogP4("revert " + CommandLine, AllowSpew: AllowSpew);
 		}
 
 		/// <summary>
@@ -1343,7 +1345,7 @@ namespace AutomationTool
                 bool isClPending = false;
                 if (ChangeFiles(CL, out isClPending, false).Count == 0)
                 {
-					CommandUtils.LogConsole("No edits left to commit after brutal submit resolve. Assuming another build committed same changes already and exiting as success.");
+					CommandUtils.Log("No edits left to commit after brutal submit resolve. Assuming another build committed same changes already and exiting as success.");
                     DeleteChange(CL);
                     // No changes to submit, no need to retry.
                     return;
@@ -1355,7 +1357,7 @@ namespace AutomationTool
 					{
 						throw new P4Exception("Change {0} failed to submit.\n{1}", CL, CmdOutput);
 					}
-					CommandUtils.LogConsole("**** P4 Returned\n{0}\n*******", CmdOutput);
+					CommandUtils.Log("**** P4 Returned\n{0}\n*******", CmdOutput);
 
 					LastCmdOutput = CmdOutput;
 					bool DidSomething = false;
@@ -1418,7 +1420,7 @@ namespace AutomationTool
                                 {
                                     continue;
                                 }
-								CommandUtils.LogConsole("Brutal 'resolve' on {0} to force submit.\n", File);
+								CommandUtils.Log("Brutal 'resolve' on {0} to force submit.\n", File);
 								Revert(CL, "-k " + CommandUtils.MakePathSafeToUseWithCommandLine(File));  // revert the file without overwriting the local one
 								Sync("-f -k " + CommandUtils.MakePathSafeToUseWithCommandLine(File + "#head"), false); // sync the file without overwriting local one
 								ReconcileNoDeletes(CL, CommandUtils.MakePathSafeToUseWithCommandLine(File));  // re-check out, if it changed, or add
@@ -1429,7 +1431,7 @@ namespace AutomationTool
                     }
 					if (!DidSomething)
 					{
-						CommandUtils.LogConsole("Change {0} failed to submit for reasons we do not recognize.\n{1}\nWaiting and retrying.", CL, CmdOutput);
+						CommandUtils.Log("Change {0} failed to submit for reasons we do not recognize.\n{1}\nWaiting and retrying.", CL, CmdOutput);
 					}
 					System.Threading.Thread.Sleep(30000);
 				}
@@ -1461,7 +1463,7 @@ namespace AutomationTool
 							}
 						}
 
-						CommandUtils.LogConsole("Submitted CL {0} which became CL {1}\n", CL, SubmittedCL);
+						CommandUtils.Log("Submitted CL {0} which became CL {1}\n", CL, SubmittedCL);
 					}
 
 					if (SubmittedCL < CL)
@@ -1498,7 +1500,7 @@ namespace AutomationTool
 			int CL = 0;
 			if(AllowSpew)
 			{
-				CommandUtils.LogConsole("Creating Change\n {0}\n", ChangeSpec);
+				CommandUtils.Log("Creating Change\n {0}\n", ChangeSpec);
 			}
 			if (LogP4Output(out CmdOutput, "change -i", Input: ChangeSpec, AllowSpew: AllowSpew))
 			{
@@ -1517,7 +1519,7 @@ namespace AutomationTool
 			}
 			else if(AllowSpew)
 			{
-				CommandUtils.LogConsole("Returned CL {0}\n", CL);
+				CommandUtils.Log("Returned CL {0}\n", CL);
 			}
 			return CL;
 		}
@@ -1648,7 +1650,7 @@ namespace AutomationTool
 				int EndOffset = CmdOutput.LastIndexOf(EndStr);
 				if (Offset == 0 && Offset < EndOffset)
 				{
-					CommandUtils.LogConsole("Change {0} does not exist", CL);
+					CommandUtils.Log("Change {0} does not exist", CL);
 					return false;
 				}
 
@@ -1664,7 +1666,7 @@ namespace AutomationTool
 				}
 
 				string Status = CmdOutput.Substring(StatusOffset + StatusStr.Length, DescOffset - StatusOffset - StatusStr.Length).Trim();
-				CommandUtils.LogConsole("Change {0} exists ({1})", CL, Status);
+				CommandUtils.Log("Change {0} exists ({1})", CL, Status);
 				Pending = (Status == "pending");
 				return true;
 			}
@@ -1756,7 +1758,7 @@ namespace AutomationTool
 			string Output;
 			if (!LogP4Output(out Output, CommandLine, null, AllowSpew))
 			{
-				CommandUtils.LogConsole("Couldn't delete label '{0}'.  It may not have existed in the first place.", LabelName);
+				CommandUtils.Log("Couldn't delete label '{0}'.  It may not have existed in the first place.", LabelName);
 			}
 		}
 
@@ -1788,7 +1790,7 @@ namespace AutomationTool
 			LabelSpec += "View: \n";
 			LabelSpec += " " + View;
 
-			CommandUtils.LogConsole("Creating Label\n {0}\n", LabelSpec);
+			CommandUtils.Log("Creating Label\n {0}\n", LabelSpec);
 			LogP4("label -i", Input: LabelSpec);
 		}
 
@@ -2039,8 +2041,8 @@ namespace AutomationTool
         {
             CheckP4Enabled();
 			var Label = Env.LabelPrefix + BuildNamePrefix + "-CL-" + Env.ChangelistString;
-			CommandUtils.Log("Label prefix {0}", BuildNamePrefix);
-			CommandUtils.Log("Full Label name {0}", Label); 
+			CommandUtils.LogLog("Label prefix {0}", BuildNamePrefix);
+			CommandUtils.LogLog("Full Label name {0}", Label); 
             return Label;
         }
 
@@ -2062,13 +2064,13 @@ namespace AutomationTool
 			}
 
 			{
-				CommandUtils.Log("Making downstream label");
+				CommandUtils.LogLog("Making downstream label");
                 var Label = FullLabelName(Env, BuildNamePrefix);
 
-				CommandUtils.Log("Deleting old label {0} (if any)...", Label);
+				CommandUtils.LogLog("Deleting old label {0} (if any)...", Label);
                 DeleteLabel(Label, false);
 
-				CommandUtils.Log("Creating new label...");
+				CommandUtils.LogLog("Creating new label...");
 				CreateLabel(
 					Name: Label,
 					Description: "BVT Time " + CommandUtils.CmdEnv.TimestampAsString + "  CL " + Env.ChangelistString,
@@ -2077,12 +2079,12 @@ namespace AutomationTool
 					);
 				if (Files == null)
 				{
-					CommandUtils.Log("Adding all files to new label {0}...", Label);
+					CommandUtils.LogLog("Adding all files to new label {0}...", Label);
 					LabelSync(Label, false);
 				}
 				else
 				{
-					CommandUtils.Log("Adding build products to new label {0}...", Label);
+					CommandUtils.LogLog("Adding build products to new label {0}...", Label);
 					foreach (string LabelFile in Files)
 					{
 						LabelSync(Label, false, LabelFile);
@@ -2109,13 +2111,13 @@ namespace AutomationTool
             }
 
             {
-				CommandUtils.Log("Making downstream label");
+				CommandUtils.LogLog("Making downstream label");
                 var Label = FullLabelName(Env, BuildNamePrefix);
 
-				CommandUtils.Log("Deleting old label {0} (if any)...", Label);
+				CommandUtils.LogLog("Deleting old label {0} (if any)...", Label);
                 DeleteLabel(Label, false);
 
-				CommandUtils.Log("Creating new label...");
+				CommandUtils.LogLog("Creating new label...");
                 CreateLabel(
                     Name: Label,
 					Description: "BVT Time " + CommandUtils.CmdEnv.TimestampAsString + "  CL " + Env.ChangelistString,
@@ -2222,6 +2224,24 @@ namespace AutomationTool
 		}
 
 		/// <summary>
+		/// Determines whether a file exists in the depot.
+		/// </summary>
+		/// <param name="DepotFile">Depot path</param>
+		/// <returns>List of records describing the file's mapping. Usually just one, but may be more.</returns>
+		public bool FileExistsInDepot(string DepotFile, bool AllowSpew = true)
+		{
+			string CommandLine = String.Format("-z tag fstat {0}", CommandUtils.MakePathSafeToUseWithCommandLine(DepotFile));
+
+			string Output;
+			if(!LogP4Output(out Output, CommandLine, AllowSpew: false) || Output.Contains("no such file(s)"))
+			{
+				return false;
+			}
+
+			return true;
+		}
+
+		/// <summary>
 		/// Gets file stats.
 		/// </summary>
 		/// <param name="Filename">Filenam</param>
@@ -2284,7 +2304,7 @@ namespace AutomationTool
 		/// <param name="Attributes">Attributes to set.</param>
 		public void ChangeFileType(string Filename, P4FileAttributes Attributes, string Changelist = null)
 		{
-			CommandUtils.Log("ChangeFileType({0}, {1}, {2})", Filename, Attributes, String.IsNullOrEmpty(Changelist) ? "null" : Changelist);
+			CommandUtils.LogLog("ChangeFileType({0}, {1}, {2})", Filename, Attributes, String.IsNullOrEmpty(Changelist) ? "null" : Changelist);
 
 			var Stat = FStat(Filename);
 			if (String.IsNullOrEmpty(Changelist))
@@ -2364,7 +2384,7 @@ namespace AutomationTool
 			CheckP4Enabled();
 			if(!Quiet)
 			{
-				CommandUtils.Log("Checking if client {0} exists", ClientName);
+				CommandUtils.LogLog("Checking if client {0} exists", ClientName);
 			}
 
             var P4Result = P4(String.Format("-c {0} where //...", ClientName), AllowSpew: false, WithClient: false);
@@ -2382,7 +2402,7 @@ namespace AutomationTool
 
 			if(!Quiet)
 			{
-				CommandUtils.Log("Getting info for client {0}", ClientName);
+				CommandUtils.LogLog("Getting info for client {0}", ClientName);
 			}
 			if (!DoesClientExist(ClientName, Quiet))
 			{
@@ -2423,6 +2443,7 @@ namespace AutomationTool
 					Info.RootPath = CommandUtils.ConvertSeparators(PathSeparator.Default, Info.RootPath);
 				}
 				Tags.TryGetValue("Owner", out Info.Owner);
+				Tags.TryGetValue("Stream", out Info.Stream);
 				string AccessTime;
 				Tags.TryGetValue("Access", out AccessTime);
 				if (!String.IsNullOrEmpty(AccessTime))
@@ -2565,7 +2586,7 @@ namespace AutomationTool
             {
                 SpecInput += "\t" + Mapping.Key + " //" + ClientSpec.Name + Mapping.Value + Environment.NewLine;
             }
-			if (AllowSpew) CommandUtils.Log(SpecInput);
+			if (AllowSpew) CommandUtils.LogLog(SpecInput);
             LogP4("client -i", SpecInput, AllowSpew: AllowSpew, WithClient: false);
             return ClientSpec;
         }
@@ -2615,6 +2636,25 @@ namespace AutomationTool
 			}
 			return Output;
 		}
+
+		/// <summary>
+		/// Gets the contents of a particular file in the depot and writes it to a local file without syncing it
+		/// </summary>
+		/// <param name="DepotPath">Depot path to the file (with revision/range if necessary)</param>
+		/// <param name="OutputFileName">Output file to write to</param>
+		public void PrintToFile(string DepotPath, string FileName, bool AllowSpew = true)
+		{
+			string Output;
+			if(!P4Output(out Output, "print -q -o \"" + FileName + "\" " + DepotPath, AllowSpew: AllowSpew, WithClient: false))
+			{
+				throw new AutomationException("p4 print {0} failed", DepotPath);
+			}
+			if(!Output.Trim().Contains("\n") && Output.Contains("no such file(s)"))
+			{
+				throw new AutomationException("p4 print {0} failed", DepotPath);
+			}
+		}
+
 
 		#region Utilities
 

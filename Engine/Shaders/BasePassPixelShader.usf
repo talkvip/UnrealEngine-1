@@ -177,8 +177,8 @@ float3 GetTranslucencyLighting(FMaterialPixelParameters MaterialParameters, floa
 	// Larger values result in a shorter transition distance
 	float TransitionScale = 6;
 	// Setup a 3d lerp factor going to 0 at the edge of the inner volume
-	float3 LerpFactors = saturate((.5f - abs(InnerVolumeUVs - .5f)) * TransitionScale);
-	float FinalLerpFactor = LerpFactors.x * LerpFactors.y * LerpFactors.z;
+	float3 InnerLerpFactors = saturate((.5f - abs(InnerVolumeUVs - .5f)) * TransitionScale);
+	float InnerLerpFactor = InnerLerpFactors.x * InnerLerpFactors.y * InnerLerpFactors.z;
 
 	#if TRANSLUCENCY_LIGHTING_VOLUMETRIC_DIRECTIONAL || TRANSLUCENCY_LIGHTING_SURFACE
 
@@ -192,8 +192,8 @@ float3 GetTranslucencyLighting(FMaterialPixelParameters MaterialParameters, floa
 
 		// Lerp between cascades
 		// Increase the directional coefficients and attenuate the ambient coefficient based on a tweaked value
-		float4 Vector0 = lerp(OuterVector0, InnerVector0, FinalLerpFactor) / DirectionalLightingIntensity;
-		float3 Vector1 = lerp(OuterVector1, InnerVector1, FinalLerpFactor) * DirectionalLightingIntensity;
+		float4 Vector0 = lerp(OuterVector0, InnerVector0, InnerLerpFactor) / DirectionalLightingIntensity;
+		float3 Vector1 = lerp(OuterVector1, InnerVector1, InnerLerpFactor) * DirectionalLightingIntensity;
 
 		// Reconstruct the SH coefficients based on what was encoded
 		FTwoBandSHVectorRGB TranslucentLighting;
@@ -219,8 +219,8 @@ float3 GetTranslucencyLighting(FMaterialPixelParameters MaterialParameters, floa
 		float4 OuterLighting = Texture3DSampleLevel(TranslucencyLightingVolumeAmbientOuter, TranslucencyLightingVolumeAmbientOuterSampler, OuterVolumeUVs, 0);
 
 		// Lerp between cascades
-		float4 Vector0 = lerp(OuterLighting, InnerLighting, FinalLerpFactor);
-		
+		float4 Vector0 = lerp(OuterLighting, InnerLighting, InnerLerpFactor);
+
 		// Normal is not taken into account with non directional lighting, and only the ambient term of the SH coefficients are needed
 		FOneBandSHVectorRGB TranslucentLighting;
 		TranslucentLighting.R.V.x = Vector0.r;
@@ -244,6 +244,19 @@ float3 GetTranslucencyLighting(FMaterialPixelParameters MaterialParameters, floa
 		// Only apply self shadowing if the shadow hasn't faded out completely
 		if (DirectionalLightColor.a > 0)
 		{
+			// fade volume contribution to not get tiling content outside
+			{
+				// Setup a 3d lerp factor going to 0 at the edge of the outer volume
+				// maybe we can replace this with a border color but some hardware doesn't support a float border color
+				float3 OuterLerpFactors = saturate((.5f - abs(OuterVolumeUVs - .5f)) * TransitionScale);
+				float OuterLerpFactor = OuterLerpFactors.x * OuterLerpFactors.y * OuterLerpFactors.z;
+
+				// 0..1, 0:fully shadowed, 1:fully unshadowed
+				const float VisibilityOutside = 1;
+
+				VolumeLighting = lerp(float4(DirectionalLightColor.rgb, VisibilityOutside), VolumeLighting, OuterLerpFactor);
+			}
+
 			// Determine the shadow space position
 			// Apply a stable offset to the world position used for shadowing, which blurs out high frequency details in the shadowmap with many layers
 			float4 HomogeneousShadowPosition = mul(float4(MaterialParameters.WorldPosition + MaterialParameters.LightingPositionOffset, 1), WorldToShadowMatrix);
@@ -624,7 +637,7 @@ void Main(
 	#endif
 #endif
 
-	OPTIONAL_OutDepth
+	OPTIONAL_OutDepthConservative
 
 #if EDITOR_ALPHA2COVERAGE != 0
    ,in uint InCoverage : SV_Coverage
@@ -832,8 +845,6 @@ void Main(
 		GBuffer.IndirectIrradiance = IndirectIrradiance;
 		GBuffer.PrecomputedShadowFactors = PrecomputedShadowFactors;
 		GBuffer.GBufferAO = MaterialAO;
-		GBuffer.Opacity = Opacity;
-		GBuffer.DecalMask = Primitive.DecalReceiverMask;
 		GBuffer.HasDistanceFieldRepresentation = Primitive.HasDistanceFieldRepresentation;
 		GBuffer.HasHeightfieldRepresentation = Primitive.HasHeightfieldRepresentation;
 
@@ -843,43 +854,51 @@ void Main(
 			GBuffer.ShadingModelID = SHADINGMODELID_DEFAULT_LIT;
 		#elif MATERIAL_SHADINGMODEL_SUBSURFACE
 			GBuffer.ShadingModelID = SHADINGMODELID_SUBSURFACE;
-			GBuffer.CustomData = EncodeSubsurfaceColor(SubsurfaceColor);
+			GBuffer.CustomData.rgb = EncodeSubsurfaceColor(SubsurfaceColor);
+			GBuffer.CustomData.a = Opacity;
 		#elif MATERIAL_SHADINGMODEL_PREINTEGRATED_SKIN
 			GBuffer.ShadingModelID = SHADINGMODELID_PREINTEGRATED_SKIN;
-			GBuffer.CustomData = EncodeSubsurfaceColor(SubsurfaceColor);
+			GBuffer.CustomData.rgb = EncodeSubsurfaceColor(SubsurfaceColor);
+			GBuffer.CustomData.a = Opacity;
 		#elif MATERIAL_SHADINGMODEL_SUBSURFACE_PROFILE
 			GBuffer.ShadingModelID = SHADINGMODELID_SUBSURFACE_PROFILE;
-			GBuffer.CustomData = EncodeSubsurfaceProfile(SubsurfaceProfile);
+			GBuffer.CustomData.rgb = EncodeSubsurfaceProfile(SubsurfaceProfile);
+			GBuffer.CustomData.a = Opacity;
 		#elif MATERIAL_SHADINGMODEL_CLEAR_COAT
 			GBuffer.ShadingModelID = SHADINGMODELID_CLEAR_COAT;
 
-			float ClearCoat				= GetMaterialClearCoat(MaterialParameters);
-			float ClearCoatRoughness	= GetMaterialClearCoatRoughness(MaterialParameters);
-			float Film = 1 * ClearCoat;
+			float ClearCoat				= saturate( GetMaterialCustomData0(MaterialParameters) );
+			float ClearCoatRoughness	= saturate( GetMaterialCustomData1(MaterialParameters) );
 			float MetalSpec = 0.9;
 
 			float NoV = saturate( dot( MaterialParameters.WorldNormal, MaterialParameters.CameraVector ) );
 
 			// Approximation of refraction's effect on EnvBRDF
 			float RefractionScale = ( (NoV * 0.5 + 0.5) * NoV - 1 ) * saturate( 1.25 - 1.25 * Roughness ) + 1;
-			RefractionScale = lerp( 1, RefractionScale, ClearCoat );
-
-			float3 AbsorptionColor = (1 - Film) + BaseColor * ( Film * (1 / MetalSpec) );
-			GBuffer.BaseColor = lerp( BaseColor, MetalSpec, Film );
-
+		
 			// Approximation of absorption integral, tuned for Roughness=0.4
+			float3 AbsorptionColor = BaseColor * (1 / MetalSpec);
 			float3 Absorption = AbsorptionColor * ( (NoV - 1) * 0.85 * ( 1 - lerp( AbsorptionColor, Square(AbsorptionColor), -0.78 ) ) + 1 );
-			//float Toe = 1 - exp2( -9 * NoV - 3.5 );
-			//float3 Absorption = Toe * AbsorptionColor * ( (NoV - 1) * 0.85 * ( 1 - lerp( AbsorptionColor, Square(AbsorptionColor), -0.78 ) ) + lerp( 0.93, 0.96, AbsorptionColor * 2 - 1 ) );
 
-			GBuffer.BaseColor *= Absorption * lerp( 1, RefractionScale, Metallic );
+			GBuffer.BaseColor = lerp( BaseColor, MetalSpec * Absorption * lerp( 1, RefractionScale, Metallic ), ClearCoat );
 			GBuffer.Specular *= Luminance( Absorption ) * RefractionScale;
 
 			GBuffer.CustomData.x = ClearCoat;
 			GBuffer.CustomData.y = ClearCoatRoughness;
 		#elif MATERIAL_SHADINGMODEL_TWOSIDED_FOLIAGE
 			GBuffer.ShadingModelID = SHADINGMODELID_TWOSIDED_FOLIAGE;
-			GBuffer.CustomData = EncodeSubsurfaceColor(SubsurfaceColor);
+			GBuffer.CustomData.rgb = EncodeSubsurfaceColor(SubsurfaceColor);
+			GBuffer.CustomData.a = Opacity;
+		#elif MATERIAL_SHADINGMODEL_HAIR
+			GBuffer.ShadingModelID = SHADINGMODELID_HAIR;
+			#if NUM_MATERIAL_OUTPUTS_GETTANGENTOUTPUT > 0
+				float3 Tangent = GetTangentOutput0(MaterialParameters);
+				Tangent = normalize( TransformTangentVectorToWorld( MaterialParameters.TangentToWorld, Tangent ) );
+				GBuffer.WorldNormal = Tangent;
+			#endif
+			GBuffer.CustomData.xy = UnitVectorToOctahedron( MaterialParameters.WorldNormal ) * 0.5 + 0.5;
+			GBuffer.CustomData.z = saturate( GetMaterialCustomData1(MaterialParameters) );	// Roughness2
+			GBuffer.CustomData.w = saturate( GetMaterialCustomData0(MaterialParameters) );	// Opacity
 		#else
 			// missing shading model, compiler should report ShadingModelID is not set
 		#endif

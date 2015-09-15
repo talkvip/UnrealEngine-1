@@ -5,9 +5,33 @@
 
 #include "RendererPrivate.h"
 #include "ScenePrivate.h"
+#include "SceneViewport.h"
 #include "PostProcess/PostProcessHMD.h"
 #include "Classes/SteamVRFunctionLibrary.h"
 
+#include "SteamVRMeshAssets.h"
+
+#if WITH_EDITOR
+#include "Editor/UnrealEd/Classes/Editor/EditorEngine.h"
+#endif
+
+/** Helper function for acquiring the appropriate FSceneViewport */
+FSceneViewport* FindSceneViewport()
+{
+	if (!GIsEditor)
+	{
+		UGameEngine* GameEngine = Cast<UGameEngine>(GEngine);
+		return GameEngine->SceneViewport.Get();
+	}
+#if WITH_EDITOR
+	else
+	{
+		UEditorEngine* EditorEngine = Cast<UEditorEngine>(GEngine);
+		return (FSceneViewport*)(EditorEngine->GetPIEViewport());
+	}
+#endif
+	return nullptr;
+}
 
 //---------------------------------------------------
 // SteamVR Plugin Implementation
@@ -142,6 +166,10 @@ bool FSteamVRHMD::HasValidTrackingPosition()
 }
 
 void FSteamVRHMD::GetPositionalTrackingCameraProperties(FVector& OutOrigin, FQuat& OutOrientation, float& OutHFOV, float& OutVFOV, float& OutCameraDistance, float& OutNearPlane, float& OutFarPlane) const
+{
+}
+
+void FSteamVRHMD::RebaseObjectOrientationAndPosition(FVector& OutPosition, FQuat& OutOrientation) const
 {
 }
 
@@ -383,8 +411,6 @@ void FSteamVRHMD::GetTrackedDeviceIds(ESteamVRTrackedDeviceType DeviceType, TArr
 
 bool FSteamVRHMD::GetTrackedObjectOrientationAndPosition(uint32 DeviceId, FQuat& CurrentOrientation, FVector& CurrentPosition)
 {
-	check(IsInGameThread());
-
 	bool bHasValidPose = false;
 
 	if (DeviceId >= 0 && DeviceId < vr::k_unMaxTrackedDeviceCount)
@@ -401,8 +427,6 @@ bool FSteamVRHMD::GetTrackedObjectOrientationAndPosition(uint32 DeviceId, FQuat&
 
 bool FSteamVRHMD::GetControllerHandPositionAndOrientation( const int32 ControllerIndex, EControllerHand Hand, FVector& OutPosition, FQuat& OutOrientation )
 {
-	check( IsInGameThread() );
-
 	if ((ControllerIndex < 0) || (ControllerIndex >= MAX_STEAMVR_CONTROLLER_PAIRS) || Hand < EControllerHand::Left || Hand > EControllerHand::Right)
 	{
 		return false;
@@ -607,6 +631,16 @@ bool FSteamVRHMD::EnableStereo(bool bStereo)
 	bStereoEnabled = (IsHMDEnabled()) ? bStereo : false;
 
 	FSystemResolution::RequestResolutionChange(1280, 720, (bStereo) ? EWindowMode::WindowedMirror : EWindowMode::Windowed);
+
+	// Set the viewport to match that of the HMD display
+	FSceneViewport* SceneVP = FindSceneViewport();
+	if (VRSystem && SceneVP)
+	{
+		int32 PosX, PosY;
+		uint32 Width, Height;
+		VRSystem->GetWindowBounds(&PosX, &PosY, &Width, &Height);
+		SceneVP->SetViewportSize(Width, Height);
+	}
 
 	// Uncap fps to enable FPS higher than 62
 	GEngine->bForceDisableFrameRateSmoothing = bStereo;
@@ -960,9 +994,7 @@ void FSteamVRHMD::Startup()
 			}
 		}
 
-		// Setup hidden area meshes
-		HiddenAreaMeshes[0].Build(VRSystem->GetHiddenAreaMesh(vr::Hmd_Eye::Eye_Left));
-		HiddenAreaMeshes[1].Build(VRSystem->GetHiddenAreaMesh(vr::Hmd_Eye::Eye_Right));
+		SetupOcclusionMeshes();
 
 #if PLATFORM_WINDOWS
 		if (IsPCPlatform(GMaxRHIShaderPlatform) && !IsOpenGLPlatform(GMaxRHIShaderPlatform))
@@ -1083,61 +1115,56 @@ void FSteamVRHMD::UnloadOpenVRModule()
 	}
 }
 
-FSteamVRHMD::FHiddenAreaMesh::FHiddenAreaMesh() :
-	pVertices(nullptr),
-	pIndices(nullptr),
-	NumVertices(0),
-	NumIndices(0),
-	NumTriangles(0)
-{}
+void FSteamVRHMD::SetupOcclusionMeshes()
+{	
+	const vr::HiddenAreaMesh_t LeftEyeMesh = VRSystem->GetHiddenAreaMesh(vr::Hmd_Eye::Eye_Left);
+	const vr::HiddenAreaMesh_t RightEyeMesh = VRSystem->GetHiddenAreaMesh(vr::Hmd_Eye::Eye_Right);
+	
+	const uint32 VertexCount = LeftEyeMesh.unTriangleCount * 3;
+	check(LeftEyeMesh.unTriangleCount == RightEyeMesh.unTriangleCount);
 
-FSteamVRHMD::FHiddenAreaMesh::~FHiddenAreaMesh()
-{
-	if (pVertices)
+	// Copy mesh data from SteamVR format to ours, then initialize the meshes.
+	if (VertexCount > 0)
 	{
-		delete[] pVertices;
-	}
+		FVector2D* const LeftEyePositions = new FVector2D[VertexCount];
+		FVector2D* const RightEyePositions = new FVector2D[VertexCount];
 
-	if (pIndices)
-	{
-		delete[] pIndices;
-	}
-}
-
-void FSteamVRHMD::FHiddenAreaMesh::Build(const vr::HiddenAreaMesh_t& Mesh)
-{
-	check(pVertices == nullptr);
-
-	NumTriangles = Mesh.unTriangleCount;
-	NumVertices  = NumTriangles * 3;
-	NumIndices   = NumVertices;
-
-	// Did we get any data?
-	if (NumVertices == 0)
-	{
-		return;
-	}
-
-	pVertices = new FVector4[NumVertices];
-	pIndices  = new uint16[NumIndices];
-
-	uint32 DataIndex = 0;
-	for (uint32 TriangleIter = 0; TriangleIter < NumTriangles; ++TriangleIter)
-	{
-		for (uint32 VertexIter = 0; VertexIter < 3; ++VertexIter)
+		uint32 HiddenAreaMeshCrc = 0;
+		uint32 DataIndex = 0;
+		for (uint32 TriangleIter = 0; TriangleIter < LeftEyeMesh.unTriangleCount; ++TriangleIter)
 		{
-			const vr::HmdVector2_t& Vertex = Mesh.pVertexData[DataIndex];
+			for (uint32 VertexIter = 0; VertexIter < 3; ++VertexIter)
+			{
+				const vr::HmdVector2_t& LeftSrc = LeftEyeMesh.pVertexData[DataIndex];
+				const vr::HmdVector2_t& RightSrc = RightEyeMesh.pVertexData[DataIndex];
 
-			// Remap from [0 1] to [-1 1] to match our NDC space
-			pVertices[DataIndex].X = (Vertex.v[0] * 2.0f) - 1.0f;
-			pVertices[DataIndex].Y = (Vertex.v[1] * 2.0f) - 1.0f;
-			pVertices[DataIndex].Z = 1.0f; // Setting to 1 for reversed depth near plane
-			pVertices[DataIndex].W = 1.0f; 
+				FVector2D& LeftDst = LeftEyePositions[DataIndex];
+				FVector2D& RightDst = RightEyePositions[DataIndex];
 
-			pIndices[DataIndex] = DataIndex;
+				LeftDst.X = LeftSrc.v[0];
+				LeftDst.Y = LeftSrc.v[1];
 
-			++DataIndex;
+				RightDst.X = RightSrc.v[0];
+				RightDst.Y = RightSrc.v[1];
+
+				HiddenAreaMeshCrc = FCrc::MemCrc32(&LeftDst, sizeof(FVector2D), HiddenAreaMeshCrc);
+
+				++DataIndex;
+			}
 		}
+
+		HiddenAreaMeshes[0].BuildMesh(LeftEyePositions, VertexCount, FHMDViewMesh::MT_HiddenArea);
+		HiddenAreaMeshes[1].BuildMesh(RightEyePositions, VertexCount, FHMDViewMesh::MT_HiddenArea);
+
+		// If the hidden area mesh from the SteamVR runtime matches the mesh used to generate the Vive's visible area mesh, initialize it.
+		if (HiddenAreaMeshCrc == ViveHiddenAreaMeshCrc)
+		{
+			VisibleAreaMeshes[0].BuildMesh(Vive_LeftEyeVisibleAreaPositions, VisibleAreaVertexCount, FHMDViewMesh::MT_VisibleArea);
+			VisibleAreaMeshes[1].BuildMesh(Vive_RightEyeVisibleAreaPositions, VisibleAreaVertexCount, FHMDViewMesh::MT_VisibleArea);
+		}
+
+		delete[] LeftEyePositions;
+		delete[] RightEyePositions;
 	}
 }
 

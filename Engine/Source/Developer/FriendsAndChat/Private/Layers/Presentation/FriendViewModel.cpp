@@ -16,7 +16,7 @@ class FFriendViewModelImpl
 {
 public:
 
-	virtual void EnumerateActions(TArray<EFriendActionType::Type>& Actions, bool bFromChat = false) override
+	virtual void EnumerateActions(TArray<EFriendActionType::Type>& Actions, bool bFromChat = false, bool DisplayChatOption = true) override
 	{
 		if(FriendItem->IsGameRequest())
 		{
@@ -39,6 +39,7 @@ public:
 			}
 			if (FriendItem->IsOnline() && (GamePartyService->IsInJoinableGameSession() || GamePartyService->IsInJoinableParty()))
 			{
+				// @todo above checks don't account for "same party", probably should be CanPerformAction below
 				Actions.Add(EFriendActionType::InviteToGame);
 			}
 		}
@@ -54,16 +55,10 @@ public:
 						{
 							Actions.Add(EFriendActionType::JoinGame);
 						}
-						else if (GamePartyService->JoinGameAllowed(GetClientId()) && FriendItem->IsInParty())
-						{
-							Actions.Add(EFriendActionType::JoinGame);
-						}
 					}
 					if (FriendItem->IsOnline() && FriendItem->CanInvite())
 					{
-						const bool bIsJoinableGame = GamePartyService->IsInJoinableGameSession() && !GamePartyService->IsFriendInSameSession(FriendItem);
-						const bool bIsJoinableParty = GamePartyService->IsInJoinableParty() && !GamePartyService->IsFriendInSameParty(FriendItem);
-						if (bIsJoinableGame || bIsJoinableParty)
+						if (CanPerformAction(EFriendActionType::InviteToGame))
 						{
 							Actions.Add(EFriendActionType::InviteToGame);
 						}
@@ -76,17 +71,27 @@ public:
 						}
 						Actions.Add(EFriendActionType::RemoveFriend);
 					}
+					else if(DisplayChatOption && FriendItem->IsOnline())
+					{
+						Actions.Add(EFriendActionType::Chat);
+					}
 				}
 				break;
 				case EInviteStatus::PendingInbound :
 				{
-					Actions.Add(EFriendActionType::AcceptFriendRequest);
-					Actions.Add(EFriendActionType::IgnoreFriendRequest);
+					if(!bFromChat)
+					{
+						Actions.Add(EFriendActionType::AcceptFriendRequest);
+						Actions.Add(EFriendActionType::IgnoreFriendRequest);
+					}
 				}
 				break;
 				case EInviteStatus::PendingOutbound :
 				{
-					Actions.Add(EFriendActionType::CancelFriendRequest);
+					if(!bFromChat)
+					{
+						Actions.Add(EFriendActionType::CancelFriendRequest);
+					}
 				}
 				break;
 			default:
@@ -170,13 +175,30 @@ public:
 			{
 				if (GamePartyService->JoinGameAllowed(GetClientId()))
 				{
-					if(FriendItem->IsInParty())
+					if (FriendItem->IsInParty())
 					{
+						// Party rules apply (if also in a game then party needs to reflect game state)
 						return FriendItem->CanJoinParty();
 					}
+					// Game rules apply
 					return true;
 				}
 				return false;
+			}
+			case EFriendActionType::InviteToGame:
+			{
+				if (IsLocalPlayerInActiveParty())
+				{
+					// Party rules apply (if also in a game then party needs to reflect game state)
+					const bool bIsJoinableParty = GamePartyService->IsInJoinableParty() && !GamePartyService->IsFriendInSameParty(FriendItem);
+					return bIsJoinableParty;
+				}
+				else
+				{
+					// Game rules apply
+					const bool bIsJoinableGame = GamePartyService->IsInJoinableGameSession() && !GamePartyService->IsFriendInSameSession(FriendItem);
+					return bIsJoinableGame;
+				}
 			}
 			case EFriendActionType::AcceptFriendRequest:
 			case EFriendActionType::RemoveFriend:
@@ -185,7 +207,6 @@ public:
 			case EFriendActionType::RejectFriendRequest:
 			case EFriendActionType::CancelFriendRequest:
 			case EFriendActionType::SendFriendRequest:
-			case EFriendActionType::InviteToGame:
 			case EFriendActionType::RejectGame:
 			case EFriendActionType::Chat:
 			default:
@@ -237,9 +258,14 @@ public:
 		return GamePartyService->IsInGameSession();
 	}
 
-	virtual bool IsInActiveParty() const override
+	virtual bool IsLocalPlayerInActiveParty() const override
 	{
-		return GamePartyService->IsInActiveParty();
+		return GamePartyService->IsLocalPlayerInActiveParty();
+	}
+
+	virtual bool IsInPartyChat() const override
+	{
+		return GamePartyService->IsInPartyChat();
 	}
 
 	virtual const EOnlinePresenceState::Type GetOnlineStatus() const override

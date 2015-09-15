@@ -77,8 +77,9 @@ void FSlateD3DRenderer::Initialize()
 {
 	CreateDevice();
 
-
 	TextureManager = MakeShareable( new FSlateD3DTextureManager );
+	FSlateDataPayload::ResourceManager = TextureManager.Get();
+
 	TextureManager->LoadUsedTextures();
 
 	FontCache = MakeShareable( new FSlateFontCache( MakeShareable( new FSlateD3DFontAtlasFactory ) ) );
@@ -243,6 +244,11 @@ bool FSlateD3DRenderer::GenerateDynamicImageResource(FName ResourceName, uint32 
 	return TextureManager->CreateDynamicTextureResource(ResourceName, Width, Height, Bytes) != NULL;
 }
 
+FSlateResourceHandle FSlateD3DRenderer::GetResourceHandle( const FSlateBrush& Brush )
+{
+	return TextureManager->GetResourceHandle( Brush );
+}
+
 void FSlateD3DRenderer::RemoveDynamicBrushResource( TSharedPtr<FSlateDynamicImageBrush> BrushToRemove )
 {
 	DynamicBrushesToRemove.Add( BrushToRemove );
@@ -364,7 +370,7 @@ void FSlateD3DRenderer::DrawWindows( FSlateDrawBuffer& InWindowDrawBuffer )
 			FSlateBatchData& BatchData = ElementList.GetBatchData();
 			{
 				SLATE_CYCLE_COUNTER_SCOPE(GRendererUpdateBuffers);
-				BatchData.CreateRenderBatches();
+				BatchData.CreateRenderBatches(ElementList.GetRootDrawLayer().GetElementBatchMap());
 				RenderingPolicy->UpdateVertexAndIndexBuffers(BatchData);
 			}
 

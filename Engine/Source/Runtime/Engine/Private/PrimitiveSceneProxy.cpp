@@ -172,7 +172,7 @@ HHitProxy* FPrimitiveSceneProxy::CreateHitProxies(UPrimitiveComponent* Component
 	}
 }
 
-FPrimitiveViewRelevance FPrimitiveSceneProxy::GetViewRelevance(const FSceneView* View)
+FPrimitiveViewRelevance FPrimitiveSceneProxy::GetViewRelevance(const FSceneView* View) const
 {
 	return FPrimitiveViewRelevance();
 }
@@ -262,6 +262,12 @@ void FPrimitiveSceneProxy::ApplyWorldOffset(FVector InOffset)
 	FMatrix NewLocalToWorld = LocalToWorld.ConcatTranslation(InOffset);
 	
 	SetTransform(NewLocalToWorld, NewBounds, NewLocalBounds, NewActorPosition);
+}
+
+void FPrimitiveSceneProxy::ApplyLateUpdateTransform(const FMatrix& LateUpdateTransform)
+{
+	const FMatrix AdjustedLocalToWorld = LocalToWorld * LateUpdateTransform;
+	SetTransform(AdjustedLocalToWorld, Bounds, LocalBounds, ActorPosition);
 }
 
 /**

@@ -17,7 +17,7 @@ namespace EAndroidScreenOrientation
 		/** Portrait orientation rotated 180 degrees. */
 		ReversePortrait,
 
-		/** Use either portrait or reverse portrait orientation, based on the device orientation sensor. */
+		/** Use either portrait or reverse portrait orientation, where supported by the device, based on the device orientation sensor. */
 		SensorPortrait,
 
 		/** Landscape orientation (the display is wider than it is tall). */
@@ -242,9 +242,17 @@ public:
 	UPROPERTY(GlobalConfig, EditAnywhere, Category = GooglePlayServices)
 	FString AdMobAdUnitID;
 
+	// Identifiers for ads obtained from AdMob
+	UPROPERTY(GlobalConfig, EditAnywhere, Category = GooglePlayServices)
+	TArray<FString> AdMobAdUnitIDs;
+
 	// The unique identifier for this application (needed for IAP)
 	UPROPERTY(GlobalConfig, EditAnywhere, Category = GooglePlayServices)
 	FString GooglePlayLicenseKey;
+
+	/** Show the launch image as a startup slash screen */
+	UPROPERTY(GlobalConfig, EditAnywhere, Category = LaunchImages, meta = (DisplayName = "Show launch image"))
+	bool bShowLaunchImage;
 
 	/** Android Audio encoding options */
 	UPROPERTY(GlobalConfig, EditAnywhere, Category = DataCooker, meta = (DisplayName = "Audio encoding"))
@@ -254,6 +262,7 @@ public:
 #if WITH_EDITOR
 	// UObject interface
 	virtual void PostEditChangeProperty(struct FPropertyChangedEvent& PropertyChangedEvent) override;
+	virtual void PostInitProperties() override;
 	// End of UObject interface
 #endif
 };

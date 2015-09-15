@@ -13,7 +13,7 @@ class UMovieSceneSection;
 class UMovieSceneTrack;
 
 
-MOVIESCENE_API DECLARE_LOG_CATEGORY_EXTERN(LogSequencerRuntime, Log, All);
+MOVIESCENE_API DECLARE_LOG_CATEGORY_EXTERN(LogMovieScene, Log, All);
 
 
 /** @todo: remove this type when support for intrinsics on TMap values is added? */
@@ -125,6 +125,11 @@ public:
 	 */
 	bool RemovePossessable(const FGuid& PossessableGuid);
 	
+	/*
+	* Replace an existing possessable with another 
+	*/
+	bool ReplacePossessable(const FGuid& OldGuid, const FGuid& NewGuid, const FString& Name);
+
 	/**
 	 * Tries to locate a possessable in this MovieScene for the specified possessable GUID.
 	 *
@@ -249,6 +254,11 @@ public:
 	{
 		return ObjectBindings;
 	}
+
+	/*
+	* Replace an existing binding with another 
+	*/
+	void ReplaceBinding(const FGuid& OldGuid, const FGuid& NewGuid, const FString& Name);
 
 	/**
 	 * @return The time range of the movie scene (the in to out time range)

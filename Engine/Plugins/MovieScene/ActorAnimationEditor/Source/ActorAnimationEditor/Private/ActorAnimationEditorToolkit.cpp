@@ -9,6 +9,10 @@
 #include "ISequencer.h"
 #include "ISequencerModule.h"
 #include "SDockTab.h"
+#include "MovieSceneBinding.h"
+#include "MovieScene.h"
+#include "MovieSceneMaterialTrack.h"
+#include "ScopedTransaction.h"
 
 
 #define LOCTEXT_NAMESPACE "ActorAnimationEditor"
@@ -62,7 +66,7 @@ FActorAnimationEditorToolkit::~FActorAnimationEditorToolkit()
 /* FActorAnimationEditorToolkit interface
  *****************************************************************************/
 
-void FActorAnimationEditorToolkit::Initialize( const EToolkitMode::Type Mode, const FSequencerViewParams& InViewParams, const TSharedPtr<IToolkitHost>& InitToolkitHost, UActorAnimation* ActorAnimation, bool bEditWithinLevelEditor )
+void FActorAnimationEditorToolkit::Initialize( const EToolkitMode::Type Mode, const TSharedPtr<IToolkitHost>& InitToolkitHost, UActorAnimation* ActorAnimation, bool bEditWithinLevelEditor )
 {
 	// create tab layout
 	const TSharedRef<FTabManager::FLayout> StandaloneDefaultLayout = FTabManager::NewLayout("Standalone_ActorAnimationEditor")
@@ -82,9 +86,14 @@ void FActorAnimationEditorToolkit::Initialize( const EToolkitMode::Type Mode, co
 	FAssetEditorToolkit::InitAssetEditor(Mode, InitToolkitHost, SequencerDefs::SequencerAppIdentifier, StandaloneDefaultLayout, bCreateDefaultStandaloneMenu, bCreateDefaultToolbar, ActorAnimation);
 
 	// initialize sequencer
+	FSequencerViewParams ViewParams(TEXT("ActorAnimationEditorViewParams"));
+	{
+		ViewParams.OnGetAddMenuContent = FOnGetAddMenuContent::CreateSP(this, &FActorAnimationEditorToolkit::HandleSequencerGetAddMenuContent);
+	}
+
 	FSequencerInitParams SequencerInitParams;
 	{
-		SequencerInitParams.ViewParams = InViewParams;
+		SequencerInitParams.ViewParams = ViewParams;
 		SequencerInitParams.RootSequence = ActorAnimation;
 		SequencerInitParams.bEditWithinLevelEditor = bEditWithinLevelEditor;
 		SequencerInitParams.ToolkitHost = InitToolkitHost;
@@ -172,6 +181,40 @@ void FActorAnimationEditorToolkit::HandleAddComponentActionExecute( UActorCompon
 }
 
 
+void FActorAnimationEditorToolkit::HandleAddComponentMaterialActionExecute( UPrimitiveComponent* Component, int32 MaterialIndex )
+{
+	FGuid ObjectHandle = Sequencer->GetHandleToObject( Component );
+	for ( const FMovieSceneBinding& Binding : Sequencer->GetFocusedMovieSceneSequence()->GetMovieScene()->GetBindings() )
+	{
+		if ( Binding.GetObjectGuid() == ObjectHandle )
+		{
+			bool bHasMaterialTrack = false;
+			for ( UMovieSceneTrack* Track : Binding.GetTracks() )
+			{
+				UMovieSceneComponentMaterialTrack* MaterialTrack = Cast<UMovieSceneComponentMaterialTrack>( Track );
+				if ( MaterialTrack->GetMaterialIndex() == MaterialIndex )
+				{
+					bHasMaterialTrack = true;
+					break;
+				}
+			}
+			if ( bHasMaterialTrack == false )
+			{
+				const FScopedTransaction Transaction( LOCTEXT( "AddComponentMaterialTrack", "Add component material track" ) );
+
+				UMovieScene* FocusedMovieScene = Sequencer->GetFocusedMovieSceneSequence()->GetMovieScene();
+				FocusedMovieScene->Modify();
+				UMovieSceneComponentMaterialTrack* MaterialTrack = Cast<UMovieSceneComponentMaterialTrack>( FocusedMovieScene->AddTrack( UMovieSceneComponentMaterialTrack::StaticClass(), ObjectHandle ) );
+				MaterialTrack->Modify();
+				MaterialTrack->SetMaterialIndex( MaterialIndex );
+				
+				Sequencer->NotifyMovieSceneDataChanged();
+			}
+		}
+	}
+}
+
+
 void FActorAnimationEditorToolkit::HandleMapChanged(class UWorld* NewWorld, EMapChangeType MapChangeType)
 {
 	Sequencer->NotifyMapChanged(NewWorld, MapChangeType);
@@ -188,6 +231,12 @@ TSharedRef<FExtender> FActorAnimationEditorToolkit::HandleMenuExtensibilityGetEx
 		FMenuExtensionDelegate::CreateRaw(this, &FActorAnimationEditorToolkit::HandleTrackMenuExtensionAddTrack, ContextSensitiveObjects));
 
 	return AddTrackMenuExtender;
+}
+
+
+TSharedRef<SWidget> FActorAnimationEditorToolkit::HandleSequencerGetAddMenuContent(TSharedRef<ISequencer> InSequencer)
+{
+	return SNullWidget::NullWidget;
 }
 
 
@@ -218,23 +267,42 @@ void FActorAnimationEditorToolkit::HandleTrackMenuExtensionAddTrack( FMenuBuilde
 	}
 
 	AActor* Actor = Cast<AActor>(ContextObjects[0]);
-	
-	if (Actor == nullptr)
+	if (Actor != nullptr)
 	{
-		return;
-	}
-
-	AddTrackMenuBuilder.BeginSection("Components", LOCTEXT("ComponentsSection", "Components"));
-	{
-		for (UActorComponent* Component : Actor->GetComponents())
+		AddTrackMenuBuilder.BeginSection("Components", LOCTEXT("ComponentsSection", "Components"));
 		{
-			FUIAction AddComponentAction(FExecuteAction::CreateSP(this, &FActorAnimationEditorToolkit::HandleAddComponentActionExecute, Component));
-			FText AddComponentLabel = FText::FromString(Component->GetName());
-			FText AddComponentToolTip = FText::Format(LOCTEXT("ComponentToolTipFormat", "Add {0} component"), FText::FromString(Component->GetName()));
-			AddTrackMenuBuilder.AddMenuEntry(AddComponentLabel, AddComponentToolTip, FSlateIcon(), AddComponentAction);
+			for (UActorComponent* Component : Actor->GetComponents())
+			{
+				FUIAction AddComponentAction(FExecuteAction::CreateSP(this, &FActorAnimationEditorToolkit::HandleAddComponentActionExecute, Component));
+				FText AddComponentLabel = FText::FromString(Component->GetName());
+				FText AddComponentToolTip = FText::Format(LOCTEXT("ComponentToolTipFormat", "Add {0} component"), FText::FromString(Component->GetName()));
+				AddTrackMenuBuilder.AddMenuEntry(AddComponentLabel, AddComponentToolTip, FSlateIcon(), AddComponentAction);
+			}
+		}
+		AddTrackMenuBuilder.EndSection();
+	}
+	else
+	{
+		UPrimitiveComponent* Component = Cast<UPrimitiveComponent>(ContextObjects[0]);
+		if (Component != nullptr)
+		{
+			int32 NumMaterials = Component->GetNumMaterials();
+			if (NumMaterials > 0)
+			{
+				AddTrackMenuBuilder.BeginSection("Materials", LOCTEXT("MaterialSection", "Materials"));
+				{
+					for (int32 MaterialIndex = 0; MaterialIndex < NumMaterials; MaterialIndex++)
+					{
+						FUIAction AddComponentMaterialAction(FExecuteAction::CreateSP(this, &FActorAnimationEditorToolkit::HandleAddComponentMaterialActionExecute, Component, MaterialIndex));
+						FText AddComponentMaterialLabel = FText::Format(LOCTEXT("ComponentMaterialIndexLabelFormat", "Element {0}"), FText::AsNumber(MaterialIndex));
+						FText AddComponentMaterialToolTip = FText::Format(LOCTEXT("ComponentMaterialIndexToolTipFormat", "Add material element {0}" ), FText::AsNumber(MaterialIndex));
+						AddTrackMenuBuilder.AddMenuEntry( AddComponentMaterialLabel, AddComponentMaterialToolTip, FSlateIcon(), AddComponentMaterialAction );
+					}
+				}
+				AddTrackMenuBuilder.EndSection();
+			}
 		}
 	}
-	AddTrackMenuBuilder.EndSection();
 }
 
 

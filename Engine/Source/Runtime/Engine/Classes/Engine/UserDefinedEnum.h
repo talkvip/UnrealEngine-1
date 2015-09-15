@@ -34,6 +34,9 @@ class ENGINE_API UUserDefinedEnum : public UEnum
 	TArray<FText> DisplayNames;
 
 public:
+	//~ Begin UObject Interface.
+	virtual void Serialize(FArchive& Ar) override;
+	//~ End UObject Interface.
 	/**
 	 * Generates full enum name give enum name.
 	 * For UUserDefinedEnum full enumerator name has form: '<enumeration path>::<short, user defined enumerator name>'
@@ -56,15 +59,15 @@ public:
 	 */
 	virtual FText GetEnumText(int32 InIndex) const override;
 
-	virtual bool SetEnums(TArray<TPair<FName, int8>>& InNames, ECppForm InCppForm) override;
+	virtual bool SetEnums(TArray<TPair<FName, uint8>>& InNames, ECppForm InCppForm) override;
 
 #if WITH_EDITOR
-	// Begin UObject interface
+	//~ Begin UObject Interface
 	virtual bool Rename(const TCHAR* NewName = NULL, UObject* NewOuter = NULL, ERenameFlags Flags = REN_None) override;
 	virtual void PostDuplicate(bool bDuplicateForPIE) override;
 	virtual void PostLoad() override;
 	virtual void PostEditUndo() override;
-	// End of UObject interface
+	//~ End UObject Interface
 
 	FString GenerateNewEnumeratorName();
 #endif	// WITH_EDITOR

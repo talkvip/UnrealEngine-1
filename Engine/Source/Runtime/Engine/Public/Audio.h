@@ -11,15 +11,14 @@
 
 ENGINE_API DECLARE_LOG_CATEGORY_EXTERN(LogAudio, Warning, All);
 
+// Special log category used for temporary programmer debugging code of audio
+ENGINE_API DECLARE_LOG_CATEGORY_EXTERN(LogAudioDebug, Display, All);
+
 /** 
  * Maximum number of channels that can be set using the ini setting
  */
 #define MAX_AUDIOCHANNELS				64
 
-/** 
- * Number of ticks an inaudible source remains alive before being stopped
- */
-#define AUDIOSOURCE_TICK_LONGEVITY		60
 
 /** 
  * Length of sound in seconds to be considered as looping forever
@@ -190,8 +189,10 @@ struct ENGINE_API FWaveInstance
 	float				Volume;
 	/** Current volume multiplier - used to zero the volume without stopping the source */
 	float				VolumeMultiplier;
-	/** Current priority */
+	/** Current priority (deprecated) */
 	float				PlayPriority;
+	/** A priority value that scales with volume (post all gain stages) and is used to determin voice playback priority. */
+	float				VolumeWeightedPriorityScale;
 	/** Voice center channel volume */
 	float				VoiceCenterChannelVolume;
 	/** Volume of the radio filter effect */
@@ -245,6 +246,8 @@ struct ENGINE_API FWaveInstance
 	FVector				Location;
 	/** At what distance we start transforming into omnidirectional soundsource */
 	float				OmniRadius;
+	/** Amount of spread for 3d multi-channel asset spatialization */
+	float				StereoSpread;
 	/** Cached type hash */
 	uint32				TypeHash;
 	/** Hash value for finding the wave instance based on the path through the cue to get to it */
@@ -282,6 +285,9 @@ struct ENGINE_API FWaveInstance
 
 	/** Returns the actual volume the wave instance will play at */
 	float GetActualVolume() const;
+
+	/** Returns the weighted priority of the wave instance. */
+	float GetVolumeWeightedPriority() const;
 
 	/**
 	 * Checks whether wave is streaming and streaming is supported

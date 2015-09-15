@@ -193,6 +193,39 @@ bool AActor::CheckActorComponents()
 
 void AActor::ResetOwnedComponents()
 {
+#if WITH_EDITOR
+	// Identify any natively-constructed components referenced by properties that either failed to serialize or came in as NULL.
+	if(HasAnyFlags(RF_WasLoaded) && NativeConstructedComponentToPropertyMap.Num() > 0)
+	{
+		TInlineComponentArray<UActorComponent*> ComponentsToDestroy;
+		for (auto Component : OwnedComponents)
+		{
+			// Only consider native components
+			if (Component && Component->CreationMethod == EComponentCreationMethod::Native)
+			{
+				// Find the property or properties that previously referenced the natively-constructed component.
+				TArray<UObjectProperty*> Properties;
+				NativeConstructedComponentToPropertyMap.MultiFind(Component->GetFName(), Properties);
+
+				// Determine if the property or properties are no longer valid references (either it got serialized out that way or something failed during load)
+				for (auto ObjProp : Properties)
+				{
+					check(ObjProp != nullptr);
+					UActorComponent* ActorComponent = Cast<UActorComponent>(ObjProp->GetObjectPropertyValue_InContainer(this));
+					if (ActorComponent == nullptr)
+					{
+						// Restore the natively-constructed component instance
+						ObjProp->SetObjectPropertyValue_InContainer(this, Component);
+					}
+				}
+			}
+		}
+
+		// Clear out the mapping as we don't need it anymore
+		NativeConstructedComponentToPropertyMap.Empty();
+	}
+#endif
+
 	TArray<UObject*> ActorChildren;
 	OwnedComponents.Empty();
 	ReplicatedComponents.Empty();
@@ -216,7 +249,6 @@ void AActor::ResetOwnedComponents()
 void AActor::PostInitProperties()
 {
 	Super::PostInitProperties();
-	RegisterAllActorTickFunctions(true,false); // component will be handled when they are registered
 	RemoteRole = (bReplicates ? ROLE_SimulatedProxy : ROLE_None);
 
 	// Make sure the OwnedComponents list correct.  
@@ -301,7 +333,7 @@ bool AActor::TeleportTo( const FVector& DestLocation, const FRotator& DestRotati
 	UPrimitiveComponent* ActorPrimComp = Cast<UPrimitiveComponent>(RootComponent);
 	if ( ActorPrimComp )
 	{
-		if (!bNoCheck && (ActorPrimComp->IsCollisionEnabled() || (GetNetMode() != NM_Client)) )
+		if (!bNoCheck && (ActorPrimComp->IsQueryCollisionEnabled() || (GetNetMode() != NM_Client)) )
 		{
 			// Apply the pivot offset to the desired location
 			FVector Offset = GetRootComponent()->Bounds.Origin - PrevLocation;
@@ -423,6 +455,40 @@ void AActor::BeginDestroy()
 bool AActor::IsReadyForFinishDestroy()
 {
 	return Super::IsReadyForFinishDestroy() && DetachFence.IsFenceComplete();
+}
+
+void AActor::Serialize(FArchive& Ar)
+{
+#if WITH_EDITOR
+	// Prior to load, map natively-constructed component instances for Blueprint-generated class types to any serialized properties that might reference them.
+	// We'll use this information post-load to determine if any owned components may not have been serialized through the reference property (i.e. in case the serialized property value ends up being NULL).
+	if (Ar.IsLoading()
+		&& OwnedComponents.Num() > 0
+		&& !(Ar.GetPortFlags() & PPF_Duplicate)
+		&& HasAllFlags(RF_WasLoaded|RF_NeedPostLoad))
+	{
+		if (const UBlueprintGeneratedClass* BPGC = Cast<UBlueprintGeneratedClass>(GetClass()))
+		{
+			NativeConstructedComponentToPropertyMap.Empty(OwnedComponents.Num());
+			for(TFieldIterator<UObjectProperty> PropertyIt(BPGC, EFieldIteratorFlags::IncludeSuper); PropertyIt; ++PropertyIt)
+			{
+				UObjectProperty* ObjProp = *PropertyIt;
+
+				// Ignore transient properties since they won't be serialized
+				if(!ObjProp->HasAnyPropertyFlags(CPF_Transient))
+				{
+					UActorComponent* ActorComponent = Cast<UActorComponent>(ObjProp->GetObjectPropertyValue_InContainer(this));
+					if(ActorComponent != nullptr && ActorComponent->CreationMethod == EComponentCreationMethod::Native)
+					{
+						NativeConstructedComponentToPropertyMap.Add(ActorComponent->GetFName(), ObjProp);
+					}
+				}
+			}
+		}
+	}
+#endif
+
+	Super::Serialize(Ar);
 }
 
 void AActor::PostLoad()
@@ -589,11 +655,16 @@ void AActor::RegisterAllActorTickFunctions(bool bRegister, bool bDoComponents)
 {
 	if(!IsTemplate())
 	{
-		FActorThreadContext& ThreadContext = FActorThreadContext::Get();
-		check(ThreadContext.TestRegisterTickFunctions == nullptr);
-		RegisterActorTickFunctions(bRegister);
-		checkf(ThreadContext.TestRegisterTickFunctions == this, TEXT("Failed to route Actor RegisterTickFunctions (%s)"), *GetFullName());
-		ThreadContext.TestRegisterTickFunctions = nullptr;
+		// Prevent repeated redundant attempts
+		if (bTickFunctionsRegistered != bRegister)
+		{
+			FActorThreadContext& ThreadContext = FActorThreadContext::Get();
+			check(ThreadContext.TestRegisterTickFunctions == nullptr);
+			RegisterActorTickFunctions(bRegister);
+			bTickFunctionsRegistered = bRegister;
+			checkf(ThreadContext.TestRegisterTickFunctions == this, TEXT("Failed to route Actor RegisterTickFunctions (%s)"), *GetFullName());
+			ThreadContext.TestRegisterTickFunctions = nullptr;
+		}
 
 		if (bDoComponents)
 		{
@@ -648,7 +719,7 @@ UNetConnection* AActor::GetNetConnection() const
 	return Owner ? Owner->GetNetConnection() : NULL;
 }
 
-class UPlayer* AActor::GetNetOwningPlayer()
+UPlayer* AActor::GetNetOwningPlayer()
 {
 	// We can only replicate RPCs to the owning player
 	if (Role == ROLE_Authority)
@@ -659,6 +730,11 @@ class UPlayer* AActor::GetNetOwningPlayer()
 		}
 	}
 	return NULL;
+}
+
+bool AActor::DestroyNetworkActorHandled()
+{
+	return false;
 }
 
 void AActor::TickActor( float DeltaSeconds, ELevelTick TickType, FActorTickFunction& ThisTickFunction )
@@ -748,10 +824,13 @@ void AActor::PreReplication( IRepChangedPropertyTracker & ChangedPropertyTracker
 
 	DOREPLIFETIME_ACTIVE_OVERRIDE( AActor, ReplicatedMovement, bReplicateMovement );
 
+	// Don't need to replicate AttachmentReplication if the root component replicates, because it already handles it.
+	DOREPLIFETIME_ACTIVE_OVERRIDE( AActor, AttachmentReplication, RootComponent && !RootComponent->GetIsReplicated() );
+
 	UBlueprintGeneratedClass* BPClass = Cast<UBlueprintGeneratedClass>(GetClass());
 	if (BPClass != NULL)
 	{
-		BPClass->InstancePreReplication(ChangedPropertyTracker);
+		BPClass->InstancePreReplication(this, ChangedPropertyTracker);
 	}
 }
 
@@ -1979,10 +2058,11 @@ void AActor::DisplayDebug(UCanvas* Canvas, const FDebugDisplayInfo& DebugDisplay
 			YPos += YL;
 		}
 
-		T = FString(TEXT("Touching "));
+		T = FString(TEXT("Overlapping "));
 
 		TArray<AActor*> TouchingActors;
 		GetOverlappingActors(TouchingActors);
+		bool bFoundAnyOverlaps = false;
 		for (int32 iTouching = 0; iTouching<TouchingActors.Num(); ++iTouching)
 		{
 			AActor* const TestActor = TouchingActors[iTouching];
@@ -1992,10 +2072,11 @@ void AActor::DisplayDebug(UCanvas* Canvas, const FDebugDisplayInfo& DebugDisplay
 			{
 				AActor* A = TestActor;
 				T = T + A->GetName() + " ";
+				bFoundAnyOverlaps = true;
 			}
 		}
 
-		if ( FCString::Strcmp(*T, TEXT("Overlapping ")))
+		if (!bFoundAnyOverlaps)
 		{
 			T = TEXT("Overlapping nothing");
 		}
@@ -2712,10 +2793,16 @@ void AActor::ExchangeNetRoles(bool bRemoteOwned)
 	}
 }
 
+void AActor::SwapRolesForReplay()
+{
+	Swap(Role, RemoteRole);
+}
+
 void AActor::BeginPlay()
 {
 	ensure(!bActorHasBegunPlay);
 	SetLifeSpan( InitialLifeSpan );
+	RegisterAllActorTickFunctions(true, false); // Components are done below.
 
 	TInlineComponentArray<UActorComponent*> Components;
 	GetComponents(Components);
@@ -2725,7 +2812,11 @@ void AActor::BeginPlay()
 		// bHasBegunPlay will be true for the component if the component was renamed and moved to a new outer during initialization
 		if (Component->IsRegistered() && !Component->HasBegunPlay())
 		{
-			Component->BeginPlay();
+			Component->RegisterAllComponentTickFunctions(true);
+			//if (Component->bWantsBeginPlay) // TODO: this should be enforced, but we need to address an upgrade path first to not quietly break code. Not checking this flag is the old behavior.
+			{
+				Component->BeginPlay();
+			}
 		}
 		else
 		{
@@ -2751,11 +2842,9 @@ void AActor::EnableInput(APlayerController* PlayerController)
 			InputComponent->bBlockInput = bBlockInput;
 			InputComponent->Priority = InputPriority;
 
-			// Only do this if this actor is of a blueprint class
-			UBlueprintGeneratedClass* BGClass = Cast<UBlueprintGeneratedClass>(GetClass());
-			if(BGClass != NULL)
+			if (UInputDelegateBinding::SupportsInputDelegate(GetClass()))
 			{
-				UInputDelegateBinding::BindInputDelegates(BGClass, InputComponent);
+				UInputDelegateBinding::BindInputDelegates(GetClass(), InputComponent);
 			}
 		}
 		else
@@ -3557,6 +3646,16 @@ bool AActor::IncrementalRegisterComponents(int32 NumComponentsToRegister)
 		// 0 - means register all components
 		NumComponentsToRegister = MAX_int32;
 	}
+
+	UWorld* const World = GetWorld();
+	check(World);
+
+	// If we are not a game world, then register tick functions now. If we are a game world we wait until right before BeginPlay(),
+	// so as to not actually tick until BeginPlay() executes (which could otherwise happen in network games).
+	if (bAllowTickBeforeBeginPlay || !World->IsGameWorld())
+	{
+		RegisterAllActorTickFunctions(true, false); // components will be handled when they are registered
+	}
 	
 	// Register RootComponent first so all other components can reliable use it (ie call GetLocation) when they register
 	if( RootComponent != NULL && !RootComponent->IsRegistered() )
@@ -3571,8 +3670,7 @@ bool AActor::IncrementalRegisterComponents(int32 NumComponentsToRegister)
 		//This should prevent unwanted components hanging around when undoing a copy/paste or duplication action.
 		RootComponent->Modify(false);
 
-		check(GetWorld());
-		RootComponent->RegisterComponentWithWorld(GetWorld());
+		RootComponent->RegisterComponentWithWorld(World);
 	}
 
 	int32 NumTotalRegisteredComponents = 0;
@@ -3611,8 +3709,7 @@ bool AActor::IncrementalRegisterComponents(int32 NumComponentsToRegister)
 			//This should prevent unwanted components hanging around when undoing a copy/paste or duplication action.
 			Component->Modify(false);
 
-			check(GetWorld());
-			Component->RegisterComponentWithWorld(GetWorld());
+			Component->RegisterComponentWithWorld(World);
 			NumRegisteredComponentsThisRun++;
 		}
 
@@ -3933,6 +4030,11 @@ UMaterialInstanceDynamic* AActor::MakeMIDForMaterial(class UMaterialInterface* P
 float AActor::GetDistanceTo(const AActor* OtherActor) const
 {
 	return OtherActor ? (GetActorLocation() - OtherActor->GetActorLocation()).Size() : 0.f;
+}
+
+float AActor::GetSquaredDistanceTo(const AActor* OtherActor) const
+{
+	return OtherActor ? (GetActorLocation() - OtherActor->GetActorLocation()).SizeSquared() : 0.f;
 }
 
 float AActor::GetHorizontalDistanceTo(const AActor* OtherActor) const

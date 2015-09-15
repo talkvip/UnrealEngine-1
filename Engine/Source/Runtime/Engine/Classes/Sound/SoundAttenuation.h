@@ -89,6 +89,10 @@ struct ENGINE_API FAttenuationSettings
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category=Attenuation, meta=(ClampMin = "0", EditCondition="bSpatialize", DisplayName="Non-Spatialized Radius"))
 	float OmniRadius;
 
+	/** The distance between left and right stereo channels when stereo assets spatialized. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Attenuation, meta = (ClampMin = "0", EditCondition = "bSpatialize", DisplayName = "3D Stereo Spread"))
+	float StereoSpread;
+
 	/** Which spatialization algorithm to use if spatializing mono sources. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Attenuation, meta = (ClampMin = "0", EditCondition = "bSpatialize", DisplayName = "Spatialization Algorithm"))
 	TEnumAsByte<enum ESoundSpatializationAlgorithm> SpatializationAlgorithm;
@@ -183,6 +187,6 @@ class USoundAttenuation : public UObject
 {
 	GENERATED_UCLASS_BODY()
 
-	UPROPERTY(EditAnywhere, Category=Settings)
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category=Settings)
 	FAttenuationSettings Attenuation;
 };

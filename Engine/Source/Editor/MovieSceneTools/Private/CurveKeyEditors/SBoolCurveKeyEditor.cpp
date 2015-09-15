@@ -27,7 +27,7 @@ ECheckBoxState SBoolCurveKeyEditor::IsChecked() const
 
 void SBoolCurveKeyEditor::OnCheckStateChanged(ECheckBoxState NewCheckboxState)
 {
-	FScopedTransaction Transaction(LOCTEXT("SetBoolKey", "Set bool key value"));
+	FScopedTransaction Transaction(LOCTEXT("SetBoolKey", "Set Bool Key Value"));
 	OwningSection->SetFlags(RF_Transactional);
 	OwningSection->Modify();
 
@@ -46,7 +46,14 @@ void SBoolCurveKeyEditor::OnCheckStateChanged(ECheckBoxState NewCheckboxState)
 		}
 	}
 
-	Curve->UpdateOrAddKey(CurrentTime, NewCheckboxState == ECheckBoxState::Checked ? 1 : 0);
+	if (Curve->GetNumKeys() == 0)
+	{
+		Curve->SetDefaultValue(NewCheckboxState == ECheckBoxState::Checked ? 1 : 0);
+	}
+	else
+	{
+		Curve->UpdateOrAddKey(CurrentTime, NewCheckboxState == ECheckBoxState::Checked ? 1 : 0);
+	}
 	Sequencer->UpdateRuntimeInstances();
 }
 

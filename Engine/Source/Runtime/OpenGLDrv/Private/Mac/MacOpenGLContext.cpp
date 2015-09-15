@@ -165,6 +165,13 @@ static NSOpenGLContext* CreateContext( NSOpenGLContext* SharedContext )
 		CGLEnable((CGLContextObj)[Context CGLContextObj], kCGLCEMPEngine);
 		
 		// @todo: We should disable OpenGL.UseMapBuffer for improved performance under MTGL, but radr://17662549 prevents it when using GL_TEXTURE_BUFFER's for skinning.
+		// Disable OpenGL.UseMapBuffer when using MTGL to reduce the number of context synchronisation points.
+		// All calls to glMapBuffer/Range will stall the MTGL thread, even with the unsynchronized bit set, so we want to avoid it.
+		static auto CVar = IConsoleManager::Get().FindConsoleVariable(TEXT("OpenGL.UseMapBuffer"));
+		if(FPlatformMisc::MacOSXVersionCompare(10,10,5) >= 0 && CVar && CVar->GetInt() == 1)
+		{
+			CVar->Set(0);
+		}
 	}
 
 	return Context;
@@ -297,6 +304,10 @@ void FPlatformOpenGLContext::Initialise( NSOpenGLContext* const SharedContext )
 	InitDebugContext();
 	
 	InitDefaultGLContextState();
+	
+	// As someone has made enabling this rely on the extension being exported set it directly here as it is always available on OS X.
+	// Conformant desktop GL 3.2 or above do not have to export this extension as it was promoted to core!
+	glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
 	
 	if ( !VertexArrayObject )
 	{

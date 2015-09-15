@@ -315,9 +315,9 @@ public:
 				Chunk[MP_SubsurfaceColor] = AppendVector(SubsurfaceColor, CodeSubsurfaceProfile);		
 			}
 
-			Chunk[MP_ClearCoat]						= Material->CompilePropertyAndSetMaterialProperty(MP_ClearCoat			   ,this);
-			Chunk[MP_ClearCoatRoughness]			= Material->CompilePropertyAndSetMaterialProperty(MP_ClearCoatRoughness    ,this);
-			Chunk[MP_AmbientOcclusion]				= Material->CompilePropertyAndSetMaterialProperty(MP_AmbientOcclusion      ,this);
+			Chunk[MP_CustomData0]					= Material->CompilePropertyAndSetMaterialProperty(MP_CustomData0		,this);
+			Chunk[MP_CustomData1]					= Material->CompilePropertyAndSetMaterialProperty(MP_CustomData1		,this);
+			Chunk[MP_AmbientOcclusion]				= Material->CompilePropertyAndSetMaterialProperty(MP_AmbientOcclusion	,this);
 
 			if(IsTranslucentBlendMode(Material->GetBlendMode()))
 			{
@@ -427,6 +427,41 @@ public:
 
 			ResourcesString = TEXT("");
 
+			// Gather the implementation for any custom output expressions
+			{
+				TArray<UMaterialExpressionCustomOutput*> CustomOutputExpressions;
+				Material->GatherCustomOutputExpressions(CustomOutputExpressions);
+				TSet<UClass*> SeenCustomOutputExpressionsClases;
+
+				for (UMaterialExpressionCustomOutput* CustomOutput : CustomOutputExpressions)
+				{
+					if (SeenCustomOutputExpressionsClases.Contains(CustomOutput->GetClass()))
+					{
+						Errorf(TEXT("The material can contain only one %s node"), *CustomOutput->GetDescription());
+					}
+					else
+					{
+						SeenCustomOutputExpressionsClases.Add(CustomOutput->GetClass());
+
+						int32 NumOutputs = CustomOutput->GetNumOutputs();
+						ResourcesString += FString::Printf(TEXT("#define NUM_MATERIAL_OUTPUTS_%s %d\r\n"), *CustomOutput->GetFunctionName().ToUpper(), NumOutputs);
+						if (NumOutputs > 0)
+						{
+							for (int32 Index = 0; Index < NumOutputs; Index++)
+							{
+								FunctionStack.Empty();
+								FunctionStack.Add(FMaterialFunctionCompileState(NULL));
+								MaterialProperty = MP_MAX; // Indicates we're not compiling any material property.
+								ShaderFrequency = SF_Pixel;
+								TArray<FShaderCodeChunk> CustomExpressionChunks;
+								CurrentScopeChunks = &CustomExpressionChunks; //-V506
+								CustomOutput->Compile(this, Index, 0);
+							}
+						}
+					}
+				}
+			}
+
 			// Output the implementation for any custom expressions we will call below.
 			for(int32 ExpressionIndex = 0;ExpressionIndex < CustomExpressionImplementations.Num();ExpressionIndex++)
 			{
@@ -488,39 +523,7 @@ public:
 				}
 			}
 
-			// Gather and output the implementation for any custom output expressions
-			TArray<UMaterialExpressionCustomOutput*> CustomOutputExpressions;
-			Material->GatherCustomOutputExpressions(CustomOutputExpressions);
-			TSet<UClass*> SeenCustomOutputExpressionsClases;
-
-			for(UMaterialExpressionCustomOutput* CustomOutput : CustomOutputExpressions)
-			{
-				if(SeenCustomOutputExpressionsClases.Contains(CustomOutput->GetClass()))
-				{
-					Errorf(TEXT("The material can contain only one %s node"), *CustomOutput->GetDescription());
-				}
-				else
-				{
-					SeenCustomOutputExpressionsClases.Add(CustomOutput->GetClass());
-
-					int32 NumOutputs = CustomOutput->GetNumOutputs();
-					ResourcesString += FString::Printf(TEXT("#define NUM_MATERIAL_OUTPUTS_%s %d\r\n"), *CustomOutput->GetFunctionName().ToUpper(), NumOutputs);
-					if (NumOutputs > 0)
-					{
-						for (int32 Index = 0; Index < NumOutputs; Index++)
-						{
-							FunctionStack.Empty();
-							FunctionStack.Add(FMaterialFunctionCompileState(NULL));
-							MaterialProperty = MP_MAX; // Indicates we're not compiling any material property.
-							ShaderFrequency = SF_Pixel;
-							TArray<FShaderCodeChunk> CustomExpressionChunks;
-							CurrentScopeChunks = &CustomExpressionChunks; //-V506
-							CustomOutput->Compile(this, Index, 0);
-						}
-					}
-				}
-			}
-
+			// Output the implementation for any custom output expressions
 			for (int32 ExpressionIndex = 0; ExpressionIndex < CustomOutputImplementations.Num(); ExpressionIndex++)
 			{
 				ResourcesString += CustomOutputImplementations[ExpressionIndex] + "\r\n\r\n";
@@ -696,8 +699,8 @@ public:
 		LazyPrintf.PushParam(*FString::Printf(TEXT("return %.5f"),Material->GetMaxDisplacement()));
 		LazyPrintf.PushParam(*GenerateFunctionCode(MP_TessellationMultiplier));
 		LazyPrintf.PushParam(*GenerateFunctionCode(MP_SubsurfaceColor));
-		LazyPrintf.PushParam(*GenerateFunctionCode(MP_ClearCoat));
-		LazyPrintf.PushParam(*GenerateFunctionCode(MP_ClearCoatRoughness));
+		LazyPrintf.PushParam(*GenerateFunctionCode(MP_CustomData0));
+		LazyPrintf.PushParam(*GenerateFunctionCode(MP_CustomData1));
 		LazyPrintf.PushParam(*GenerateFunctionCode(MP_AmbientOcclusion));
 		LazyPrintf.PushParam(*GenerateFunctionCode(MP_Refraction));
 
@@ -1660,7 +1663,8 @@ protected:
 			{MEVP_FieldOfView, MCT_Float2, TEXT("View.<PREV>FieldOfViewWideAngles"), nullptr},
 			{MEVP_TanHalfFieldOfView, MCT_Float2, TEXT("Get<PREV>TanHalfFieldOfView()"), TEXT("Get<PREV>CotanHalfFieldOfView()")},
 			{MEVP_ViewSize, MCT_Float2, TEXT("View.ViewSizeAndInvSize.xy"), TEXT("View.ViewSizeAndInvSize.zw")},
-			{MEVP_WorldSpaceCameraPosition, MCT_Float3, TEXT("View.<PREV>ViewOrigin"), nullptr},
+			{MEVP_WorldSpaceViewPosition, MCT_Float3, TEXT("View.<PREV>WorldViewOrigin"), nullptr},
+			{MEVP_WorldSpaceCameraPosition, MCT_Float3, TEXT("View.<PREV>WorldCameraOrigin"), nullptr},
 		};
 		static_assert((sizeof(ViewPropertyMetaArray) / sizeof(ViewPropertyMetaArray[0])) == MEVP_MAX, "incoherency between EMaterialExposedViewProperty and ViewPropertyMetaArray");
 
@@ -1940,12 +1944,12 @@ protected:
 
 	virtual int32 ScreenPosition() override
 	{
-		if (ShaderFrequency != SF_Pixel && ShaderFrequency != SF_Compute)
+		if (ShaderFrequency != SF_Pixel && ShaderFrequency != SF_Compute && ShaderFrequency != SF_Vertex)
 		{
-			return NonPixelShaderExpressionError();
+			return Errorf(TEXT("Invalid node used in hull/domain shader input!"));
 		}
 
-		return AddCodeChunk(MCT_Float2,TEXT("ScreenAlignedPosition(Parameters.ScreenPosition).xy"));		
+		return AddCodeChunk(MCT_Float2,TEXT("ScreenAlignedPosition(GetScreenPosition(Parameters)).xy"));		
 	}
 
 	virtual int32 ParticleMacroUV() override 
@@ -2452,8 +2456,27 @@ protected:
 			);
 	}
 
+	virtual int32 TextureProperty(int32 TextureIndex, EMaterialExposedTextureProperty Property) override
+	{
+		EMaterialValueType TextureType = GetParameterType(TextureIndex);
+
+		if(TextureType != MCT_Texture2D)
+		{
+			return Errorf(TEXT("Texture size only available for Texture2D, not %s"),DescribeType(TextureType));
+		}
+		
+		auto TextureExpression = (FMaterialUniformExpressionTexture*) (*CurrentScopeChunks)[TextureIndex].UniformExpression.GetReference();
+
+		return AddUniformExpression(new FMaterialUniformExpressionTextureProperty(TextureExpression, Property), MCT_Float2, TEXT(""));
+	}
+
 	virtual int32 TextureDecalMipmapLevel(int32 TextureSizeInput) override
 	{
+		if (Material->GetMaterialDomain() != MD_DeferredDecal)
+		{
+			return Errorf(TEXT("Decal mipmap level only available in the decal material domain."));
+		}
+
 		EMaterialValueType TextureSizeType = GetParameterType(TextureSizeInput);
 
 		if (TextureSizeType != MCT_Float2)
@@ -2471,13 +2494,26 @@ protected:
 			);
 	}
 
+	virtual int32 TextureDecalDerivative(bool bDDY) override
+	{
+		if (Material->GetMaterialDomain() != MD_DeferredDecal)
+		{
+			return Errorf(TEXT("Decal derivatives only available in the decal material domain."));
+		}
+
+		return AddCodeChunk(
+			MCT_Float2,
+			bDDY ? TEXT("ComputeDecalDDY(Parameters)") : TEXT("ComputeDecalDDX(Parameters)")
+			);
+	}
+
 	virtual int32 PixelDepth() override
 	{
-		if (ShaderFrequency != SF_Pixel && ShaderFrequency != SF_Compute)
+		if (ShaderFrequency != SF_Pixel && ShaderFrequency != SF_Compute && ShaderFrequency != SF_Vertex)
 		{
-			return NonPixelShaderExpressionError();
+			return Errorf(TEXT("Invalid node used in hull/domain shader input!"));
 		}
-		return AddInlinedCodeChunk(MCT_Float, TEXT("Parameters.ScreenPosition.w"));		
+		return AddInlinedCodeChunk(MCT_Float, TEXT("GetScreenPosition(Parameters).w"));		
 	}
 
 	/** Calculate screen aligned UV coodinates from an offset fraction or texture coordinate */
@@ -2485,11 +2521,11 @@ protected:
 	{
 		if(bUseOffset)
 		{
-			return AddCodeChunk(MCT_Float2, TEXT("CalcScreenUVFromOffsetFraction(Parameters.ScreenPosition, %s)"), *GetParameterCode(Offset));
+			return AddCodeChunk(MCT_Float2, TEXT("CalcScreenUVFromOffsetFraction(GetScreenPosition(Parameters), %s)"), *GetParameterCode(Offset));
 		}
 		else
 		{
-			FString DefaultScreenAligned(TEXT("MaterialFloat2(ScreenAlignedPosition(Parameters.ScreenPosition).xy)"));
+			FString DefaultScreenAligned(TEXT("MaterialFloat2(ScreenAlignedPosition(GetScreenPosition(Parameters)).xy)"));
 			FString CodeString = (UV != INDEX_NONE) ? CoerceParameter(UV,MCT_Float2) : DefaultScreenAligned;
 			return AddInlinedCodeChunk(MCT_Float2, *CodeString );
 		}
@@ -2497,11 +2533,6 @@ protected:
 
 	virtual int32 SceneDepth(int32 Offset, int32 UV, bool bUseOffset) override
 	{
-		if (ShaderFrequency != SF_Pixel && ShaderFrequency != SF_Compute)
-		{
-			return NonPixelShaderExpressionError();
-		}
-
 		if (Offset == INDEX_NONE && bUseOffset)
 		{
 			return INDEX_NONE;
@@ -2527,17 +2558,22 @@ protected:
 			return INDEX_NONE;
 		}
 
-		if (ShaderFrequency != SF_Pixel)
+		if (ShaderFrequency != SF_Pixel && ShaderFrequency != SF_Vertex)
 		{
 			// we can relax this later if needed
 			return NonPixelShaderExpressionError();
 		}
 		
+		if (InSceneTextureId == PPI_DecalMask)
+		{
+			return Error(TEXT("Decal Mask bit was move out of GBuffer to the stencil buffer for performance optimisation and is therefor no longer available"));
+		}
+
 		ESceneTextureId SceneTextureId = (ESceneTextureId)InSceneTextureId;
 
 		UseSceneTextureId(SceneTextureId, true);
 
-		FString DefaultScreenAligned(TEXT("MaterialFloat2(ScreenAlignedPosition(Parameters.ScreenPosition).xy)"));
+		FString DefaultScreenAligned(TEXT("MaterialFloat2(ScreenAlignedPosition(GetScreenPosition(Parameters)).xy)"));
 		FString TexCoordCode((UV != INDEX_NONE) ? CoerceParameter(UV, MCT_Float2) : DefaultScreenAligned);
 
 		return AddCodeChunk(
@@ -2665,7 +2701,9 @@ protected:
 			|| SceneTextureId == PPI_Roughness
 			|| SceneTextureId == PPI_MaterialAO
 			|| SceneTextureId == PPI_DecalMask
-			|| SceneTextureId == PPI_ShadingModel;
+			|| SceneTextureId == PPI_ShadingModel
+			|| SceneTextureId == PPI_StoredBaseColor
+			|| SceneTextureId == PPI_StoredSpecular;
 
 		// not yet tracked:
 		//   PPI_SeparateTranslucency, PPI_CustomDepth, PPI_AmbientOcclusion
@@ -3301,9 +3339,13 @@ protected:
 						CodeStr = TEXT("<A>");
 					}
 				}
-				else if (DestCoordBasis == MCB_View)
+				else if (DestCoordBasis == MCB_Camera)
 				{
 					CodeStr = TEXT("mul(<A>, <MATRIX>(View.<PREV>TranslatedWorldToCameraView))");
+				}
+				else if (DestCoordBasis == MCB_View)
+				{
+					CodeStr = TEXT("mul(<A>, <MATRIX>(View.<PREV>TranslatedWorldToView))");
 				}
 				// else use MCB_World as intermediary basis
 				break;
@@ -3344,11 +3386,21 @@ protected:
 				IntermediaryBasis = MCB_TranslatedWorld;
 				break;
 			}
-			case MCB_View:
+			case MCB_Camera:
 			{
 				if (DestCoordBasis == MCB_TranslatedWorld)
 				{
 					CodeStr = TEXT("mul(<A>, <MATRIX>(View.<PREV>CameraViewToTranslatedWorld))");
+				}
+				// else use MCB_TranslatedWorld as intermediary basis
+				IntermediaryBasis = MCB_TranslatedWorld;
+				break;
+			}
+			case MCB_View:
+			{
+				if (DestCoordBasis == MCB_TranslatedWorld)
+				{
+					CodeStr = TEXT("mul(<A>, <MATRIX>(View.<PREV>ViewToTranslatedWorld))");
 				}
 				// else use MCB_TranslatedWorld as intermediary basis
 				IntermediaryBasis = MCB_TranslatedWorld;

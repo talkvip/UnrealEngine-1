@@ -38,7 +38,7 @@ class FPostProcessLpvIndirectPS : public FGlobalShader
 	DECLARE_SHADER_TYPE(FPostProcessLpvIndirectPS, Global);
 
 	//@todo-rco: Remove this when reenabling for OpenGL
-	static bool ShouldCache( EShaderPlatform Platform )		{ return IsFeatureLevelSupported(Platform, ERHIFeatureLevel::SM5) && !IsOpenGLPlatform(Platform); }
+	static bool ShouldCache( EShaderPlatform Platform )		{ return IsFeatureLevelSupported(Platform, ERHIFeatureLevel::SM5) && !IsOpenGLPlatform(Platform) && !IsMetalPlatform(Platform); }
 
 	/** Default constructor. */
 	FPostProcessLpvIndirectPS() {}
@@ -322,16 +322,17 @@ void FRCPassPostProcessLpvIndirect::Process(FRenderingCompositePassContext& Cont
 	{
 		SCOPED_DRAW_EVENT(Context.RHICmdList, PostProcessLpvIndirect );
 
-	    // Draw a quad mapping scene color to the view's render target
-	    DrawRectangle( 
-		    Context.RHICmdList,
-		    0, 0,
-		    View.ViewRect.Width(), View.ViewRect.Height(),
-		    View.ViewRect.Min.X, View.ViewRect.Min.Y, 
-		    View.ViewRect.Width(), View.ViewRect.Height(),
-		    View.ViewRect.Size(),
-		    SceneContext.GetBufferSizeXY(),
-		    *VertexShader);
+		DrawPostProcessPass(
+			Context.RHICmdList,
+			0, 0,
+			View.ViewRect.Width(), View.ViewRect.Height(),
+			View.ViewRect.Min.X, View.ViewRect.Min.Y,
+			View.ViewRect.Width(), View.ViewRect.Height(),
+			View.ViewRect.Size(),
+			SceneContext.GetBufferSizeXY(),
+			*VertexShader,
+			View.StereoPass,
+			Context.HasHmdMesh());
 
 		Context.RHICmdList.CopyToResolveTarget(DestColorRenderTarget.TargetableTexture, DestColorRenderTarget.ShaderResourceTexture, false, FResolveParams());
 		if(bApplySeparateSpecularRT)
@@ -395,16 +396,17 @@ void FRCPassPostProcessLpvIndirect::DoDirectionalOcclusionPass(FRenderingComposi
 
 	PixelShader->SetParameters( Lpv->GetAOVolumeTextureSRV(), LpvReadUniformBuffer, Context );
 
-	// Draw a quad mapping scene color to the view's render target
-	DrawRectangle( 
+	DrawPostProcessPass(
 		Context.RHICmdList,
 		0, 0,
 		View.ViewRect.Width(), View.ViewRect.Height(),
-		View.ViewRect.Min.X, View.ViewRect.Min.Y, 
+		View.ViewRect.Min.X, View.ViewRect.Min.Y,
 		View.ViewRect.Width(), View.ViewRect.Height(),
 		View.ViewRect.Size(),
 		SceneContext.GetBufferSizeXY(),
-		*VertexShader);
+		*VertexShader, 
+		View.StereoPass, 
+		Context.HasHmdMesh());
 }
 
 FPooledRenderTargetDesc FRCPassPostProcessLpvIndirect::ComputeOutputDesc(EPassOutputId InPassOutputId) const

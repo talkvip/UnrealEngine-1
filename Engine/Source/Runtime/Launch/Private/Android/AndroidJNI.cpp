@@ -53,7 +53,7 @@ void FJavaWrapper::FindClassesAndMethods(JNIEnv* Env)
 	AndroidThunkJava_KeepScreenOn = FindMethod(Env, GameActivityClassID, "AndroidThunkJava_KeepScreenOn", "(Z)V", bIsOptional);
 	AndroidThunkJava_InitHMDs = FindMethod(Env, GameActivityClassID, "AndroidThunkJava_InitHMDs", "()V", bIsOptional);
 	AndroidThunkJava_IsGearVRApplication = FindMethod(Env, GameActivityClassID, "AndroidThunkJava_IsGearVRApplication", "()Z", bIsOptional);
-
+	AndroidThunkJava_DismissSplashScreen = FindMethod(Env, GameActivityClassID, "AndroidThunkJava_DismissSplashScreen", "()V", bIsOptional);
 
 	// the rest are optional
 	bIsOptional = true;
@@ -159,6 +159,7 @@ jmethodID FJavaWrapper::AndroidThunkJava_IsMusicActive;
 jmethodID FJavaWrapper::AndroidThunkJava_KeepScreenOn;
 jmethodID FJavaWrapper::AndroidThunkJava_InitHMDs;
 jmethodID FJavaWrapper::AndroidThunkJava_IsGearVRApplication;
+jmethodID FJavaWrapper::AndroidThunkJava_DismissSplashScreen;
 
 jclass FJavaWrapper::GoogleServicesClassID;
 jobject FJavaWrapper::GoogleServicesThis;
@@ -180,16 +181,23 @@ void EngineCrashHandler(const FGenericCrashContext& GenericContext)
 	if (FPlatformAtomics::InterlockedCompareExchange(&bHasEntered, 1, 0) == 0)
 	{
 		const SIZE_T StackTraceSize = 65535;
-		ANSICHAR* StackTrace = (ANSICHAR*)FMemory::Malloc(StackTraceSize);
+		ANSICHAR StackTrace[StackTraceSize];
 		StackTrace[0] = 0;
 
 		// Walk the stack and dump it to the allocated memory.
 		FPlatformStackWalk::StackWalkAndDump(StackTrace, StackTraceSize, 0, Context.Context);
-		UE_LOG(LogEngine, Error, TEXT("%s"), ANSI_TO_TCHAR(StackTrace));
-		FMemory::Free(StackTrace);
-
-		GError->HandleError();
-		FPlatformMisc::RequestExit(true);
+		UE_LOG(LogEngine, Error, TEXT("\n%s\n"), ANSI_TO_TCHAR(StackTrace));
+		
+		if (GLog)
+		{
+			GLog->SetCurrentThreadAsMasterThread();
+			GLog->Flush();
+		}
+		
+		if (GWarn)
+		{
+			GWarn->Flush();
+		}
 	}
 }
 
@@ -230,6 +238,14 @@ bool AndroidThunkCpp_IsGearVRApplication()
 	}
 
 	return bIsGearVRApplication;
+}
+
+void AndroidThunkCpp_DismissSplashScreen()
+{
+	if (JNIEnv* Env = FAndroidApplication::GetJavaEnv())
+	{
+		FJavaWrapper::CallVoidMethod(Env, FJavaWrapper::GameActivityThis, FJavaWrapper::AndroidThunkJava_DismissSplashScreen);
+	}
 }
 
 void AndroidThunkCpp_ShowConsoleWindow()
@@ -289,9 +305,18 @@ extern "C" void Java_com_epicgames_ue4_GameActivity_nativeVirtualKeyboardResult(
 		if (VirtualKeyboardWidget != NULL)
 		{
 			const char* javaChars = jenv->GetStringUTFChars(contents, 0);
-			VirtualKeyboardWidget->SetTextFromVirtualKeyboard(FText::FromString(FString(UTF8_TO_TCHAR(javaChars))));
 
-			//Release the string
+			// call to set the widget text on game thread
+			if (FTaskGraphInterface::IsRunning())
+			{
+				FGraphEventRef SetWidgetText = FFunctionGraphTask::CreateAndDispatchWhenReady([&]()
+				{
+					VirtualKeyboardWidget->SetTextFromVirtualKeyboard(FText::FromString(FString(UTF8_TO_TCHAR(javaChars))));
+				}, TStatId(), NULL, ENamedThreads::GameThread);
+				FTaskGraphInterface::Get().WaitUntilTaskCompletes(SetWidgetText);
+			}
+
+			// release string
 			jenv->ReleaseStringUTFChars(contents, javaChars);
 		}
 	}
@@ -501,16 +526,11 @@ JNIEXPORT jint JNI_OnLoad(JavaVM* InJavaVM, void* InReserved)
 	FJavaWrapper::FindClassesAndMethods(Env);
 
 	// hook signals
-#if UE_BUILD_DEBUG
-	if (GAlwaysReportCrash)
-#else
-	if (0)//!FPlatformMisc::IsDebuggerPresent() || GAlwaysReportCrash)
-#endif
+	if (!FPlatformMisc::IsDebuggerPresent() || GAlwaysReportCrash)
 	{
-		// disable crash handler.. getting better stack traces from system logcat for now
-//		FPlatformMisc::SetCrashHandler(EngineCrashHandler);
+		FPlatformMisc::SetCrashHandler(EngineCrashHandler);
 	}
-
+	
 	// Cache path to external storage
 	jclass EnvClass = Env->FindClass("android/os/Environment");
 	jmethodID getExternalStorageDir = Env->GetStaticMethodID(EnvClass, "getExternalStorageDirectory", "()Ljava/io/File;");

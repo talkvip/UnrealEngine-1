@@ -93,6 +93,7 @@ public:
 	// Stored calls of latent function (on current class), needed to tell if blueprint should be tickable
 	TArray< UK2Node_CallFunction* > LatentFunctionCalls;
 
+	//Skip some optimization. C++ code will be generated in this pass. 
 	bool bGeneratingCpp;
 
 	//Does this function use requires FlowStack ?
@@ -275,6 +276,8 @@ public:
 		TArray<FBlueprintCompiledStatement*>* SourceStatementList = StatementsPerNode.Find(Node);
 		return (SourceStatementList != NULL) && (SourceStatementList->Num() > 0);
 	}
+
+	KISMETCOMPILER_API bool MustUseSwitchState(const FBlueprintCompiledStatement* ExcludeThisOne) const;
 
 private:
 	// Optimize out any useless jumps (jump to the very next statement, where the control flow can just fall through)

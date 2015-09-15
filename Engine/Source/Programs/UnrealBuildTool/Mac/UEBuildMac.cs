@@ -89,10 +89,10 @@ namespace UnrealBuildTool
 		 */
 		public override string GetDebugInfoExtension(UEBuildBinaryType InBinaryType)
 		{
-			return BuildConfiguration.bGeneratedSYMFile || BuildConfiguration.bUsePDBFiles ? ".dsym" : "";
+			return BuildConfiguration.bGeneratedSYMFile || BuildConfiguration.bUsePDBFiles ? ".dSYM" : "";
 		}
 
-		public override void ModifyNewlyLoadedModule(UEBuildModule InModule, TargetInfo Target)
+		public override void ModifyModuleRules(string ModuleName, ModuleRules Rules, TargetInfo Target)
 		{
 			if (Target.Platform == UnrealTargetPlatform.Mac)
 			{
@@ -100,27 +100,30 @@ namespace UnrealBuildTool
 
                 if (!UEBuildConfiguration.bBuildRequiresCookedData)
                 {
-                    if (InModule.ToString() == "TargetPlatform")
+                    if (ModuleName == "TargetPlatform")
                     {
                         bBuildShaderFormats = true;
                     }
                 }
 
 				// allow standalone tools to use target platform modules, without needing Engine
-				if (UEBuildConfiguration.bForceBuildTargetPlatforms)
+				if(ModuleName == "TargetPlatform")
 				{
-					InModule.AddDynamicallyLoadedModule("MacTargetPlatform");
-					InModule.AddDynamicallyLoadedModule("MacNoEditorTargetPlatform");
-					InModule.AddDynamicallyLoadedModule("MacClientTargetPlatform");
-					InModule.AddDynamicallyLoadedModule("MacServerTargetPlatform");
-					InModule.AddDynamicallyLoadedModule("AllDesktopTargetPlatform");
+				    if (UEBuildConfiguration.bForceBuildTargetPlatforms)
+				    {
+					    Rules.DynamicallyLoadedModuleNames.Add("MacTargetPlatform");
+					    Rules.DynamicallyLoadedModuleNames.Add("MacNoEditorTargetPlatform");
+					    Rules.DynamicallyLoadedModuleNames.Add("MacClientTargetPlatform");
+					    Rules.DynamicallyLoadedModuleNames.Add("MacServerTargetPlatform");
+					    Rules.DynamicallyLoadedModuleNames.Add("AllDesktopTargetPlatform");
+				    }
+    
+                    if (bBuildShaderFormats)
+                    {
+					    // Rules.DynamicallyLoadedModuleNames.Add("ShaderFormatD3D");
+                        Rules.DynamicallyLoadedModuleNames.Add("ShaderFormatOpenGL");
+                    }
 				}
-
-                if (bBuildShaderFormats)
-                {
-					// InModule.AddDynamicallyLoadedModule("ShaderFormatD3D");
-                    InModule.AddDynamicallyLoadedModule("ShaderFormatOpenGL");
-                }
 			}
 		}
 		

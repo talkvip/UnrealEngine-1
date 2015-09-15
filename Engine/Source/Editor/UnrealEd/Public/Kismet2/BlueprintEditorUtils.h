@@ -352,6 +352,9 @@ public:
 	 */
 	static UEdGraph* GetTopLevelGraph(const UEdGraph* InGraph);
 
+	/** Determines if the graph is ReadOnly, this differs from editable in that it is never expected to be edited and is in a read-only state */
+	static bool IsGraphReadOnly(UEdGraph* InGraph);
+
 	/** Look to see if an event already exists to override a particular function */
 	static class UK2Node_Event* FindOverrideForFunction(const UBlueprint* Blueprint, const UClass* SignatureClass, FName SignatureName);
 
@@ -996,6 +999,8 @@ public:
 	static bool PropertyValueFromString(const UProperty* Property, const FString& StrValue, uint8* ContainerMem);
 
 	static bool PropertyValueToString(const UProperty* Property, const uint8* Container, FString& OutForm);
+
+	static bool PropertyValueToString_Direct(const UProperty* Property, const uint8* DirectValue, FString& OutForm);
 
 	/** Call PostEditChange() on all Actors based on the given Blueprint */
 	static void PostEditChangeBlueprintActors(UBlueprint* Blueprint, bool bComponentEditChange = false);

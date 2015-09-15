@@ -21,7 +21,8 @@
 #include "DistCurveEditorModule.h"
 #include "IDistCurveEditor.h"
 
-#include "MatineeClasses.h"
+#include "Classes/MatineeOptions.h"
+#include "Classes/MatineeTransBuffer.h"
 
 #include "CameraController.h"
 #include "MatineeConstants.h"
@@ -944,7 +945,7 @@ void FMatinee::InitMatinee(const EToolkitMode::Type Mode, const TSharedPtr< clas
 			}
 
 			// Turn on 'show camera frustums' flag
-			LevelVC->EngineShowFlags.CameraFrustums = 1;
+			LevelVC->EngineShowFlags.SetCameraFrustums(true);
 		}
 	}
 
@@ -2067,7 +2068,7 @@ void FMatinee::OnClose()
 			}
 
 			// Turn off 'show camera frustums' flag.
-			LevelVC->EngineShowFlags.CameraFrustums = 0;
+			LevelVC->EngineShowFlags.SetCameraFrustums(false);
 		}
 	}
 

@@ -3,6 +3,7 @@
 #pragma once
 
 #include "SlateBasics.h"
+#include "IWebBrowserDialog.h"
 
 enum class EWebBrowserDocumentState;
 class IWebBrowserWindow;
@@ -21,6 +22,7 @@ class WEBBROWSER_API SWebBrowser
 public:
 	DECLARE_DELEGATE_RetVal_TwoParams(bool, FOnBeforeBrowse, const FString&, bool)
 	DECLARE_DELEGATE_RetVal_ThreeParams(bool, FOnLoadUrl, const FString& /*Method*/, const FString& /*Url*/, FString& /* Response */)
+	DECLARE_DELEGATE_RetVal_OneParam(EWebBrowserDialogEventResponse, FOnShowDialog, const TWeakPtr<IWebBrowserDialog>&);
 
 	SLATE_BEGIN_ARGS(SWebBrowser)
 		: _InitialURL(TEXT("https://www.google.com"))
@@ -29,6 +31,7 @@ public:
 		, _ShowErrorMessage(true)
 		, _SupportsTransparency(false)
 		, _SupportsThumbMouseButtonNavigation(false)
+		, _ShowInitialThrobber(true)
 		, _BackgroundColor(255,255,255,255)
 		, _PopupMenuMethod(TOptional<EPopupMethod>())
 		, _ViewportSize(FVector2D::ZeroVector)
@@ -57,6 +60,9 @@ public:
 
 		/** Whether to allow forward and back navigation via the mouse thumb buttons. */
 		SLATE_ARGUMENT(bool, SupportsThumbMouseButtonNavigation)
+
+		/** Whether to show a throbber overlay during browser initialization. */
+		SLATE_ARGUMENT(bool, ShowInitialThrobber)
 
 		/** Opaque background color used before a document is loaded and when no document color is specified. */
 		SLATE_ARGUMENT(FColor, BackgroundColor)
@@ -96,6 +102,13 @@ public:
 	
 		/** Called to allow bypassing page content on load. */
 		SLATE_EVENT(FOnLoadUrl, OnLoadUrl)
+
+		/** Called when the browser needs to show a dialog to the user. */
+		SLATE_EVENT(FOnShowDialog, OnShowDialog)
+
+		/** Called to dismiss any dialogs shown via OnShowDialog. */
+		SLATE_EVENT(FSimpleDelegate, OnDismissAllDialogs)
+
 	SLATE_END_ARGS()
 
 
@@ -103,6 +116,8 @@ public:
 	SWebBrowser();
 
 	~SWebBrowser();
+
+	virtual bool SupportsKeyboardFocus() const override {return true;}
 
 	/**
 	 * Construct the widget.
@@ -250,6 +265,12 @@ private:
 	 */
 	bool HandleCloseWindow(const TWeakPtr<IWebBrowserWindow>& BrowserWindow);
 
+	/** Callback for showing dialogs to the user */
+	EWebBrowserDialogEventResponse HandleShowDialog(const TWeakPtr<IWebBrowserDialog>& DialogParams);
+
+	/** Callback for dismissing any dialogs previously shown  */
+	void HandleDismissAllDialogs();
+
 	/** Callback for popup window permission */
 	bool HandleBeforePopup(FString URL, FString Target);
 
@@ -262,10 +283,7 @@ private:
 	/** Callback from the popup menu notifiying it has been dismissed */
 	void HandleMenuDismissed(TSharedRef<IMenu>);
 
-	virtual TOptional<EPopupMethod> OnQueryPopupMethod() const override
-	{
-		return PopupMenuMethod;
-	}
+	virtual FPopupMethodReply OnQueryPopupMethod() const override;
 
 private:
 
@@ -324,4 +342,13 @@ private:
 	
 	/** A delegate that is invoked when loading a resource, allowing the application to provide contents directly */
 	FOnLoadUrl OnLoadUrl;
+
+	/** A delegate that is invoked when when the browser needs to present a dialog to the user */
+	FOnShowDialog OnShowDialog;
+
+	/** A delegate that is invoked when when the browser needs to dismiss all dialogs */
+	FSimpleDelegate OnDismissAllDialogs;
+
+	/** The initial throbber setting */
+	bool bShowInitialThrobber;
 };

@@ -1032,7 +1032,7 @@ public:
 
 	/**
 	 * Finds an item by key (assuming the ElementType overloads operator== for
-	 * the comparison).
+	 * the comparison). Time Complexity: O(n), starts iteration from the beginning so better performance if Key is in the front
 	 *
 	 * @param Key The key to search by.
 	 *
@@ -1623,6 +1623,16 @@ public:
 		{
 			RemoveAt(NewNum, Num() - NewNum);
 		}
+	}
+
+	/**
+	 * Does nothing except setting the new number of elements in the array. Does not destruct items, does not de-allocate memory.
+	 * @param NewNum New number of elements in the array, must be <= the current number of elements in the array.
+	 */
+	void SetNumUnsafeInternal(int32 NewNum)
+	{
+		checkSlow(NewNum <= Num() && NewNum >= 0);
+		ArrayNum = NewNum;
 	}
 
 	/**
@@ -2372,10 +2382,10 @@ public:
 	 * @param Predicate Predicate class instance.
 	 */
 	template <class PREDICATE_CLASS>
-	void HeapPop(ElementType& OutItem, const PREDICATE_CLASS& Predicate)
+	void HeapPop(ElementType& OutItem, const PREDICATE_CLASS& Predicate, bool bAllowShrinking = true)
 	{
 		OutItem = (*this)[0];
-		RemoveAtSwap(0);
+		RemoveAtSwap(0, 1, bAllowShrinking);
 
 		TDereferenceWrapper< ElementType, PREDICATE_CLASS> PredicateWrapper(Predicate);
 		SiftDown(0, Num(), PredicateWrapper);
@@ -2390,10 +2400,11 @@ public:
 	 * the template type.
 	 *
 	 * @param OutItem The removed item.
+	 * @param bAllowShrinking (Optional) Tells if this call can shrink the array allocation if suitable after the pop. Default is true.
 	 */
-	void HeapPop(ElementType& OutItem)
+	void HeapPop(ElementType& OutItem, bool bAllowShrinking = true)
 	{
-		HeapPop(OutItem, TLess<ElementType>());
+		HeapPop(OutItem, TLess<ElementType>(), bAllowShrinking);
 	}
 
 	/**
@@ -2420,11 +2431,12 @@ public:
 	 * Removes the top element from the heap.
 	 *
 	 * @param Predicate Predicate class instance.
+	 * @param bAllowShrinking (Optional) Tells if this call can shrink the array allocation if suitable after the discard. Default is true.
 	 */
 	template <class PREDICATE_CLASS>
-	void HeapPopDiscard(const PREDICATE_CLASS& Predicate)
+	void HeapPopDiscard(const PREDICATE_CLASS& Predicate, bool bAllowShrinking = true)
 	{
-		RemoveAtSwap(0);
+		RemoveAtSwap(0, 1, bAllowShrinking);
 		TDereferenceWrapper< ElementType, PREDICATE_CLASS> PredicateWrapper(Predicate);
 		SiftDown(0, Num(), PredicateWrapper);
 
@@ -2436,10 +2448,11 @@ public:
 	/** 
 	 * Removes the top element from the heap. Assumes < operator is defined for
 	 * the template type.
+	 * @param bAllowShrinking (Optional) Tells if this call can shrink the array allocation if suitable after the discard. Default is true.
 	 */
-	void HeapPopDiscard()
+	void HeapPopDiscard(bool bAllowShrinking = true)
 	{
-		HeapPopDiscard(TLess<ElementType>());
+		HeapPopDiscard(TLess<ElementType>(), bAllowShrinking);
 	}
 
 	/** 
@@ -2469,11 +2482,12 @@ public:
 	 *
 	 * @param Index Position at which to remove item.
 	 * @param Predicate Predicate class instance.
+	 * @param bAllowShrinking (Optional) Tells if this call can shrink the array allocation if suitable after the remove. Default is true.
 	 */
 	template <class PREDICATE_CLASS>
-	void HeapRemoveAt(int32 Index, const PREDICATE_CLASS& Predicate)
+	void HeapRemoveAt(int32 Index, const PREDICATE_CLASS& Predicate, bool bAllowShrinking = true)
 	{
-		RemoveAtSwap(Index);
+		RemoveAtSwap(Index, 1, bAllowShrinking);
 
 		TDereferenceWrapper< ElementType, PREDICATE_CLASS> PredicateWrapper(Predicate);
 		SiftDown(Index, Num(), PredicateWrapper);
@@ -2489,10 +2503,11 @@ public:
 	 * template type.
 	 *
 	 * @param Index Position at which to remove item.
+	 * @param bAllowShrinking (Optional) Tells if this call can shrink the array allocation if suitable after the remove. Default is true.
 	 */
-	void HeapRemoveAt(int32 Index)
+	void HeapRemoveAt(int32 Index, bool bAllowShrinking = true)
 	{
-		HeapRemoveAt(Index, TLess< ElementType >());
+		HeapRemoveAt(Index, TLess< ElementType >(), bAllowShrinking);
 	}
 
 	/**

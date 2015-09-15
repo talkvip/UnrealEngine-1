@@ -4,6 +4,14 @@
 #include "Animation/AnimNodeBase.h"
 
 /////////////////////////////////////////////////////
+// FAnimNode_Base
+
+void FAnimNode_Base::Initialize(const FAnimationInitializeContext& Context)
+{
+	EvaluateGraphExposedInputs.Initialize(this, Context.AnimInstance);
+}
+
+/////////////////////////////////////////////////////
 // FPoseLinkBase
 
 void FPoseLinkBase::AttemptRelink(const FAnimationBaseContext& Context)
@@ -57,6 +65,7 @@ void FPoseLinkBase::CacheBones(const FAnimationCacheBonesContext& Context)
 
 void FPoseLinkBase::Update(const FAnimationUpdateContext& Context)
 {
+	QUICK_SCOPE_CYCLE_COUNTER(STAT_FPoseLinkBase_Update);
 #if DO_CHECK
 	checkf( !bProcessed, TEXT( "Update already in progress, circular link for AnimInstance [%s] Blueprint [%s]" ), \
 		Context.AnimInstance ? *Context.AnimInstance->GetFullName() : TEXT( "None" ), Context.GetAnimBlueprintClass() ? *Context.GetAnimBlueprintClass()->GetFullName() : TEXT( "None" ) );
@@ -122,7 +131,13 @@ void FPoseLink::Evaluate(FPoseContext& Output)
 
 	if (LinkedNode != NULL)
 	{
+#if ENABLE_ANIMNODE_POSE_DEBUG
+		CurrentPose.ResetToIdentity();
+#endif
 		LinkedNode->Evaluate(Output);
+#if ENABLE_ANIMNODE_POSE_DEBUG
+		CurrentPose = Output.Pose;
+#endif
 	}
 	else
 	{

@@ -98,7 +98,7 @@ FPlatformRect FAndroidWindow::GetScreenRect()
 
 	if (RequestedContentScaleFactor != ContentScaleFactor)
 	{
-		FPlatformMisc::LowLevelOutputDebugStringf(TEXT("***** RequestedContentScaleFactor different %d != %d, not using res cache"), RequestedContentScaleFactor, ContentScaleFactor);
+		FPlatformMisc::LowLevelOutputDebugStringf(TEXT("***** RequestedContentScaleFactor different %f != %f, not using res cache"), RequestedContentScaleFactor, ContentScaleFactor);
 	}
 
 	if (Window != LastWindow)
@@ -218,7 +218,8 @@ void FAndroidWindow::CalculateSurfaceSize(void* InWindow, int32_t& SurfaceWidth,
 	SurfaceHeight = ANativeWindow_getHeight(Window);
 
 	// some phones gave it the other way (so, if swap if the app is landscape, but width < height)
-	if (!GAndroidIsPortrait && SurfaceWidth < SurfaceHeight)
+	if ((GAndroidIsPortrait && SurfaceWidth > SurfaceHeight) || 
+		(!GAndroidIsPortrait && SurfaceWidth < SurfaceHeight))
 	{
 		Swap(SurfaceWidth, SurfaceHeight);
 	}

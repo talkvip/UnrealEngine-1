@@ -122,14 +122,7 @@ int32 FMaterialResource::CompilePropertyAndSetMaterialProperty(EMaterialProperty
 
 void FMaterialResource::GatherCustomOutputExpressions(TArray<UMaterialExpressionCustomOutput*>& OutCustomOutputs) const
 {
-	for (UMaterialExpression* Expression : Material->Expressions)
-	{
-		UMaterialExpressionCustomOutput* CustomOutput = Cast<UMaterialExpressionCustomOutput>(Expression);
-		if (CustomOutput)
-		{
-			OutCustomOutputs.Add(CustomOutput);
-		}
-	}
+	Material->GetAllCustomOutputExpressions(OutCustomOutputs);
 }
 
 void FMaterialResource::GetShaderMapId(EShaderPlatform Platform, FMaterialShaderMapId& OutId) const
@@ -353,7 +346,7 @@ void UMaterialInterface::InitDefaultMaterials()
 				GDefaultMaterials[Domain] = FindObject<UMaterial>(NULL,GDefaultMaterialNames[Domain]);
 				if (GDefaultMaterials[Domain] == NULL)
 				{
-					GDefaultMaterials[Domain] = LoadObject<UMaterial>(NULL,GDefaultMaterialNames[Domain],NULL,LOAD_None,NULL);
+					GDefaultMaterials[Domain] = LoadObject<UMaterial>(NULL, GDefaultMaterialNames[Domain], NULL, LOAD_DisableDependencyPreloading, NULL);
 					checkf(GDefaultMaterials[Domain] != NULL, TEXT("Cannot load default material '%s'"), GDefaultMaterialNames[Domain]);
 				}
 				GDefaultMaterials[Domain]->AddToRoot();
@@ -912,34 +905,30 @@ bool UMaterial::CheckMaterialUsage_Concurrent(EMaterialUsage Usage, const bool b
 				EMaterialUsage Usage;
 				bool bSkipPrim;
 				bool& bUsageSetSuccessfully;
-				FScopedEvent& Event;
 
-				FCallSMU(UMaterial* InMaterial, EMaterialUsage InUsage, bool bInSkipPrim, bool& bInUsageSetSuccessfully, FScopedEvent& InEvent)
+				FCallSMU(UMaterial* InMaterial, EMaterialUsage InUsage, bool bInSkipPrim, bool& bInUsageSetSuccessfully)
 					: Material(InMaterial)
 					, Usage(InUsage)
 					, bSkipPrim(bInSkipPrim)
 					, bUsageSetSuccessfully(bInUsageSetSuccessfully)
-					, Event(InEvent)
 				{
 				}
 
 				void Task()
 				{
 					bUsageSetSuccessfully = Material->CheckMaterialUsage(Usage, bSkipPrim);
-					Event.Trigger();
 				}
 			};
 			UE_LOG(LogMaterial, Warning, TEXT("Has to pass SMU back to game thread. This stalls the tasks graph, but since it is editor only or only happens once, is not such a big deal."));
 
-			FScopedEvent Event;
-			FCallSMU CallSMU(const_cast<UMaterial*>(this), Usage, bSkipPrim, bUsageSetSuccessfully, Event);
+			TSharedRef<FCallSMU, ESPMode::ThreadSafe> CallSMU = MakeShareable(new FCallSMU(const_cast<UMaterial*>(this), Usage, bSkipPrim, bUsageSetSuccessfully));
 
 			DECLARE_CYCLE_STAT(TEXT("FSimpleDelegateGraphTask.CheckMaterialUsage"),
 				STAT_FSimpleDelegateGraphTask_CheckMaterialUsage,
 				STATGROUP_TaskGraphTasks);
 
 			FSimpleDelegateGraphTask::CreateAndDispatchWhenReady(
-				FSimpleDelegateGraphTask::FDelegate::CreateRaw(&CallSMU, &FCallSMU::Task),
+				FSimpleDelegateGraphTask::FDelegate::CreateThreadSafeSP(CallSMU, &FCallSMU::Task),
 				GET_STATID(STAT_FSimpleDelegateGraphTask_CheckMaterialUsage), NULL, ENamedThreads::GameThread_Local
 			);
 		}
@@ -1156,8 +1145,6 @@ void UMaterialInterface::OverrideBlendableSettings(class FSceneView& View, float
 
 		if(MID)
 		{
-			MID->K2_CopyMaterialInstanceParameters((UMaterialInterface*)this);
-
 			FPostProcessMaterialNode NewNode(MID, Material->BlendableLocation, Material->BlendablePriority);
 
 			// a material already exists, blend with existing ones
@@ -2630,15 +2617,11 @@ void UMaterial::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEve
 	// check for distortion in material 
 	{
 		bUsesDistortion = false;
-		// can only have distortion with translucent blend modes
-		if(IsTranslucentBlendMode((EBlendMode)BlendMode))
-		{
-			// check for a distortion value
-			if(Refraction.Expression
+		// check for a distortion value
+		if (Refraction.Expression
 			|| (Refraction.UseConstant && FMath::Abs(Refraction.Constant) >= KINDA_SMALL_NUMBER))
-			{
-				bUsesDistortion = true;
-			}
+		{
+			bUsesDistortion = true;
 		}
 	}
 
@@ -3410,8 +3393,8 @@ FExpressionInput* UMaterial::GetExpressionInputForProperty(EMaterialProperty InP
 		case MP_WorldDisplacement:		return &WorldDisplacement;
 		case MP_TessellationMultiplier:	return &TessellationMultiplier;
 		case MP_SubsurfaceColor:		return &SubsurfaceColor;
-		case MP_ClearCoat:				return &ClearCoat;
-		case MP_ClearCoatRoughness:		return &ClearCoatRoughness;
+		case MP_CustomData0:			return &ClearCoat;
+		case MP_CustomData1:			return &ClearCoatRoughness;
 		case MP_AmbientOcclusion:		return &AmbientOcclusion;
 		case MP_Refraction:				return &Refraction;
 		case MP_MaterialAttributes:		return &MaterialAttributes;
@@ -3426,6 +3409,17 @@ FExpressionInput* UMaterial::GetExpressionInputForProperty(EMaterialProperty InP
 	return nullptr;
 }
 
+void UMaterial::GetAllCustomOutputExpressions(TArray<class UMaterialExpressionCustomOutput*>& OutCustomOutputs) const
+{
+	for (UMaterialExpression* Expression : Expressions)
+	{
+		UMaterialExpressionCustomOutput* CustomOutput = Cast<UMaterialExpressionCustomOutput>(Expression);
+		if (CustomOutput)
+		{
+			OutCustomOutputs.Add(CustomOutput);
+		}
+	}
+}
 
 bool UMaterial::GetAllReferencedExpressions(TArray<UMaterialExpression*>& OutExpressions, class FStaticParameterSet* InStaticParameterSet)
 {
@@ -3442,6 +3436,14 @@ bool UMaterial::GetAllReferencedExpressions(TArray<UMaterialExpression*>& OutExp
 				OutExpressions.AddUnique(MPRefdExpressions[AddIdx]);
 			}
 		}
+	}
+
+	TArray<class UMaterialExpressionCustomOutput*> CustomOutputExpressions;
+	GetAllCustomOutputExpressions(CustomOutputExpressions);
+	for (UMaterialExpressionCustomOutput* Expression : CustomOutputExpressions)
+	{
+		TArray<FExpressionInput*> ProcessedInputs;
+		RecursiveGetExpressionChain(Expression, ProcessedInputs, OutExpressions, InStaticParameterSet);
 	}
 
 	return true;
@@ -3706,8 +3708,8 @@ int32 UMaterial::CompilePropertyEx( FMaterialCompiler* Compiler, EMaterialProper
 		case MP_Specular:				return Specular.CompileWithDefault(Compiler, Property);
 		case MP_Roughness:				return Roughness.CompileWithDefault(Compiler, Property);
 		case MP_TessellationMultiplier:	return TessellationMultiplier.CompileWithDefault(Compiler, Property);
-		case MP_ClearCoat:				return ClearCoat.CompileWithDefault(Compiler, Property);
-		case MP_ClearCoatRoughness:		return ClearCoatRoughness.CompileWithDefault(Compiler, Property);
+		case MP_CustomData0:			return ClearCoat.CompileWithDefault(Compiler, Property);
+		case MP_CustomData1:			return ClearCoatRoughness.CompileWithDefault(Compiler, Property);
 		case MP_AmbientOcclusion:		return AmbientOcclusion.CompileWithDefault(Compiler, Property);
 		case MP_Refraction:				return Refraction.CompileWithDefault(Compiler, Property);
 		case MP_EmissiveColor:			return EmissiveColor.CompileWithDefault(Compiler, Property);
@@ -3833,8 +3835,9 @@ EMaterialShadingModel UMaterial::GetShadingModel(bool bIsInGameThread) const
 	switch (MaterialDomain)
 	{
 		case MD_Surface:
-		case MD_DeferredDecal:
 			return ShadingModel;
+		case MD_DeferredDecal:
+			return MSM_DefaultLit;
 
 		// Post process and light function materials must be rendered with the unlit model.
 		case MD_PostProcess:
@@ -3972,6 +3975,7 @@ bool UMaterial::IsPropertyActive(EMaterialProperty InProperty) const
 	else if ( MaterialDomain == MD_UI )
 	{
 		return InProperty == MP_EmissiveColor
+			|| ( InProperty == MP_WorldPositionOffset )
 			|| ( InProperty == MP_OpacityMask && BlendMode == BLEND_Masked ) 
 			|| ( InProperty == MP_Opacity && IsTranslucentBlendMode((EBlendMode)BlendMode) && BlendMode != BLEND_Modulate );
 	}
@@ -4013,9 +4017,9 @@ bool UMaterial::IsPropertyActive(EMaterialProperty InProperty) const
 	case MP_SubsurfaceColor:
 		Active = ShadingModel == MSM_Subsurface || ShadingModel == MSM_PreintegratedSkin || ShadingModel == MSM_TwoSidedFoliage;
 		break;
-	case MP_ClearCoat:
-	case MP_ClearCoatRoughness:
-		Active = ShadingModel == MSM_ClearCoat;
+	case MP_CustomData0:
+	case MP_CustomData1:
+		Active = ShadingModel == MSM_ClearCoat || ShadingModel == MSM_Hair;
 		break;
 	case MP_TessellationMultiplier:
 	case MP_WorldDisplacement:

@@ -27,11 +27,18 @@ public:
 	virtual int32 GetFilteredGameInviteList(TArray< TSharedPtr< IFriendItem > >& OutFriendsList) const = 0;
 
 	/**
+	 * Get the id of the active party
+	 *
+	 * @return party id the local players are a member of
+	 */
+	virtual TSharedPtr<const FOnlinePartyId> GetActivePartyId() const = 0;
+
+	/**
 	* Get the name of the primary party chat room we've joined
 	*
 	* @param Out shared ref to party room id
 	*/
-	virtual TSharedPtr<const FOnlinePartyId> GetPartyChatRoomId() const = 0;
+	virtual FChatRoomId GetPartyChatRoomId() const = 0;
 
 	/**
 	* Reject a game invite
@@ -76,6 +83,16 @@ public:
 	virtual bool IsInGameSession() const = 0;
 
 	/**
+	 * Set if we should combine party and game chat.
+	 */
+	virtual void SetCombineGameAndPartyChat(bool bCombine) = 0;
+
+	/**
+	 * Return if we are combining game and party chat.
+	 */
+	virtual bool CombineGameAndPartyChat() const = 0;
+
+	/**
 	* Is this friend in the same session as I am
 	*
 	* @param reference to a friend item
@@ -109,7 +126,7 @@ public:
 	* @param ClientID ID of the Game we want to join
 	* @return true if joining a game is allowed
 	*/
-	virtual bool JoinGameAllowed(FString ClientID) = 0;
+	virtual bool JoinGameAllowed(const FString& ClientID) = 0;
 
 	/**
 	* Get party info our friend is in
@@ -132,10 +149,17 @@ public:
 	virtual TSharedPtr<const FUniqueNetId> GetGameSessionId(FString SessionID) const = 0;
 
 	/**
-	* Get if we are in a party
-	* @return true if we are in a party
-	*/
-	virtual bool IsInActiveParty() const = 0;
+	 * Is the local player in a valid party
+	 * 
+	 * @return true if we are in a party
+	 */
+	virtual bool IsLocalPlayerInActiveParty() const = 0;
+	
+	/**
+	 * Get if we are able to party chat
+	 * @return true if we are in a party with more than 1 member and able to chat
+	 */
+	virtual bool IsInPartyChat() const = 0;
 
 	/**
 	* Add an application view model
@@ -166,6 +190,11 @@ public:
 	DECLARE_EVENT_TwoParams(FGameAndPartyService, FOnFriendsJoinGameEvent, const FUniqueNetId& /*FriendId*/, const FUniqueNetId& /*SessionId*/)
 	virtual FOnFriendsJoinGameEvent& OnFriendsJoinGame() = 0;
 
+	DECLARE_EVENT(FGameAndPartyService, FOnPartyMembersChangedEvent)
+	virtual FOnPartyMembersChangedEvent& OnPartyMembersChanged() = 0;
+
+	DECLARE_EVENT(FGameAndPartyService, FOnGameSessionChangedEvent)
+	virtual FOnGameSessionChangedEvent& OnGameSessionChanged() = 0;
 };
 
 /**

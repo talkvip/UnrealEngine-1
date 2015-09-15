@@ -61,9 +61,13 @@
 #include "Engine/StaticMesh.h"
 #include "Engine/Light.h"
 #include "Animation/SkeletalMeshActor.h"
-#include "Editor/Persona/Public/AnimationRecorder.h"
+#include "Editor/UnrealEd/Public/Animation/AnimationRecorder.h"
 #include "Editor/KismetWidgets/Public/CreateBlueprintFromActorDialog.h"
 #include "EditorProjectSettings.h"
+#include "HierarchicalLODUtils.h"
+#include "AsyncResult.h"
+#include "IPortalApplicationWindow.h"
+#include "IPortalServiceLocator.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LevelEditorActions, Log, All);
 
@@ -522,7 +526,7 @@ void FLevelEditorActionCallbacks::Build_Execute()
 	ConfigureLightingBuildOptions( FLightingBuildOptions() );
 
 	// Build everything!
-	FEditorBuildUtils::EditorBuild( GetWorld(), EBuildOptions::BuildAll );
+	FEditorBuildUtils::EditorBuild( GetWorld(), FBuildOptions::BuildAll );
 }
 
 
@@ -540,7 +544,7 @@ void FLevelEditorActionCallbacks::BuildLightingOnly_Execute()
 
 	// Build lighting!
 	const bool bAllowLightingDialog = false;
-	FEditorBuildUtils::EditorBuild( GetWorld(), EBuildOptions::BuildLighting, bAllowLightingDialog );
+	FEditorBuildUtils::EditorBuild( GetWorld(), FBuildOptions::BuildLighting, bAllowLightingDialog );
 }
 
 bool FLevelEditorActionCallbacks::BuildLighting_CanExecute()
@@ -564,7 +568,7 @@ void FLevelEditorActionCallbacks::BuildLightingOnly_VisibilityOnly_Execute()
 
 	// Build lighting!
 	const bool bAllowLightingDialog = false;
-	FEditorBuildUtils::EditorBuild( GetWorld(), EBuildOptions::BuildLighting, bAllowLightingDialog );
+	FEditorBuildUtils::EditorBuild( GetWorld(), FBuildOptions::BuildLighting, bAllowLightingDialog );
 
 	// Reset build options
 	ConfigureLightingBuildOptions( FLightingBuildOptions() );
@@ -606,33 +610,27 @@ void FLevelEditorActionCallbacks::LightingBuildOptions_ShowLightingStats_Toggled
 void FLevelEditorActionCallbacks::BuildGeometryOnly_Execute()
 {
 	// Build geometry!
-	FEditorBuildUtils::EditorBuild( GetWorld(), EBuildOptions::BuildVisibleGeometry );
+	FEditorBuildUtils::EditorBuild( GetWorld(), FBuildOptions::BuildVisibleGeometry );
 }
 
 
 void FLevelEditorActionCallbacks::BuildGeometryOnly_OnlyCurrentLevel_Execute()
 {
 	// Build geometry (current level)!
-	FEditorBuildUtils::EditorBuild( GetWorld(), EBuildOptions::BuildGeometry );
+	FEditorBuildUtils::EditorBuild( GetWorld(), FBuildOptions::BuildGeometry );
 }
 
 
 void FLevelEditorActionCallbacks::BuildPathsOnly_Execute()
 {
 	// Build paths!
-	FEditorBuildUtils::EditorBuild( GetWorld(), EBuildOptions::BuildAIPaths );
+	FEditorBuildUtils::EditorBuild( GetWorld(), FBuildOptions::BuildAIPaths );
 }
 
 void FLevelEditorActionCallbacks::BuildLODsOnly_Execute()
 {
 	// Build HLOD
-	FEditorBuildUtils::EditorBuild(GetWorld(), EBuildOptions::BuildHierarchicalLOD);
-}
-
-void FLevelEditorActionCallbacks::PreviewHLODClustersOnly_Execute()
-{
-	// Preview HLOD Clusters
-	FEditorBuildUtils::EditorBuild(GetWorld(), EBuildOptions::PreviewHierarchicalLOD);
+	FEditorBuildUtils::EditorBuild(GetWorld(), FBuildOptions::BuildHierarchicalLOD);
 }
 
 bool FLevelEditorActionCallbacks::IsLightingQualityChecked( ELightingBuildQuality TestQuality )
@@ -1592,6 +1590,21 @@ void FLevelEditorActionCallbacks::OnSelectAllActorsControlledByMatinee()
 	GEditor->SelectAllActorsControlledByMatinee();
 }
 
+void FLevelEditorActionCallbacks::OnSelectOwningHLODCluster()
+{
+	if (GEditor->GetSelectedActorCount() > 0)
+	{
+		AActor* Actor = Cast<AActor>(GEditor->GetSelectedActors()->GetSelectedObject(0));
+		ALODActor* ParentActor = HierarchicalLODUtils::GetParentLODActor(Actor);
+		if (Actor && ParentActor)
+		{
+			GEditor->SelectNone(false, true);
+			GEditor->SelectActor(ParentActor, true, false);
+			GEditor->NoteSelectionChange();
+		}
+	}
+}
+
 void FLevelEditorActionCallbacks::OnSelectMatineeActor( AMatineeActor * ActorToSelect )
 {
 	GEditor->SelectNone( false, true );
@@ -1955,13 +1968,24 @@ void FLevelEditorActionCallbacks::OpenContentBrowser()
 
 void FLevelEditorActionCallbacks::OpenMarketplace()
 {
+	auto Service = GEditor->GetServiceLocator()->GetServiceRef<IPortalApplicationWindow>();
+	if (Service->IsAvailable())
+	{
+		TAsyncResult<bool> Result = Service->NavigateTo(TEXT("/ue/marketplace"));
+		if (FEngineAnalytics::IsAvailable())
+		{
+			FEngineAnalytics::GetProvider().RecordEvent(TEXT("Editor.Usage.OpenMarketplace"));
+		}
+	}
+	else
+	{
 	IDesktopPlatform* DesktopPlatform = FDesktopPlatformModule::Get();
 
 	if (DesktopPlatform != nullptr)
 	{
 		TArray<FAnalyticsEventAttribute> EventAttributes;
 
-		if (DesktopPlatform->OpenLauncher(false, TEXT("-OpenMarket")))
+		if (DesktopPlatform->OpenLauncher(false, TEXT("ue/marketplace"), FString()))
 		{
 			EventAttributes.Add(FAnalyticsEventAttribute(TEXT("OpenSucceeded"), TEXT("TRUE")));
 		}
@@ -1971,7 +1995,7 @@ void FLevelEditorActionCallbacks::OpenMarketplace()
 
 			if (EAppReturnType::Yes == FMessageDialog::Open(EAppMsgType::YesNo, LOCTEXT("InstallMarketplacePrompt", "The Marketplace requires the Epic Games Launcher, which does not seem to be installed on your computer. Would you like to install it now?")))
 			{
-				if (!DesktopPlatform->OpenLauncher(true, TEXT("-OpenMarket")))
+				if (!DesktopPlatform->OpenLauncher(true, TEXT("ue/marketplace"), FString()))
 				{
 					EventAttributes.Add(FAnalyticsEventAttribute(TEXT("InstallSucceeded"), TEXT("FALSE")));
 					FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(TEXT("Sorry, there was a problem installing the Launcher.\nPlease try to install it manually!")));
@@ -1990,6 +2014,7 @@ void FLevelEditorActionCallbacks::OpenMarketplace()
 			FEngineAnalytics::GetProvider().RecordEvent(TEXT("Editor.Usage.OpenMarketplace"), EventAttributes);
 		}
 	}
+}
 }
 
 bool FLevelEditorActionCallbacks::CanSelectGameModeBlueprint()
@@ -2803,7 +2828,7 @@ void FLevelEditorCommands::RegisterCommands()
 	UI_COMMAND( BuildGeometryOnly_OnlyCurrentLevel, "Build Geometry (Current Level)", "Builds geometry, only for the current level", EUserInterfaceActionType::Button, FInputChord() );
 	UI_COMMAND( BuildPathsOnly, "Build Paths", "Only builds paths (all levels.)", EUserInterfaceActionType::Button, FInputChord() );
 	UI_COMMAND( BuildLODsOnly, "Build LODs", "Only builds LODs (all levels.)", EUserInterfaceActionType::Button, FInputChord() );
-	UI_COMMAND( PreviewHLODClustersOnly, "Preview HLOD clusters", "Preview builds LODs and shows clusters (all levels.)", EUserInterfaceActionType::Button, FInputChord());
+	
 	UI_COMMAND( LightingQuality_Production, "Production", "Sets precomputed lighting quality to highest possible quality (slowest computation time.)", EUserInterfaceActionType::RadioButton, FInputChord() );
 	UI_COMMAND( LightingQuality_High, "High", "Sets precomputed lighting quality to high quality", EUserInterfaceActionType::RadioButton, FInputChord() );
 	UI_COMMAND( LightingQuality_Medium, "Medium", "Sets precomputed lighting quality to medium quality", EUserInterfaceActionType::RadioButton, FInputChord() );
@@ -2922,6 +2947,7 @@ void FLevelEditorCommands::RegisterCommands()
 	UI_COMMAND( SelectComponentOwnerActor, "Select Component Owner", "Select the actor that owns the currently selected component(s)", EUserInterfaceActionType::Button, FInputChord() );
 	UI_COMMAND( SelectRelevantLights, "Select Relevant Lights", "Select all lights relevant to the current selection", EUserInterfaceActionType::Button, FInputChord() ); 
 	UI_COMMAND( SelectStaticMeshesOfSameClass, "Select All Using Selected Static Meshes (Selected Actor Types)", "Selects all actors with the same static mesh and actor class as the selection", EUserInterfaceActionType::Button, FInputChord() ); 
+	UI_COMMAND( SelectOwningHierarchicalLODCluster, "Select Owning Hierarchical LOD cluster Using Selected Static Mesh (Selected Actor Types)", "Select Owning Hierarchical LOD cluster for the selected actor", EUserInterfaceActionType::Button, FInputChord());
 	UI_COMMAND( SelectStaticMeshesAllClasses, "Select All Using Selected Static Meshes (All Actor Types)", "Selects all actors with the same static mesh as the selection", EUserInterfaceActionType::Button, FInputChord( EModifierKey::Shift, EKeys::E ) ); 
 	UI_COMMAND( SelectSkeletalMeshesOfSameClass, "Select All Using Selected Skeletal Meshes (Selected Actor Types)", "Selects all actors with the same skeletal mesh and actor class as the selection", EUserInterfaceActionType::Button, FInputChord() ); 
 	UI_COMMAND( SelectSkeletalMeshesAllClasses, "Select All Using Selected Skeletal Meshes (All Actor Types)", "Selects all actors with the same skeletal mesh as the selection", EUserInterfaceActionType::Button, FInputChord() ); 

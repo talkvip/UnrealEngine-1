@@ -361,7 +361,6 @@ int32 FStatUnitData::DrawStat(FViewport* InViewport, FCanvas* InCanvas, int32 In
 	const bool bStereoRendering = (GEngine && GEngine->IsStereoscopic3D(InViewport));
 	UFont* Font = (!FPlatformProperties::SupportsWindowedMode() && GEngine->GetMediumFont()) ? GEngine->GetMediumFont() : GEngine->GetSmallFont();
 
-	FColor Color;
 	// Note InX should already be within the safe zone
 	int32 X3 = InX * (bStereoRendering ? 0.5f : 1.0f);
 	if (bShowUnitMaxTimes)
@@ -373,43 +372,52 @@ int32 FStatUnitData::DrawStat(FViewport* InViewport, FCanvas* InCanvas, int32 In
 	const int32 RowHeight = FMath::TruncToInt(Font->GetMaxCharHeight() * 1.1f);
 	const bool bShowUnitTimeGraph = InViewport->GetClient() ? InViewport->GetClient()->IsStatEnabled(TEXT("UnitGraph")) : false;
 
-	// 0-34 ms: Green, 34-50 ms: Yellow, 50+ ms: Red
-	Color = FrameTime < 34.0f ? FColor::Green : (FrameTime < 50.0f ? FColor::Yellow : FColor::Red);
-	InCanvas->DrawShadowedString(X1, InY, TEXT("Frame:"), Font, bShowUnitTimeGraph ? FColor(100, 255, 100) : FColor::White);
-	InCanvas->DrawShadowedString(X2, InY, *FString::Printf(TEXT("%3.2f ms"), FrameTime), Font, Color);
-	if (bShowUnitMaxTimes)
 	{
-		InCanvas->DrawShadowedString(X3, InY, *FString::Printf(TEXT("%4.2f ms"), Max_FrameTime), Font, Color);
+		const FColor FrameTimeAverageColor = GEngine->GetFrameTimeDisplayColor(FrameTime);
+		InCanvas->DrawShadowedString(X1, InY, TEXT("Frame:"), Font, bShowUnitTimeGraph ? FColor(100, 255, 100) : FColor::White);
+		InCanvas->DrawShadowedString(X2, InY, *FString::Printf(TEXT("%3.2f ms"), FrameTime), Font, FrameTimeAverageColor);
+		if (bShowUnitMaxTimes)
+		{
+			const FColor MaxFrameTimeColor = GEngine->GetFrameTimeDisplayColor(Max_FrameTime);
+			InCanvas->DrawShadowedString(X3, InY, *FString::Printf(TEXT("%4.2f ms"), Max_FrameTime), Font, MaxFrameTimeColor);
+		}
+		InY += RowHeight;
 	}
-	InY += RowHeight;
 
-	Color = GameThreadTime < 34.0f ? FColor::Green : (GameThreadTime < 50.0f ? FColor::Yellow : FColor::Red);
-	InCanvas->DrawShadowedString(X1, InY, TEXT("Game:"), Font, bShowUnitTimeGraph ? FColor(255, 100, 100) : FColor::White);
-	InCanvas->DrawShadowedString(X2, InY, *FString::Printf(TEXT("%3.2f ms"), GameThreadTime), Font, Color);
-	if (bShowUnitMaxTimes)
 	{
-		InCanvas->DrawShadowedString(X3, InY, *FString::Printf(TEXT("%4.2f ms"), Max_GameThreadTime), Font, Color);
+		const FColor GameThreadAverageColor = GEngine->GetFrameTimeDisplayColor(GameThreadTime);
+		InCanvas->DrawShadowedString(X1, InY, TEXT("Game:"), Font, bShowUnitTimeGraph ? FColor(255, 100, 100) : FColor::White);
+		InCanvas->DrawShadowedString(X2, InY, *FString::Printf(TEXT("%3.2f ms"), GameThreadTime), Font, GameThreadAverageColor);
+		if (bShowUnitMaxTimes)
+		{
+			const FColor GameThreadMaxColor = GEngine->GetFrameTimeDisplayColor(Max_GameThreadTime);
+			InCanvas->DrawShadowedString(X3, InY, *FString::Printf(TEXT("%4.2f ms"), Max_GameThreadTime), Font, GameThreadMaxColor);
+		}
+		InY += RowHeight;
 	}
-	InY += RowHeight;
 
-	Color = RenderThreadTime < 34.0f ? FColor::Green : (RenderThreadTime < 50.0f ? FColor::Yellow : FColor::Red);
-	InCanvas->DrawShadowedString(X1, InY, TEXT("Draw:"), Font, bShowUnitTimeGraph ? FColor(100, 100, 255) : FColor::White);
-	InCanvas->DrawShadowedString(X2, InY, *FString::Printf(TEXT("%3.2f ms"), RenderThreadTime), Font, Color);
-	if (bShowUnitMaxTimes)
 	{
-		InCanvas->DrawShadowedString(X3, InY, *FString::Printf(TEXT("%4.2f ms"), Max_RenderThreadTime), Font, Color);
+		const FColor RenderThreadAverageColor = GEngine->GetFrameTimeDisplayColor(RenderThreadTime);
+		InCanvas->DrawShadowedString(X1, InY, TEXT("Draw:"), Font, bShowUnitTimeGraph ? FColor(100, 100, 255) : FColor::White);
+		InCanvas->DrawShadowedString(X2, InY, *FString::Printf(TEXT("%3.2f ms"), RenderThreadTime), Font, RenderThreadAverageColor);
+		if (bShowUnitMaxTimes)
+		{
+			const FColor RenderThreadMaxColor = GEngine->GetFrameTimeDisplayColor(Max_RenderThreadTime);
+			InCanvas->DrawShadowedString(X3, InY, *FString::Printf(TEXT("%4.2f ms"), Max_RenderThreadTime), Font, RenderThreadMaxColor);
+		}
+		InY += RowHeight;
 	}
-	InY += RowHeight;
 
 	const bool bHaveGPUData = GPUCycles > 0;
 	if (bHaveGPUData)
 	{
-		Color = GPUFrameTime < 34.0f ? FColor::Green : (GPUFrameTime < 50.0f ? FColor::Yellow : FColor::Red);
+		const FColor GPUAverageColor = GEngine->GetFrameTimeDisplayColor(GPUFrameTime);
 		InCanvas->DrawShadowedString(X1, InY, TEXT("GPU:"), Font, bShowUnitTimeGraph ? FColor(255, 255, 100) : FColor::White);
-		InCanvas->DrawShadowedString(X2, InY, *FString::Printf(TEXT("%3.2f ms"), GPUFrameTime), Font, Color);
+		InCanvas->DrawShadowedString(X2, InY, *FString::Printf(TEXT("%3.2f ms"), GPUFrameTime), Font, GPUAverageColor);
 		if (bShowUnitMaxTimes)
 		{
-			InCanvas->DrawShadowedString(X3, InY, *FString::Printf(TEXT("%4.2f ms"), Max_GPUFrameTime), Font, Color);
+			const FColor GPUMaxColor = GEngine->GetFrameTimeDisplayColor(Max_GPUFrameTime);
+			InCanvas->DrawShadowedString(X3, InY, *FString::Printf(TEXT("%4.2f ms"), Max_GPUFrameTime), Font, GPUMaxColor);
 		}
 		InY += RowHeight;
 	}
@@ -427,7 +435,10 @@ int32 FStatUnitData::DrawStat(FViewport* InViewport, FCanvas* InCanvas, int32 In
 		// The horizontal axis is the frame number (NOT time!!!)
 
 		// Threshold where graph lines will pulsate for slow frames
-		const float AlertTimeMS = 33.33f;
+		extern TAutoConsoleVariable<float> GTargetFrameTimeThresholdCVar;
+		const float TargetTimeMS = GTargetFrameTimeThresholdCVar.GetValueOnGameThread();
+
+		const float AlertTimeMS = TargetTimeMS;
 
 		// Graph layout
 		const float GraphLeftXPos = 80.0f;
@@ -683,7 +694,7 @@ FViewport::FViewport(FViewportClient* InViewportClient):
 	}
 #endif
 
-	AppVersionString = FString::Printf( TEXT( "Version: %s" ), *GEngineVersion.ToString() );
+	AppVersionString = FString::Printf( TEXT( "Version: %s" ), *FEngineVersion::Current().ToString() );
 
 	bIsPlayInEditorViewport = false;
 }
@@ -744,17 +755,17 @@ void FViewport::HighResScreenshot()
 
 	DummyViewport->EnqueueBeginRenderFrame();
 
-	uint32 MaskShowFlagBackup = ViewportClient->GetEngineShowFlags()->HighResScreenshotMask;
+	bool MaskShowFlagBackup = ViewportClient->GetEngineShowFlags()->HighResScreenshotMask;
 	uint32 MotionBlurShowFlagBackup = ViewportClient->GetEngineShowFlags()->MotionBlur;
-	ViewportClient->GetEngineShowFlags()->HighResScreenshotMask = GetHighResScreenshotConfig().bMaskEnabled ? 1 : 0;
-	ViewportClient->GetEngineShowFlags()->MotionBlur = 0;
+	ViewportClient->GetEngineShowFlags()->SetHighResScreenshotMask(GetHighResScreenshotConfig().bMaskEnabled);
+	ViewportClient->GetEngineShowFlags()->SetMotionBlur(false);
 
 	FCanvas Canvas(DummyViewport, NULL, ViewportClient->GetWorld(), ViewportClient->GetWorld()->FeatureLevel);
 	{
 		ViewportClient->Draw(DummyViewport, &Canvas);
 	}
 	Canvas.Flush_GameThread();
-	ViewportClient->GetEngineShowFlags()->HighResScreenshotMask = MaskShowFlagBackup;
+	ViewportClient->GetEngineShowFlags()->SetHighResScreenshotMask(MaskShowFlagBackup);
 	ViewportClient->GetEngineShowFlags()->MotionBlur = MotionBlurShowFlagBackup;
 	ViewportClient->ProcessScreenShots(DummyViewport);
 
@@ -896,6 +907,16 @@ void UPostProcessComponent::OnUnregister()
 {
 	Super::OnUnregister();
 	GetWorld()->PostProcessVolumes.RemoveSingle(this);
+}
+
+void UPostProcessComponent::Serialize(FArchive& Ar)
+{
+	Super::Serialize(Ar);
+
+	if(Ar.IsLoading())
+	{
+		Settings.OnAfterLoad();
+	}
 }
 
 /**
@@ -1091,10 +1112,8 @@ const TArray<FColor>& FViewport::GetRawHitProxyData(FIntRect InRect)
 			FViewport*, Viewport, this,
 			{
 			// Set the hit proxy map's render target.
-			SetRenderTarget(RHICmdList, Viewport->HitProxyMap.GetRenderTargetTexture(), FTextureRHIRef());
-
 			// Clear the hit proxy map to white, which is overloaded to mean no hit proxy.
-			RHICmdList.Clear(true, FLinearColor::White, false, 0, false, 0, FIntRect());
+			SetRenderTarget(RHICmdList, Viewport->HitProxyMap.GetRenderTargetTexture(), FTextureRHIRef(), ESimpleRenderTargetMode::EClearColorExistingDepth);
 		});
 
 		// Let the viewport client draw its hit proxies.
@@ -1413,7 +1432,7 @@ void FViewport::FHitProxyMap::Init(uint32 NewSizeX,uint32 NewSizeY)
 
 	// Create a render target to store the hit proxy map.
 	{
-		FRHIResourceCreateInfo CreateInfo;
+		FRHIResourceCreateInfo CreateInfo(FClearValueBinding::White);
 		RHICreateTargetableShaderResource2D(SizeX,SizeY,PF_B8G8R8A8,1,TexCreate_None,TexCreate_RenderTargetable,false,CreateInfo,RenderTargetTextureRHI,HitProxyTexture);
 	}
 	{

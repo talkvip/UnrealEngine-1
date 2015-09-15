@@ -8,7 +8,8 @@
 
 #include "SkeletalRender.h"
 #include "SkeletalRenderPublic.h"
-#include "GPUSkinVertexFactory.h" 
+#include "GPUSkinVertexFactory.h"
+#include "ClothSimData.h"
 
 // 1 for a single buffer, this creates and releases textures every frame (the driver has to keep the reference and need to defer the release, low memory as it only occupies rendered buffers (up to 3 copies), best Xbox360 method?)
 // 2 for double buffering (works well for PC, caused Xbox360 to stall)
@@ -19,9 +20,28 @@
 * Stores the updated matrices needed to skin the verts.
 * Created by the game thread and sent to the rendering thread as an update 
 */
-class FDynamicSkelMeshObjectDataGPUSkin : public FDynamicSkelMeshObjectData
+class FDynamicSkelMeshObjectDataGPUSkin
 {
+	/**
+	* Constructor, these are recycled, so you never use a constructor
+	*/
+	FDynamicSkelMeshObjectDataGPUSkin()
+	{
+		Clear();
+	}
+
+	virtual ~FDynamicSkelMeshObjectDataGPUSkin()
+	{
+		// we leak these
+		check(0);
+	}
+
+	void Clear();
+
 public:
+
+	static FDynamicSkelMeshObjectDataGPUSkin* AllocDynamicSkelMeshObjectDataGPUSkin();
+	static void FreeDynamicSkelMeshObjectDataGPUSkin(FDynamicSkelMeshObjectDataGPUSkin* Who);
 
 	/**
 	* Constructor
@@ -30,7 +50,7 @@ public:
 	* @param	InLODIndex - each lod has its own bone map 
 	* @param	InActiveVertexAnims - vertex anims active for the mesh
 	*/
-	FDynamicSkelMeshObjectDataGPUSkin(
+	void InitDynamicSkelMeshObjectDataGPUSkin(
 		USkinnedMeshComponent* InMeshComponent,
 		FSkeletalMeshResource* InSkeletalMeshResource,
 		int32 InLODIndex,
@@ -275,11 +295,11 @@ public:
 	FSkeletalMeshObjectGPUSkin(USkinnedMeshComponent* InMeshComponent, FSkeletalMeshResource* InSkeletalMeshResource, ERHIFeatureLevel::Type InFeatureLevel);
 	virtual ~FSkeletalMeshObjectGPUSkin();
 
-	// Begin FSkeletalMeshObject interface
+	//~ Begin FSkeletalMeshObject Interface
 	virtual void InitResources() override;
 	virtual void ReleaseResources() override;
 	virtual void Update(int32 LODIndex,USkinnedMeshComponent* InMeshComponent,const TArray<FActiveVertexAnim>& ActiveVertexAnims) override;
-	virtual void UpdateDynamicData_RenderThread(FRHICommandListImmediate& RHICmdList, FDynamicSkelMeshObjectData* InDynamicData) override;
+	void UpdateDynamicData_RenderThread(FRHICommandListImmediate& RHICmdList, FDynamicSkelMeshObjectDataGPUSkin* InDynamicData);
 	virtual void PreGDMECallback() override;
 	virtual const FVertexFactory* GetVertexFactory(int32 LODIndex,int32 ChunkIdx) const override;
 	virtual void CacheVertices(int32 LODIndex, bool bForce) const override {}
@@ -323,7 +343,7 @@ public:
 
 		return ResourceSize;
 	}
-	// End FSkeletalMeshObject interface
+	//~ End FSkeletalMeshObject Interface
 
 	/** 
 	 * Vertex buffers that can be used for GPU skinning factories 

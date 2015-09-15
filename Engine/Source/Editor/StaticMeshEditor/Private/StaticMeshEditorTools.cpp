@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+		// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
 
 #include "StaticMeshEditorModule.h"
 #include "StaticMeshEditorTools.h"
@@ -84,26 +84,6 @@ void FStaticMeshDetails::CustomizeDetails( class IDetailLayoutBuilder& DetailBui
 				StaticMeshCategory.AddProperty( ChildProp );
 			}
 		}
-	}
-
-	// Only add the reimport button if we have reimport settings we can modify
-	// Note: this will get rebuilt if the asset is reimported so we don't need to use .Visibility on the button
-	const UStaticMesh* StaticMesh = StaticMeshEditor.GetStaticMesh();
-	check(StaticMesh);
-	if (StaticMesh->AssetImportData && StaticMesh->AssetImportData->GetClass() != UAssetImportData::StaticClass())
-	{
-		ImportCategory.AddCustomRow(LOCTEXT("ReimportStaticMesh", "Reimport Static Mesh"), true)
-			.ValueContent()
-			[
-				SNew(SButton)
-				.OnClicked(this, &FStaticMeshDetails::Reimport)
-				.IsEnabled(this, &FStaticMeshDetails::CanReimport)
-				[
-					SNew(STextBlock)
-					.Text(LOCTEXT("Reimport", "Reimport"))
-					.Font(IDetailLayoutBuilder::GetDetailFont())
-				]
-			];
 	}
 }
 
@@ -205,25 +185,6 @@ void FStaticMeshDetails::ApplyChanges()
 	{
 		LevelOfDetailSettings->ApplyChanges();
 	}
-}
-
-FReply FStaticMeshDetails::Reimport()
-{
-	UStaticMesh* StaticMesh = StaticMeshEditor.GetStaticMesh();
-	check(StaticMesh);
-	FReimportManager::Instance()->Reimport(StaticMesh, true);
-	return FReply::Handled();
-}
-
-bool FStaticMeshDetails::CanReimport() const
-{
-	const UStaticMesh* StaticMesh = StaticMeshEditor.GetStaticMesh();
-	check(StaticMesh);
-	if (StaticMesh->AssetImportData)
-	{
-		return StaticMesh->AssetImportData->bDirty;
-	}
-	return false;
 }
 
 SConvexDecomposition::~SConvexDecomposition()
@@ -405,6 +366,22 @@ void FMeshBuildSettingsLayout::GenerateChildContent( IDetailChildrenBuilder& Chi
 			SNew(SCheckBox)
 			.IsChecked(this, &FMeshBuildSettingsLayout::ShouldBuildAdjacencyBuffer)
 			.OnCheckStateChanged(this, &FMeshBuildSettingsLayout::OnBuildAdjacencyBufferChanged)
+		];
+	}
+
+	{
+		ChildrenBuilder.AddChildContent( LOCTEXT("BuildReversedIndexBuffer", "Build Reversed Index Buffer") )
+		.NameContent()
+		[
+			SNew(STextBlock)
+			.Font( IDetailLayoutBuilder::GetDetailFont() )
+			.Text(LOCTEXT("BuildReversedIndexBuffer", "Build Reversed Index Buffer"))
+		]
+		.ValueContent()
+		[
+			SNew(SCheckBox)
+			.IsChecked(this, &FMeshBuildSettingsLayout::ShouldBuildReversedIndexBuffer)
+			.OnCheckStateChanged(this, &FMeshBuildSettingsLayout::OnBuildReversedIndexBufferChanged)
 		];
 	}
 
@@ -635,6 +612,11 @@ ECheckBoxState FMeshBuildSettingsLayout::ShouldBuildAdjacencyBuffer() const
 	return BuildSettings.bBuildAdjacencyBuffer ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
 }
 
+ECheckBoxState FMeshBuildSettingsLayout::ShouldBuildReversedIndexBuffer() const
+{
+	return BuildSettings.bBuildReversedIndexBuffer ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+}
+
 ECheckBoxState FMeshBuildSettingsLayout::ShouldUseFullPrecisionUVs() const
 {
 	return BuildSettings.bUseFullPrecisionUVs ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
@@ -743,6 +725,19 @@ void FMeshBuildSettingsLayout::OnBuildAdjacencyBufferChanged(ECheckBoxState NewS
 			FEngineAnalytics::GetProvider().RecordEvent(TEXT("Editor.Usage.StaticMesh.BuildSettings"), TEXT("bBuildAdjacencyBuffer"), bBuildAdjacencyBuffer ? TEXT("True") : TEXT("False"));
 		}
 		BuildSettings.bBuildAdjacencyBuffer = bBuildAdjacencyBuffer;
+	}
+}
+
+void FMeshBuildSettingsLayout::OnBuildReversedIndexBufferChanged(ECheckBoxState NewState)
+{
+	const bool bBuildReversedIndexBuffer = (NewState == ECheckBoxState::Checked) ? true : false;
+	if (BuildSettings.bBuildReversedIndexBuffer != bBuildReversedIndexBuffer)
+	{
+		if (FEngineAnalytics::IsAvailable())
+		{
+			FEngineAnalytics::GetProvider().RecordEvent(TEXT("Editor.Usage.StaticMesh.BuildSettings"), TEXT("bBuildReversedIndexBuffer"), bBuildReversedIndexBuffer ? TEXT("True") : TEXT("False"));
+		}
+		BuildSettings.bBuildReversedIndexBuffer = bBuildReversedIndexBuffer;
 	}
 }
 
@@ -1313,17 +1308,37 @@ void FMeshSectionSettingsLayout::OnMaterialChanged(UMaterialInterface* NewMateri
 
 TSharedRef<SWidget> FMeshSectionSettingsLayout::OnGenerateNameWidgetsForMaterial(UMaterialInterface* Material, int32 SlotIndex)
 {
-	return
-		SNew(SCheckBox)
-		.IsChecked(this, &FMeshSectionSettingsLayout::IsSectionSelected, SlotIndex)
-		.OnCheckStateChanged(this, &FMeshSectionSettingsLayout::OnSectionSelectedChanged, SlotIndex)
-		.ToolTipText(LOCTEXT("Highlight_ToolTip", "Highlights this section in the viewport"))
+	return SNew(SVerticalBox)
+		+ SVerticalBox::Slot()
+		.AutoHeight()
 		[
-			SNew(STextBlock)
-			.Font(IDetailLayoutBuilder::GetDetailFont())
-			.ColorAndOpacity( FLinearColor( 0.4f, 0.4f, 0.4f, 1.0f) )
-			.Text(LOCTEXT("Highlight", "Highlight"))
+			SNew(SCheckBox)
+			.IsChecked(this, &FMeshSectionSettingsLayout::IsSectionHighlighted, SlotIndex)
+			.OnCheckStateChanged(this, &FMeshSectionSettingsLayout::OnSectionHighlightedChanged, SlotIndex)
+			.ToolTipText(LOCTEXT("Highlight_ToolTip", "Highlights this section in the viewport"))
+			[
+				SNew(STextBlock)
+				.Font(IDetailLayoutBuilder::GetDetailFont())
+				.ColorAndOpacity( FLinearColor( 0.4f, 0.4f, 0.4f, 1.0f) )
+				.Text(LOCTEXT("Highlight", "Highlight"))
 
+			]
+		]
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.Padding(0, 2, 0, 0)
+		[
+			SNew(SCheckBox)
+			.IsChecked(this, &FMeshSectionSettingsLayout::IsSectionIsolatedEnabled, SlotIndex)
+			.OnCheckStateChanged(this, &FMeshSectionSettingsLayout::OnSectionIsolatedChanged, SlotIndex)
+			.ToolTipText(LOCTEXT("Isolate_ToolTip", "Isolates this section in the viewport"))
+			[
+				SNew(STextBlock)
+				.Font(IDetailLayoutBuilder::GetDetailFont())
+				.ColorAndOpacity(FLinearColor(0.4f, 0.4f, 0.4f, 1.0f))
+				.Text(LOCTEXT("Isolate", "Isolate"))
+
+			]
 		];
 }
 
@@ -1405,7 +1420,7 @@ void FMeshSectionSettingsLayout::OnSectionCollisionChanged(ECheckBoxState NewSta
 	CallPostEditChange();
 }
 
-ECheckBoxState FMeshSectionSettingsLayout::IsSectionSelected(int32 SectionIndex) const
+ECheckBoxState FMeshSectionSettingsLayout::IsSectionHighlighted(int32 SectionIndex) const
 {
 	ECheckBoxState State = ECheckBoxState::Unchecked;
 	UStaticMeshComponent* Component = StaticMeshEditor.GetStaticMeshComponent();
@@ -1416,7 +1431,7 @@ ECheckBoxState FMeshSectionSettingsLayout::IsSectionSelected(int32 SectionIndex)
 	return State;
 }
 
-void FMeshSectionSettingsLayout::OnSectionSelectedChanged(ECheckBoxState NewState, int32 SectionIndex)
+void FMeshSectionSettingsLayout::OnSectionHighlightedChanged(ECheckBoxState NewState, int32 SectionIndex)
 {
 	UStaticMeshComponent* Component = StaticMeshEditor.GetStaticMeshComponent();
 	if (Component)
@@ -1424,10 +1439,48 @@ void FMeshSectionSettingsLayout::OnSectionSelectedChanged(ECheckBoxState NewStat
 		if (NewState == ECheckBoxState::Checked)
 		{
 			Component->SelectedEditorSection = SectionIndex;
+			if (Component->SectionIndexPreview != SectionIndex)
+			{
+				// Unhide all mesh sections
+				Component->SetSectionPreview(INDEX_NONE);
+			}
 		}
 		else if (NewState == ECheckBoxState::Unchecked)
 		{
 			Component->SelectedEditorSection = INDEX_NONE;
+		}
+		Component->MarkRenderStateDirty();
+		StaticMeshEditor.RefreshViewport();
+	}
+}
+
+ECheckBoxState FMeshSectionSettingsLayout::IsSectionIsolatedEnabled(int32 SectionIndex) const
+{
+	ECheckBoxState State = ECheckBoxState::Unchecked;
+	const UStaticMeshComponent* Component = StaticMeshEditor.GetStaticMeshComponent();
+	if (Component)
+	{
+		State = Component->SectionIndexPreview == SectionIndex ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+	}
+	return State;
+}
+
+void FMeshSectionSettingsLayout::OnSectionIsolatedChanged(ECheckBoxState NewState, int32 SectionIndex)
+{
+	UStaticMeshComponent* Component = StaticMeshEditor.GetStaticMeshComponent();
+	if (Component)
+	{
+		if (NewState == ECheckBoxState::Checked)
+		{
+			Component->SetSectionPreview(SectionIndex);
+			if (Component->SelectedEditorSection != SectionIndex)
+			{
+				Component->SelectedEditorSection = INDEX_NONE;
+			}
+		}
+		else if (NewState == ECheckBoxState::Unchecked)
+		{
+			Component->SetSectionPreview(INDEX_NONE);
 		}
 		Component->MarkRenderStateDirty();
 		StaticMeshEditor.RefreshViewport();

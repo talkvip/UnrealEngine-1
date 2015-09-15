@@ -19,6 +19,7 @@
 #define NAVMESHVER_OFFMESH_HEIGHT_BUG	11
 #define NAVMESHVER_LANDSCAPE_HEIGHT		13
 
+
 #define NAVMESHVER_LATEST				NAVMESHVER_LANDSCAPE_HEIGHT
 #define NAVMESHVER_MIN_COMPATIBLE		NAVMESHVER_LANDSCAPE_HEIGHT
 
@@ -689,7 +690,7 @@ public:
 	/** Dtor */
 	virtual ~ARecastNavMesh();
 
-	// Begin UObject Interface
+	//~ Begin UObject Interface
 	virtual void PostInitProperties() override;
 	virtual void PostLoad() override;
 	virtual SIZE_T GetResourceSize(EResourceSizeMode::Type Mode) override;	
@@ -697,7 +698,7 @@ public:
 #if WITH_EDITOR
 	virtual void PostEditChangeProperty( struct FPropertyChangedEvent& PropertyChangedEvent) override;
 #endif // WITH_EDITOR
-	// End UObject Interface
+	//~ End UObject Interface
 
 #if WITH_EDITOR
 	/** RecastNavMesh instances are dynamically spawned and should not be coppied */
@@ -706,7 +707,7 @@ public:
 	
 	virtual void CleanUp() override;
 
-	// Begin ANavigationData Interface
+	//~ Begin ANavigationData Interface
 	virtual FNavLocation GetRandomPoint(TSharedPtr<const FNavigationQueryFilter> Filter = NULL, const UObject* Querier = NULL) const override;
 	virtual bool GetRandomReachablePointInRadius(const FVector& Origin, float Radius, FNavLocation& OutResult, TSharedPtr<const FNavigationQueryFilter> Filter = NULL, const UObject* Querier = NULL) const override;
 	virtual bool GetRandomPointInNavigableRadius(const FVector& Origin, float Radius, FNavLocation& OutResult, TSharedPtr<const FNavigationQueryFilter> Filter = NULL, const UObject* Querier = NULL) const override;
@@ -729,7 +730,7 @@ public:
 
 	virtual void OnStreamingLevelAdded(ULevel* InLevel, UWorld* InWorld) override;
 	virtual void OnStreamingLevelRemoved(ULevel* InLevel, UWorld* InWorld) override;
-	// End ANavigationData Interface
+	//~ End ANavigationData Interface
 
 protected:
 	/** Serialization helper. */
@@ -777,13 +778,13 @@ public:
 	void UpdateDrawing();
 
 	/** Creates a task to be executed on GameThread calling UpdateDrawing */
-	void RequestDrawingUpdate();
+	void RequestDrawingUpdate(bool bForce = false);
 
 	/** Invalidates active paths that go through changed tiles  */
 	void InvalidateAffectedPaths(const TArray<uint32>& ChangedTiles);
 
 	/** Event from generator that navmesh build has finished */
-	void OnNavMeshGenerationFinished();
+	virtual void OnNavMeshGenerationFinished();
 
 	virtual void SetConfig(const FNavDataConfig& Src) override;
 protected:
@@ -875,9 +876,21 @@ public:
 	/** Retrieves area ID for the specified polygon. */
 	uint32 GetPolyAreaID(NavNodeRef PolyID) const;
 
+	/** Sets area ID for the specified polygon. */
+	void SetPolyAreaID(NavNodeRef PolyID, uint8 AreaID);
+
+	/** Sets area ID for the specified polygons */
+	void SetPolyArrayAreaID(const TArray<FNavPoly>& Polys, uint8 AreaID);
+
 	/** Retrieves poly and area flags for specified polygon */
 	bool GetPolyFlags(NavNodeRef PolyID, uint16& PolyFlags, uint16& AreaFlags) const;
 	bool GetPolyFlags(NavNodeRef PolyID, FNavMeshNodeFlags& Flags) const;
+
+	/** Finds all polys connected with specified one */
+	bool GetPolyNeighbors(NavNodeRef PolyID, TArray<FNavigationPortalEdge>& Neighbors) const;
+
+	/** Finds all polys connected with specified one, results expressed as array of NavNodeRefs */
+	bool GetPolyNeighbors(NavNodeRef PolyID, TArray<NavNodeRef>& Neighbors) const;
 
 	/** Finds closest point constrained to given poly */
 	bool GetClosestPointOnPoly(NavNodeRef PolyID, const FVector& TestPt, FVector& PointOnPoly) const;
@@ -909,6 +922,9 @@ public:
 
 	/** Get all polys from tile */
 	bool GetPolysInTile(int32 TileIndex, TArray<FNavPoly>& Polys) const;
+
+	/** Get all polys that overlap the specified box */
+	bool GetPolysInBox(const FBox& Box, TArray<FNavPoly>& Polys, TSharedPtr<const FNavigationQueryFilter> Filter = nullptr, const UObject* Owner = nullptr) const;
 
 	/** Projects point on navmesh, returning all hits along vertical line defined by min-max Z params */
 	bool ProjectPointMulti(const FVector& Point, TArray<FNavLocation>& OutLocations, const FVector& Extent,
@@ -960,9 +976,6 @@ protected:
 
 	/** Returns query extent including adjustments for voxelization error compensation */
 	FVector GetModifiedQueryExtent(const FVector& QueryExtent) const;
-
-	// @todo docuement
-	UPrimitiveComponent* ConstructRenderingComponentImpl();
 
 	/** Spawns an ARecastNavMesh instance, and configures it if AgentProps != NULL */
 	static ARecastNavMesh* SpawnInstance(UNavigationSystem* NavSys, const FNavDataConfig* AgentProps = NULL);

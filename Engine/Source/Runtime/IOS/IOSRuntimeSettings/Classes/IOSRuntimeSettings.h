@@ -48,6 +48,11 @@ struct FIOSBuildResourceFilePath
 	 */
 	bool ExportTextItem(FString& ValueStr, FIOSBuildResourceFilePath const& DefaultValue, UObject* Parent, int32 PortFlags, UObject* ExportRootScope) const
 	{
+		if (0 != (PortFlags & EPropertyPortFlags::PPF_ExportCpp))
+		{
+			return false;
+		}
+
 		ValueStr += FilePath;
 		return true;
 	}
@@ -96,6 +101,11 @@ struct FIOSBuildResourceDirectory
 	 */
 	bool ExportTextItem(FString& ValueStr, FIOSBuildResourceDirectory const& DefaultValue, UObject* Parent, int32 PortFlags, UObject* ExportRootScope) const
 	{
+		if (0 != (PortFlags & EPropertyPortFlags::PPF_ExportCpp))
+		{
+			return false;
+		}
+
 		ValueStr += Path;
 		return true;
 	}
@@ -184,6 +194,14 @@ public:
 	UPROPERTY(GlobalConfig, EditAnywhere, Category = Build, meta = (DisplayName = "Support armv7s in Shipping"))
 	bool bShipForArmV7S;
 	
+	// Any additional linker flags to pass to the linker in non-shipping builds
+	UPROPERTY(GlobalConfig, EditAnywhere, Category = Build, meta = (DispalyName = "Additional Non-Shipping Linker Flags", ConfigHierarchyEditable))
+	FString AdditionalLinkerFlags;
+
+	// Any additional linker flags to pass to the linker in shipping builds
+	UPROPERTY(GlobalConfig, EditAnywhere, Category = Build, meta = (DispalyName = "Additional Shipping Linker Flags", ConfigHierarchyEditable))
+	FString AdditionalShippingLinkerFlags;
+
 	// The name or ip address of the remote mac which will be used to build IOS
 	UPROPERTY(GlobalConfig, EditAnywhere, Category = "Build", meta = (ConfigHierarchyEditable))
 	FString RemoteServerName;

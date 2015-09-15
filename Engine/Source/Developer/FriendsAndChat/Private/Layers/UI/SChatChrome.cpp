@@ -19,49 +19,81 @@ public:
 	void Construct(const FArguments& InArgs, const TSharedRef<FChatChromeViewModel>& InChromeViewModel) override
 	{
 		FriendStyle = *InArgs._FriendStyle;
-		MenuMethod = InArgs._Method;
 		ChromeViewModel = InChromeViewModel;
 
 		ChromeViewModel->OnActiveTabChanged().AddSP(this, &SChatChromeImpl::HandleActiveTabChanged);
 		ChromeViewModel->OnVisibleTabsChanged().AddSP(this, &SChatChromeImpl::HandleVisibleTabsChanged);
+
+		TSharedRef<SWidget> HeaderWidget = SNew(SHorizontalBox)
+			+SHorizontalBox::Slot()
+			[
+				SAssignNew(TabContainer, SHorizontalBox)
+			]
+			+SHorizontalBox::Slot()
+			.Expose(SettingBox)
+			.AutoWidth()
+			.HAlign(HAlign_Right)
+			.VAlign(VAlign_Center)
+			+SHorizontalBox::Slot()
+			.AutoWidth()
+			.HAlign(HAlign_Right)
+			.VAlign(VAlign_Center)
+			[
+				SNew(SButton)
+				.Visibility(this, &SChatChromeImpl::GetMinizedButtonVisibility)
+				.ButtonStyle(&FriendStyle.FriendsChatStyle.FriendsMinimizeButtonStyle)
+				.OnClicked(this, &SChatChromeImpl::ToggleHeader)
+			];
 
 		SUserWidget::Construct(SUserWidget::FArguments()
 		[
 			SNew(SBorder)
 			.Padding(0)
 			.BorderImage(FCoreStyle::Get().GetBrush("NoBorder"))
-			.Visibility(this, &SChatChromeImpl::GetChatWindowVisibility)
-			.Padding(0)
+			.Visibility(EVisibility::SelfHitTestInvisible)
 			[
 				SNew(SVerticalBox)
-				+ SVerticalBox::Slot()
-				.AutoHeight()
+				.Visibility(EVisibility::SelfHitTestInvisible)
+				+SVerticalBox::Slot()
 				[
-					SNew(SHorizontalBox)
-					.Visibility(this, &SChatChromeImpl::GetHeaderVisibility)
-					+SHorizontalBox::Slot()
+					SNew(SVerticalBox)
+					.Visibility(this, &SChatChromeImpl::GetMinizedWindowVisibility)
+					+SVerticalBox::Slot()
+					+SVerticalBox::Slot()
+					.AutoHeight()
+					.VAlign(VAlign_Bottom)
 					[
-						SAssignNew(TabContainer, SHorizontalBox)
-					]
-					+SHorizontalBox::Slot()
-					.AutoWidth()
-					.HAlign(HAlign_Right)
-					.VAlign(VAlign_Center)
-					[
-						GetChatSettingsWidget().ToSharedRef()
+						HeaderWidget
 					]
 				]
-				+ SVerticalBox::Slot()
+				+SVerticalBox::Slot()
 				[
-					SAssignNew(ChatWindowContainer, SWidgetSwitcher)
+					SNew(SVerticalBox)
+					.Visibility(this, &SChatChromeImpl::GetChatWindowVisibility)
+					+SVerticalBox::Slot()
+					.AutoHeight()
+					[
+						HeaderWidget
+					]
+					+ SVerticalBox::Slot()
+					.VAlign(VAlign_Fill)
+					[
+						SAssignNew(ChatWindowContainer, SWidgetSwitcher)
+					]
 				]
 			]
 		]);
 
 		RegenerateTabs();
 		HandleActiveTabChanged();
-	}
 
+		if(SettingBox && ChromeViewModel->DisplayChatSettings())
+		{
+			SettingBox->AttachWidget(
+				GetChatSettingsWidget().ToSharedRef()
+			);
+		}
+	}
 
 	virtual void HandleWindowActivated() override
 	{
@@ -96,7 +128,7 @@ private:
 		TSharedPtr<IChatTabViewModel> Tab = TabPtr.Pin();
 		if (Tab.IsValid())
 		{
-			ChromeViewModel->ActivateTab(Tab.ToSharedRef());
+			ChromeViewModel->ActivateTab(Tab.ToSharedRef(), true);
 		}
 		return FReply::Handled();
 	}
@@ -134,10 +166,11 @@ private:
 		{
 			if (Tab == ChromeViewModel->GetActiveTab())
 			{
-				return FriendStyle.FriendsNormalFontStyle.InvertedFontColor;
+				EChatMessageType::Type Channel = Tab->GetTabID();
+				return FriendStyle.FriendsChatStyle.GetChannelTextColor(Channel);
 			}
 		}
-		return FriendStyle.FriendsNormalFontStyle.DefaultFontColor;
+		return FriendStyle.FriendsNormalFontStyle.InvertedFontColor;
 	}
 
 	EVisibility GetTabVisibility(TWeakPtr<IChatTabViewModel> TabPtr) const
@@ -170,6 +203,8 @@ private:
 
 			// Create container for a quick settings options
 			TSharedPtr<SBox> QuickSettingsContainer = SNew(SBox);
+
+			TSharedPtr<SBox> NotificationContainer = SNew(SBox);
 			
 			// Add Tab
 			TabContainer->AddSlot()
@@ -191,23 +226,34 @@ private:
 							TabButton
 						]
 						+ SHorizontalBox::Slot()
-							.AutoWidth()
+						.AutoWidth()
 						[
 							QuickSettingsContainer.ToSharedRef()
+						]
+						+ SHorizontalBox::Slot()
+						.AutoWidth()
+						[
+							NotificationContainer.ToSharedRef()
 						]
 					]
 				]
 			];
 
 			// Add a quick settings if needed
-			QuickSettingsContainer->SetContent(GetQuickSettingsWidget(Tab).ToSharedRef());
+			//QuickSettingsContainer->SetContent(GetQuickSettingsWidget(Tab).ToSharedRef());
 			
+			// Add Message notification indicator
+			NotificationContainer->SetContent(GetNotificationWidget(Tab).ToSharedRef());
+
+
 			if (!ChatWindows.Contains(Tab))
 			{
 				// Create Chat window for this tab
 				TSharedRef<SChatWindow> ChatWindow = SNew(SChatWindow, Tab->GetChatViewModel().ToSharedRef())
 					.FriendStyle(&FriendStyle)
 					.Method(EPopupMethod::UseCurrentWindow);
+
+				ChatWindow->SetVisibility(EVisibility::SelfHitTestInvisible);
 
 				ChatWindowContainer->AddSlot()
 					[
@@ -246,19 +292,81 @@ private:
 			.MenuContent()
 			[
 				SNew(SChatChromeTabQuickSettings, Tab)
-				.ChatType(Tab->GetChatViewModel()->GetChatChannelType())
+				.ChatType(Tab->GetChatViewModel()->GetDefaultChannelType())
 				.FriendStyle(&FriendStyle)
 			];
 	}
 
+	EVisibility GetMessageNotificationVisibility(TWeakPtr<IChatTabViewModel> TabPtr) const
+	{
+		TSharedPtr<IChatTabViewModel> Tab = TabPtr.Pin();
+		if (Tab.IsValid() && Tab->GetChatViewModel().IsValid())
+		{
+			if (Tab->GetChatViewModel()->GetUnreadChannelMessageCount() > 0)
+			{
+				return EVisibility::Visible;
+			}
+		}
+		return EVisibility::Collapsed;
+	}
+
+	TSharedPtr<SWidget> GetNotificationWidget(const TSharedRef<IChatTabViewModel>& Tab) const
+	{
+		return SNew(SBox)
+		.Visibility(this, &SChatChromeImpl::GetMessageNotificationVisibility, TWeakPtr<IChatTabViewModel>(Tab))
+		[
+			SNew(SBorder)
+			.Padding(FMargin(4.0f))
+			.BorderImage(&FriendStyle.FriendsChatStyle.MessageNotificationBrush)
+			[
+				SNew(STextBlock)
+				.ColorAndOpacity(FriendStyle.FriendsNormalFontStyle.DefaultFontColor)
+				.Font(FriendStyle.FriendsNormalFontStyle.FriendsFontSmallBold)
+				.Text(this, &SChatChromeImpl::GetMessageNotificationsText, TWeakPtr<IChatTabViewModel>(Tab))
+			]
+		];
+	}
+
+	FText GetMessageNotificationsText(TWeakPtr<IChatTabViewModel> TabPtr) const
+	{
+		TSharedPtr<IChatTabViewModel> Tab = TabPtr.Pin();
+		if (Tab.IsValid())
+		{
+			return Tab->GetMessageNotificationsText();
+		}
+		return FText::GetEmpty();
+	}
+
+
 	EVisibility GetChatWindowVisibility() const
 	{
-		return ChromeViewModel->IsActive() ? EVisibility::Visible : EVisibility::Collapsed;
+		return ChromeViewModel->GetChatWindowVisibility();
+	}
+
+	EVisibility GetMinizedWindowVisibility() const
+	{
+		return ChromeViewModel->GetChatMinimizedVisibility();
+	}
+
+	EVisibility GetMinizedButtonVisibility() const
+	{
+		return ChromeViewModel->GetMinimizedButtonVisibility();
 	}
 
 	EVisibility GetHeaderVisibility() const
 	{
 		return ChromeViewModel->GetHeaderVisibility();
+	}
+
+	FReply ToggleHeader()
+	{
+		ChromeViewModel->ToggleChatMinimized();
+		return FReply::Handled();
+	}
+
+	EVisibility GetMinimizeVisibility() const
+	{
+		return (!ChromeViewModel->IsMinimizeEnabled() || ChromeViewModel->IsChatMinimized()) ? EVisibility::Collapsed : EVisibility::Visible;
 	}
 
 	// Holds the menu anchor
@@ -267,14 +375,11 @@ private:
 	TSharedPtr<FChatChromeViewModel> ChromeViewModel;
 	TSharedPtr<SHorizontalBox> TabContainer;
 	TSharedPtr<SWidgetSwitcher> ChatWindowContainer;
+	SHorizontalBox::FSlot* SettingBox;
 
 	TMap<TSharedPtr<IChatTabViewModel>, TSharedPtr<SChatWindow>> ChatWindows;
 	/** Holds the style to use when making the widget. */
 	FFriendsAndChatStyle FriendStyle;
-
-	// Holds the menu method - Full screen requires use owning window or crashes.
-	EPopupMethod MenuMethod;
-
 };
 
 TSharedRef<SChatChrome> SChatChrome::New()

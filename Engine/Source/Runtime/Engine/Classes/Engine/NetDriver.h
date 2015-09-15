@@ -143,13 +143,23 @@ public:
 	UPROPERTY(Config)
 	float KeepAliveTime;
 
-	/** @todo document */
+	/** Amount of time to wait for a new net connection to be established before destroying the connection */
 	UPROPERTY(Config)
 	float InitialConnectTimeout;
 
-	/** @todo document */
+	/** 
+	 * Amount of time to wait before considering an established connection timed out.  
+	 * Typically shorter than the time to wait on a new connection because this connection
+	 * should already have been setup and any interruption should be trapped quicker.
+	 */
 	UPROPERTY(Config)
 	float ConnectionTimeout;
+
+	/**
+	 * If true, ignore timeouts completely.  Should be used only in development
+	 */
+	UPROPERTY(Config)
+	bool bNoTimeouts;
 
 	/** Connection to the server (this net driver is a client) */
 	UPROPERTY()
@@ -319,14 +329,14 @@ public:
 	ENGINE_API UNetDriver(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get());
 
 
-	// Begin UObject interface.
+	//~ Begin UObject Interface.
 	ENGINE_API virtual void PostInitProperties() override;
 	ENGINE_API virtual void FinishDestroy() override;
 	ENGINE_API virtual void Serialize( FArchive& Ar ) override;
 	ENGINE_API static void AddReferencedObjects(UObject* InThis, FReferenceCollector& Collector);
-	// End UObject interface.
+	//~ End UObject Interface.
 
-	// Begin FExec interface
+	//~ Begin FExec Interface
 
 	/**
 	 * Handle exec commands
@@ -341,7 +351,7 @@ public:
 
 	ENGINE_API ENetMode	GetNetMode() const;
 
-	// End FExec interface.
+	//~ End FExec Interface.
 
 	/** 
 	 * Returns true if this net driver is valid for the current configuration.

@@ -3,6 +3,89 @@
 #include "EnginePrivate.h"
 #include "Animation/AnimSequence.h"
 
+
+//////////////////////////////////////////////////////////////////////////
+// FAnimGroupInstance
+
+void FAnimGroupInstance::TestTickRecordForLeadership(EAnimGroupRole::Type MembershipType)
+{
+	int32 TestIndex = ActivePlayers.Num() - 1;
+	FAnimTickRecord& Candidate = ActivePlayers[TestIndex];
+
+	switch (MembershipType)
+	{
+	case EAnimGroupRole::CanBeLeader:
+		// Set it if we're better than the current leader (or if there is no leader yet)
+		if ((GroupLeaderIndex == INDEX_NONE) || (ActivePlayers[GroupLeaderIndex].EffectiveBlendWeight < Candidate.EffectiveBlendWeight))
+		{
+			// This is a better leader
+			GroupLeaderIndex = TestIndex;
+		}
+		break;
+	case EAnimGroupRole::AlwaysLeader:
+		// Always set the leader index
+		GroupLeaderIndex = TestIndex;
+		break;
+	default:
+	case EAnimGroupRole::AlwaysFollower:
+		// Never set the leader index; the actual tick code will handle the case of no leader by using the first element in the array
+		break;
+	}
+}
+
+void FAnimGroupInstance::Finalize(const TArray<FName>& PreviousValidMarkers, int32 PreviousGroupLeader)
+{
+	GroupLeaderIndex = FMath::Max(GroupLeaderIndex, 0);
+
+	TArray<FName>* MarkerNames = ActivePlayers[GroupLeaderIndex].SourceAsset->GetUniqueMarkerNames();
+	if (MarkerNames)
+	{
+		// Group leader has markers, off to a good start
+		ValidMarkers = *MarkerNames;
+		ActivePlayers[GroupLeaderIndex].bCanUseMarkerSync = true;
+		bCanUseMarkerSync = true;
+
+		//filter markers based on what exists in the other animations
+		for ( int32 ActivePlayerIndex = 0; ActivePlayerIndex < ActivePlayers.Num(); ++ActivePlayerIndex )
+		{
+			if ( ActivePlayerIndex != GroupLeaderIndex )
+			{
+				FAnimTickRecord& Candidate = ActivePlayers[ActivePlayerIndex];
+				TArray<FName>* PlayerMarkerNames = Candidate.SourceAsset->GetUniqueMarkerNames();
+				if ( PlayerMarkerNames ) // Let anims with no markers set use length scaling sync
+				{
+					Candidate.bCanUseMarkerSync = true;
+					for ( int32 ValidMarkerIndex = ValidMarkers.Num() - 1; ValidMarkerIndex >= 0; --ValidMarkerIndex )
+					{
+						FName& MarkerName = ValidMarkers[ValidMarkerIndex];
+						if ( !PlayerMarkerNames->Contains(MarkerName) )
+						{
+							ValidMarkers.RemoveAtSwap(ValidMarkerIndex, 1, false);
+						}
+					}
+					if (ValidMarkers.Num() == 0) //No common markers between all anims, no marker syncing
+					{
+						bCanUseMarkerSync = false;
+						break;
+					}
+				}
+			}
+		}
+		ValidMarkers.Sort();
+		if (ValidMarkers != PreviousValidMarkers || PreviousGroupLeader != GroupLeaderIndex)
+		{
+			for (int32 Idx = 0; Idx < ActivePlayers.Num(); ++Idx)
+			{
+				ActivePlayers[Idx].MarkerTickRecord.PreviousMarker.MarkerIndex = MarkerIndexSpecialValues::Unitialized;
+				ActivePlayers[Idx].MarkerTickRecord.NextMarker.MarkerIndex = MarkerIndexSpecialValues::Unitialized;
+			}
+		}
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+// UAnimationAsset
+
 UAnimationAsset::UAnimationAsset(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 {
@@ -20,7 +103,6 @@ void UAnimationAsset::PostLoad()
 	}
 
 	ValidateSkeleton();
-
 
 	check( Skeleton==NULL || SkeletonGuid.IsValid() );
 }
@@ -325,3 +407,50 @@ void FBoneContainer::RemapFromSkeleton(USkeleton const & SourceSkeleton)
 	PoseToSkeletonBoneIndexArray = SkeletonToPoseBoneIndexArray;
 }
 
+
+void FBlendSampleData::NormalizeDataWeight(TArray<FBlendSampleData>& SampleDataList)
+{
+	float TotalSum = 0.f;
+
+	check(SampleDataList.Num() > 0);
+	int32 NumBones = SampleDataList[0].PerBoneBlendData.Num();
+
+	TArray<float> PerBoneTotalSums;
+	PerBoneTotalSums.AddZeroed(NumBones);
+
+	for(int32 I = 0; I < SampleDataList.Num(); ++I)
+	{
+		checkf(SampleDataList[I].PerBoneBlendData.Num() == NumBones, TEXT("Attempted to normalise a blend sample list, but the samples have differing numbers of bones."));
+
+		TotalSum += SampleDataList[I].GetWeight();
+
+		if(SampleDataList[I].PerBoneBlendData.Num() > 0)
+		{
+			// now interpolate the per bone weights
+			for(int32 Iter = 0; Iter<SampleDataList[I].PerBoneBlendData.Num(); ++Iter)
+			{
+				PerBoneTotalSums[Iter] += SampleDataList[I].PerBoneBlendData[Iter];
+			}
+		}
+	}
+
+	if(ensure(TotalSum > ZERO_ANIMWEIGHT_THRESH))
+	{
+		for(int32 I = 0; I < SampleDataList.Num(); ++I)
+		{
+			if(FMath::Abs<float>(TotalSum - 1.f) > ZERO_ANIMWEIGHT_THRESH)
+			{
+				SampleDataList[I].TotalWeight /= TotalSum;
+			}
+
+			// now interpolate the per bone weights
+			for(int32 Iter = 0; Iter < SampleDataList[I].PerBoneBlendData.Num(); ++Iter)
+			{
+				if(FMath::Abs<float>(PerBoneTotalSums[Iter] - 1.f) > ZERO_ANIMWEIGHT_THRESH)
+				{
+					SampleDataList[I].PerBoneBlendData[Iter] /= PerBoneTotalSums[Iter];
+				}
+			}
+		}
+	}
+}

@@ -3,6 +3,7 @@
 #pragma once
 
 class IFriendItem;
+enum class ESendInviteCompleteResult;
 namespace EChatMessageType
 {
 	enum Type : uint8;
@@ -36,24 +37,28 @@ public:
 	virtual void SetAway() = 0;
 
 	/**
-	* Create the chat Settings service used to customize chat
-	* @return The chat settings.
-	*/
+	 * Create the chat Settings service used to customize chat
+	 * @return The chat settings.
+	 */
 	virtual TSharedRef< IChatSettingsService > GenerateChatSettingsService() = 0;
 
 	/**
-	* Create the display servies used to customize chat widgets
-	* @return The display service.
-	*/
-	virtual TSharedRef< IChatDisplayService > GenerateChatDisplayService(bool FadeChatList = false, bool FadeChatEntry = false, float ListFadeTime = -1.f, float EntryFadeTime = -1.f) = 0;
+	 * Create the display servies used to customize chat widgets
+	 * @return The display service.
+	 */
+	virtual TSharedRef< IChatDisplayService > GenerateChatDisplayService(bool ChatMinimizeEnabled = true, bool ChatAutoMinimizeEnabled = false, bool FadeChatList = false, bool FadeChatEntry = false, float ListFadeTime = -1.f, float EntryFadeTime = -1.f) = 0;
 
 	/**
-	* Create the a chrome widget
-	* @param InStyle The style to use to create the widgets.
-	* @param InStyle The display service.
-	* @return The Chrome chat widget.
-	*/
-	virtual TSharedPtr< SWidget > GenerateChromeWidget(const struct FFriendsAndChatStyle* InStyle, TSharedRef<IChatDisplayService> ChatDisplayService, TSharedRef<IChatSettingsService> InChatSettingsService) = 0;
+	 * Create the a chrome widget
+	 * @param InStyle The style to use to create the widgets.
+	 * @param InStyle The display service.
+	 * @return The Chrome chat widget.
+	 */
+	virtual TSharedPtr< SWidget > GenerateChromeWidget(const struct FFriendsAndChatStyle* InStyle,
+		TSharedRef<IChatDisplayService> ChatDisplayService,
+		TSharedRef<IChatSettingsService> InChatSettingsService,
+		TArray<TSharedRef<class ICustomSlashCommand> >* CustomSlashCommands = nullptr,
+		bool CombineChatAndPartyChat = false) = 0;
 
 	/**
 	 * Set the analytics provider for capturing friends/chat events
@@ -90,17 +95,17 @@ public:
 
 
 	/**
-	* Generate a chat widget.
-	* @param The friend for this header
-	* @return The chat widget.
-	*/
+	 * Generate a chat widget.
+	 * @param The friend for this header
+	 * @return The chat widget.
+	 */
 	virtual TSharedPtr<SWidget> GenerateFriendUserHeaderWidget(TSharedPtr<IFriendItem> FriendItem) = 0;
 
 	/**
-	* Get the navigation service.
-	* @return The navigation service
-	*/
-	virtual TSharedPtr<class FFriendsNavigationService> GetNavigationService() = 0;
+	 * Get the navigation service.
+	 * @return The navigation service
+	 */
+	virtual TSharedPtr<class IFriendsNavigationService> GetNavigationService() = 0;
 
 	/**
 	* Get the notification service.
@@ -127,21 +132,28 @@ public:
 	virtual void InsertNetworkChatMessage(const FString& InMessage) = 0;
 
 	/**
+	 * Insert an admin message.
+	 * @param InMessage The message.
+	 */
+	virtual void InsertNetworkAdminMessage(const FString& InMessage) = 0;
+
+	/**
 	 * Join a global chat room
 	 * @param RoomName The name of the room
 	 */
-	virtual void JoinPublicChatRoom(const FString& RoomName) = 0;
+	virtual void JoinGlobalChatRoom(const FString& RoomName) = 0;
 
 	/**
-	 * Delegate when the chat room has been joined
+	 * Delegate when the global chat room has been joined
 	 */
-	virtual void OnChatPublicRoomJoined(const FString& ChatRoomID) = 0;
+	virtual void OnGlobalChatRoomJoined(const FString& ChatRoomID) = 0;
+	
 
 	/**
-	* Get the online status
-	*
-	* @return EOnlinePresenceState
-	*/
+	 * Get the online status
+	 *
+	 * @return EOnlinePresenceState
+	 */
 	virtual EOnlinePresenceState::Type GetOnlineStatus() = 0;
 
 	/** 
@@ -157,6 +169,12 @@ public:
 	virtual void AddRecentPlayerNamespace(const FString& Namespace) = 0;
 
 	virtual void ClearApplicationViewModels() = 0;
+
+	DECLARE_EVENT_FourParams(IFriendsAndChatManager, FOnSendPartyInvitationCompleteEvent, const FUniqueNetId& /*LocalUserId*/, const FOnlinePartyId& /*PartyId*/, ESendInviteCompleteResult /*Result*/, const FUniqueNetId& /*RecipientId*/);
+	virtual FOnSendPartyInvitationCompleteEvent& OnSendPartyInvitationComplete() = 0;
+
+	DECLARE_EVENT_FiveParams(IFriendsAndChatManager, FOnSendFriendRequestCompleteEvent, const int /* Local Player */, bool /* bWasSuccessful */, const FUniqueNetId& /* FriendId*/, const FString& /*ListName*/, const FString& /*ErrorStr*/);
+	virtual FOnSendFriendRequestCompleteEvent& OnSendFriendRequestComplete() = 0;
 
 	DECLARE_DELEGATE_RetVal(bool, FAllowFriendsJoinGame);
 	virtual FAllowFriendsJoinGame& AllowFriendsJoinGame() = 0;

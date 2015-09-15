@@ -6,6 +6,7 @@
 FHMDSettings::FHMDSettings() :
 	SavedScrPerc(100.f)
 	, ScreenPercentage(100.f)
+	, IdealScreenPercentage(100.f)
 	, InterpupillaryDistance(0.064f)
 	, WorldToMetersScale(100.f)
 	, UserDistanceToScreenModifier(0.f)
@@ -204,7 +205,7 @@ bool FHeadMountedDisplay::OnStartGameFrame(FWorldContext& WorldContext)
 {
 	check(IsInGameThread());
 
-	if (!GWorld || !GWorld->IsGameWorld())
+	if (!WorldContext.World() || !WorldContext.World()->IsGameWorld())
 	{
 		// ignore all non-game worlds
 		return false;
@@ -213,7 +214,7 @@ bool FHeadMountedDisplay::OnStartGameFrame(FWorldContext& WorldContext)
 	Frame.Reset();
 	Flags.bFrameStarted = true;
 
-	if (Flags.bNeedDisableStereo || (Settings->Flags.bStereoEnabled && !IsHMDConnected()))
+	if (Flags.bNeedDisableStereo || (Settings->Flags.bStereoEnabled && !IsHMDActive()))
 	{
 		Flags.bNeedDisableStereo = false;
 		DoEnableStereo(false, Flags.bEnableStereoToHmd);
@@ -256,15 +257,13 @@ bool FHeadMountedDisplay::OnStartGameFrame(FWorldContext& WorldContext)
 	CurrentFrame->FrameNumber = GFrameCounter;
 	CurrentFrame->Flags.bOutOfFrame = false;
 
-	check(GWorld);
-
 	if (Settings->Flags.bWorldToMetersOverride)
 	{
 		CurrentFrame->WorldToMetersScale = Settings->WorldToMetersScale;
 	}
 	else
 	{
-		CurrentFrame->WorldToMetersScale = GWorld->GetWorldSettings()->WorldToMeters;
+		CurrentFrame->WorldToMetersScale = WorldContext.World()->GetWorldSettings()->WorldToMeters;
 	}
 
 	if (Settings->Flags.bCameraScale3DOverride)
@@ -287,7 +286,7 @@ bool FHeadMountedDisplay::OnEndGameFrame(FWorldContext& WorldContext)
 
 	FHMDGameFrame* const CurrentGameFrame = Frame.Get();
 
-		if (!GWorld || !GWorld->IsGameWorld() || !CurrentGameFrame)
+	if (!WorldContext.World() || !WorldContext.World()->IsGameWorld() || !CurrentGameFrame)
 	{
 		// ignore all non-game worlds
 		return false;
@@ -518,10 +517,12 @@ bool FHeadMountedDisplay::Exec(UWorld* InWorld, const TCHAR* Cmd, FOutputDevice&
 		if (FParse::Command(&Cmd, TEXT("OFF")))
 		{
 			Flags.bNeedDisableStereo = true;
+			Settings->Flags.bStereoEnforced = true;
 			return true;
 		}
 		else if (FParse::Command(&Cmd, TEXT("RESET")))
 		{
+			Settings->Flags.bStereoEnforced = false;
 			ResetStereoRenderingParams();
 			return true;
 		}

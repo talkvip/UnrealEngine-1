@@ -75,13 +75,13 @@ void FSteamVRHMD::RenderTexture_RenderThread(FRHICommandListImmediate& RHICmdLis
 	}
 }
 
-void FSteamVRHMD::DrawHiddenAreaMaskView_RenderThread(FRHICommandList& RHICmdList, const FViewInfo& View) const
+static void DrawOcclusionMesh(FRHICommandList& RHICmdList, EStereoscopicPass StereoPass, const FHMDViewMesh MeshAssets[])
 {
 	check(IsInRenderingThread());
-	check(View.StereoPass != eSSP_FULL);
+	check(StereoPass != eSSP_FULL);
 
-	const uint32 HiddenMeshIndex = (View.StereoPass == eSSP_LEFT_EYE) ? 0 : 1;
-	const FHiddenAreaMesh& Mesh = HiddenAreaMeshes[HiddenMeshIndex];
+	const uint32 MeshIndex = (StereoPass == eSSP_LEFT_EYE) ? 0 : 1;
+	const FHMDViewMesh& Mesh = MeshAssets[MeshIndex];
 	check(Mesh.IsValid());
 
 	DrawIndexedPrimitiveUP(
@@ -94,7 +94,17 @@ void FSteamVRHMD::DrawHiddenAreaMaskView_RenderThread(FRHICommandList& RHICmdLis
 		sizeof(Mesh.pIndices[0]),
 		Mesh.pVertices,
 		sizeof(Mesh.pVertices[0])
-	);
+		);
+}
+
+void FSteamVRHMD::DrawHiddenAreaMesh_RenderThread(FRHICommandList& RHICmdList, EStereoscopicPass StereoPass) const
+{
+	DrawOcclusionMesh(RHICmdList, StereoPass, HiddenAreaMeshes);
+}
+
+void FSteamVRHMD::DrawVisibleAreaMesh_RenderThread(FRHICommandList& RHICmdList, EStereoscopicPass StereoPass) const
+{
+	DrawOcclusionMesh(RHICmdList, StereoPass, VisibleAreaMeshes);
 }
 
 #if PLATFORM_WINDOWS

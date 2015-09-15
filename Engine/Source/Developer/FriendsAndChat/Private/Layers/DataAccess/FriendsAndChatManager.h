@@ -51,7 +51,7 @@ public:
 	/** Destructor. */
 	~FFriendsAndChatManager( );
 
-	void Initialize();
+	void Initialize(bool InGame);
 
 public:
 
@@ -65,23 +65,40 @@ public:
 	virtual void AddApplicationViewModel(const FString ClientID, TSharedPtr<IFriendsApplicationViewModel> ApplicationViewModel) override;
 	virtual void AddRecentPlayerNamespace(const FString& Namespace) override;
 	virtual void ClearApplicationViewModels() override;
-	virtual TSharedRef< IChatDisplayService > GenerateChatDisplayService(bool FadeChatList = false, bool FadeChatEntry = false, float ListFadeTime = -1.f, float EntryFadeTime = -1.f) override;
+	virtual TSharedRef< IChatDisplayService > GenerateChatDisplayService(bool ChatMinimizeEnabled = true, bool ChatAutoMinimizeEnabled = false, bool FadeChatList = false, bool FadeChatEntry = false, float ListFadeTime = -1.f, float EntryFadeTime = -1.f) override;
 	virtual TSharedRef< IChatSettingsService > GenerateChatSettingsService() override;
-	virtual TSharedPtr< SWidget > GenerateChromeWidget(const struct FFriendsAndChatStyle* InStyle, TSharedRef<IChatDisplayService> ChatViewModel, TSharedRef<IChatSettingsService> ChatSettingsService) override;
+	virtual TSharedPtr< SWidget > GenerateChromeWidget(const struct FFriendsAndChatStyle* InStyle,
+														TSharedRef<IChatDisplayService> ChatViewModel, 
+														TSharedRef<IChatSettingsService> ChatSettingsService, 
+														TArray<TSharedRef<class ICustomSlashCommand> >* CustomSlashCommands = nullptr,
+														bool CombineChatAndPartyChat = false) override;
 	virtual void SetAnalyticsProvider(const TSharedPtr<IAnalyticsProvider>& AnalyticsProvider) override;
 	virtual TSharedPtr< SWidget > GenerateFriendsListWidget( const FFriendsAndChatStyle* InStyle ) override;
 	virtual TSharedPtr< SWidget > GenerateStatusWidget(const FFriendsAndChatStyle* InStyle, bool ShowStatusOptions) override;
 	virtual TSharedPtr< SWidget > GenerateChatWidget(const FFriendsAndChatStyle* InStyle, TAttribute<FText> ActivationHintDelegate, EChatMessageType::Type MessageType, TSharedPtr<IFriendItem> FriendItem, TSharedPtr< SWindow > WindowPtr) override;
 	virtual TSharedPtr<SWidget> GenerateFriendUserHeaderWidget(TSharedPtr<IFriendItem> FriendItem) override;
-	virtual TSharedPtr<class FFriendsNavigationService> GetNavigationService() override;
+	virtual TSharedPtr<class IFriendsNavigationService> GetNavigationService() override;
 	virtual TSharedPtr<class IChatNotificationService> GetNotificationService() override;
 	virtual TSharedPtr<class IChatCommunicationService> GetCommunicationService() override;
 	virtual TSharedPtr<class IGameAndPartyService> GetGameAndPartyService() override;
 	virtual void InsertNetworkChatMessage(const FString& InMessage) override;
-	virtual void JoinPublicChatRoom(const FString& RoomName) override;
-	virtual void OnChatPublicRoomJoined(const FString& ChatRoomID) override;
+	virtual void InsertNetworkAdminMessage(const FString& InMessage) override;
+	virtual void JoinGlobalChatRoom(const FString& RoomName) override;
+	virtual void OnGlobalChatRoomJoined(const FString& ChatRoomID) override;
 
 	// External events
+	DECLARE_DERIVED_EVENT(IFriendsAndChatManager, IFriendsAndChatManager::FOnSendPartyInvitationCompleteEvent, FOnSendPartyInvitationCompleteEvent);
+	virtual FOnSendPartyInvitationCompleteEvent& OnSendPartyInvitationComplete() override
+	{
+		return SendPartyInviteCompleteEvent;
+	}
+
+	DECLARE_DERIVED_EVENT(IFriendsAndChatManager, IFriendsAndChatManager::FOnSendFriendRequestCompleteEvent, FOnSendFriendRequestCompleteEvent);
+	virtual FOnSendFriendRequestCompleteEvent& OnSendFriendRequestComplete() override
+	{
+		return SendFriendRequestCompleteEvent;
+	}
+
 	virtual FAllowFriendsJoinGame& AllowFriendsJoinGame() override
 	{
 		return AllowFriendsJoinGameDelegate;
@@ -93,8 +110,23 @@ private:
 	void ShutdownManager();
 
 	/**
+	 * Notification when an invite list has changed for a party
+ 	 * @param LocalUserId - user that is associated with this notification
+	 */
+	void OnPartyInvitesChanged(const FUniqueNetId& LocalUserId);
+
+	/**
+	 * Delegate used when an party invite is sent
+	 * 
+	 * @param LocalUserId	The user ID.
+	 * @param PartyId		Party ID.
+	 * @param Result Result of send invite action.
+	 * @param RecipientId	The friend ID.
+	 */
+	void OnSendPartyInvitationCompleteInternal(const FUniqueNetId& LocalUserId, const FOnlinePartyId& PartyId, ESendInviteCompleteResult Result, const FUniqueNetId& RecipientId);
+
+	/**
 	 * A ticker used to perform updates on the main thread.
-	 *
 	 * @param Delta The tick delta.
 	 * @return true to continue ticking.
 	 */
@@ -117,6 +149,10 @@ private:
 
 	/* Delegates
 	*****************************************************************************/
+	// Holds the On send party invite complete delegate
+	FOnSendPartyInvitationCompleteEvent SendPartyInviteCompleteEvent;
+	// Holds the on send friend request complete delegate
+	FOnSendFriendRequestCompleteEvent SendFriendRequestCompleteEvent;
 	FAllowFriendsJoinGame AllowFriendsJoinGameDelegate;
 
 	/* Services
@@ -160,6 +196,8 @@ private:
 	FFriendsAndChatStyle Style;
 	// Holds the toast notification
 	TSharedPtr<SNotificationList> FriendsNotificationBox;
+	// Holds the last created chrome view model
+	TSharedPtr<class FChatChromeViewModel> CachedViewModel;
 
 private:
 

@@ -302,9 +302,16 @@ FSceneView::FSceneView(const FSceneViewInitOptions& InitOptions)
 	check(UnscaledViewRect.Min.Y >= 0);
 	check(UnscaledViewRect.Width() > 0);
 	check(UnscaledViewRect.Height() > 0);
-	check(InitOptions.ViewRotationMatrix.GetOrigin().IsNearlyZero());
 
-	ViewMatrices.ViewMatrix = FTranslationMatrix(-InitOptions.ViewOrigin) * InitOptions.ViewRotationMatrix;
+	FVector ViewOrigin = InitOptions.ViewOrigin;
+	FMatrix ViewRotationMatrix = InitOptions.ViewRotationMatrix;
+	if( !ViewRotationMatrix.GetOrigin().IsNearlyZero( 0.0f ) )
+	{
+		ViewOrigin += ViewRotationMatrix.InverseTransformPosition( FVector::ZeroVector );
+		ViewRotationMatrix = ViewRotationMatrix.RemoveTranslation();
+	}
+
+	ViewMatrices.ViewMatrix = FTranslationMatrix(-ViewOrigin) * ViewRotationMatrix;
 
 	// Adjust the projection matrix for the current RHI.
 	ViewMatrices.ProjMatrix = AdjustProjectionMatrixForRHI(ProjectionMatrixUnadjustedForRHI);
@@ -315,7 +322,7 @@ FSceneView::FSceneView(const FSceneViewInitOptions& InitOptions)
 	FMatrix InvProjectionMatrix = ViewMatrices.GetInvProjMatrix();
 
 	// For precision reasons the view matrix inverse is calculated independently.
-	InvViewMatrix = InitOptions.ViewRotationMatrix.GetTransposed() * FTranslationMatrix(InitOptions.ViewOrigin);
+	InvViewMatrix = ViewRotationMatrix.GetTransposed() * FTranslationMatrix(ViewOrigin);
 	InvViewProjectionMatrix = InvProjectionMatrix * InvViewMatrix;
 
 	bool bApplyPreViewTranslation = true;
@@ -324,13 +331,13 @@ FSceneView::FSceneView(const FSceneViewInitOptions& InitOptions)
 	// Calculate the view origin from the view/projection matrices.
 	if(IsPerspectiveProjection())
 	{
-		ViewMatrices.ViewOrigin = InitOptions.ViewOrigin;
+		ViewMatrices.ViewOrigin = ViewOrigin;
 	}
 #if WITH_EDITOR
 	else if (InitOptions.bUseFauxOrthoViewPos)
 	{
 		float DistanceToViewOrigin = WORLD_MAX;
-		ViewMatrices.ViewOrigin = FVector4(InvViewMatrix.TransformVector(FVector(0,0,-1)).GetSafeNormal()*DistanceToViewOrigin,1) + InitOptions.ViewOrigin;
+		ViewMatrices.ViewOrigin = FVector4(InvViewMatrix.TransformVector(FVector(0,0,-1)).GetSafeNormal()*DistanceToViewOrigin,1) + ViewOrigin;
 		bViewOriginIsFudged = true;
 	}
 #endif
@@ -342,7 +349,7 @@ FSceneView::FSceneView(const FSceneViewInitOptions& InitOptions)
 	}
 
 	/** The view transform, starting from world-space points translated by -ViewOrigin. */
-	FMatrix TranslatedViewMatrix = InitOptions.ViewRotationMatrix;
+	FMatrix TranslatedViewMatrix = ViewRotationMatrix;
 	FMatrix InvTranslatedViewMatrix = TranslatedViewMatrix.GetTransposed();
 
 	// Translate world-space so its origin is at ViewOrigin for improved precision.
@@ -350,7 +357,7 @@ FSceneView::FSceneView(const FSceneViewInitOptions& InitOptions)
 	// in that case so the same value may be used in shaders for both the world-space translation and the camera's world position.
 	if(bApplyPreViewTranslation)
 	{
-		ViewMatrices.PreViewTranslation = -FVector(ViewMatrices.ViewOrigin);
+		ViewMatrices.PreViewTranslation = -FVector(ViewOrigin);
 
 #if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
 		{
@@ -382,7 +389,7 @@ FSceneView::FSceneView(const FSceneViewInitOptions& InitOptions)
 	if (bViewOriginIsFudged)
 	{
 		TranslatedViewMatrix = FTranslationMatrix(-ViewMatrices.PreViewTranslation)
-			* FTranslationMatrix(-InitOptions.ViewOrigin) * InitOptions.ViewRotationMatrix;
+			* FTranslationMatrix(-ViewOrigin) * ViewRotationMatrix;
 		InvTranslatedViewMatrix = TranslatedViewMatrix.Inverse();
 	}
 	
@@ -568,16 +575,14 @@ void FSceneView::UpdateViewMatrix()
 		FPlane(0,	0,	0,	1));
  
 	ViewMatrices.PreViewTranslation = -ViewMatrices.ViewOrigin;
-	FMatrix TranslatedViewMatrix = FTranslationMatrix(-ViewMatrices.PreViewTranslation) * ViewMatrices.ViewMatrix;
+	ViewMatrices.TranslatedViewMatrix = FTranslationMatrix(-ViewMatrices.PreViewTranslation) * ViewMatrices.ViewMatrix;
 	
 	// Compute a transform from view origin centered world-space to clip space.
-	ViewMatrices.TranslatedViewProjectionMatrix = TranslatedViewMatrix * ViewMatrices.ProjMatrix;
+	ViewMatrices.TranslatedViewProjectionMatrix = ViewMatrices.TranslatedViewMatrix * ViewMatrices.ProjMatrix;
 	ViewMatrices.InvTranslatedViewProjectionMatrix = ViewMatrices.TranslatedViewProjectionMatrix.Inverse();
 
 	ViewProjectionMatrix = ViewMatrices.GetViewProjMatrix();
-
-	// Need to use a full view matrix inverse here as there are translations present
-	InvViewMatrix = ViewMatrices.ViewMatrix.Inverse();
+	InvViewMatrix = ViewMatrices.GetInvViewMatrix();
 	InvViewProjectionMatrix = ViewMatrices.GetInvProjMatrix() * InvViewMatrix;
 }
 
@@ -861,7 +866,6 @@ void FSceneView::OverridePostProcessSettings(const FPostProcessSettings& Src, fl
 
 		LERP_PP(SceneColorTint);
 		LERP_PP(SceneFringeIntensity);
-		LERP_PP(SceneFringeSaturation);
 		LERP_PP(BloomIntensity);
 		LERP_PP(BloomThreshold);
 		LERP_PP(Bloom1Tint);
@@ -926,6 +930,7 @@ void FSceneView::OverridePostProcessSettings(const FPostProcessSettings& Src, fl
 		LERP_PP(DepthOfFieldColorThreshold);
 		LERP_PP(DepthOfFieldSizeThreshold);
 		LERP_PP(DepthOfFieldSkyFocusDistance);
+		LERP_PP(DepthOfFieldVignetteSize);
 		LERP_PP(MotionBlurAmount);
 		LERP_PP(MotionBlurMax);
 		LERP_PP(MotionBlurPerObjectSize);
@@ -1041,7 +1046,7 @@ void FSceneView::OverridePostProcessSettings(const FPostProcessSettings& Src, fl
 				continue;
 			}
 
-			float LocalWeight = Src.WeightedBlendables.Array[i].Weight * Weight;
+			float LocalWeight = FMath::Min(1.0f, Src.WeightedBlendables.Array[i].Weight) * Weight;
 
 			if(LocalWeight > 0.0f)
 			{
@@ -1173,6 +1178,8 @@ void FSceneView::StartFinalPostprocessSettings(FVector InViewLocation)
 
 void FSceneView::EndFinalPostprocessSettings(const FSceneViewInitOptions& ViewInitOptions)
 {
+	const auto SceneViewFeatureLevel = GetFeatureLevel();
+
 	// will be deprecated soon, use the new asset LightPropagationVolumeBlendable instead
 	{
 		FLightPropagationVolumeSettings& Dest = FinalPostProcessSettings.BlendableManager.GetSingleFinalData<FLightPropagationVolumeSettings>();
@@ -1317,7 +1324,10 @@ void FSceneView::EndFinalPostprocessSettings(const FSceneViewInitOptions& ViewIn
 		}
 	}
 
-	if(!Family->EngineShowFlags.ScreenPercentage || bIsSceneCapture || bIsReflectionCapture)
+	// Not supported in ES2/3.
+	bool bES2Or3 = (SceneViewFeatureLevel == ERHIFeatureLevel::ES2) || (SceneViewFeatureLevel == ERHIFeatureLevel::ES3_1);
+
+	if(!Family->EngineShowFlags.ScreenPercentage || bIsSceneCapture || bIsReflectionCapture || bES2Or3)
 	{
 		FinalPostProcessSettings.ScreenPercentage = 100;
 	}
@@ -1378,8 +1388,6 @@ void FSceneView::EndFinalPostprocessSettings(const FSceneViewInitOptions& ViewIn
 
 	// Anti-Aliasing
 	{
-		const auto SceneViewFeatureLevel = GetFeatureLevel();
-
 		static const auto CVar = IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.PostProcessAAQuality")); 
 		static auto* MobileHDRCvar = IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.MobileHDR"));
 		static auto* MobileMSAACvar = IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.MobileMSAA"));
@@ -1545,9 +1553,6 @@ void FSceneView::ConfigureBufferVisualizationSettings()
 			BufferVisualizationData.SetCurrentOverviewMaterialNames(SelectedMaterialNames);
 			BufferVisualizationData.GetOverviewMaterials().Empty();
 
-			// Note - This will re-parse the list of names from the console variable every frame. It could be cached and only updated when
-			// the variable value changes if this turns out to be a performance issue.
-		
 			// Extract each material name from the comma separated string
 			while (SelectedMaterialNames.Len())
 			{
@@ -1655,13 +1660,6 @@ FSceneViewFamily::FSceneViewFamily( const ConstructionValues& CVS )
 	HierarchicalLODOverride = -1;
 	bDrawBaseInfo = true;
 #endif
-
-	// Not supported in ES2.
-	auto FeatureLevel = GetFeatureLevel();
-	if (FeatureLevel == ERHIFeatureLevel::ES2 || FeatureLevel == ERHIFeatureLevel::ES3_1)
-	{
-		EngineShowFlags.ScreenPercentage = false;
-	}
 }
 
 void FSceneViewFamily::ComputeFamilySize()

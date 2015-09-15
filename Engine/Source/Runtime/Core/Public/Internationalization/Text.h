@@ -6,6 +6,7 @@
 #include "UObject/NameTypes.h"
 #include "TextLocalizationManager.h"
 #include "Optional.h"
+#include "UniquePtr.h"
 
 struct FTimespan;
 struct FDateTime;
@@ -66,7 +67,32 @@ namespace EFormatArgumentType
 	};
 }
 
-struct FFormatArgumentValue;
+struct CORE_API FFormatArgumentValue
+{
+	EFormatArgumentType::Type Type;
+	union
+	{
+		int64 IntValue;
+		uint64 UIntValue;
+		float FloatValue;
+		double DoubleValue;
+		FText* TextValue;
+	};
+
+	FFormatArgumentValue();
+
+	FFormatArgumentValue( const int Value );
+	FFormatArgumentValue( const unsigned int Value );
+	FFormatArgumentValue( const int64 Value );
+	FFormatArgumentValue( const uint64 Value );
+	FFormatArgumentValue( const float Value );
+	FFormatArgumentValue( const double Value );
+	FFormatArgumentValue( const FText& Value );
+	FFormatArgumentValue( const FFormatArgumentValue& Source );
+	~FFormatArgumentValue();
+
+	friend FArchive& operator<<( FArchive& Ar, FFormatArgumentValue& Value );
+};
 
 typedef TMap<FString, FFormatArgumentValue> FFormatNamedArguments;
 typedef TArray<FFormatArgumentValue> FFormatOrderedArguments;
@@ -315,6 +341,71 @@ public:
 	static FText Format(const FText& Fmt,const FText& v1,const FText& v2,const FText& v3);
 	static FText Format(const FText& Fmt,const FText& v1,const FText& v2,const FText& v3,const FText& v4);
 
+#if PLATFORM_COMPILER_HAS_VARIADIC_TEMPLATES
+	/**
+	 * FormatNamed allows you to pass name <-> value pairs to the function to format automatically
+	 *
+	 * @usage FText::FormatNamed( FText::FromString( TEXT( "{PlayerName} is really cool" ) ), TEXT( "PlayerName" ), FText::FromString( TEXT( "Awesomegirl" ) ) );
+	 *
+	 * @param Fmt the format to create from
+	 * @param Args a variadic list of FString to Value (must be even numbered)
+	 * @return a formatted FText
+	 */
+	template < typename... TArguments >
+	static FText FormatNamed( const FText& Fmt, TArguments&&... Args )
+	{
+		static_assert( sizeof...( TArguments ) % 2 == 0, "FormatNamed requires an even number of Name <-> Value pairs" );
+
+		FFormatNamedArguments FormatArguments;
+		FormatNamed_Util( FormatArguments, Forward< TArguments >( Args )... );
+		return FormatInternal( Fmt, FormatArguments, false, false );
+	}
+
+	/**
+	 * FormatOrdered allows you to pass a variadic list of types to use for formatting in order desired
+	 *
+	 * @param Fmt the format to create from
+	 * @param Args a variadic list of values in order of desired formatting
+	 * @return a formatted FText
+	 */
+	template < typename... TArguments >
+	static FText FormatOrdered( const FText& Fmt, TArguments&&... Args )
+	{
+		FFormatOrderedArguments FormatArguments;
+		FormatOrdered_Util( FormatArguments, Forward< TArguments >( Args )... );
+		return FormatInternal( Fmt, FormatArguments, false, false );
+	}
+
+private:
+	template < typename TName, typename TValue, typename... TArguments >
+	static void FormatNamed_Util( OUT FFormatNamedArguments& Result, TName&& Name, TValue&& Value, TArguments&&... Args )
+	{
+		FormatNamed_Util( Result, Name, Value );
+		FormatNamed_Util( Result, Forward< TArguments >( Args )... );
+	}
+
+	template < typename TName, typename TValue >
+	static void FormatNamed_Util( OUT FFormatNamedArguments& Result, TName&& Name, TValue&& Value )
+	{
+		Result.Emplace( Name, Value );
+	}
+
+	template < typename TValue, typename... TArguments >
+	static void FormatOrdered_Util( OUT FFormatOrderedArguments& Result, TValue&& Value, TArguments&&... Args )
+	{
+		FormatOrdered_Util( Result, Value );
+		FormatOrdered_Util( Result, Forward< TArguments >( Args )... );
+	}
+
+	template < typename TValue >
+	static void FormatOrdered_Util( OUT FFormatOrderedArguments& Result, TValue&& Value )
+	{
+		Result.Emplace( Value );
+	}
+
+public:
+#endif
+
 	static void SetEnableErrorCheckingResults(bool bEnable){bEnableErrorCheckingResults=bEnable;}
 	static bool GetEnableErrorCheckingResults(){return bEnableErrorCheckingResults;}
 
@@ -332,9 +423,9 @@ private:
 	enum class EInitToEmptyString : uint8 { Value };
 	explicit FText( EInitToEmptyString );
 
-	explicit FText( FString InSourceString );
+	FText( FString InSourceString, TSharedPtr<class FTextHistory, ESPMode::ThreadSafe> InHistory );
 
-	explicit FText( FString InSourceString, FString InNamespace, FString InKey, int32 InFlags=0 );
+	FText( FString InSourceString, FString InNamespace, FString InKey, int32 InFlags=0 );
 
 	friend CORE_API FArchive& operator<<( FArchive& Ar, FText& Value );
 
@@ -348,12 +439,12 @@ private:
 	/**
 	 * Generate an FText for a string formatted numerically.
 	 */
-	static FText CreateNumericalText(FString InSourceString);
+	static FText CreateNumericalText(FString InSourceString, TSharedPtr<class FTextHistory, ESPMode::ThreadSafe> InHistory);
 
 	/**
 	 * Generate an FText for a string formatted from a date/time.
 	 */
-	static FText CreateChronologicalText(FString InSourceString);
+	static FText CreateChronologicalText(FString InSourceString, TSharedPtr<class FTextHistory, ESPMode::ThreadSafe> InHistory);
 
 	/** Returns the source string of the FText */
 	TSharedPtr< FString, ESPMode::ThreadSafe > GetSourceString() const;
@@ -451,33 +542,6 @@ public:
 	static const FString& GetDisplayString(const FText& Text);
 	static const FTextDisplayStringRef GetSharedDisplayString(const FText& Text);
 	static int32 GetFlags(const FText& Text);
-};
-
-struct CORE_API FFormatArgumentValue
-{
-	EFormatArgumentType::Type Type;
-	union
-	{
-		int64 IntValue;
-		uint64 UIntValue;
-		float FloatValue;
-		double DoubleValue;
-		FText* TextValue;
-	};
-
-	FFormatArgumentValue();
-
-	FFormatArgumentValue(const int Value);
-	FFormatArgumentValue(const unsigned int Value);
-	FFormatArgumentValue(const int64 Value);
-	FFormatArgumentValue(const uint64 Value);
-	FFormatArgumentValue(const float Value);
-	FFormatArgumentValue(const double Value);
-	FFormatArgumentValue(const FText& Value);
-	FFormatArgumentValue(const FFormatArgumentValue& Source);
-	~FFormatArgumentValue();
-
-	friend FArchive& operator<<( FArchive& Ar, FFormatArgumentValue& Value );
 };
 
 struct FFormatArgumentData
@@ -602,5 +666,67 @@ private:
 	int32 Flags;
 	FText& TextToPersist;
 };
+
+/**
+ * Unicode Bidirectional text support 
+ * http://www.unicode.org/reports/tr9/
+ */
+namespace TextBiDi
+{
+	/** Lists the potential reading directions for text */
+	enum class ETextDirection : uint8
+	{
+		/** Contains only LTR text - requires simple LTR layout */
+		LeftToRight,
+		/** Contains only RTL text - requires simple RTL layout */
+		RightToLeft,
+		/** Contains both LTR and RTL text - requires more complex layout using multiple runs of text */
+		Mixed,
+	};
+
+	/** A single complex layout entry. Defines the starting position, length, and reading direction for a sub-section of text */
+	struct FTextDirectionInfo
+	{
+		int32 StartIndex;
+		int32 Length;
+		ETextDirection TextDirection;
+	};
+
+	/** Defines the interface for a re-usable BiDi object */
+	class CORE_API ITextBiDi
+	{
+	public:
+		virtual ~ITextBiDi() {}
+
+		/** See TextBiDi::ComputeTextDirection */
+		virtual ETextDirection ComputeTextDirection(const FText& InText) = 0;
+		virtual ETextDirection ComputeTextDirection(const FString& InString) = 0;
+
+		/** See TextBiDi::ComputeTextDirection */
+		virtual ETextDirection ComputeTextDirection(const FText& InText, TArray<FTextDirectionInfo>& OutTextDirectionInfo) = 0;
+		virtual ETextDirection ComputeTextDirection(const FString& InString, TArray<FTextDirectionInfo>& OutTextDirectionInfo) = 0;
+	};
+
+	/**
+	 * Create a re-usable BiDi object.
+	 * This may yield better performance than the utility functions if you're performing a lot of BiDi requests, as this object can re-use allocated data between requests.
+	 */
+	CORE_API TUniquePtr<ITextBiDi> CreateTextBiDi();
+
+	/**
+	 * Utility function which will compute the reading direction of the given text.
+	 * @note You may want to use the version that returns you the advanced layout data in the Mixed case.
+	 * @return LeftToRight if all of the text is LTR, RightToLeft if all of the text is RTL, or Mixed if the text contains both LTR and RTL text.
+	 */
+	CORE_API ETextDirection ComputeTextDirection(const FText& InText);
+	CORE_API ETextDirection ComputeTextDirection(const FString& InString);
+
+	/**
+	 * Utility function which will compute the reading direction of the given text, as well as populate any advanced layout data for the text.
+	 * @return LeftToRight if all of the text is LTR, RightToLeft if all of the text is RTL, or Mixed if the text contains both LTR and RTL text.
+	 */
+	CORE_API ETextDirection ComputeTextDirection(const FText& InText, TArray<FTextDirectionInfo>& OutTextDirectionInfo);
+	CORE_API ETextDirection ComputeTextDirection(const FString& InString, TArray<FTextDirectionInfo>& OutTextDirectionInfo);
+} // namespace TextBiDi
 
 Expose_TNameOf(FText)

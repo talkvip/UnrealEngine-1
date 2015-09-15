@@ -584,7 +584,7 @@ UK2Node_Event* FKismetEditorUtilities::AddDefaultEventNode(UBlueprint* InBluepri
 		NewEventNode->PostPlacedNewNode();
 		NewEventNode->SetFlags(RF_Transactional);
 		NewEventNode->AllocateDefaultPins();
-		NewEventNode->bIsNodeEnabled = false;
+		NewEventNode->DisableNode();
 		NewEventNode->NodeComment = LOCTEXT("DisabledNodeComment", "This node is disabled and will not be called.\nDrag off pins to build functionality.").ToString();
 		NewEventNode->bCommentBubblePinned = true;
 		NewEventNode->bCommentBubbleVisible = true;
@@ -611,10 +611,10 @@ UK2Node_Event* FKismetEditorUtilities::AddDefaultEventNode(UBlueprint* InBluepri
 			UEdGraphSchema_K2::SetNodeMetaData(ParentFunctionNode, FNodeMetadata::DefaultGraphNode);
 			FunctionNodeCreator.Finalize();
 
-			ParentFunctionNode->bIsNodeEnabled = false;
+			ParentFunctionNode->DisableNode();
 
 			// Adding the call to parent and connecting it will reset this value
-			NewEventNode->bIsNodeEnabled = false;
+			NewEventNode->DisableNode();
 			NewEventNode->NodeComment = LOCTEXT("DisabledNodeComment", "This node is disabled and will not be called.\nDrag off pins to build functionality.").ToString();
 		}
 	}
@@ -675,7 +675,7 @@ bool FKismetEditorUtilities::IsReferencedByUndoBuffer(UBlueprint* Blueprint)
 	return (TotalReferenceCount > NonUndoReferenceCount);
 }
 
-void FKismetEditorUtilities::CompileBlueprint(UBlueprint* BlueprintObj, bool bIsRegeneratingOnLoad, bool bSkipGarbageCollection, bool bSaveIntermediateProducts, FCompilerResultsLog* pResults, bool bSkeletonUpToDate )
+void FKismetEditorUtilities::CompileBlueprint(UBlueprint* BlueprintObj, bool bIsRegeneratingOnLoad, bool bSkipGarbageCollection, bool bSaveIntermediateProducts, FCompilerResultsLog* pResults, bool bSkeletonUpToDate, bool bBatchCompile)
 {
 	FSecondsCounterScope Timer(BlueprintCompileAndLoadTimerData); 
 	BP_SCOPED_COMPILER_EVENT_STAT(EKismetCompilerStats_CompileBlueprint);
@@ -724,6 +724,18 @@ void FKismetEditorUtilities::CompileBlueprint(UBlueprint* BlueprintObj, bool bIs
 	FCompilerResultsLog LocalResults;
 	FCompilerResultsLog& Results = (pResults != NULL) ? *pResults : LocalResults;
 
+	// Monitoring UE-20486, the OldClass->ClassGeneratedBy is NULL or otherwise not a UBlueprint.
+	if (OldClass)
+	{
+		if (OldClass->ClassGeneratedBy == nullptr)
+		{
+			checkf(OldClass->ClassGeneratedBy == BlueprintObj, TEXT("Generated Class '%s' during compilation has a NULL ClassGeneratedBy for Blueprint '%s'"), *OldClass->GetPathName(), *BlueprintObj->GetPathName());
+		}
+		else
+		{
+			checkf(OldClass->ClassGeneratedBy == BlueprintObj, TEXT("Generated Class '%s' has an invalid ClassGeneratedBy '%s' while the expected is Blueprint '%s'"), *OldClass->GetPathName(), *OldClass->ClassGeneratedBy->GetPathName(), *BlueprintObj->GetPathName());
+		}
+	}
 	auto ReinstanceHelper = FBlueprintCompileReinstancer::Create(OldClass);
 
 	// Suppress errors/warnings in the log if we're recompiling on load on a build machine
@@ -792,7 +804,8 @@ void FKismetEditorUtilities::CompileBlueprint(UBlueprint* BlueprintObj, bool bIs
 		// ReinstanceHelper.VerifyReplacement();
 	}
 
-	{ 
+	if (!bBatchCompile)
+	{
 		BP_SCOPED_COMPILER_EVENT_STAT(EKismetCompilerStats_NotifyBlueprintChanged);
 
 		BlueprintObj->BroadcastCompiled();
@@ -900,7 +913,7 @@ bool FKismetEditorUtilities::GenerateBlueprintSkeleton(UBlueprint* BlueprintObj,
 }
 
 /** Recompiles the bytecode of a blueprint only.  Should only be run for recompiling dependencies during compile on load */
-void FKismetEditorUtilities::RecompileBlueprintBytecode(UBlueprint* BlueprintObj, TArray<UObject*>* ObjLoaded)
+void FKismetEditorUtilities::RecompileBlueprintBytecode(UBlueprint* BlueprintObj, TArray<UObject*>* ObjLoaded, bool bBatchCompile)
 {
 	FSecondsCounterScope Timer(BlueprintCompileAndLoadTimerData); 
 	
@@ -931,7 +944,7 @@ void FKismetEditorUtilities::RecompileBlueprintBytecode(UBlueprint* BlueprintObj
 		BlueprintPackage->SetDirtyFlag(bStartedWithUnsavedChanges);
 	}
 
-	if (!BlueprintObj->bIsRegeneratingOnLoad)
+	if (!BlueprintObj->bIsRegeneratingOnLoad && !bBatchCompile)
 	{
 		BP_SCOPED_COMPILER_EVENT_STAT(EKismetCompilerStats_NotifyBlueprintChanged);
 
@@ -943,67 +956,6 @@ void FKismetEditorUtilities::RecompileBlueprintBytecode(UBlueprint* BlueprintObj
 		}
 	}
 }
-
-/** Recompiles the bytecode of a blueprint only.  Should only be run for recompiling dependencies during compile on load */
-void FKismetEditorUtilities::GenerateCppCode(UObject* Obj, TSharedPtr<FString> OutHeaderSource, TSharedPtr<FString> OutCppSource)
-{
-	auto UDEnum = Cast<UUserDefinedEnum>(Obj);
-	auto UDStruct = Cast<UUserDefinedStruct>(Obj);
-	auto BPGC = Cast<UClass>(Obj);
-	auto InBlueprintObj = BPGC ? Cast<UBlueprint>(BPGC->ClassGeneratedBy) : nullptr;
-
-	if (InBlueprintObj)
-	{
-		check(InBlueprintObj->GetOutermost() != GetTransientPackage());
-		checkf(InBlueprintObj->GeneratedClass, TEXT("Invalid generated class for %s"), *InBlueprintObj->GetName());
-		check(OutHeaderSource.IsValid());
-		check(OutCppSource.IsValid());
-
-		//TGuardValue<bool> DuplicatingReadOnly(InBlueprintObj->bDuplicatingReadOnly, true);
-		{
-			auto BlueprintObj = DuplicateObject<UBlueprint>(InBlueprintObj, GetTransientPackage(), *InBlueprintObj->GetName());
-			{
-				auto Reinstancer = FBlueprintCompileReinstancer::Create(BlueprintObj->GeneratedClass);
-
-				IKismetCompilerInterface& Compiler = FModuleManager::LoadModuleChecked<IKismetCompilerInterface>(KISMET_COMPILER_MODULENAME);
-
-				TGuardValue<bool> GuardTemplateNameFlag(GCompilingBlueprint, true);
-				FCompilerResultsLog Results;
-
-				FKismetCompilerOptions CompileOptions;
-				CompileOptions.CompileType = EKismetCompileType::Cpp;
-				CompileOptions.OutCppSourceCode = OutCppSource;
-				CompileOptions.OutHeaderSourceCode = OutHeaderSource;
-				Compiler.CompileBlueprint(BlueprintObj, CompileOptions, Results);
-
-				if (EBlueprintType::BPTYPE_Interface == BlueprintObj->BlueprintType && OutCppSource.IsValid())
-				{
-					OutCppSource->Empty();
-				}
-			}
-			BlueprintObj->RemoveGeneratedClasses();
-			BlueprintObj->ClearFlags(RF_Standalone);
-			BlueprintObj->MarkPendingKill();
-		}
-	}
-	else if ((UDEnum || UDStruct) && OutHeaderSource.IsValid())
-	{
-		IKismetCompilerInterface& Compiler = FModuleManager::LoadModuleChecked<IKismetCompilerInterface>(KISMET_COMPILER_MODULENAME);
-		if (UDEnum)
-		{
-			*OutHeaderSource = Compiler.GenerateCppCodeForEnum(UDEnum);
-		}
-		else if (UDStruct)
-		{
-			*OutHeaderSource = Compiler.GenerateCppCodeForStruct(UDStruct);
-		}
-	}
-	else
-	{
-		ensure(false);
-	}
-}
-
 
 namespace ConformComponentsUtils
 {

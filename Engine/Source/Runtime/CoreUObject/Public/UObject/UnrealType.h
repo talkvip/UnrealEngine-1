@@ -31,7 +31,9 @@ enum EPropertyExportCPPFlags
 	CPPF_NoConst					=	0x00000010,
 	/** No reference '&' sign */
 	CPPF_NoRef						=	0x00000020,
-	/** Blueprint kompiler generated C++ code */
+	/** No static array [%d] */
+	CPPF_NoStaticArray				=	0x00000040,
+	/** Blueprint compiler generated C++ code */
 	CPPF_BlueprintCppBackend		=	0x00000080,
 };
 
@@ -218,13 +220,13 @@ public:
 	{
 		if( ShouldSerializeValue(Ar) )
 		{
-			UProperty* OldSerializedProperty = Ar.GetSerializedProperty();
+			FSerializedPropertyScope SerializedProperty(Ar, this);
 			for (int32 Idx = 0; Idx < ArrayDim; Idx++)
 			{
+				// Keep setting the property in case something inside of SerializeItem changes it
 				Ar.SetSerializedProperty(this);
 				SerializeItem( Ar, ContainerPtrToValuePtr<void>(Data, Idx) );
 			}
-			Ar.SetSerializedProperty(OldSerializedProperty);
 		}
 	}
 	/**
@@ -245,10 +247,8 @@ public:
 				void const* Default = ContainerPtrToValuePtrForDefaults<void>(DefaultStruct, DefaultData, Idx);
 				if ( !Identical(Target, Default, Ar.GetPortFlags()) )
 				{
-					UProperty* OldSerializedProperty = Ar.GetSerializedProperty();
-					Ar.SetSerializedProperty(this);
+					FSerializedPropertyScope SerializedProperty(Ar, this);
 					SerializeItem( Ar, Target, Default );
-					Ar.SetSerializedProperty(OldSerializedProperty);
 				}
 			}
 		}
@@ -709,6 +709,16 @@ public:
 	UProperty* GetOwnerProperty()
 	{
 		UProperty* Result=this;
+		for (UProperty* PropBase = dynamic_cast<UProperty*>(GetOuter()); PropBase; PropBase = dynamic_cast<UProperty*>(PropBase->GetOuter()))
+		{
+			Result = PropBase;
+		}
+		return Result;
+	}
+
+	const UProperty* GetOwnerProperty() const
+	{
+		const UProperty* Result = this;
 		for (UProperty* PropBase = dynamic_cast<UProperty*>(GetOuter()); PropBase; PropBase = dynamic_cast<UProperty*>(PropBase->GetOuter()))
 		{
 			Result = PropBase;
@@ -1476,6 +1486,10 @@ class COREUOBJECT_API UFloatProperty : public TProperty_Numeric<float>
 		:	TProperty_Numeric( ObjectInitializer, EC_CppProperty, InOffset, InFlags )
 	{
 	}
+
+	// UProperty interface
+	virtual void ExportTextItem(FString& ValueStr, const void* PropertyValue, const void* DefaultValue, UObject* Parent, int32 PortFlags, UObject* ExportRootScope) const override;
+	// End of UProperty interface
 };
 
 /*-----------------------------------------------------------------------------
@@ -3200,6 +3214,8 @@ public:
 	virtual void EmitReferenceInfo(UClass& OwnerClass, int32 BaseOffset) override;
 	virtual bool SameType(const UProperty* Other) const override;
 	// End of UProperty interface
+
+	static const TCHAR* ImportText_Static(UScriptStruct* InStruct, const FString& InName, const TCHAR* Buffer, void* Data, int32 PortFlags, UObject* OwnerObject, FOutputDevice* ErrorText);
 
 	bool UseNativeSerialization() const;
 	bool UseBinarySerialization(const FArchive& Ar) const;

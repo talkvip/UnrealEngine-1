@@ -455,7 +455,7 @@ void UUnrealEdEngine::OnPackageDirtyStateUpdated( UPackage* Pkg)
 				FPackageFileSummary Summary;
 				*PackageReader << Summary;
 
-				if ( Summary.GetFileVersionUE4() > GPackageFileUE4Version || !GEngineVersion.IsCompatibleWith(Summary.CompatibleWithEngineVersion) )
+				if ( Summary.GetFileVersionUE4() > GPackageFileUE4Version || !FEngineVersion::Current().IsCompatibleWith(Summary.CompatibleWithEngineVersion) )
 				{
 					WarningStateToSet = WDWS_PendingWarn;
 					bNeedWarningForPkgEngineVer = true;
@@ -1187,6 +1187,56 @@ void UUnrealEdEngine::UpdateVolumeActorVisibility( UClass* InVolumeActorClass, F
 					PrimitiveComponent->PushEditorVisibilityToProxy( ActorToUpdate->HiddenEditorViews );
 				}
 			}
+		}
+	}
+}
+
+
+void UUnrealEdEngine::FixAnyInvertedBrushes(UWorld* World)
+{
+	// Get list of brushes with inverted polys
+	TArray<ABrush*> Brushes;
+	for (TActorIterator<ABrush> It(World); It; ++It)
+	{
+		ABrush* Brush = *It;
+		if (Brush->BrushComponent && Brush->BrushComponent->HasInvertedPolys())
+		{
+			Brushes.Add(Brush);
+		}
+	}
+
+	bool bAnyStaticBrushesFixed = false;
+	if (Brushes.Num() > 0)
+	{
+		for (ABrush* Brush : Brushes)
+		{
+			UE_LOG(LogUnrealEdEngine, Warning, TEXT("Brush '%s' appears to be inside out - fixing."), *Brush->GetName());
+
+			// Invert the polys of the brush
+			for (auto& Poly : Brush->BrushComponent->Brush->Polys->Element)
+			{
+				Poly.Reverse();
+				Poly.CalcNormal();
+			}
+
+			if (Brush->IsStaticBrush())
+			{
+				// Static brushes require a full BSP rebuild
+				bAnyStaticBrushesFixed = true;
+			}
+			else
+			{
+				// Dynamic brushes can be fixed up here
+				FBSPOps::csgPrepMovingBrush(Brush);
+				Brush->BrushComponent->BuildSimpleBrushCollision();
+			}
+
+			Brush->MarkPackageDirty();
+		}
+
+		if (bAnyStaticBrushesFixed)
+		{
+			RebuildAlteredBSP();
 		}
 	}
 }

@@ -325,6 +325,8 @@ public:
 	void AttemptRelink(const FAnimationBaseContext& Context);
 };
 
+#define ENABLE_ANIMNODE_POSE_DEBUG 0
+
 /** A local-space pose link to another node */
 USTRUCT()
 struct ENGINE_API FPoseLink : public FPoseLinkBase
@@ -334,6 +336,12 @@ struct ENGINE_API FPoseLink : public FPoseLinkBase
 public:
 	// Interface
 	void Evaluate(FPoseContext& Output);
+
+#if ENABLE_ANIMNODE_POSE_DEBUG
+private:
+	// forwarded pose data from the wired node which current node's skeletal control is not applied yet
+	FCompactPose CurrentPose;
+#endif //#if ENABLE_ANIMNODE_POSE_DEBUG
 };
 
 /** A component-space pose link to another node */
@@ -347,6 +355,38 @@ public:
 	void EvaluateComponentSpace(FComponentSpacePoseContext& Output);
 };
 
+USTRUCT()
+struct FExposedValueCopyRecord
+{
+	GENERATED_USTRUCT_BODY()
+
+	FExposedValueCopyRecord()
+		: Source(nullptr)
+		, Dest(nullptr)
+	{}
+
+	UPROPERTY()
+	UProperty* SourceProperty;
+
+	UPROPERTY()
+	int32 SourceArrayIndex;
+
+	UPROPERTY()
+	UProperty* DestProperty;
+
+	UPROPERTY()
+	int32 DestArrayIndex;
+
+	UPROPERTY()
+	int32 Size;
+
+	// Cached source copy ptr
+	void* Source;
+
+	// Cached dest copy ptr
+	void* Dest;
+};
+
 // An exposed value updater
 USTRUCT()
 struct FExposedValueHandler
@@ -357,15 +397,66 @@ struct FExposedValueHandler
 	UPROPERTY()
 	FName BoundFunction;
 
-	void Execute(const FAnimationBaseContext& Context) const
+	// Direct data access to property in anim instance
+	UPROPERTY()
+	TArray<FExposedValueCopyRecord> CopyRecords;
+
+	// funtion pointer if BoundFunction != NAME_None
+	UFunction* Function;
+
+	void Initialize(FAnimNode_Base* AnimNode, UAnimInstance* AnimInstance) 
 	{
 		if (BoundFunction != NAME_None)
 		{
-			//@TODO: Should be able to be Checked, or at least produce a warning when it fails
-			if (UFunction* Function = Context.AnimInstance->FindFunction(BoundFunction))
+			Function = AnimInstance->FindFunction(BoundFunction);
+		}
+		else
+		{
+			Function = NULL;
+		}
+
+		// initialize copy records
+		for(auto& CopyRecord : CopyRecords)
+		{
+			if(UArrayProperty* SourceArrayProperty = Cast<UArrayProperty>(CopyRecord.SourceProperty))
 			{
-				Context.AnimInstance->ProcessEvent(Function, NULL);
+				FScriptArrayHelper ArrayHelper(SourceArrayProperty, CopyRecord.SourceProperty->ContainerPtrToValuePtr<uint8>(AnimInstance));
+				check(ArrayHelper.IsValidIndex(CopyRecord.SourceArrayIndex));
+				CopyRecord.Source = ArrayHelper.GetRawPtr(CopyRecord.SourceArrayIndex);
 			}
+			else
+			{
+				CopyRecord.Source = CopyRecord.SourceProperty->ContainerPtrToValuePtr<uint8>(AnimInstance, CopyRecord.SourceArrayIndex);
+			}
+
+			if(UArrayProperty* DestArrayProperty = Cast<UArrayProperty>(CopyRecord.DestProperty))
+			{
+				FScriptArrayHelper ArrayHelper(DestArrayProperty, CopyRecord.DestProperty->ContainerPtrToValuePtr<uint8>(AnimNode));
+				check(ArrayHelper.IsValidIndex(CopyRecord.DestArrayIndex));
+				CopyRecord.Dest = ArrayHelper.GetRawPtr(CopyRecord.DestArrayIndex);
+			}
+			else
+			{
+				CopyRecord.Dest = CopyRecord.DestProperty->ContainerPtrToValuePtr<uint8>(AnimNode, CopyRecord.DestArrayIndex);
+			}
+		}
+	}
+
+	void Execute(const FAnimationBaseContext& Context) const
+	{
+		if (Function != nullptr)
+		{
+			Context.AnimInstance->ProcessEvent(Function, NULL);
+		}
+
+		for(const auto& CopyRecord : CopyRecords)
+		{
+			// if any of these checks fail then it's likely that Initialize has not been called.
+			// has new anim node type been added that doesnt call the base class Initialize()?
+			checkSlow(CopyRecord.Dest != nullptr);
+			checkSlow(CopyRecord.Source != nullptr);
+			checkSlow(CopyRecord.Size != 0);
+			FMemory::Memcpy(CopyRecord.Dest, CopyRecord.Source, CopyRecord.Size);
 		}
 	}
 };
@@ -389,7 +480,7 @@ struct ENGINE_API FAnimNode_Base
 	// A derived class should implement Initialize, Update, and either Evaluate or EvaluateComponentSpace, but not both of them
 
 	// Interface to implement
-	virtual void Initialize(const FAnimationInitializeContext& Context) {}
+	virtual void Initialize(const FAnimationInitializeContext& Context);
 	virtual void CacheBones(const FAnimationCacheBonesContext& Context) {}
 	virtual void Update(const FAnimationUpdateContext& Context) {}
 	virtual void Evaluate(FPoseContext& Output) { check(false); }
@@ -400,7 +491,7 @@ struct ENGINE_API FAnimNode_Base
 
 	virtual void GatherDebugData(FNodeDebugData& DebugData)
 	{ 
-		DebugData.AddDebugItem(TEXT("Non Overriden GatherDebugData")); 
+		DebugData.AddDebugItem(TEXT("Non Overridden GatherDebugData")); 
 	}
 	// End of interface to implement
 

@@ -34,43 +34,43 @@ static TAutoConsoleVariable<int32> CVarDiffuseFromCaptures(
 	TEXT(" 0 is off (default), 1 is on"),
 	ECVF_RenderThreadSafe);
 
-#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
 static TAutoConsoleVariable<int32> CVarReflectionEnvironment(
 	TEXT("r.ReflectionEnvironment"),
 	1,
-	TEXT("0:off, 1:on and blend with scene, 2:on and overwrite scene.\n")
-	TEXT("Whether to render the reflection environment feature, which implements local reflections through Reflection Capture actors."),
-	ECVF_Cheat | ECVF_RenderThreadSafe);
-#endif 
-static TAutoConsoleVariable<int32> CVarHalfResReflections(
-	TEXT("r.HalfResReflections"),
-	0,
-	TEXT("Compute ReflectionEnvironment samples at half resolution.\n")
-	TEXT(" 0 is off (default), 1 is on"),
-	ECVF_RenderThreadSafe);
+	TEXT("Whether to render the reflection environment feature, which implements local reflections through Reflection Capture actors.\n")
+	TEXT(" 0: off\n")
+	TEXT(" 1: on and blend with scene (default)")
+	TEXT(" 2: on and overwrite scene (only in non-shipping builds)"),
+	ECVF_RenderThreadSafe | ECVF_Scalability);
 
 static TAutoConsoleVariable<int32> CVarDoTiledReflections(
 	TEXT("r.DoTiledReflections"),
 	1,
 	TEXT("Compute Reflection Environment with Tiled compute shader..\n")
-	TEXT(" 1 is on (default), 1 is on"),
+	TEXT(" 0: off\n")
+	TEXT(" 1: on (default)"),
 	ECVF_RenderThreadSafe);
 
 static TAutoConsoleVariable<float> CVarSkySpecularOcclusionStrength(
 	TEXT("r.SkySpecularOcclusionStrength"),
 	1,
-	TEXT("Strength of skylight specular occlusion from DFAO"),
+	TEXT("Strength of skylight specular occlusion from DFAO (default is 1.0)"),
 	ECVF_RenderThreadSafe);
 
 // to avoid having direct access from many places
 static int GetReflectionEnvironmentCVar()
 {
-#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
-	return CVarReflectionEnvironment.GetValueOnAnyThread();
+	int32 RetVal = CVarReflectionEnvironment.GetValueOnAnyThread();
+
+#if (UE_BUILD_SHIPPING || UE_BUILD_TEST)
+	// Disabling the debug part of this CVar when in shipping
+	if (RetVal == 2)
+	{
+		RetVal = 1;
+	}
 #endif
 
-	// on, default mode
-	return 1;
+	return RetVal;
 }
 
 bool IsReflectionEnvironmentAvailable(ERHIFeatureLevel::Type InFeatureLevel)
@@ -840,7 +840,6 @@ void FDeferredShadingSceneRenderer::RenderTiledDeferredImageBasedReflections(FRH
 	FSceneRenderTargets& SceneContext = FSceneRenderTargets::Get(RHICmdList);
 	static const auto AllowStaticLightingVar = IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.AllowStaticLighting"));
 	const bool bUseLightmaps = (AllowStaticLightingVar->GetValueOnRenderThread() == 1) && (CVarDiffuseFromCaptures.GetValueOnRenderThread() == 0);
-	const bool bHalfRes = CVarHalfResReflections.GetValueOnRenderThread() != 0;
 
 	TRefCountPtr<IPooledRenderTarget> NewSceneColor;
 	{
@@ -870,18 +869,10 @@ void FDeferredShadingSceneRenderer::RenderTiledDeferredImageBasedReflections(FRH
 
 		// ReflectionEnv is assumed to be on when going into this method
 		{
-			// Render the reflection environment with tiled deferred culling
-			SCOPED_DRAW_EVENT(RHICmdList, ReflectionEnvironmentGather);
-
 			SetRenderTarget(RHICmdList, NULL, NULL);
 
 			FReflectionEnvironmentTiledDeferredCS* ComputeShader = NULL;
-			uint32 AdjustedReflectionTileSizeX = GReflectionEnvironmentTileSizeX;
-			if (bHalfRes)
-			{
-				AdjustedReflectionTileSizeX *= 2;
-			}
-			
+			// Render the reflection environment with tiled deferred culling
 			TArray<FReflectionCaptureSortData> SortData;
 			int32 NumBoxCaptures = 0;
 			int32 NumSphereCaptures = 0;
@@ -890,13 +881,18 @@ void FDeferredShadingSceneRenderer::RenderTiledDeferredImageBasedReflections(FRH
 			bool bHasBoxCaptures = (NumBoxCaptures > 0);
 			bool bHasSphereCaptures = (NumSphereCaptures > 0);
 			bool bNeedsClearCoat = (View.ShadingModelMaskInView & (1 << MSM_ClearCoat)) != 0;
+
+			SCOPED_DRAW_EVENTF(RHICmdList, ReflectionEnvironment, TEXT("ReflectionEnvironment ComputeShader %dx%d Tile:%dx%d Box:%d Sphere:%d ClearCoat:%d"), 
+				View.ViewRect.Width(), View.ViewRect.Height(), GReflectionEnvironmentTileSizeX, GReflectionEnvironmentTileSizeY,
+				NumBoxCaptures, NumSphereCaptures, bNeedsClearCoat);
+
 			ComputeShader = SelectReflectionEnvironmentTiledDeferredCS(View.ShaderMap, bUseLightmaps, bNeedsClearCoat, bHasBoxCaptures, bHasSphereCaptures);
 
 			RHICmdList.SetComputeShader(ComputeShader->GetComputeShader());
 
 			ComputeShader->SetParameters(RHICmdList, View, SSROutput->GetRenderTargetItem().ShaderResourceTexture, SortData, NewSceneColor->GetRenderTargetItem().UAV, DynamicBentNormalAO);
 
-			uint32 GroupSizeX = (View.ViewRect.Size().X + AdjustedReflectionTileSizeX - 1) / AdjustedReflectionTileSizeX;
+			uint32 GroupSizeX = (View.ViewRect.Size().X + GReflectionEnvironmentTileSizeX - 1) / GReflectionEnvironmentTileSizeX;
 			uint32 GroupSizeY = (View.ViewRect.Size().Y + GReflectionEnvironmentTileSizeY - 1) / GReflectionEnvironmentTileSizeY;
 			DispatchComputeShader(RHICmdList, ComputeShader, GroupSizeX, GroupSizeY, 1);
 
@@ -1016,7 +1012,7 @@ void FDeferredShadingSceneRenderer::RenderStandardDeferredImageBasedReflections(
 		{
 			bRequiresApply = true;
 
-			SCOPED_DRAW_EVENT(RHICmdList, StandardDeferredReflectionEnvironment);
+			SCOPED_DRAW_EVENTF(RHICmdList, ReflectionEnvironment, TEXT("ReflectionEnvironment PixelShader"));
 
 			{
 				// Clear to no reflection contribution, alpha of 1 indicates full background contribution
@@ -1053,7 +1049,7 @@ void FDeferredShadingSceneRenderer::RenderStandardDeferredImageBasedReflections(
 
 						static FGlobalBoundShaderState BoundShaderState;
 						
-						SetGlobalBoundShaderState(RHICmdList, FeatureLevel, BoundShaderState, GFilterVertexDeclaration.VertexDeclarationRHI, *VertexShader, *PixelShader);
+						SetGlobalBoundShaderState(RHICmdList, FeatureLevel, BoundShaderState, GetVertexDeclarationFVector4(), *VertexShader, *PixelShader);
 
 						PixelShader->SetParameters(RHICmdList, View, ReflectionCapture);
 					}
@@ -1063,7 +1059,7 @@ void FDeferredShadingSceneRenderer::RenderStandardDeferredImageBasedReflections(
 
 						static FGlobalBoundShaderState BoundShaderState;
 						
-						SetGlobalBoundShaderState(RHICmdList, FeatureLevel, BoundShaderState, GFilterVertexDeclaration.VertexDeclarationRHI, *VertexShader, *PixelShader);
+						SetGlobalBoundShaderState(RHICmdList, FeatureLevel, BoundShaderState, GetVertexDeclarationFVector4(), *VertexShader, *PixelShader);
 
 						PixelShader->SetParameters(RHICmdList, View, ReflectionCapture);
 					}
@@ -1073,6 +1069,7 @@ void FDeferredShadingSceneRenderer::RenderStandardDeferredImageBasedReflections(
 					StencilingGeometry::DrawSphere(RHICmdList);
 				}
 			}
+			RHICmdList.CopyToResolveTarget(LightAccumulation->GetRenderTargetItem().TargetableTexture, LightAccumulation->GetRenderTargetItem().ShaderResourceTexture, false, FResolveParams());
 
 			GRenderTargetPool.VisualizeTexture.SetCheckPoint(RHICmdList, LightAccumulation);
 		}

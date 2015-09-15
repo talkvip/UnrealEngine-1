@@ -94,8 +94,9 @@ bool FFileHelper::LoadFileToArray( TArray<uint8>& Result, const TCHAR* Filename,
 		}
 		return 0;
 	}
-	Result.Reset();
-	Result.AddUninitialized( Reader->TotalSize() );
+	int64 TotalSize = Reader->TotalSize();
+	Result.Reset( TotalSize );
+	Result.AddUninitialized( TotalSize );
 	Reader->Serialize(Result.GetData(), Result.Num());
 	bool Success = Reader->Close();
 	delete Reader;
@@ -960,10 +961,21 @@ void GenerateConvenientWindowedResolutions(const FDisplayMetrics& InDisplayMetri
 		}
 	}
 	
-	// if no convenient resolutions have been found, add a minimum one (if it fits)
-	if (OutResolutions.Num() == 0 && InDisplayMetrics.PrimaryDisplayHeight > MinHeight && InDisplayMetrics.PrimaryDisplayWidth > MinWidth)
+	// if no convenient resolutions have been found, add a minimum one
+	if (OutResolutions.Num() == 0)
 	{
-		OutResolutions.Add(FIntPoint(MinWidth, MinHeight));
+		if (InDisplayMetrics.PrimaryDisplayHeight > MinHeight && InDisplayMetrics.PrimaryDisplayWidth > MinWidth)
+		{
+			//Add the minimum size if it fit
+			OutResolutions.Add(FIntPoint(MinWidth, MinHeight));
+		}
+		else
+		{
+			//Force a resolution even if its smaller then the minimum height and width to avoid a bigger window then the desktop
+			float TargetWidth = FMath::RoundToFloat(InDisplayMetrics.PrimaryDisplayWidth) * Scales[NumScales - 1];
+			float TargetHeight = FMath::RoundToFloat(InDisplayMetrics.PrimaryDisplayHeight) * Scales[NumScales - 1];
+			OutResolutions.Add(FIntPoint(TargetWidth, TargetHeight));
+		}
 	}
 }
 

@@ -10,6 +10,7 @@
 DECLARE_DWORD_ACCUMULATOR_STAT(TEXT("Num Texture Atlases"), STAT_SlateNumTextureAtlases, STATGROUP_SlateMemory);
 DECLARE_DWORD_ACCUMULATOR_STAT(TEXT("Num Non-Atlased Textures"), STAT_SlateNumNonAtlasedTextures, STATGROUP_SlateMemory);
 DECLARE_DWORD_ACCUMULATOR_STAT(TEXT("Num Dynamic Textures"), STAT_SlateNumDynamicTextures, STATGROUP_SlateMemory);
+DECLARE_CYCLE_STAT(TEXT("GetResource Time"), STAT_SlateGetResourceTime, STATGROUP_SlateVerbose);
 
 FDynamicResourceMap::FDynamicResourceMap()
 	: TextureMemorySincePurge(0)
@@ -430,6 +431,8 @@ static void LoadUObjectForBrush( const FSlateBrush& InBrush )
 
 FSlateShaderResourceProxy* FSlateRHIResourceManager::GetShaderResource( const FSlateBrush& InBrush )
 {
+	SCOPE_CYCLE_COUNTER( STAT_SlateGetResourceTime );
+
 	check( IsThreadSafeForSlateRendering() );
 
 	FSlateShaderResourceProxy* Texture = NULL;
@@ -613,29 +616,10 @@ FSlateShaderResourceProxy* FSlateRHIResourceManager::FindOrCreateDynamicTextureR
 				}
 			}
 
-			if ( TextureResource.IsValid() )
+			if ( TextureResource.IsValid() && TextureResource->TextureObject && TextureResource->TextureObject->Resource )
 			{
-				UTexture* Texture2DObject = TextureResource->TextureObject;
-				if ( Texture2DObject && !AccessedUTextures.Contains(Texture2DObject) && Texture2DObject->Resource )
-				{
-					// Set the texture rendering resource that should be used.  The UTexture resource could change at any time so we must do this each frame
-					ENQUEUE_UNIQUE_RENDER_COMMAND_ONEPARAMETER(UpdateSlateUTextureResource,
-						FSlateUTextureResource*, InUTextureResource, TextureResource.Get(),
-						{
-							FTexture* RenderTexture = InUTextureResource->TextureObject->Resource;
-
-							// Let the streaming manager know we are using this texture now
-							RenderTexture->LastRenderTime = FApp::GetCurrentTime();
-
-							// Refresh FTexture
-							InUTextureResource->UpdateRenderResource(RenderTexture);
-
-						});
-
-
-					AccessedUTextures.Add(Texture2DObject);
-				}
-
+				TextureResource->UpdateRenderResource(TextureObject->Resource);
+				AccessedUTextures.Add(TextureResource->TextureObject);
 				return TextureResource->Proxy;
 			}
 		}
@@ -798,7 +782,7 @@ void FSlateRHIResourceManager::LoadStyleResources( const ISlateStyle& Style )
 	CreateTextures( Resources );
 }
 
-void FSlateRHIResourceManager::ClearAccessedResources()
+void FSlateRHIResourceManager::ReleaseAccessedResources()
 {
 	AccessedUTextures.Reset();
 	AccessedMaterials.Reset();

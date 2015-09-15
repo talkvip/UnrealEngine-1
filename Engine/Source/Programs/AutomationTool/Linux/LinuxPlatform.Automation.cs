@@ -123,7 +123,7 @@ public abstract class BaseLinuxPlatform : Platform
 						if (!SC.IsCodeBasedProject && !FileExists_NoExceptions(Params.ProjectGameExeFilename) && !SC.bIsCombiningMultiplePlatforms)
 						{
 							LogError("Failed to find game binary " + Params.ProjectGameExeFilename);
-                            throw new AutomationException(ErrorCodes.Error_MissingExecutable, "Stage Failed. Could not find game binary {0}. You may need to build the UE4 project with your target configuration and platform.", Params.ProjectGameExeFilename);
+                            throw new AutomationException(ExitCode.Error_MissingExecutable, "Stage Failed. Could not find game binary {0}. You may need to build the UE4 project with your target configuration and platform.", Params.ProjectGameExeFilename);
 						}
 
 					    SC.StageFiles(StagedFileType.NonUFS, CombinePaths(SC.LocalRoot, "Engine/Binaries", SC.PlatformDir), Path.GetFileNameWithoutExtension(Exe), true, null, CommandUtils.CombinePaths(SC.RelativeProjectRootForStage, "Binaries", SC.PlatformDir), false, true, SC.ShortProjectName);
@@ -277,7 +277,7 @@ chmod 700 $HOME/Desktop/{1}.desktop", DesiredGLVersion, SC.ShortProjectName, SC.
 				&& ((!String.IsNullOrEmpty(ProjParams.DeviceUsername) && !String.IsNullOrEmpty(ProjParams.DevicePassword))
 					|| !ProjParams.Unattended)) // Skip key generation in unattended mode if information is missing
 			{
-				LogConsole("Configuring Linux host");
+				Log("Configuring Linux host");
 
 				// Prompt for username if not already set
 				while (String.IsNullOrEmpty(ProjParams.DeviceUsername))

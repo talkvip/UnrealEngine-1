@@ -151,6 +151,7 @@ const FKey EKeys::A_AccentGrave("A_AccentGrave");
 const FKey EKeys::E_AccentGrave("E_AccentGrave");
 const FKey EKeys::E_AccentAigu("E_AccentAigu");
 const FKey EKeys::C_Cedille("C_Cedille");
+const FKey EKeys::Section("Section");
 
 
 // Setup platform specific keys
@@ -507,6 +508,7 @@ void EKeys::Initialize()
 	AddKey(FKeyDetails(EKeys::E_AccentGrave, FText::FromString(FString::Chr(232))));
 	AddKey(FKeyDetails(EKeys::E_AccentAigu, FText::FromString(FString::Chr(233))));
 	AddKey(FKeyDetails(EKeys::C_Cedille, FText::FromString(FString::Chr(231))));
+	AddKey(FKeyDetails(EKeys::Section, FText::FromString(FString::Chr(167))));
 
 
 	// Setup Gamepad keys
@@ -1018,6 +1020,12 @@ bool FKey::SerializeFromMismatchedTag(struct FPropertyTag const& Tag, FArchive& 
 
 bool FKey::ExportTextItem(FString& ValueStr, FKey const& DefaultValue, UObject* Parent, int32 PortFlags, UObject* ExportRootScope) const
 {
+	if (0 != (PortFlags & EPropertyPortFlags::PPF_ExportCpp))
+	{
+		ValueStr += FString::Printf(TEXT("FKey(TEXT(\"%s\"))"), *KeyName.ToString());
+		return true;
+	}
+
 	ValueStr += KeyName.ToString();
 	return true;
 }

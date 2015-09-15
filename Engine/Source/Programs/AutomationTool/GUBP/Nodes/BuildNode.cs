@@ -8,7 +8,7 @@ using UnrealBuildTool;
 namespace AutomationTool
 {
 	[DebuggerDisplay("{Name}")]
-	public abstract class BuildNode
+	public abstract class BuildNodeTemplate
 	{
 		public string Name;
 		public UnrealTargetPlatform AgentPlatform = UnrealTargetPlatform.Win64;
@@ -18,23 +18,91 @@ namespace AutomationTool
 		public int AgentMemoryRequirement;
 		public int TimeoutInMinutes;
 		public float Priority;
+		public string InputDependencyNames;
+		public string OrderDependencyNames;
+		public string RecipientsForFailureEmails;
+		public bool AddSubmittersToFailureEmails;
+		public bool SendSuccessEmail;
+		public bool IsParallelAgentShareEditor;
+		public bool IsSticky;
+		public bool IsTest;
+		public string DisplayGroupName;
+        public string GameNameIfAnyForFullGameAggregateNode;
+		public string RootIfAnyForTempStorage;
 
-		public GUBP.GUBPNode Node;
-		public BuildNode[] Dependencies;
-		public BuildNode[] PseudoDependencies;
-		public BuildNode[] AllDirectDependencies;
-		public BuildNode[] AllIndirectDependencies;
+		public abstract BuildNode Instantiate();
+	}
+
+	[DebuggerDisplay("{Name}")]
+	public abstract class BuildNode
+	{
+		public readonly string Name;
+		public UnrealTargetPlatform AgentPlatform = UnrealTargetPlatform.Win64;
+		public string AgentRequirements;
+		public string AgentSharingGroup;
+		public int FrequencyShift;
+		public int AgentMemoryRequirement;
+		public int TimeoutInMinutes;
+		public float Priority;
+
+		public HashSet<BuildNode> InputDependencies;
+		public HashSet<BuildNode> OrderDependencies;
 		public TriggerNode[] ControllingTriggers;
 		public bool IsComplete;
 		public string[] RecipientsForFailureEmails;
 		public bool AddSubmittersToFailureEmails;
 		public bool SendSuccessEmail;
 		public bool IsParallelAgentShareEditor;
+		public bool IsSticky;
+		public bool IsTest;
+		public string DisplayGroupName;
+        public string GameNameIfAnyForFullGameAggregateNode;
+		public string RootIfAnyForTempStorage;
 
-		public abstract bool IsSticky
+		public List<string> BuildProducts;
+
+		public BuildNode(BuildNodeTemplate Template)
 		{
-			get;
+			Name = Template.Name;
+			AgentPlatform = Template.AgentPlatform;
+			AgentRequirements = Template.AgentRequirements;
+			AgentSharingGroup = Template.AgentSharingGroup;
+			FrequencyShift = Template.FrequencyShift;
+			AgentMemoryRequirement = Template.AgentMemoryRequirement;
+			TimeoutInMinutes = Template.TimeoutInMinutes;
+			Priority = Template.Priority;
+			RecipientsForFailureEmails = Template.RecipientsForFailureEmails.Split(';');
+			AddSubmittersToFailureEmails = Template.AddSubmittersToFailureEmails;
+			SendSuccessEmail = Template.SendSuccessEmail;
+			IsParallelAgentShareEditor = Template.IsParallelAgentShareEditor;
+			IsSticky = Template.IsSticky;
+			IsTest = Template.IsTest;
+			DisplayGroupName = Template.DisplayGroupName;
+            GameNameIfAnyForFullGameAggregateNode = Template.GameNameIfAnyForFullGameAggregateNode;
+			RootIfAnyForTempStorage = Template.RootIfAnyForTempStorage;
 		}
+
+		public virtual void ArchiveBuildProducts(string StorageRootIfAny, TempStorageNodeInfo TempStorageNodeInfo, bool bLocalOnly)
+		{
+			TempStorage.StoreToTempStorage(TempStorageNodeInfo, BuildProducts, bLocalOnly, StorageRootIfAny);
+		}
+
+		public virtual void RetrieveBuildProducts(string StorageRootIfAny, TempStorageNodeInfo TempStorageNodeInfo)
+		{
+			CommandUtils.Log("***** Retrieving GUBP Node {0} from {1}", Name, TempStorageNodeInfo.GetRelativeDirectory());
+			try
+			{
+				BuildProducts = TempStorage.RetrieveFromTempStorage(TempStorageNodeInfo, StorageRootIfAny);
+			}
+			catch (Exception Ex)
+			{
+				throw new AutomationException(Ex, "Build Products cannot be found for node {0}", Name);
+			}
+		}
+
+		public abstract void DoBuild();
+
+		public abstract void DoFakeBuild();
 
 		public string ControllingTriggerDotName
 		{
@@ -43,7 +111,7 @@ namespace AutomationTool
 
 		public bool DependsOn(BuildNode Node)
 		{
-			return AllIndirectDependencies.Contains(Node);
+			return OrderDependencies.Contains(Node);
 		}
 
 		public override string ToString()
@@ -51,47 +119,18 @@ namespace AutomationTool
 			System.Diagnostics.Trace.TraceWarning("Implicit conversion from NodeInfo to string\n{0}", Environment.StackTrace);
 			return Name;
 		}
-
-		// Legacy stuff that should probably be removed
-
-		public abstract bool IsTest
-		{
-			get;
-		}
-
-		public abstract string DisplayGroupName
-		{
-			get;
-		}
 	}
 
-	public class LegacyBuildNode : BuildNode
+	[DebuggerDisplay("{Definition.Name}")]
+	class BuildNodePair
 	{
-		public LegacyBuildNode(GUBP.GUBPNode InNode)
-		{
-			Name = InNode.GetFullName();
-			Node = InNode;
-			AgentRequirements = Node.ECAgentString();
-			AgentSharingGroup = Node.AgentSharingGroup;
-			AgentMemoryRequirement = Node.AgentMemoryRequirement();
-			TimeoutInMinutes = Node.TimeoutInMinutes();
-			SendSuccessEmail = Node.SendSuccessEmail();
-			Priority = Node.Priority();
-		}
+		public readonly BuildNodeTemplate Template;
+		public readonly BuildNode Node;
 
-		public override bool IsSticky
+		public BuildNodePair(BuildNodeTemplate InTemplate)
 		{
-			get { return Node.IsSticky(); }
-		}
-
-		public override bool IsTest
-		{
-			get { return Node.IsTest(); }
-		}
-
-		public override string DisplayGroupName
-		{
-			get { return Node.GetDisplayGroupName(); }
+			Template = InTemplate;
+			Node = InTemplate.Instantiate();
 		}
 	}
 }

@@ -47,7 +47,11 @@ public:
 
 	bool FormatMessage(const TSharedPtr<FChatItemViewModel>& NewMessage, bool GroupText)
 	{
-		const FTextBlockStyle& MessageTextStyle = DecoratorStyleSet->FriendsChatStyle.TextStyle;
+		const FTextBlockStyle& DefaultTextStyle = DecoratorStyleSet->FriendsChatStyle.TextStyle;
+
+		FTextBlockStyle HighlightedTextStyle = DefaultTextStyle;
+		HighlightedTextStyle.ColorAndOpacity = GetChatColor(NewMessage->GetMessageType());
+
 		TSharedRef<FTextLayout> TextLayoutRef = TextLayout->AsShared();
 
 		FTextRange ModelRange;
@@ -58,17 +62,27 @@ public:
 		{
 			// Add time stamp
 			{
+				FTextBlockStyle TimeStampStyle = DecoratorStyleSet->FriendsChatStyle.TimeStampTextStyle;
+				TimeStampStyle.ColorAndOpacity = GetChatColor(NewMessage->GetMessageType());
+
 				TSharedRef< FSlateFontMeasure > FontMeasure = FSlateApplication::Get().GetRenderer()->GetFontMeasureService();
-				int16 Baseline = FontMeasure->GetBaseline(DecoratorStyleSet->FriendsChatStyle.TimeStampTextStyle.Font);
+				int16 Baseline = FontMeasure->GetBaseline(TimeStampStyle.Font);
  				
-				FTimeStampRun::FTimeStampRunInfo WidgetRunInfo = FTimeStampRun::FTimeStampRunInfo(NewMessage->GetMessageTime(), Baseline, DecoratorStyleSet->FriendsChatStyle.TimeStampTextStyle);
+				FTimeStampRun::FTimeStampRunInfo WidgetRunInfo = FTimeStampRun::FTimeStampRunInfo(NewMessage->GetMessageTime(), Baseline, TimeStampStyle);
 
 				TSharedPtr< ISlateRun > Run = FTimeStampRun::Create(TextLayoutRef, FRunInfo(), ModelString, WidgetRunInfo);
 				*ModelString += (" ");
 				Runs.Add(Run.ToSharedRef());
 			}
 
-			if(ChannelHyperlinkDecorator.IsValid() && IsMultiChat)
+			if(NewMessage->GetMessageType() == EChatMessageType::Admin)
+			{
+				ModelRange.BeginIndex = ModelString->Len();
+				*ModelString += ": ";
+				ModelRange.EndIndex = ModelString->Len();
+				Runs.Add(FSlateTextRun::Create(FRunInfo(), ModelString, HighlightedTextStyle, ModelRange));
+			}
+			else if(ChannelHyperlinkDecorator.IsValid() && IsMultiChat)
 			{
 				FString MessageText = " " + GetRoomName(NewMessage);
 				int32 NameLen = MessageText.Len();
@@ -88,11 +102,11 @@ public:
 				EndPos += StyleMetaData.Len();
 				ParseInfo.MetaData.Add(TEXT("Style"), FTextRange(StartPos, EndPos));
 
-				TSharedPtr< ISlateRun > Run = NameHyperlinkDecorator->Create(TextLayoutRef, ParseInfo, MessageText, ModelString, &FFriendsAndChatModuleStyle::Get());
+				TSharedPtr< ISlateRun > Run = ChannelHyperlinkDecorator->Create(TextLayoutRef, ParseInfo, MessageText, ModelString, &FFriendsAndChatModuleStyle::Get());
 				Runs.Add(Run.ToSharedRef());
 			}
 
-			if(IsMultiChat)
+			if(IsMultiChat && NewMessage->GetMessageType() == EChatMessageType::Whisper)
 			{
 				static const FText ToText = NSLOCTEXT("SChatWindow", "ChatTo", " to ");
 				static const FText FromText = NSLOCTEXT("SChatWindow", "ChatFrom", " from ");
@@ -107,12 +121,16 @@ public:
 					*ModelString += FromText.ToString();
 				}
 				ModelRange.EndIndex = ModelString->Len();
-				Runs.Add(FSlateTextRun::Create(FRunInfo(), ModelString, MessageTextStyle, ModelRange));
+				Runs.Add(FSlateTextRun::Create(FRunInfo(), ModelString, HighlightedTextStyle, ModelRange));
 			}
 
-			if(NameHyperlinkDecorator.IsValid() && (IsMultiChat || !NewMessage->IsFromSelf()))
+			if(NewMessage->GetMessageType() == EChatMessageType::Game || NewMessage->GetMessageType() == EChatMessageType::Admin)
 			{
-				FString MessageText = " " + GetSenderName(NewMessage) + " :";
+				// Don't add any channel information for In-Game
+			}
+			else if(NameHyperlinkDecorator.IsValid() && (!NewMessage->IsFromSelf() || (IsMultiChat && NewMessage->GetMessageType() == EChatMessageType::Whisper)))
+			{
+				FString MessageText = " " + GetSenderName(NewMessage) + ": ";
 
 				int32 NameLen = MessageText.Len();
 
@@ -143,18 +161,36 @@ public:
 			else
 			{
 				ModelRange.BeginIndex = ModelString->Len();
-				*ModelString += (" " + NewMessage->GetSenderName().ToString() + " :");
+				*ModelString += (" " + NewMessage->GetSenderName().ToString() + ": ");
 				ModelRange.EndIndex = ModelString->Len();
-				Runs.Add(FSlateTextRun::Create(FRunInfo(), ModelString, MessageTextStyle, ModelRange));
+				Runs.Add(FSlateTextRun::Create(FRunInfo(), ModelString, HighlightedTextStyle, ModelRange));
 			}
 		}
 
-		ModelRange.BeginIndex = ModelString->Len();
-		*ModelString += (" " + NewMessage->GetMessage().ToString());
-		ModelRange.EndIndex = ModelString->Len();
-		Runs.Add(FSlateTextRun::Create(FRunInfo(), ModelString, MessageTextStyle, ModelRange));
+		FString MessageString = NewMessage->GetMessage().ToString();
+		TArray<FString> MessageLines;
+		MessageString.ParseIntoArrayLines(MessageLines);
 
-		TextLayout->AddLine(ModelString, Runs);
+		if(MessageLines.Num())
+		{
+			ModelRange.BeginIndex = ModelString->Len();
+			*ModelString += MessageLines[0];
+			ModelRange.EndIndex = ModelString->Len();
+			Runs.Add(FSlateTextRun::Create(FRunInfo(), ModelString, HighlightedTextStyle, ModelRange));
+			TextLayout->AddLine(ModelString, Runs);
+		}
+
+		for (int32 Range = 1; Range < MessageLines.Num(); Range++)
+		{
+			TSharedRef<FString> LineString = MakeShareable(new FString(MessageLines[Range]));
+			TArray< TSharedRef< IRun > > LineRun;
+			FTextRange LineRange;
+			LineRange.BeginIndex = 0;
+			LineRange.EndIndex = LineString->Len();
+			LineRun.Add(FSlateTextRun::Create(FRunInfo(), LineString, HighlightedTextStyle, LineRange));
+			TextLayout->AddLine(LineString, LineRun);
+		}
+
 		return true;
 	}
 
@@ -184,6 +220,9 @@ protected:
 		case EChatMessageType::Whisper: 
 			HyperlinkStyle = TEXT("UserNameTextStyle.Whisperlink"); 
 			break;
+		case EChatMessageType::Party:
+			HyperlinkStyle = TEXT("UserNameTextStyle.PartyHyperlink");
+			break;
 		case EChatMessageType::Game: 
 			HyperlinkStyle = TEXT("UserNameTextStyle.GameHyperlink"); 
 			break;
@@ -202,6 +241,9 @@ protected:
 		case EChatMessageType::Whisper: 
 			RoomName = TEXT("[w]");
 			break;
+		case EChatMessageType::Party:
+			RoomName = TEXT("[p]");
+			break;
 		case EChatMessageType::Game: 
 			RoomName = TEXT("[p]");
 			break;
@@ -211,6 +253,24 @@ protected:
 		}
 
 		return RoomName;
+	}
+
+	const FLinearColor GetChatColor(EChatMessageType::Type MessageType)
+	{
+		switch (MessageType)
+		{
+		case EChatMessageType::Global: 
+			return DecoratorStyleSet->FriendsChatStyle.GlobalChatColor; 
+		case EChatMessageType::Whisper: 
+			return DecoratorStyleSet->FriendsChatStyle.WhisperChatColor; 
+		case EChatMessageType::Party:
+			return DecoratorStyleSet->FriendsChatStyle.PartyChatColor; 
+		case EChatMessageType::Game: 
+			return DecoratorStyleSet->FriendsChatStyle.GameChatColor;
+		case EChatMessageType::Admin: 
+			return DecoratorStyleSet->FriendsChatStyle.AdminChatColor; 
+		}
+		return DecoratorStyleSet->FriendsChatStyle.DefaultChatColor;
 	}
 
 	FString GetSenderName(TSharedPtr<FChatItemViewModel> ChatItem)

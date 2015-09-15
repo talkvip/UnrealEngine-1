@@ -47,6 +47,11 @@ public:
 	/** Access the underlying tree data */
 	TSharedPtr<FSequencerNodeTree> GetNodeTree() { return SequencerNodeTree; }
 
+public:
+
+	/** Get the display node at the specified physical vertical position */
+	TSharedPtr<FSequencerDisplayNode> HitTestNode(float InPhysical) const;
+
 	/** Convert the specified physical vertical position into an absolute virtual position, ignoring expanded states */
 	float PhysicalToVirtual(float InPhysical) const;
 
@@ -55,16 +60,30 @@ public:
 	 */
 	float VirtualToPhysical(float InVirtual) const;
 
+public:
+
 	/** Refresh this tree as a result of the underlying tree data changing */
 	void Refresh();
 
+	/** Expand or collapse nodes */
+	void ToggleExpandCollapseNodes(ETreeRecursion Recursion = ETreeRecursion::Recursive);
+
+	/** Expand nodes */
+	void ExpandNodes(ETreeRecursion Recursion = ETreeRecursion::Recursive);
+
+	/** Collapse nodes */
+	void CollapseNodes(ETreeRecursion Recursion = ETreeRecursion::Recursive);
+
 	/** Expand or collapse selected nodes */
-	void ToggleSelectedNodeExpansion(ETreeRecursion Recursion);
+	void ExpandSelectedNodes(ETreeRecursion Recursion);
 
 	/** Scroll this tree view by the specified number of slate units */
 	void ScrollByDelta(float DeltaInSlateUnits);
 
 protected:
+
+	/** Expand or collapse nodes */
+	void ExpandOrCollapseNodes(ETreeRecursion Recursion, bool bExpand);
 
 	/** Set the item's expansion state, including all of its children */
 	void ExpandCollapseNode(const FDisplayNodeRef& InNode, bool bExpansionState, ETreeRecursion Recursion);
@@ -99,6 +118,9 @@ public:
 		FDisplayNodeRef Node;
 		float PhysicalTop, PhysicalHeight;
 	};
+
+	/** Access all the physical nodes currently visible on the sequencer */
+	const TArray<FCachedGeometry>& GetAllVisibleNodes() const { return PhysicalNodes; }
 
 	/** Retrieve the last reported physical geometry for the specified node, if available */
 	TOptional<FCachedGeometry> GetPhysicalGeometryForNode(const FDisplayNodeRef& InNode) const;

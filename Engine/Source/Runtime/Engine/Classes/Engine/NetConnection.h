@@ -122,12 +122,6 @@ struct DelayedPacket
 };
 #endif
 
-// The interval between ack packets, which is used to decide which acks are used for ping validation checks (must be power of two)
-#define PING_ACK_PACKET_INTERVAL 16
-
-// Used by the client, for setting a minimum delay between PingAck's
-//	(optionally, 'PING_ACK_PACKET_INTERVAL' can be tweaked, so that the interval checks take a similar amount of time as this delay)
-#define PING_ACK_DELAY 0.5
 
 UCLASS(customConstructor, Abstract, MinimalAPI, transient, config=Engine)
 class UNetConnection : public UPlayer
@@ -203,7 +197,7 @@ public:
 
 	EConnectionState	State;					// State this connection is in.
 	
-	uint32 bPendingDestroy:1;    // when true, playercontroller is being destroyed
+	uint32 bPendingDestroy:1;    // when true, playercontroller or beaconclient is being destroyed
 
 	// Packet Handler
 	TUniquePtr<PacketHandler> Handler;
@@ -231,6 +225,8 @@ public:
 	// Internal.
 	UPROPERTY()
 	double			LastReceiveTime;		// Last time a packet was received, for timeout checking.
+	double			LastReceiveRealtime;	// Last time a packet was received, using real time seconds (FPlatformTime::Seconds)
+	double			LastGoodPacketRealtime;	// Last real time a packet was considered valid
 	double			LastSendTime;			// Last time a packet was sent, for keepalives.
 	double			LastTickTime;			// Last time of polling.
 	int32			QueuedBytes;			// Bytes assumed to be queued up.
@@ -276,9 +272,7 @@ public:
 	int32			OutPacketId;			// Most recently sent packet.
 	int32 			OutAckPacketId;			// Most recently acked outgoing packet.
 
-	uint32			PingAckDataCache[MAX_PACKETID/PING_ACK_PACKET_INTERVAL];	// Caches packet data on the server, for verifying pings
-	float			LastPingAck;												// The time of the most recent PingAck on the client
-	int32			LastPingAckPacketId;										// The PacketId of the last PingAck, on the server
+	bool			bLastHasServerFrameTime;
 
 	// Channel table.
 	class UChannel*		Channels		[ MAX_CHANNELS ];
@@ -367,7 +361,7 @@ public:
 	// Constructors and destructors.
 	ENGINE_API UNetConnection(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get());
 
-	// Begin UObject interface.
+	//~ Begin UObject Interface.
 
 	ENGINE_API virtual void Serialize( FArchive& Ar ) override;
 
@@ -382,14 +376,14 @@ public:
 	 */
 	ENGINE_API virtual UWorld* GetWorld() const override;
 
-	// End UObject interface.
+	//~ End UObject Interface.
 
 
-	// Begin FExec interface.
+	//~ Begin FExec Interface.
 
 	ENGINE_API virtual bool Exec( UWorld* InWorld, const TCHAR* Cmd, FOutputDevice& Ar=*GLog ) override;
 
-	// End FExec interface.
+	//~ End FExec Interface.
 
 	/** read input */
 	void ReadInput( float DeltaSeconds );
@@ -411,6 +405,9 @@ public:
 	/** @return the description of connection */
 	virtual FString LowLevelDescribe() PURE_VIRTUAL(UNetConnection::LowLevelDescribe,return TEXT(""););
 
+	/** Describe the connection. */
+	ENGINE_API virtual FString Describe();
+
 	/**
 	 * Sends a byte stream to the remote endpoint using the underlying socket
 	 *
@@ -429,7 +426,7 @@ public:
 	ENGINE_API virtual void AssertValid();
 
 	/** Send an acknowledgment. */
-	ENGINE_API virtual void SendAck( int32 PacketId, bool FirstTime=1, bool bHavePingAckData=0, uint32 PingAckData=0 );
+	ENGINE_API virtual void SendAck( int32 PacketId, bool FirstTime=1);
 
 	/**
 	 * flushes any pending data, bundling it into a packet and sending it via LowLevelSend()

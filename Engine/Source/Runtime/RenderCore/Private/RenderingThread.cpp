@@ -309,6 +309,14 @@ void RenderingThreadMain( FEvent* TaskGraphBoundSyncEvent )
 	FTaskGraphInterface::Get().ProcessThreadUntilRequestReturn(ENamedThreads::RenderThread);
 	FPlatformMisc::MemoryBarrier();
 	check(!GIsThreadedRendering);
+	
+#if STATS
+	if (FThreadStats::WillEverCollectData())
+	{
+		FThreadStats::ExplicitFlush(); // Another explicit flush to clean up the ScopeCount established above for any stats lingering since the last frame
+	}
+#endif
+	
 	ENamedThreads::RenderThread = ENamedThreads::GameThread;
 	ENamedThreads::RenderThread_Local = ENamedThreads::GameThread_Local;
 	FPlatformMisc::MemoryBarrier();
@@ -908,7 +916,7 @@ FRHICommandListImmediate& GetImmediateCommandList_ForRenderCommand()
 }
 
 /** The set of deferred cleanup objects which are pending cleanup. */
-static TLockFreePointerList<FDeferredCleanupInterface>	PendingCleanupObjectsList;
+static TLockFreePointerListUnordered<FDeferredCleanupInterface>	PendingCleanupObjectsList;
 
 FPendingCleanupObjects::FPendingCleanupObjects()
 {

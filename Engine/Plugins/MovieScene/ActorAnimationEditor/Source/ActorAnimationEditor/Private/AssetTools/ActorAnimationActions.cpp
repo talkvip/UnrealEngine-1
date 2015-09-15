@@ -46,12 +46,6 @@ FColor FActorAnimationActions::GetTypeColor() const
 
 void FActorAnimationActions::OpenAssetEditor(const TArray<UObject*>& InObjects, TSharedPtr<IToolkitHost> EditWithinLevelEditor)
 {
-	// @todo sequencer: Only allow users to create new MovieScenes if that feature is turned on globally.
-	if (!FParse::Param(FCommandLine::Get(), TEXT("Sequencer")))
-	{
-		return;
-	}
-
 	EToolkitMode::Type Mode = EditWithinLevelEditor.IsValid()
 		? EToolkitMode::WorldCentric
 		: EToolkitMode::Standalone;
@@ -62,9 +56,8 @@ void FActorAnimationActions::OpenAssetEditor(const TArray<UObject*>& InObjects, 
 
 		if (ActorAnimation != nullptr)
 		{
-			FSequencerViewParams ViewParams(TEXT("ActorAnimationEditorViewParams"));
 			TSharedRef<FActorAnimationEditorToolkit> Toolkit = MakeShareable(new FActorAnimationEditorToolkit(Style));
-			Toolkit->Initialize(Mode, ViewParams, EditWithinLevelEditor, ActorAnimation, true);
+			Toolkit->Initialize(Mode, EditWithinLevelEditor, ActorAnimation, true);
 		}
 	}
 }

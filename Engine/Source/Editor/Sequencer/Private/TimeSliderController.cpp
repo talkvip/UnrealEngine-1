@@ -303,7 +303,18 @@ int32 FSequencerTimeSliderController::OnPaintTimeSlider( bool bMirrorLabels, con
 		FString FrameString;
 		if (SequencerSnapValues::IsTimeSnapIntervalFrameRate(TimeSliderArgs.Settings->GetTimeSnapInterval()) && TimeSliderArgs.Settings->GetShowFrameNumbers())
 		{
-			FrameString = FString::Printf( TEXT("%d"), TimeToFrame(Time));
+			float FrameRate = 1.0f/TimeSliderArgs.Settings->GetTimeSnapInterval();
+			float FrameTime = Time * FrameRate;
+			int32 Frame = SequencerHelpers::TimeToFrame(Time, FrameRate);
+					
+			if (FMath::IsNearlyEqual(FrameTime, (float)Frame, KINDA_SMALL_NUMBER))
+			{
+				FrameString = FString::Printf( TEXT("%d"), TimeToFrame(Time));
+			}
+			else
+			{
+				FrameString = FString::Printf( TEXT("%.3f"), FrameTime);
+			}
 		}
 		else
 		{
@@ -443,7 +454,7 @@ FReply FSequencerTimeSliderController::OnMouseButtonUp( TSharedRef<SWidget> Widg
 					NewValue = LastRange[1];
 				}
 
-				TimeSliderArgs.OnViewRangeChanged.ExecuteIfBound(TRange<float>(DownValue, NewValue), EViewRangeInterpolation::Immediate);
+				TimeSliderArgs.OnViewRangeChanged.ExecuteIfBound(TRange<float>(DownValue, NewValue), EViewRangeInterpolation::Immediate, false);
 						
 				if( !TimeSliderArgs.ViewRange.IsBound() )
 				{	
@@ -534,10 +545,8 @@ FReply FSequencerTimeSliderController::OnMouseMove( TSharedRef<SWidget> WidgetOw
 					{
 						NewValue = TimeSliderArgs.Settings->SnapTimeToInterval(NewValue);
 					}
-
-					// Clamp to the view range so that you can't scroll beyond the current view range. This doesn't conflict with auto-scroll because the view range will grow before you get to the bounds.
-					NewValue = FMath::Clamp(NewValue, TimeSliderArgs.ViewRange.Get().GetLowerBoundValue(), TimeSliderArgs.ViewRange.Get().GetUpperBoundValue());
-
+					
+					// Delegate responsibility for clamping to the current viewrange to the client
 					CommitScrubPosition( NewValue, /*bIsScrubbing=*/true );
 				}
 				else if (MouseDragType == DRAG_SETTING_RANGE)
@@ -657,7 +666,7 @@ float FSequencerTimeSliderController::FrameToTime(int32 Frame) const
 void FSequencerTimeSliderController::ClampViewRange(float& NewRangeMin, float& NewRangeMax, bool bMaintainRange)
 {
 	// If locked, clamp the new range to clamp range
-	if (TimeSliderArgs.Settings->GetLockInOutToStartEndRange())
+	if (TimeSliderArgs.Settings->GetShowRangeSlider() && TimeSliderArgs.Settings->GetLockInOutToStartEndRange())
 	{
 		if (bMaintainRange)
 		{
@@ -708,7 +717,7 @@ void FSequencerTimeSliderController::SetViewRange( float NewRangeMin, float NewR
 {
 	const TRange<float> NewRange(NewRangeMin, NewRangeMax);
 
-	TimeSliderArgs.OnViewRangeChanged.ExecuteIfBound( NewRange, Interpolation );
+	TimeSliderArgs.OnViewRangeChanged.ExecuteIfBound( NewRange, Interpolation, false );
 
 	if( !TimeSliderArgs.ViewRange.IsBound() )
 	{	

@@ -59,7 +59,8 @@ protected:
 		FString UATCommandLine;
 		FString ProjectPath = *ChainState.Profile->GetProjectPath();
 		ProjectPath = FPaths::ConvertRelativePathToFull(ProjectPath);
-		UATCommandLine = FString::Printf(TEXT("BuildCookRun -project=\"%s\" -noP4 -clientconfig=%s -serverconfig=%s"),
+		UATCommandLine = FString::Printf(TEXT("-ScriptsForProject=\"%s\" BuildCookRun -project=\"%s\" -noP4 -clientconfig=%s -serverconfig=%s"),
+			*ProjectPath,
 			*ProjectPath,
 			*ConfigStrings[ChainState.Profile->GetBuildConfiguration()],
 			*ConfigStrings[ChainState.Profile->GetBuildConfiguration()]);
@@ -75,6 +76,12 @@ protected:
 		if(EditorExe.Len() > 0)
 		{
 			UATCommandLine += FString::Printf(TEXT(" -ue4exe=\"%s\""), *EditorExe);
+
+			bool bRunningDebug = FParse::Param(FCommandLine::Get(), TEXT("debug"));
+			if (bRunningDebug)
+			{
+				UATCommandLine += TEXT(" -UseDebugParamForEditorExe");
+			}
 		}
 
 		// specialized command arguments for this particular task

@@ -15,7 +15,7 @@ PACKAGE_SCOPE:
 
 public:
 
-	// Begin IOnlineExternalUI interface
+	//~ Begin IOnlineExternalUI Interface
 	virtual bool ShowLoginUI(const int ControllerIndex, bool bShowOnlineOnly, const FOnLoginUIClosedDelegate& Delegate) override;
 	virtual bool ShowFriendsUI(int32 LocalUserNum) override;
 	virtual bool ShowInviteUI(int32 LocalUserNum, FName SessionMame = GameSessionName) override;
@@ -24,10 +24,14 @@ public:
 	virtual bool ShowWebURL(const FString& WebURL) override;
 	virtual bool ShowProfileUI(const FUniqueNetId& Requestor, const FUniqueNetId& Requestee, const FOnProfileUIClosedDelegate& Delegate) override;
 	virtual bool ShowAccountUpgradeUI(const FUniqueNetId& UniqueId) override;
-	// End IOnlineExternalUI interface
+	//~ End IOnlineExternalUI Interface
 	
 private:
 	FOnlineSubsystemIOS* Subsystem;
+	FDelegateHandle CompleteDelegate;
+	FOnLoginUIClosedDelegate CopiedDelegate;
+
+    void OnLoginComplete(int ControllerIndex, bool bWasSuccessful, const FUniqueNetId& UserId, const FString& ErrorString);
 };
 
 typedef TSharedPtr<FOnlineExternalUIIOS, ESPMode::ThreadSafe> FOnlineExternalUIIOSPtr;

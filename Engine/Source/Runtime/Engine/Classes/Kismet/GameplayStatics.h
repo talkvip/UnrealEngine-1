@@ -34,7 +34,7 @@ class ENGINE_API UGameplayStatics : public UBlueprintFunctionLibrary
 	UFUNCTION(BlueprintCallable, Category = "Spawning", meta = (BlueprintInternalUseOnly = "true"))
 	static UObject* SpawnObject(TSubclassOf<UObject> ObjectClass, UObject* Outer);
 
-	static bool CanSpawnObjectOfClass(TSubclassOf<UObject> ObjectClass);
+	static bool CanSpawnObjectOfClass(TSubclassOf<UObject> ObjectClass, bool bAllowAbstract = false);
 
 	// --- Spawning functions ------------------------------
 
@@ -172,14 +172,14 @@ class ENGINE_API UGameplayStatics : public UBlueprintFunctionLibrary
 	static class UClass *GetObjectClass(const UObject *Object);
 
 	/**
-	 * Sets the global time dilation
-	 * @param	TimeDilation	value to set the global time dilation to
+	 * Gets the current global time dilation.
+	 * @return Current time dilation.
 	 */
 	UFUNCTION(BlueprintPure, Category="Utilities|Time", meta=(WorldContext="WorldContextObject") )
 	static float GetGlobalTimeDilation(UObject* WorldContextObject);
 
 	/**
-	 * Sets the global time dilation
+	 * Sets the global time dilation.
 	 * @param	TimeDilation	value to set the global time dilation to
 	 */
 	UFUNCTION(BlueprintCallable, Category="Utilities|Time", meta=(WorldContext="WorldContextObject") )
@@ -303,11 +303,23 @@ class ENGINE_API UGameplayStatics : public UBlueprintFunctionLibrary
 	UFUNCTION(BlueprintCallable, Category = "Audio", meta = (WorldContext = "WorldContextObject"))
 	static bool AreAnyListenersWithinRange(UObject* WorldContextObject, FVector Location, float MaximumRange);
 	
+
+	/**
+	* Sets a global pitch modulation scalar that will apply to all non-UI sounds
+	*
+	* * Fire and Forget.
+	* * Not Replicated.
+	* @param PitchModulation - A pitch modulation value to globally set.
+	* @param TimeSec - A time value to linearly interpolate the global modulation pitch over from it's current value.
+	*/
+	UFUNCTION(BlueprintCallable, BlueprintCosmetic, Category = "Audio", meta = (WorldContext = "WorldContextObject"))
+	static void SetGlobalPitchModulation(UObject* WorldContextObject, float PitchModulation, float TimeSec);
+
 	/**
 	 * Plays a sound directly with no attenuation, perfect for UI sounds.
 	 *
-	 * ● Fire and Forget.
-	 * ● Not Replicated.
+	 * * Fire and Forget.
+	 * * Not Replicated.
 	 * @param Sound - Sound to play.
 	 * @param VolumeMultiplier - Multiplied with the volume to make the sound louder or softer.
 	 * @param PitchMultiplier - Multiplies the pitch.
@@ -319,7 +331,7 @@ class ENGINE_API UGameplayStatics : public UBlueprintFunctionLibrary
 	/**
 	 * Spawns a sound with no attenuation, perfect for UI sounds.
 	 *
-	 * ● Not Replicated.
+	 * * Not Replicated.
 	 * @param Sound - Sound to play.
 	 * @param VolumeMultiplier - Multiplied with the volume to make the sound louder or softer.
 	 * @param PitchMultiplier - Multiplies the pitch.
@@ -392,8 +404,8 @@ class ENGINE_API UGameplayStatics : public UBlueprintFunctionLibrary
 	/**
 	 * Plays a dialogue directly with no attenuation, perfect for UI.
 	 *
-	 * ● Fire and Forget.
-	 * ● Not Replicated.
+	 * * Fire and Forget.
+	 * * Not Replicated.
 	 * @param Dialogue - dialogue to play
 	 * @param Context - context the dialogue is to play in
 	 * @param VolumeMultiplier - Multiplied with the volume to make the sound louder or softer.
@@ -406,7 +418,7 @@ class ENGINE_API UGameplayStatics : public UBlueprintFunctionLibrary
 	/**
 	 * Spawns a dialogue with no attenuation, perfect for UI.
 	 *
-	 * ● Not Replicated.
+	 * * Not Replicated.
 	 * @param Dialogue - dialogue to play
 	 * @param Context - context the dialogue is to play in
 	 * @param VolumeMultiplier - Multiplied with the volume to make the sound louder or softer.
@@ -616,8 +628,8 @@ class ENGINE_API UGameplayStatics : public UBlueprintFunctionLibrary
 	UFUNCTION(BlueprintCallable, Category = "Game")
 	static bool DeleteGameInSlot(const FString& SlotName, const int32 UserIndex);
 
-	/** Returns the frame delta time in seconds adjusted by e.g. time dilation. */
-	UFUNCTION(BlueprintPure, Category = "Utilities|Time", meta = (HidePin = "WorldContextObject", DefaultToSelf = "WorldContextObject"))
+	/** Returns the frame delta time in seconds, adjusted by time dilation. */
+	UFUNCTION(BlueprintPure, Category = "Utilities|Time", meta = (WorldContext="WorldContextObject"))
 	static float GetWorldDeltaSeconds(UObject* WorldContextObject);
 
 	/** Returns time in seconds since world was brought up for play, does NOT stop when game pauses, NOT dilated/clamped */
@@ -631,7 +643,7 @@ class ENGINE_API UGameplayStatics : public UBlueprintFunctionLibrary
 	UFUNCTION(BlueprintPure, Category="Utilities|Time", meta=(WorldContext="WorldContextObject"))
 	static void GetAccurateRealTime(UObject* WorldContextObject, int32& Seconds, float& PartialSeconds);
 
-	/** DVRStreaming API */
+	/*~ DVRStreaming API */
 	
 	/**
 	 * Toggle live DVR streaming.
@@ -665,32 +677,32 @@ class ENGINE_API UGameplayStatics : public UBlueprintFunctionLibrary
 	/** Native version, has more options than the Blueprint version. */
 	static bool SuggestProjectileVelocity(UObject* WorldContextObject, FVector& TossVelocity, FVector StartLocation, FVector EndLocation, float TossSpeed, bool bHighArc = false, float CollisionRadius = 0.f, float OverrideGravityZ = 0, ESuggestProjVelocityTraceOption::Type TraceOption = ESuggestProjVelocityTraceOption::TraceFullPath, const FCollisionResponseParams& ResponseParam = FCollisionResponseParams::DefaultResponseParam, const TArray<AActor*>& ActorsToIgnore = TArray<AActor*>(), bool bDrawDebug = false);
 
-	/** Returns world origin current location */
+	/** Returns world origin current location. */
 	UFUNCTION(BlueprintPure, Category="Game", meta=(WorldContext="WorldContextObject") )
 	static FIntVector GetWorldOriginLocation(UObject* WorldContextObject);
 	
-	/** Requests a new location for a world origin */
+	/** Requests a new location for a world origin. */
 	UFUNCTION(BlueprintCallable, Category="Game", meta=(WorldContext="WorldContextObject"))
 	static void SetWorldOriginLocation(UObject* WorldContextObject, FIntVector NewLocation);
 
 	/**
 	* Counts how many grass foliage instances overlap a given sphere.
 	*
-	* @param	Mesh			The static mesh we are interested in counting
-	* @param	CenterPosition	The center position of the sphere
+	* @param	Mesh			The static mesh we are interested in counting.
+	* @param	CenterPosition	The center position of the sphere.
 	* @param	Radius			The radius of the sphere.
 	*
-	* @return number of foliage instances with their mesh set to Mesh that overlap the sphere
+	* @return Number of foliage instances with their mesh set to Mesh that overlap the sphere.
 	*/
 	UFUNCTION(BlueprintCallable, Category = "Foliage", meta = (WorldContext = "WorldContextObject", UnsafeDuringActorConstruction = "true"))
 	static int32 GrassOverlappingSphereCount(UObject* WorldContextObject, const UStaticMesh* StaticMesh, FVector CenterPosition, float Radius);
 
 	/** 
-	 * Transforms the given 2D screen space coordinate into a 3D world-space point and direction
+	 * Transforms the given 2D screen space coordinate into a 3D world-space point and direction.
 	 * @param Player			Deproject using this player's view.
-	 * @param ScreenPosition	2D screen space to deproject
-	 * @param WorldPosition		(out) Corresponding 3D position in world space
-	 * @param WorldDirection	(out) World space direction vector away from the camera at the given 2d poiunt
+	 * @param ScreenPosition	2D screen space to deproject.
+	 * @param WorldPosition		(out) Corresponding 3D position in world space.
+	 * @param WorldDirection	(out) World space direction vector away from the camera at the given 2d poiunt.
 	 */
 	UFUNCTION(BlueprintPure, Category = "Utilities", meta = (Keywords = "unproject"))
 	static bool DeprojectScreenToWorld(APlayerController const* Player, const FVector2D& ScreenPosition, FVector& WorldPosition, FVector& WorldDirection);
@@ -704,10 +716,10 @@ class ENGINE_API UGameplayStatics : public UBlueprintFunctionLibrary
 	UFUNCTION(BlueprintPure, Category = "Utilities")
 	static bool ProjectWorldToScreen(APlayerController const* Player, const FVector& WorldPosition, FVector2D& ScreenPosition);
 
-	// Utility functions for interacting with Options strings
+	//~ Utility functions for interacting with Options strings
 
-	//=========================================================================
-	// URL Parsing
+	//~=========================================================================
+	//~ URL Parsing
 
 	static bool GrabOption( FString& Options, FString& ResultString );
 

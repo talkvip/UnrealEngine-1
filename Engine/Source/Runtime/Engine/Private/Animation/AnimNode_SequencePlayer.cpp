@@ -8,12 +8,15 @@
 
 void FAnimNode_SequencePlayer::Initialize(const FAnimationInitializeContext& Context)
 {
-	EvaluateGraphExposedInputs.Execute(Context);
-	InternalTimeAccumulator = 0.0f;
+	FAnimNode_Base::Initialize(Context);
 
+	EvaluateGraphExposedInputs.Execute(Context);
+	InternalTimeAccumulator = StartPosition;
 	if (Sequence != NULL)
 	{
-		if ((PlayRate * Sequence->RateScale) < 0.0f)
+		InternalTimeAccumulator = FMath::Clamp(StartPosition, 0.f, Sequence->SequenceLength);
+
+		if (StartPosition == 0.f && (PlayRate * Sequence->RateScale) < 0.0f)
 		{
 			InternalTimeAccumulator = Sequence->SequenceLength;
 		}
@@ -35,6 +38,8 @@ void FAnimNode_SequencePlayer::UpdateAssetPlayer(const FAnimationUpdateContext& 
 		// Create a tick record and fill it out
 		FAnimGroupInstance* SyncGroup;
 		FAnimTickRecord& TickRecord = Context.AnimInstance->CreateUninitializedTickRecord(GroupIndex, /*out*/ SyncGroup);
+		TickRecord.SourceNodeRef = this;
+		Context.AnimInstance->InitTickRecordFromLastFrame(GroupIndex, TickRecord);
 
 		if (InternalTimeAccumulator > Sequence->SequenceLength)
 		{

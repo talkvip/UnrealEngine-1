@@ -934,34 +934,30 @@ bool UMaterialInstance::CheckMaterialUsage_Concurrent(const EMaterialUsage Usage
 					EMaterialUsage Usage;
 					bool bSkipPrim;
 					bool& bUsageSetSuccessfully;
-					FScopedEvent& Event;
 
-					FCallSMU(UMaterialInstance* InMaterial, EMaterialUsage InUsage, bool bInSkipPrim, bool& bInUsageSetSuccessfully, FScopedEvent& InEvent)
+					FCallSMU(UMaterialInstance* InMaterial, EMaterialUsage InUsage, bool bInSkipPrim, bool& bInUsageSetSuccessfully)
 						: Material(InMaterial)
 						, Usage(InUsage)
 						, bSkipPrim(bInSkipPrim)
 						, bUsageSetSuccessfully(bInUsageSetSuccessfully)
-						, Event(InEvent)
 					{
 					}
 
 					void Task()
 					{
 						bUsageSetSuccessfully = Material->CheckMaterialUsage(Usage, bSkipPrim);
-						Event.Trigger();
 					}
 				};
 				UE_LOG(LogMaterial, Warning, TEXT("Has to pass SMU back to game thread. This stalls the tasks graph, but since it is editor only, is not such a big deal."));
 
-				FScopedEvent Event;
-				FCallSMU CallSMU(const_cast<UMaterialInstance*>(this), Usage, bSkipPrim, bUsageSetSuccessfully, Event);
+				TSharedRef<FCallSMU, ESPMode::ThreadSafe> CallSMU = MakeShareable(new FCallSMU(const_cast<UMaterialInstance*>(this), Usage, bSkipPrim, bUsageSetSuccessfully));
 
 				DECLARE_CYCLE_STAT(TEXT("FSimpleDelegateGraphTask.CheckMaterialUsage"),
 					STAT_FSimpleDelegateGraphTask_CheckMaterialUsage,
 					STATGROUP_TaskGraphTasks);
 
 				FSimpleDelegateGraphTask::CreateAndDispatchWhenReady(
-					FSimpleDelegateGraphTask::FDelegate::CreateRaw(&CallSMU, &FCallSMU::Task),
+					FSimpleDelegateGraphTask::FDelegate::CreateThreadSafeSP(CallSMU, &FCallSMU::Task),
 					GET_STATID(STAT_FSimpleDelegateGraphTask_CheckMaterialUsage), NULL, ENamedThreads::GameThread_Local
 				);
 			}
@@ -996,9 +992,9 @@ bool UMaterialInstance::IsDependent(UMaterialInterface* TestDependency)
 	}
 }
 
-void UMaterialInstance::CopyMaterialInstanceParameters(UMaterialInterface* MaterialInterface)
+void UMaterialInstance::CopyMaterialInstanceParameters(UMaterialInterface* Source)
 {
-	if(MaterialInterface)
+	if(Source)
 	{
 		UMaterial* Material = GetMaterial();
 
@@ -1016,7 +1012,7 @@ void UMaterialInstance::CopyMaterialInstanceParameters(UMaterialInterface* Mater
 			FName ParameterName = Names[i];
 			UFont* FontValue = NULL;
 			int32 FontPage;
-			if(MaterialInterface->GetFontParameterValue(ParameterName, FontValue, FontPage))
+			if(Source->GetFontParameterValue(ParameterName, FontValue, FontPage))
 			{
 				FFontParameterValue* ParameterValue = new(FontParameterValues) FFontParameterValue;
 				ParameterValue->ParameterName = ParameterName;
@@ -1035,7 +1031,7 @@ void UMaterialInstance::CopyMaterialInstanceParameters(UMaterialInterface* Mater
 		{
 			FName ParameterName = Names[i];
 			float ScalarValue = 1.0f;
-			if(MaterialInterface->GetScalarParameterValue(ParameterName, ScalarValue))
+			if(Source->GetScalarParameterValue(ParameterName, ScalarValue))
 			{
 				FScalarParameterValue* ParameterValue = new(ScalarParameterValues) FScalarParameterValue;
 				ParameterValue->ParameterName = ParameterName;
@@ -1052,7 +1048,7 @@ void UMaterialInstance::CopyMaterialInstanceParameters(UMaterialInterface* Mater
 		{
 			FName ParameterName = Names[i];
 			FLinearColor VectorValue;
-			if(MaterialInterface->GetVectorParameterValue(ParameterName, VectorValue))
+			if(Source->GetVectorParameterValue(ParameterName, VectorValue))
 			{
 				FVectorParameterValue* ParameterValue = new(VectorParameterValues) FVectorParameterValue;
 				ParameterValue->ParameterName = ParameterName;
@@ -1069,7 +1065,7 @@ void UMaterialInstance::CopyMaterialInstanceParameters(UMaterialInterface* Mater
 		{
 			FName ParameterName = Names[i];
 			UTexture* TextureValue = NULL;
-			if(MaterialInterface->GetTextureParameterValue(ParameterName, TextureValue))
+			if(Source->GetTextureParameterValue(ParameterName, TextureValue))
 			{
 				FTextureParameterValue* ParameterValue = new(TextureParameterValues) FTextureParameterValue;
 				ParameterValue->ParameterName = ParameterName;
@@ -1085,7 +1081,7 @@ void UMaterialInstance::CopyMaterialInstanceParameters(UMaterialInterface* Mater
 
 FMaterialResource* UMaterialInstance::GetMaterialResource(ERHIFeatureLevel::Type InFeatureLevel, EMaterialQualityLevel::Type QualityLevel)
 {
-	check(IsInGameThread());
+	check(!IsInActualRenderingThread());
 
 	if (QualityLevel == EMaterialQualityLevel::Num)
 	{
@@ -1104,7 +1100,7 @@ FMaterialResource* UMaterialInstance::GetMaterialResource(ERHIFeatureLevel::Type
 
 const FMaterialResource* UMaterialInstance::GetMaterialResource(ERHIFeatureLevel::Type InFeatureLevel, EMaterialQualityLevel::Type QualityLevel) const
 {
-	check(IsInGameThread());
+	//check(!IsInActualRenderingThread());
 
 	if (QualityLevel == EMaterialQualityLevel::Num)
 	{
@@ -2333,12 +2329,10 @@ void UMaterialInstance::OverrideBlendableSettings(class FSceneView& View, float 
 		{
 			UMaterial* Base = Material->GetBaseMaterial();
 
-			UMaterialInstanceDynamic* MID = View.State->GetReusableMID((UMaterialInterface*)this);
+			UMaterialInstanceDynamic* MID = View.State->GetReusableMID(Base);
 
 			if(MID)
 			{
-				MID->K2_CopyMaterialInstanceParameters((UMaterialInterface*)Base);
-
 				FPostProcessMaterialNode NewNode(MID, Base->BlendableLocation, Base->BlendablePriority);
 
 				// it's the first material, no blending needed
@@ -2368,7 +2362,6 @@ void UMaterialInstance::OverrideBlendableSettings(class FSceneView& View, float 
 
 		if(MID)
 		{
-			MID->K2_CopyMaterialInstanceParameters((UMaterialInterface*)this);
 			SetTonemapperPostprocessMaterialSettings(View, *MID);
 
 			FPostProcessMaterialNode NewNode(MID, Material->BlendableLocation, Material->BlendablePriority);

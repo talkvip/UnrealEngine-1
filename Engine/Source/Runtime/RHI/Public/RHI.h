@@ -119,6 +119,9 @@ extern RHI_API bool GSupportsDepthBoundsTest;
 /** True if the RHI supports 'GetHDR32bppEncodeModeES2' shader intrinsic. */
 extern RHI_API bool GSupportsHDR32bppEncodeModeIntrinsic;
 
+/** True if the RHI supports getting the result of occlusion queries when on a thread other than the renderthread */
+extern RHI_API bool GSupportsParallelOcclusionQueries;
+
 /** The minimum Z value in clip space for the RHI. */
 extern RHI_API float GMinClipZ;
 
@@ -232,6 +235,9 @@ Requirements:
 * RHICreateBoundShaderState is threadsafe and GetCachedBoundShaderState must not be used. GetCachedBoundShaderState_Threadsafe has a slightly different protocol.
 ***/
 extern RHI_API bool GRHISupportsParallelRHIExecute;
+
+/** Whether or not the RHI can perform MSAA sample load. */
+extern RHI_API bool GRHISupportsMSAADepthSampleAccess;
 
 /** Called once per frame only from within an RHI. */
 extern RHI_API void RHIPrivateBeginFrame();
@@ -823,8 +829,8 @@ struct FClearValueBinding
 			if (ColorBinding == EClearBinding::EDepthStencilBound)
 			{
 				return
-					Value.DSValue.Depth == Value.DSValue.Depth &&
-					Value.DSValue.Stencil == Value.DSValue.Stencil;
+					Value.DSValue.Depth == Other.Value.DSValue.Depth &&
+					Value.DSValue.Stencil == Other.Value.DSValue.Stencil;
 			}
 			return true;
 		}
@@ -1179,10 +1185,10 @@ extern RHI_API void RHIExit();
 // the following helper macros allow to safely convert shader types without much code clutter
 #define GETSAFERHISHADER_PIXEL(Shader) (Shader ? Shader->GetPixelShader() : (FPixelShaderRHIParamRef)FPixelShaderRHIRef())
 #define GETSAFERHISHADER_VERTEX(Shader) (Shader ? Shader->GetVertexShader() : (FVertexShaderRHIParamRef)FVertexShaderRHIRef())
-#define GETSAFERHISHADER_HULL(Shader) (Shader ? Shader->GetHullShader() : FHullShaderRHIRef())
-#define GETSAFERHISHADER_DOMAIN(Shader) (Shader ? Shader->GetDomainShader() : FDomainShaderRHIRef())
-#define GETSAFERHISHADER_GEOMETRY(Shader) (Shader ? Shader->GetGeometryShader() : FGeometryShaderRHIRef())
-#define GETSAFERHISHADER_COMPUTE(Shader) (Shader ? Shader->GetComputeShader() : FComputeShaderRHIRef())
+#define GETSAFERHISHADER_HULL(Shader) (Shader ? Shader->GetHullShader() : (FHullShaderRHIParamRef)FHullShaderRHIRef())
+#define GETSAFERHISHADER_DOMAIN(Shader) (Shader ? Shader->GetDomainShader() : (FDomainShaderRHIParamRef)FDomainShaderRHIRef())
+#define GETSAFERHISHADER_GEOMETRY(Shader) (Shader ? Shader->GetGeometryShader() : (FGeometryShaderRHIParamRef)FGeometryShaderRHIRef())
+#define GETSAFERHISHADER_COMPUTE(Shader) (Shader ? Shader->GetComputeShader() : (FComputeShaderRHIParamRef)FComputeShaderRHIRef())
 
 // RHI utility functions that depend on the RHI definitions.
 #include "RHIUtilities.h"

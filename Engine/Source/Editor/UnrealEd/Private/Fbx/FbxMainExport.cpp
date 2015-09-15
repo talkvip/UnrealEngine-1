@@ -127,10 +127,10 @@ void FFbxExporter::CreateDocument()
 	SceneInfo->mSubject = "Export FBX meshes from Unreal";
 	SceneInfo->Original_ApplicationVendor.Set( "Epic Games" );
 	SceneInfo->Original_ApplicationName.Set( "Unreal Engine" );
-	SceneInfo->Original_ApplicationVersion.Set( TCHAR_TO_UTF8(*GEngineVersion.ToString()) );
+	SceneInfo->Original_ApplicationVersion.Set( TCHAR_TO_UTF8(*FEngineVersion::Current().ToString()) );
 	SceneInfo->LastSaved_ApplicationVendor.Set( "Epic Games" );
 	SceneInfo->LastSaved_ApplicationName.Set( "Unreal Engine" );
-	SceneInfo->LastSaved_ApplicationVersion.Set( TCHAR_TO_UTF8(*GEngineVersion.ToString()) );
+	SceneInfo->LastSaved_ApplicationVersion.Set( TCHAR_TO_UTF8(*FEngineVersion::Current().ToString()) );
 
 	Scene->SetSceneInfo(SceneInfo);
 	
@@ -234,8 +234,8 @@ void FFbxExporter::CreateAnimatableUserProperty(FbxNode* Node, float Value, cons
 	// Add one user property for recording the animation
 	FbxProperty IntensityProp = FbxProperty::Create(Node, FbxFloatDT, Name, Label);
 	IntensityProp.Set(Value);
-	IntensityProp.ModifyFlag(FbxPropertyAttr::eUserDefined, true);
-	IntensityProp.ModifyFlag(FbxPropertyAttr::eAnimatable, true);
+	IntensityProp.ModifyFlag(FbxPropertyFlags::eUserDefined, true);
+	IntensityProp.ModifyFlag(FbxPropertyFlags::eAnimatable, true);
 }
 
 /**
@@ -280,10 +280,10 @@ void FFbxExporter::ExportLevelMesh( ULevel* InLevel, AMatineeActor* InMatineeAct
 		World = CastChecked<UWorld>( InLevel->GetOuter() );
 	}
 	check(World);
-	int32 ActorCount = World->GetCurrentLevel()->Actors.Num();
+	int32 ActorCount = InLevel->Actors.Num();
 	for (int32 ActorIndex = 0; ActorIndex < ActorCount; ++ActorIndex)
 	{
-		AActor* Actor = World->GetCurrentLevel()->Actors[ActorIndex];
+		AActor* Actor = InLevel->Actors[ActorIndex];
 		if ( Actor != NULL && ( !bSelectedOnly || ( bSelectedOnly && Actor->IsSelected() ) ) )
 		{
 			if (Actor->IsA(ALight::StaticClass()))

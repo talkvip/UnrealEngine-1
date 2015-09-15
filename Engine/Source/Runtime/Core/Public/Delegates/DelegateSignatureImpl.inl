@@ -1753,6 +1753,7 @@ protected:
 		return AddInternal(InDelegateInstance);
 	}
 
+public:
 	/**
 	 * Broadcasts this delegate to all bound objects, except to those that may have expired.
 	 *
@@ -1764,7 +1765,7 @@ protected:
 
 		LockInvocationList();
 		{
-			const TArray<IDelegateInstance*>& InvocationList = GetInvocationList();
+			const TInvocationList& InvocationList = GetInvocationList();
 
 			// call bound functions in reverse order, so we ignore any instances that may be added by callees
 			for (int32 InvocationListIndex = InvocationList.Num() - 1; InvocationListIndex >= 0; --InvocationListIndex)
@@ -1786,6 +1787,7 @@ protected:
 		}
 	}
 
+protected:
 	/**
 	 * Removes a function from this multi-cast delegate's invocation list (performance is O(N)).
 	 *
@@ -1796,7 +1798,7 @@ protected:
 	 */
 	void RemoveDelegateInstance( FDelegateHandle Handle )
 	{
-		const TArray<IDelegateInstance*>& InvocationList = GetInvocationList();
+		const TInvocationList& InvocationList = GetInvocationList();
 
 		// NOTE: We assume that this method is never called with a nullptr object, in which case the
 		//       the following algorithm would break down (it would remove the first found instance
@@ -1877,14 +1879,6 @@ public:
 	inline void Clear()
 	{
 		return Super::Clear();
-	}
-
-	/**
-	 * Broadcasts this delegate to all bound objects, except to those that may have expired
-	 */
-	inline void Broadcast( FUNC_PARAM_LIST ) const
-	{
-		return Super::Broadcast( FUNC_PARAM_PASSTHRU );
 	}
 
 private: 

@@ -175,7 +175,7 @@ UGameViewportClient::~UGameViewportClient()
 {
 	if (EngineShowFlags.Collision)
 	{
-		EngineShowFlags.Collision = false;
+		EngineShowFlags.SetCollision(false);
 		ToggleShowCollision();
 	}
 
@@ -567,9 +567,9 @@ bool UGameViewportClient::RequiresUncapturedAxisInput() const
 		{
 			bRequired = true;
 		}
-		else if (GetWorld() && GetWorld()->GetFirstPlayerController())
+		else if (GameInstance && GameInstance->GetFirstLocalPlayerController())
 		{
-			bRequired = GetWorld()->GetFirstPlayerController()->ShouldShowMouseCursor();
+			bRequired = GameInstance->GetFirstLocalPlayerController()->ShouldShowMouseCursor();
 		}
 	}
 
@@ -610,9 +610,9 @@ EMouseCursor::Type UGameViewportClient::GetCursor(FViewport* InViewport, int32 X
 	}
 	else if ( /*(!bIsPlayingMovie) && */(InViewport->IsFullscreen() || !bIsWithinTitleBar) ) //bIsPlayingMovie has always false value
 	{
-		if (GetWorld() && GetWorld()->GetFirstPlayerController())
+		if (GameInstance && GameInstance->GetFirstLocalPlayerController())
 		{
-			return GetWorld()->GetFirstPlayerController()->GetMouseCursor();
+			return GameInstance->GetFirstLocalPlayerController()->GetMouseCursor();
 		}
 
 		return EMouseCursor::None;
@@ -751,9 +751,9 @@ bool UGameViewportClient::ShouldForceFullscreenViewport() const
 		{
 			bResult = true;
 		}
-		else
+		else if ( GameInstance )
 		{
-			APlayerController* PlayerController = GetWorld()->GetFirstPlayerController();
+			APlayerController* PlayerController = GameInstance->GetFirstLocalPlayerController();
 			if( ( PlayerController ) && ( PlayerController->bCinematicMode ) )
 			{
 				bResult = true;
@@ -826,6 +826,11 @@ void UGameViewportClient::Draw(FViewport* InViewport, FCanvas* SceneCanvas)
 		GetWorld()->Scene,
 		EngineShowFlags)
 		.SetRealtimeUpdate(true));
+
+	if (GEngine->ViewExtensions.Num())
+	{
+		ViewFamily.ViewExtensions.Append(GEngine->ViewExtensions.GetData(), GEngine->ViewExtensions.Num());
+	}
 
 	// Allow HMD to modify the view later, just before rendering
 	if (GEngine->HMDDevice.IsValid() && GEngine->IsStereoscopic3D(InViewport))
@@ -2293,9 +2298,10 @@ bool UGameViewportClient::HandleShowCommand( const TCHAR* Cmd, FOutputDevice& Ar
 	return true;
 }
 
-TOptional<EPopupMethod> UGameViewportClient::OnQueryPopupMethod() const
+FPopupMethodReply UGameViewportClient::OnQueryPopupMethod() const
 {
-	return EPopupMethod::UseCurrentWindow;
+	return FPopupMethodReply::UseMethod(EPopupMethod::UseCurrentWindow)
+		.SetShouldThrottle(EShouldThrottle::No);
 }
 
 void UGameViewportClient::ToggleShowVolumes()
@@ -2303,7 +2309,7 @@ void UGameViewportClient::ToggleShowVolumes()
 	// Don't allow 'show collision' and 'show volumes' at the same time, so turn collision off
 	if (EngineShowFlags.Volumes && EngineShowFlags.Collision)
 	{
-		EngineShowFlags.Collision = false;
+		EngineShowFlags.SetCollision(false);
 		ToggleShowCollision();
 	}
 
@@ -2344,7 +2350,7 @@ void UGameViewportClient::ToggleShowCollision()
 		// Don't allow 'show collision' and 'show volumes' at the same time, so turn collision off
 		if (EngineShowFlags.Volumes)
 		{
-			EngineShowFlags.Volumes = false;
+			EngineShowFlags.SetVolumes(false);
 			ToggleShowVolumes();
 		}
 
@@ -2940,7 +2946,7 @@ bool UGameViewportClient::HandleDisplayAllCommand( const TCHAR* Cmd, FOutputDevi
 					// so then we only have to iterate over dynamic things each frame
 					for (TObjectIterator<UObject> It; It; ++It)
 					{
-						if (!GetUObjectArray().IsDisregardForGC(*It))
+						if (!GUObjectArray.IsDisregardForGC(*It))
 						{
 							break;
 						}
@@ -2987,7 +2993,7 @@ bool UGameViewportClient::HandleDisplayAllLocationCommand( const TCHAR* Cmd, FOu
 			// so then we only have to iterate over dynamic things each frame
 			for (TObjectIterator<UObject> It(true); It; ++It)
 			{
-				if (!GetUObjectArray().IsDisregardForGC(*It))
+				if (!GUObjectArray.IsDisregardForGC(*It))
 				{
 					break;
 				}
@@ -3025,7 +3031,7 @@ bool UGameViewportClient::HandleDisplayAllRotationCommand( const TCHAR* Cmd, FOu
 			// so then we only have to iterate over dynamic things each frame
 			for (TObjectIterator<UObject> It(true); It; ++It)
 			{
-				if (!GetUObjectArray().IsDisregardForGC(*It))
+				if (!GUObjectArray.IsDisregardForGC(*It))
 				{
 					break;
 				}

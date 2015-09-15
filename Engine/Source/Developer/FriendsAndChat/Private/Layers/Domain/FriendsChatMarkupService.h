@@ -9,6 +9,7 @@ public:
 	virtual bool IsEnabled() = 0;
 	virtual bool IsValidForType(EChatMessageType::Type ChatChannel) = 0;
 	virtual FReply ExecuteTip() = 0;
+	virtual void ExecuteCommand() = 0;
 };
 
 class FFriendsChatMarkupService
@@ -17,6 +18,11 @@ class FFriendsChatMarkupService
 public:
 
 	virtual ~FFriendsChatMarkupService() {}
+
+	/**
+	 * Add custom slash commands - handled by the owning client.
+	 */
+	virtual void AddCustomSlashMarkupCommand(TArray<TSharedRef<class ICustomSlashCommand> >& InCustomSlashCommands) = 0;
 
 	/**
 	 * Make chat tips unavailable.
@@ -59,6 +65,11 @@ public:
 	 virtual void SetSelectedFriend(TSharedPtr<class FFriendViewModel> FriendViewModel) = 0;
 
 	/**
+	 * Navigate to channel
+	 */
+	virtual void NavigateToChannel(EChatMessageType::Type ChatChannel) = 0;
+
+	/**
 	 * Process keyboard input for tip actions
 	 */
 	virtual FReply HandleChatKeyEntry(const FKeyEvent& KeyEvent) = 0;
@@ -75,16 +86,40 @@ public:
 	virtual TSharedPtr<IChatTip> GetActiveTip() = 0;
 
 	/**
+	 * the selected markup channel.
+	 */
+	virtual EChatMessageType::Type GetMarkupChannel() const = 0;
+
+	/**
 	 * Event broadcast when a user enters some text.
 	 */
 	DECLARE_EVENT(FFriendsChatMarkupService, FChatInputUpdated);
 	virtual FChatInputUpdated& OnInputUpdated() = 0;
 
 	/**
+	 * Event broadcast when a chat tip is selected.
+	 */
+	DECLARE_EVENT_OneParam(FFriendsChatMarkupService, FChatTipSelected, TSharedRef<IChatTip> /* Chat Tip Selected */);
+	virtual FChatTipSelected& OnChatTipSelected() = 0;
+
+	/**
 	 * Event broadcast when a validated text entry is ready.
 	 */
 	DECLARE_EVENT(FFriendsChatMarkupService, FValidatedChatReadyEvent);
 	virtual FValidatedChatReadyEvent& OnValidateInputReady() = 0;
+
+	/**
+	 * Event broadcast when a message is sent.
+	 */
+	DECLARE_EVENT(FFriendsChatMarkupService, FChatMessageCommitted)
+	virtual FChatMessageCommitted& OnMessageCommitted() = 0;
+
+	/**
+	 * Event broadcast when we want to send a network message.
+	 */
+	DECLARE_EVENT_OneParam(FFriendsChatMarkupService, FSendNetworkMessageEvent, const FString& /*message*/)
+	virtual FSendNetworkMessageEvent& OnSendNetworkMessageEvent() = 0;
+
 };
 
 IFACTORY(TSharedRef< FFriendsChatMarkupService >, IFriendsChatMarkupService);
@@ -92,4 +127,5 @@ IFACTORY(TSharedRef< FFriendsChatMarkupService >, IFriendsChatMarkupService);
 FACTORY(TSharedRef<IFriendsChatMarkupServiceFactory>, FFriendsChatMarkupServiceFactory, 
 		const TSharedRef<class IChatCommunicationService >& CommunicationService,
 		const TSharedRef<class FFriendsNavigationService>& NavigationService,
-		const TSharedRef<IFriendListFactory>& FriendsListFactory);
+		const TSharedRef<IFriendListFactory>& FriendsListFactory,
+		const TSharedRef<class FGameAndPartyService>& InGamePartyService);

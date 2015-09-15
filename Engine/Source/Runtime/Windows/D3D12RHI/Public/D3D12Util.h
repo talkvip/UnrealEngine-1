@@ -245,7 +245,7 @@ public:
 	/** Unlocks the buffer returning the underlying D3D12 buffer to use as a resource. */
 	FD3D12ResourceLocation* Unlock();
 
-	// Begin FRenderResource interface.
+	//~ Begin FRenderResource Interface.
 	virtual void InitRHI() override;
 	virtual void ReleaseRHI() override;
 	// End FRenderResource interface.
@@ -377,6 +377,7 @@ private: // Methods
 		TRefCountPtr<ID3D12DescriptorHeap> Heap;
 		VERIFYD3D11RESULT( m_pDevice->CreateDescriptorHeap(&m_Desc, IID_PPV_ARGS(Heap.GetInitReference())) );
 		HeapOffset HeapBase = Heap->GetCPUDescriptorHandleForHeapStart();
+		check(HeapBase.ptr != 0);
 
 		// Allocate and initialize a single new entry in the map
 		m_Heaps.SetNum(m_Heaps.Num() + 1); 

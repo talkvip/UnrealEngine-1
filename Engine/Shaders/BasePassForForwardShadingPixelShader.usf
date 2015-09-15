@@ -270,11 +270,13 @@ void Main(
 		}
 		#endif /* MOVABLE_DIRECTIONAL_LIGHT_CSM */
 
-		half NoL = max(0, dot(MaterialParameters.WorldNormal, View.DirectionalLightDirection));
-		half RoL = max(0, dot(MaterialParameters.ReflectionVector, View.DirectionalLightDirection));
+		float NoL = max(0, dot(MaterialParameters.WorldNormal, View.DirectionalLightDirection));
+		float RoL = max(0, dot(MaterialParameters.ReflectionVector, View.DirectionalLightDirection));
 
-		Color += (Shadow * NoL) * View.DirectionalLightColor.rgb * (DiffuseColor + SpecularColor * PhongApprox(Roughness, RoL));
-		#if !MATERIAL_FULLY_ROUGH
+		#if MATERIAL_FULLY_ROUGH
+			Color += (Shadow * NoL) * View.DirectionalLightColor.rgb * DiffuseColor;
+		#else
+			Color += (Shadow * NoL) * View.DirectionalLightColor.rgb * (DiffuseColor + SpecularColor * PhongApprox(Roughness, RoL));
 			half3 SpecularIBL = GetImageBasedReflectionLighting(MaterialParameters, Roughness);
 			// Environment map has been prenormalized, scale by lightmap luminance
 			Color += SpecularIBL * IndirectIrradiance * SpecularColor;
@@ -288,11 +290,23 @@ void Main(
 
 		#if MAX_DYNAMIC_POINT_LIGHTS > 0
 			#if VARIABLE_NUM_DYNAMIC_POINT_LIGHTS
-				for (int i = 0; i < NumDynamicPointLights; i++)
-			#else
-				for (int i = 0; i < NUM_DYNAMIC_POINT_LIGHTS; i++)
-			#endif
+			#if WEBGL
+			// webgl needs a constant loop counter
+			UNROLL
+			for (int i = 0; i < MAX_DYNAMIC_POINT_LIGHTS; i++)
 			{
+				if(i >= NumDynamicPointLights)
+				{
+					break;
+				}
+			#else
+			for (int i = 0; i < NumDynamicPointLights; i++)
+			{
+			#endif
+			#else
+			for (int i = 0; i < NUM_DYNAMIC_POINT_LIGHTS; i++)
+			{
+			#endif
 				float3 ToLight = LightPositionAndInvRadius[i].xyz - MaterialParameters.WorldPosition;
 				float DistanceSqr = dot(ToLight, ToLight);
 				float3 L = ToLight * rsqrt(DistanceSqr);

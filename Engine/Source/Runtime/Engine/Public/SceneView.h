@@ -148,13 +148,16 @@ struct FViewMatrices
 	{
 		ProjMatrix.SetIdentity();
 		ViewMatrix.SetIdentity();
+		TranslatedViewMatrix.SetIdentity();
 		TranslatedViewProjectionMatrix.SetIdentity();
 		InvTranslatedViewProjectionMatrix.SetIdentity();
 		GetDynamicMeshElementsShadowCullFrustum = nullptr;
 		PreShadowTranslation = FVector::ZeroVector;
 		PreViewTranslation = FVector::ZeroVector;
 		ViewOrigin = FVector::ZeroVector;
+		ProjectionScale = FVector2D::ZeroVector;
 		TemporalAAProjJitter = FVector2D::ZeroVector;
+		ScreenScale = 1.f;
 	}
 
 	/** ViewToClip : UE4 projection matrix projects such that clip space Z=1 is the near plane, and Z=0 is the infinite far plane. */
@@ -241,7 +244,7 @@ struct FViewMatrices
 
 	FMatrix GetInvViewMatrix() const
 	{
-		return ViewMatrix.RemoveTranslation().GetTransposed() * FTranslationMatrix( ViewMatrix.GetOrigin() );
+		return FTranslationMatrix( -ViewMatrix.GetOrigin() ) * ViewMatrix.RemoveTranslation().GetTransposed();
 	}
 
 	FMatrix GetInvViewProjMatrix() const
@@ -371,8 +374,9 @@ BEGIN_UNIFORM_BUFFER_STRUCT_WITH_CONSTRUCTOR(FViewUniformShaderParameters,ENGINE
 	DECLARE_UNIFORM_BUFFER_STRUCT_MEMBER_EX(FVector4,ViewRectMin, EShaderPrecisionModifier::Half)
 	DECLARE_UNIFORM_BUFFER_STRUCT_MEMBER(FVector4,ViewSizeAndInvSize)
 	DECLARE_UNIFORM_BUFFER_STRUCT_MEMBER(FVector4,BufferSizeAndInvSize)
-	DECLARE_UNIFORM_BUFFER_STRUCT_MEMBER(FVector4,ViewOrigin)
-	DECLARE_UNIFORM_BUFFER_STRUCT_MEMBER(FVector4,TranslatedViewOrigin)
+	DECLARE_UNIFORM_BUFFER_STRUCT_MEMBER(FVector,WorldCameraOrigin)
+	DECLARE_UNIFORM_BUFFER_STRUCT_MEMBER(FVector,TranslatedWorldCameraOrigin)
+	DECLARE_UNIFORM_BUFFER_STRUCT_MEMBER(FVector,WorldViewOrigin)
 	// The exposure scale is just a scalar but needs to be a float4 to workaround a driver bug on IOS.
 	// After 4.2 we can put the workaround in the cross compiler.
 	DECLARE_UNIFORM_BUFFER_STRUCT_MEMBER_EX(FVector4,ExposureScale, EShaderPrecisionModifier::Half)
@@ -384,7 +388,7 @@ BEGIN_UNIFORM_BUFFER_STRUCT_WITH_CONSTRUCTOR(FViewUniformShaderParameters,ENGINE
 	DECLARE_UNIFORM_BUFFER_STRUCT_MEMBER(float, PrevFrameRealTime)
 	DECLARE_UNIFORM_BUFFER_STRUCT_MEMBER(FVector,PreViewTranslation)
 	DECLARE_UNIFORM_BUFFER_STRUCT_MEMBER_EX(float,OutOfBoundsMask, EShaderPrecisionModifier::Half)
-	DECLARE_UNIFORM_BUFFER_STRUCT_MEMBER(FVector,ViewOriginDelta)
+	DECLARE_UNIFORM_BUFFER_STRUCT_MEMBER(FVector,WorldCameraMovementSinceLastFrame)
 	DECLARE_UNIFORM_BUFFER_STRUCT_MEMBER(float,CullingSign)
 	DECLARE_UNIFORM_BUFFER_STRUCT_MEMBER_EX(float,NearPlane, EShaderPrecisionModifier::Half)
 	DECLARE_UNIFORM_BUFFER_STRUCT_MEMBER(float,AdaptiveTessellationFactor)
@@ -425,7 +429,8 @@ BEGIN_UNIFORM_BUFFER_STRUCT_WITH_CONSTRUCTOR(FViewUniformShaderParameters,ENGINE
 	DECLARE_UNIFORM_BUFFER_STRUCT_MEMBER(FMatrix,PrevViewToTranslatedWorld)
 	DECLARE_UNIFORM_BUFFER_STRUCT_MEMBER(FMatrix,PrevTranslatedWorldToCameraView)
 	DECLARE_UNIFORM_BUFFER_STRUCT_MEMBER(FMatrix,PrevCameraViewToTranslatedWorld)
-	DECLARE_UNIFORM_BUFFER_STRUCT_MEMBER(FVector,PrevViewOrigin)
+	DECLARE_UNIFORM_BUFFER_STRUCT_MEMBER(FVector,PrevWorldCameraOrigin)
+	DECLARE_UNIFORM_BUFFER_STRUCT_MEMBER(FVector,PrevWorldViewOrigin)
 	DECLARE_UNIFORM_BUFFER_STRUCT_MEMBER(FVector,PrevPreViewTranslation)
 	DECLARE_UNIFORM_BUFFER_STRUCT_MEMBER(FMatrix,PrevInvViewProj)
 	DECLARE_UNIFORM_BUFFER_STRUCT_MEMBER(FMatrix,PrevScreenToTranslatedWorld)

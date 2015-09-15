@@ -539,8 +539,12 @@ struct FStaticMeshLODResources
 
 	/** Index buffer resource for rendering. */
 	FRawStaticIndexBuffer IndexBuffer;
+	/** Reversed index buffer, used to prevent changing culling state between drawcalls. */
+	FRawStaticIndexBuffer ReversedIndexBuffer;
 	/** Index buffer resource for rendering in depth only passes. */
 	FRawStaticIndexBuffer DepthOnlyIndexBuffer;
+	/** Reversed depth only index buffer, used to prevent changing culling state between drawcalls. */
+	FRawStaticIndexBuffer ReversedDepthOnlyIndexBuffer;
 	/** Index buffer resource for rendering wireframe mode. */
 	FRawStaticIndexBuffer WireframeIndexBuffer;
 	/** Index buffer containing adjacency information required by tessellation. */
@@ -559,7 +563,18 @@ struct FStaticMeshLODResources
 	float MaxDeviation;
 
 	/** True if the adjacency index buffer contained data at init. Needed as it will not be available to the CPU afterwards. */
-	bool bHasAdjacencyInfo;
+	uint32 bHasAdjacencyInfo : 1;
+
+	/** True if the depth only index buffers contained data at init. Needed as it will not be available to the CPU afterwards. */
+	uint32 bHasDepthOnlyIndices : 1;
+
+	/** True if the reversed index buffers contained data at init. Needed as it will not be available to the CPU afterwards. */
+	uint32 bHasReversedIndices : 1;
+
+	/** True if the reversed index buffers contained data at init. Needed as it will not be available to the CPU afterwards. */
+	uint32 bHasReversedDepthOnlyIndices: 1;
+
+	uint32 DepthOnlyNumTriangles;
 
 	/** Default constructor. */
 	FStaticMeshLODResources();
@@ -761,7 +776,7 @@ protected:
 	/**
 	 * Sets IndexBuffer, FirstIndex and NumPrimitives of OutMeshElement.
 	 */
-	virtual void SetIndexSource(int32 LODIndex, int32 ElementIndex, FMeshBatch& OutMeshElement, bool bWireframe, bool bRequiresAdjacencyInformation ) const;
+	virtual void SetIndexSource(int32 LODIndex, int32 ElementIndex, FMeshBatch& OutMeshElement, bool bWireframe, bool bRequiresAdjacencyInformation, bool bUseInversedIndices) const;
 	bool IsCollisionView(const FEngineShowFlags& EngineShowFlags, bool& bDrawSimpleCollision, bool& bDrawComplexCollision) const;
 
 public:
@@ -772,7 +787,7 @@ public:
 	virtual void DrawStaticElements(FStaticPrimitiveDrawInterface* PDI) override;
 	virtual void OnTransformChanged() override;
 	virtual int32 GetLOD(const FSceneView* View) const override;
-	virtual FPrimitiveViewRelevance GetViewRelevance(const FSceneView* View) override;
+	virtual FPrimitiveViewRelevance GetViewRelevance(const FSceneView* View) const override;
 	virtual bool CanBeOccluded() const override;
 	virtual void GetLightRelevance(const FLightSceneProxy* LightSceneProxy, bool& bDynamic, bool& bRelevant, bool& bLightMapped, bool& bShadowMapped) const override;
 	virtual void GetDistancefieldAtlasData(FBox& LocalVolumeBounds, FIntVector& OutBlockMin, FIntVector& OutBlockSize, bool& bOutBuiltAsIfTwoSided, bool& bMeshWasPlane, TArray<FMatrix>& ObjectLocalToWorldTransforms) const override;
@@ -867,7 +882,7 @@ protected:
 
 	TIndirectArray<FLODInfo> LODs;
 
-	const FDistanceFieldVolumeData* DistanceFieldData;
+	const FDistanceFieldVolumeData* DistanceFieldData;	
 
 	/**
 	 * The forcedLOD set in the static mesh editor, copied from the mesh component
@@ -887,6 +902,11 @@ protected:
 
 	/** Collision Response of this component**/
 	FCollisionResponseContainer CollisionResponse;
+
+#if WITH_EDITORONLY_DATA
+	/** Index of the section to preview. If set to INDEX_NONE, all section will be rendered */
+	int32 SectionIndexPreview;
+#endif
 
 	/**
 	 * Returns the display factor for the given LOD level

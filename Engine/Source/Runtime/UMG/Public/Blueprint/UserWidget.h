@@ -152,17 +152,18 @@ public:
 	virtual void PostDuplicate(bool bDuplicateForPIE) override;
 	virtual void BeginDestroy() override;
 	virtual void PostLoad() override;
-	// End of UObject interface
+	//~ End UObject Interface
 
 	virtual bool Initialize();
+	virtual void CustomNativeInitilize() {}
 
 	//UVisual interface
 	virtual void ReleaseSlateResources(bool bReleaseChildren) override;
-	// End of UVisual interface
+	//~ End UVisual Interface
 
-	// UWidget interface
+	//~ Begin UWidget Interface
 	virtual void SynchronizeProperties() override;
-	// End of UWidget interface
+	//~ End UWidget Interface
 
 	// UNamedSlotInterface Begin
 	virtual void GetSlotNames(TArray<FName>& SlotNames) const override;
@@ -730,6 +731,15 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintCosmetic, Category="User Interface|Animation")
 	float PauseAnimation(const UWidgetAnimation* InAnimation);
 
+	/**
+	 * Gets whether an animation is currently playing on this widget.
+	 * 
+	 * @param InAnimation The animation to check the playback status of
+	 * @return True if the animation is currently playing
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintCosmetic, Category="User Interface|Animation")
+	bool IsAnimationPlaying(const UWidgetAnimation* InAnimation) const;
+
 	/** Called when a sequence player is finished playing an animation */
 	void OnAnimationFinishedPlaying(UUMGSequencePlayer& Player );
 
@@ -756,18 +766,19 @@ public:
 	/** @returns The uobject widget corresponding to a given name */
 	UWidget* GetWidgetFromName(const FName& Name) const;
 
-	// Begin UObject interface
+	//~ Begin UObject Interface
 	virtual void PreSave() override;
-	// End UObject interface
+	//~ End UObject Interface
 
 	/** Are we currently playing any animations? */
+	UFUNCTION(BlueprintCallable, Category="User Interface|Animation")
 	bool IsPlayingAnimation() const { return ActiveSequencePlayers.Num() > 0; }
 
 #if WITH_EDITOR
-	// UWidget interface
+	//~ Begin UWidget Interface
 	virtual const FSlateBrush* GetEditorIcon() override;
 	virtual const FText GetPaletteCategory() override;
-	// End UWidget interface
+	//~ End UWidget Interface
 
 	void SetDesignerFlags(EWidgetDesignFlags::Type NewFlags);
 #endif
@@ -840,6 +851,12 @@ public:
 
 #endif
 
+	/** If a widget doesn't ever need to tick the blueprint, setting this to false is an optimization. */
+	bool bCanEverTick : 1;
+
+	/** If a widget doesn't ever need to do custom painting in the blueprint, setting this to false is an optimization. */
+	bool bCanEverPaint : 1;
+
 protected:
 
 	/** Adds the widget to the screen, either to the viewport or to the player's screen depending on if the LocalPlayer is null. */
@@ -904,6 +921,8 @@ protected:
 	 */
 	void TickActionsAndAnimation(const FGeometry& MyGeometry, float InDeltaTime);
 
+	void RemoveObsoleteBindings(const TArray<FName>& NamedSlots);
+
 private:
 	FAnchors ViewportAnchors;
 	FMargin ViewportOffsets;
@@ -912,6 +931,9 @@ private:
 	TWeakPtr<SWidget> FullScreenWidget;
 
 	FLocalPlayerContext PlayerContext;
+
+	/** Get World calls can be expensive for Widgets, we speed them up by caching the last found world until it goes away. */
+	mutable TWeakObjectPtr<UWorld> CachedWorld;
 
 	/** Has this widget been initialized by its class yet? */
 	bool bInitialized;

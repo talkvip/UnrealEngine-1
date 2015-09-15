@@ -6,13 +6,15 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.IO;
+using System.Runtime.Serialization;
+using System.Linq;
 using Tools.DotNETCommon.FileContentsCacheType;
 
 namespace UnrealBuildTool
 {
 	/** For C++ source file items, this structure is used to cache data that will be used for include dependency scanning */
 	[Serializable]
-	public class CPPIncludeInfo
+	public class CPPIncludeInfo : ISerializable
 	{
 		/** Ordered list of include paths for the module  */
 		public HashSet<string> IncludePaths = new HashSet<string>();
@@ -24,8 +26,23 @@ namespace UnrealBuildTool
 		public HashSet<string> SystemIncludePaths = new HashSet<string>();
 
 		/** Contains a mapping from filename to the full path of the header in this environment.  This is used to optimized include path lookups at runtime for any given single module. */
-		[NonSerialized]
 		public Dictionary<string, FileItem> IncludeFileSearchDictionary = new Dictionary<string, FileItem>();
+
+		public CPPIncludeInfo()
+		{
+		}
+
+		public CPPIncludeInfo(SerializationInfo Info, StreamingContext Context)
+		{
+			IncludePaths       = new HashSet<string>((string[])Info.GetValue("ip", typeof(string[])));
+			SystemIncludePaths = new HashSet<string>((string[])Info.GetValue("sp", typeof(string[])));
+		}
+
+		public void GetObjectData(SerializationInfo Info, StreamingContext Context)
+		{
+			Info.AddValue("ip", IncludePaths.ToArray());
+			Info.AddValue("sp", SystemIncludePaths.ToArray());
+		}
 
 
 		/// <summary>
@@ -106,9 +123,10 @@ namespace UnrealBuildTool
 				int SearchAttempts = 0;
 				if( Path.IsPathRooted( RelativeIncludePath ) )
 				{
-					if( DirectoryLookupCache.FileExists( RelativeIncludePath ) )
+					FileReference Reference = new FileReference(RelativeIncludePath);
+					if( DirectoryLookupCache.FileExists( Reference ) )
 					{
-						Result = FileItem.GetItemByFullPath( RelativeIncludePath );
+						Result = FileItem.GetItemByFileReference( Reference );
 					}
 					++SearchAttempts;
 				}
@@ -127,17 +145,17 @@ namespace UnrealBuildTool
 						{
 							throw new BuildException(Exception, "Failed to combine null or invalid include paths.");
 						}
-						string FullFilePath = null;
+						FileReference FullFilePath = null;
 						try
 						{
-							FullFilePath = Path.GetFullPath(RelativeFilePath);
+							FullFilePath = new FileReference(RelativeFilePath);
 						}
 						catch (Exception)
 						{
 						}
 						if( FullFilePath != null && DirectoryLookupCache.FileExists( FullFilePath ) )
 						{
-							Result = FileItem.GetItemByFullPath( FullFilePath );
+							Result = FileItem.GetItemByFileReference( FullFilePath );
 							break;
 						}
 					}
@@ -193,7 +211,7 @@ namespace UnrealBuildTool
 			bool bUseFlatCPPIncludeDependencyCache = BuildConfiguration.bUseUBTMakefiles && UnrealBuildTool.IsAssemblingBuild;
 			if( bOnlyCachedDependencies && bUseFlatCPPIncludeDependencyCache )
 			{ 
-				Result = FlatCPPIncludeDependencyCache[Target].GetDependenciesForFile( SourceFile.AbsolutePath );
+				Result = FlatCPPIncludeDependencyCache[Target].GetDependenciesForFile( SourceFile.Reference );
 				if( Result == null )
 				{
 					// Nothing cached for this file!  It is new to us.  This is the expected flow when our CPPIncludeDepencencyCache is missing.
@@ -224,13 +242,13 @@ namespace UnrealBuildTool
 				// Update cache
 				if( bUseFlatCPPIncludeDependencyCache && !bOnlyCachedDependencies )
 				{ 
-					var Dependencies = new List<string>();
+					var Dependencies = new List<FileReference>();
 					foreach( var IncludedFile in Result )
 					{
-						Dependencies.Add( IncludedFile.AbsolutePath );
+						Dependencies.Add( IncludedFile.Reference );
 					}
-					string PCHName = SourceFile.PrecompiledHeaderIncludeFilename;
-					FlatCPPIncludeDependencyCache[Target].SetDependenciesForFile( SourceFile.AbsolutePath, PCHName, Dependencies );
+					FileReference PCHName = SourceFile.PrecompiledHeaderIncludeFilename;
+					FlatCPPIncludeDependencyCache[Target].SetDependenciesForFile( SourceFile.Reference, PCHName, Dependencies );
 				}
 			}
 
@@ -267,7 +285,7 @@ namespace UnrealBuildTool
 				{
 					// Resolve the included file name to an actual file.
 					DependencyInclude DirectInclude = DirectIncludes[DirectlyIncludedFileNameIndex];
-					if (DirectInclude.IncludeResolvedName == null || 
+					if (!DirectInclude.HasAttemptedResolve || 
 						// ignore any preexisting resolve cache if we are not configured to use it.
 						!BuildConfiguration.bUseIncludeDependencyResolveCache ||
 						// if we are testing the resolve cache, we force UBT to resolve every time to look for conflicts
@@ -282,14 +300,14 @@ namespace UnrealBuildTool
 						{
 							DirectlyIncludedFiles.Add(DirectIncludeResolvedFile);
 						}
-						IncludeDependencyCache[Target].CacheResolvedIncludeFullPath(CPPFile, DirectlyIncludedFileNameIndex, DirectIncludeResolvedFile != null ? DirectIncludeResolvedFile.AbsolutePath : "");
+						IncludeDependencyCache[Target].CacheResolvedIncludeFullPath(CPPFile, DirectlyIncludedFileNameIndex, DirectIncludeResolvedFile != null ? DirectIncludeResolvedFile.Reference : null);
 					}
 					else
 					{
 						// we might have cached an attempt to resolve the file, but couldn't actually find the file (system headers, etc).
-						if (DirectInclude.IncludeResolvedName != string.Empty)
+						if (DirectInclude.IncludeResolvedNameIfSuccessful != null)
 						{
-							DirectlyIncludedFiles.Add(FileItem.GetItemByFullPath(DirectInclude.IncludeResolvedName));
+							DirectlyIncludedFiles.Add(FileItem.GetItemByFileReference(DirectInclude.IncludeResolvedNameIfSuccessful));
 						}
 					}
 				}
@@ -482,7 +500,7 @@ namespace UnrealBuildTool
 				}
 
 				//@TODO: The intermediate exclusion is to work around autogenerated absolute paths in Module.SomeGame.cpp style files
-				bool bCheckForBackwardSlashes = FileToRead.StartsWith(InstalledFolder) || (UnrealBuildTool.HasUProjectFile() && Utils.IsFileUnderDirectory(FileToRead, UnrealBuildTool.GetUProjectPath()));
+				bool bCheckForBackwardSlashes = FileToRead.StartsWith(InstalledFolder) || (UnrealBuildTool.HasUProjectFile() && new FileReference(FileToRead).IsUnderDirectory(UnrealBuildTool.GetUProjectPath()));
 				if (bCheckForBackwardSlashes && !FileToRead.Contains("Intermediate") && !FileToRead.Contains("ThirdParty") && HeaderValue.IndexOf('\\', 0) >= 0)
 				{
 					throw new BuildException("In {0}: #include \"{1}\" contains backslashes ('\\'), please use forward slashes ('/') instead.", FileToRead, C.Value);

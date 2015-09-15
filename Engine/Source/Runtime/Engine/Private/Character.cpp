@@ -90,7 +90,6 @@ ACharacter::ACharacter(const FObjectInitializer& ObjectInitializer)
 		Mesh->bCastDynamicShadow = true;
 		Mesh->bAffectDynamicIndirectLighting = true;
 		Mesh->PrimaryComponentTick.TickGroup = TG_PrePhysics;
-		Mesh->bChartDistanceFactor = true;
 		Mesh->AttachParent = CapsuleComponent;
 		static FName MeshCollisionProfileName(TEXT("CharacterMesh"));
 		Mesh->SetCollisionProfileName(MeshCollisionProfileName);
@@ -1110,7 +1109,7 @@ bool ACharacter::CanUseRootMotionRepMove(const FSimulatedRootMotionReplicatedMov
 			const int32 CurrentSectionIndex = AnimMontage->GetSectionIndexFromPosition(ClientPosition);
 			if( CurrentSectionIndex != INDEX_NONE )
 			{
-				const int32 NextSectionIndex = (CurrentSectionIndex < ClientMontageInstance.NextSections.Num()) ? ClientMontageInstance.NextSections[CurrentSectionIndex] : INDEX_NONE;
+				const int32 NextSectionIndex = ClientMontageInstance.GetNextSectionID(CurrentSectionIndex);
 
 				// We can only extract root motion if we are within the same section.
 				// It's not trivial to jump through sections in a deterministic manner, but that is luckily not frequent. 
@@ -1330,7 +1329,7 @@ void ACharacter::StopAnimMontage(class UAnimMontage* AnimMontage)
 
 	if ( bShouldStopMontage )
 	{
-		AnimInstance->Montage_Stop(MontageToStop->BlendOutTime, MontageToStop);
+		AnimInstance->Montage_Stop(MontageToStop->BlendOut.GetBlendTime(), MontageToStop);
 	}
 }
 

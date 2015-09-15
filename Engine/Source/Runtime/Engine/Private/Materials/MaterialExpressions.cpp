@@ -31,6 +31,7 @@
 #include "Materials/MaterialExpressionCustom.h"
 #include "Materials/MaterialExpressionDDX.h"
 #include "Materials/MaterialExpressionDDY.h"
+#include "Materials/MaterialExpressionDecalDerivative.h"
 #include "Materials/MaterialExpressionDecalMipmapLevel.h"
 #include "Materials/MaterialExpressionDepthFade.h"
 #include "Materials/MaterialExpressionDepthOfFieldFunction.h"
@@ -110,8 +111,10 @@
 #include "Materials/MaterialExpressionStaticBool.h"
 #include "Materials/MaterialExpressionStaticSwitch.h"
 #include "Materials/MaterialExpressionSubtract.h"
+#include "Materials/MaterialExpressionTangentOutput.h"
 #include "Materials/MaterialExpressionTextureBase.h"
 #include "Materials/MaterialExpressionTextureObject.h"
+#include "Materials/MaterialExpressionTextureProperty.h"
 #include "Materials/MaterialExpressionTextureSample.h"
 #include "Materials/MaterialExpressionParticleSubUV.h"
 #include "Materials/MaterialExpressionTextureSampleParameter.h"
@@ -1214,12 +1217,7 @@ const TArray<FExpressionInput*> UMaterialExpressionTextureSample::GetInputs()
 FExpressionInput* UMaterialExpressionTextureSample::GetInput(int32 InputIndex)
 {
 	IF_INPUT_RETURN(Coordinates);
-
-	// Only show the TextureObject input inside a material function, since that's the only place it is useful
-	if(GetOuter()->IsA(UMaterialFunction::StaticClass()))
-	{
-		IF_INPUT_RETURN(TextureObject);
-	}
+	IF_INPUT_RETURN(TextureObject);
 
 	if(MipValueMode == TMVM_Derivative)
 	{
@@ -1240,12 +1238,7 @@ FExpressionInput* UMaterialExpressionTextureSample::GetInput(int32 InputIndex)
 FString UMaterialExpressionTextureSample::GetInputName(int32 InputIndex) const
 {
 	IF_INPUT_RETURN(Coordinates, TEXT("Coordinates"));
-
-	// Only show the TextureObject input inside a material function, since that's the only place it is useful
-	if(GetOuter()->IsA(UMaterialFunction::StaticClass()))
-	{
-		IF_INPUT_RETURN(TextureObject, TEXT("TextureObject"));
-	}
+	IF_INPUT_RETURN(TextureObject, TEXT("TextureObject"));
 
 	if(MipValueMode == TMVM_MipLevel)
 	{
@@ -1415,11 +1408,8 @@ uint32 UMaterialExpressionTextureSample::GetInputType(int32 InputIndex)
 	IF_INPUT_RETURN(Coordinates, MCT_Float);
 
 	// Only show the TextureObject input inside a material function, since that's the only place it is useful
-	if(GetOuter()->IsA(UMaterialFunction::StaticClass()))
-	{
-		IF_INPUT_RETURN(TextureObject, MCT_Texture);
-	}
-
+	IF_INPUT_RETURN(TextureObject, MCT_Texture);
+	
 	if(MipValueMode == TMVM_MipLevel || MipValueMode == TMVM_MipBias)
 	{
 		IF_INPUT_RETURN(MipValue, MCT_Float);
@@ -1433,17 +1423,6 @@ uint32 UMaterialExpressionTextureSample::GetInputType(int32 InputIndex)
 	return MCT_Unknown;
 }
 #undef IF_INPUT_RETURN
-
-void UMaterialExpressionTextureSample::GetConnectorToolTip(int32 InputIndex, int32 OutputIndex, TArray<FString>& OutToolTip)
-{
-	if (InputIndex == 1 && !GetOuter()->IsA(UMaterialFunction::StaticClass()))
-	{
-		// If input pin 1 is omitted, increment the index so the correct tooltip is looked up
-		InputIndex++;
-	}
-
-	Super::GetConnectorToolTip(InputIndex, OutputIndex, OutToolTip);
-}
 #endif
 
 int32 UMaterialExpressionTextureSample::CompileMipValue0(class FMaterialCompiler* Compiler)
@@ -1759,6 +1738,73 @@ uint32 UMaterialExpressionTextureObject::GetOutputType(int32 OutputIndex)
 	}
 }
 #endif //WITH_EDITOR
+
+//
+//  UMaterialExpressionTextureProperty
+//
+UMaterialExpressionTextureProperty::UMaterialExpressionTextureProperty(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer)
+{
+	// Structure to hold one-time initialization
+	struct FConstructorStatics
+	{
+		FText NAME_Constants;
+		FConstructorStatics()
+			: NAME_Constants(LOCTEXT( "Texture", "Texture" ))
+		{
+		}
+	};
+	static FConstructorStatics ConstructorStatics;
+
+	Property = TMTM_TextureSize;
+	MenuCategories.Add(ConstructorStatics.NAME_Constants);
+	bShaderInputData = true;
+	bShowOutputNameOnPin = false;
+	
+	Outputs.Reset();
+	Outputs.Add(FExpressionOutput(TEXT("")));
+}
+
+int32 UMaterialExpressionTextureProperty::Compile(class FMaterialCompiler* Compiler, int32 OutputIndex, int32 MultiplexIndex)
+{	
+	if (!TextureObject.Expression)
+	{
+		return Compiler->Errorf(TEXT("TextureSample> Missing input texture"));
+	}
+
+	const int32 TextureCodeIndex = TextureObject.Compile(Compiler);
+	if (TextureCodeIndex == INDEX_NONE)
+	{
+		return INDEX_NONE;
+	}
+
+	return Compiler->TextureProperty(TextureCodeIndex, Property);
+}
+
+void UMaterialExpressionTextureProperty::GetCaption(TArray<FString>& OutCaptions) const
+{
+#if WITH_EDITOR
+	const UEnum* TexturePropertyEnum = FindObject<UEnum>(NULL, TEXT("Engine.EMaterialExposedTextureProperty"));
+	check(TexturePropertyEnum);
+
+	const FString PropertyDisplayName = TexturePropertyEnum->GetDisplayNameText(Property).ToString();
+#else
+	const FString PropertyDisplayName = TEXT("");
+#endif
+
+	OutCaptions.Add(PropertyDisplayName);
+}
+
+#if WITH_EDITOR
+// this define is only used for the following function
+#define IF_INPUT_RETURN(Item, Type) if(!InputIndex) return Type; --InputIndex
+uint32 UMaterialExpressionTextureProperty::GetInputType(int32 InputIndex)
+{
+	IF_INPUT_RETURN(TextureObject, MCT_Texture);
+	return MCT_Unknown;
+}
+#undef IF_INPUT_RETURN
+#endif
 
 //
 //  UMaterialExpressionTextureSampleParameter2D
@@ -2595,7 +2641,7 @@ int32 UMaterialExpressionTextureCoordinate::Compile(class FMaterialCompiler* Com
 
 void UMaterialExpressionTextureCoordinate::GetCaption(TArray<FString>& OutCaptions) const
 {
-	OutCaptions.Add(TEXT("TexCoord"));
+	OutCaptions.Add(FString::Printf(TEXT("TexCoord[%i]"), CoordinateIndex));
 }
 
 
@@ -3293,8 +3339,8 @@ int32 UMaterialExpressionMakeMaterialAttributes::Compile(class FMaterialCompiler
 	case MP_WorldDisplacement: Ret = WorldDisplacement.Compile(Compiler); Expression = WorldDisplacement.Expression; break;
 	case MP_TessellationMultiplier: Ret = TessellationMultiplier.Compile(Compiler); Expression = TessellationMultiplier.Expression; break;
 	case MP_SubsurfaceColor: Ret = SubsurfaceColor.Compile(Compiler); Expression = SubsurfaceColor.Expression; break;
-	case MP_ClearCoat: Ret = ClearCoat.Compile(Compiler); Expression = ClearCoat.Expression; break;
-	case MP_ClearCoatRoughness: Ret = ClearCoatRoughness.Compile(Compiler); Expression = ClearCoatRoughness.Expression; break;
+	case MP_CustomData0: Ret = ClearCoat.Compile(Compiler); Expression = ClearCoat.Expression; break;
+	case MP_CustomData1: Ret = ClearCoatRoughness.Compile(Compiler); Expression = ClearCoatRoughness.Expression; break;
 	case MP_AmbientOcclusion: Ret = AmbientOcclusion.Compile(Compiler); Expression = AmbientOcclusion.Expression; break;
 	case MP_Refraction: Ret = Refraction.Compile(Compiler); Expression = Refraction.Expression; break;
 	case MP_PixelDepthOffset: Ret = PixelDepthOffset.Compile(Compiler); Expression = PixelDepthOffset.Expression; break;
@@ -4724,7 +4770,7 @@ void UMaterialExpressionViewProperty::GetCaption(TArray<FString>& OutCaptions) c
 	const FString PropertyDisplayName = TEXT("");
 #endif
 
-	OutCaptions.Add(FString(TEXT("View.")) + PropertyDisplayName);
+	OutCaptions.Add(PropertyDisplayName);
 }
 
 UMaterialExpressionViewSize::UMaterialExpressionViewSize(const FObjectInitializer& ObjectInitializer)
@@ -5339,10 +5385,11 @@ void UMaterialExpressionAbs::GetCaption(TArray<FString>& OutCaptions) const
 static EMaterialCommonBasis GetMaterialCommonBasis(EMaterialVectorCoordTransformSource X)
 {
 	static const EMaterialCommonBasis ConversionTable[TRANSFORMSOURCE_MAX] = {
-		MCB_Tangent,
-		MCB_Local,
-		MCB_World,
-		MCB_View,
+		MCB_Tangent,					// TRANSFORMSOURCE_Tangent
+		MCB_Local,						// TRANSFORMSOURCE_Local
+		MCB_World,						// TRANSFORMSOURCE_World
+		MCB_View,						// TRANSFORMSOURCE_View
+		MCB_Camera,						// TRANSFORMSOURCE_Camera
 	};
 	return ConversionTable[X];
 }
@@ -5350,10 +5397,11 @@ static EMaterialCommonBasis GetMaterialCommonBasis(EMaterialVectorCoordTransform
 static EMaterialCommonBasis GetMaterialCommonBasis(EMaterialVectorCoordTransform X)
 {
 	static const EMaterialCommonBasis ConversionTable[TRANSFORM_MAX] = {
-		MCB_Tangent,
-		MCB_Local,
-		MCB_World,
-		MCB_View,
+		MCB_Tangent,					// TRANSFORM_Tangent
+		MCB_Local,						// TRANSFORM_Local
+		MCB_World,						// TRANSFORM_World
+		MCB_View,						// TRANSFORM_View
+		MCB_Camera,						// TRANSFORM_Camera
 	};
 	return ConversionTable[X];
 }
@@ -5442,10 +5490,11 @@ UMaterialExpressionTransformPosition::UMaterialExpressionTransformPosition(const
 static EMaterialCommonBasis GetMaterialCommonBasis(EMaterialPositionTransformSource X)
 {
 	static const EMaterialCommonBasis ConversionTable[TRANSFORMPOSSOURCE_MAX] = {
-		MCB_Local,
-		MCB_World,
-		MCB_TranslatedWorld,
-		MCB_View,
+		MCB_Local,						// TRANSFORMPOSSOURCE_Local
+		MCB_World,						// TRANSFORMPOSSOURCE_World
+		MCB_TranslatedWorld,			// TRANSFORMPOSSOURCE_TranslatedWorld
+		MCB_View,						// TRANSFORMPOSSOURCE_View
+		MCB_Camera,						// TRANSFORMPOSSOURCE_Camera
 	};
 	return ConversionTable[X];
 }
@@ -6330,8 +6379,9 @@ uint32 UMaterialExpressionCustom::GetOutputType(int32 OutputIndex)
 UMaterialFunction::UMaterialFunction(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 {
+#if WITH_EDITORONLY_DATA
 	LibraryCategoriesText.Add(LOCTEXT("Misc", "Misc"));
-
+#endif
 #if WITH_EDITORONLY_DATA
 	PreviewMaterial = NULL;
 	ThumbnailInfo = NULL;
@@ -7190,7 +7240,7 @@ bool UMaterialExpressionMaterialFunctionCall::SetMaterialFunction(
 }
 
 
-void UMaterialExpressionMaterialFunctionCall::UpdateFromFunctionResource()
+void UMaterialExpressionMaterialFunctionCall::UpdateFromFunctionResource(bool bRecreateAndLinkNode)
 {
 	TArray<FFunctionExpressionInput> OriginalInputs = FunctionInputs;
 	TArray<FFunctionExpressionOutput> OriginalOutputs = FunctionOutputs;
@@ -7253,7 +7303,7 @@ void UMaterialExpressionMaterialFunctionCall::UpdateFromFunctionResource()
 	}
 
 #if WITH_EDITOR
-	if (GraphNode)
+	if (GraphNode && bRecreateAndLinkNode)
 	{
 		// Check whether number of input/outputs or transient pointers have changed
 		bool bUpdatedFromFunction = false;
@@ -8822,6 +8872,43 @@ void UMaterialExpressionAntialiasedTextureMask::SetDefaultTexture()
 }
 
 //
+//	UMaterialExpressionDecalDerivative
+//
+UMaterialExpressionDecalDerivative::UMaterialExpressionDecalDerivative(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer)
+{
+	// Structure to hold one-time initialization
+	struct FConstructorStatics
+	{
+		FText NAME_Vectors;
+		FConstructorStatics()
+			: NAME_Vectors(LOCTEXT("Utils", "Utils"))
+		{
+		}
+	};
+	static FConstructorStatics ConstructorStatics;
+
+	MenuCategories.Add(ConstructorStatics.NAME_Vectors);
+	//bCollapsed = true;
+	bShaderInputData = true;
+	bShowOutputNameOnPin = true;
+	
+	Outputs.Reset();
+	Outputs.Add(FExpressionOutput(TEXT("DDX")));
+	Outputs.Add(FExpressionOutput(TEXT("DDY")));
+}
+
+int32 UMaterialExpressionDecalDerivative::Compile(class FMaterialCompiler* Compiler, int32 OutputIndex, int32 MultiplexIndex)
+{
+	return Compiler->TextureDecalDerivative(OutputIndex == 1);
+}
+
+void UMaterialExpressionDecalDerivative::GetCaption(TArray<FString>& OutCaptions) const
+{
+	OutCaptions.Add(TEXT("Decal Derivative"));
+}
+
+//
 //	UMaterialExpressionDecalMipmapLevel
 //
 UMaterialExpressionDecalMipmapLevel::UMaterialExpressionDecalMipmapLevel(const FObjectInitializer& ObjectInitializer)
@@ -9411,6 +9498,49 @@ int32 UMaterialExpressionEyeAdaptation::Compile(class FMaterialCompiler* Compile
 void UMaterialExpressionEyeAdaptation::GetCaption(TArray<FString>& OutCaptions) const
 {
 	OutCaptions.Add(FString(TEXT("EyeAdaptation")));
+}
+
+
+//
+// UMaterialExpressionTangentOutput
+//
+UMaterialExpressionTangentOutput::UMaterialExpressionTangentOutput(const FObjectInitializer& ObjectInitializer)
+: Super(ObjectInitializer)
+{
+	// Structure to hold one-time initialization
+	struct FConstructorStatics
+	{
+		FText NAME_Custom;
+		FConstructorStatics()
+			: NAME_Custom(LOCTEXT( "Custom", "Custom" ))
+		{
+		}
+	};
+	static FConstructorStatics ConstructorStatics;
+
+	MenuCategories.Add(ConstructorStatics.NAME_Custom);
+
+	// No outputs
+	Outputs.Reset();
+}
+
+int32 UMaterialExpressionTangentOutput::Compile(class FMaterialCompiler* Compiler, int32 OutputIndex, int32 MultiplexIndex)
+{
+	if( Input.Expression )
+	{
+		return Compiler->CustomOutput(this, OutputIndex, Input.Compile(Compiler, MultiplexIndex));
+	}
+	else
+	{
+		return CompilerError(Compiler, TEXT("Input missing"));
+	}
+
+	return INDEX_NONE;
+}
+
+void UMaterialExpressionTangentOutput::GetCaption(TArray<FString>& OutCaptions) const
+{
+	OutCaptions.Add(TEXT("Tangent output"));
 }
 
 #undef LOCTEXT_NAMESPACE

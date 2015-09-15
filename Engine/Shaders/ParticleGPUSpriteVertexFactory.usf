@@ -17,7 +17,13 @@
 #define USE_PARTICLE_SIZE (FEATURE_LEVEL >= FEATURE_LEVEL_SM5 && NEEDS_PARTICLE_SIZE)
 
 /** Buffer containing particle indices. */
-Buffer<float2> ParticleIndices;
+#if COMPILER_METAL
+	// Metal does not have buffer SRVs, so data types have to match
+	#undef half2
+	Buffer<half2> ParticleIndices;
+#else
+	Buffer<float2> ParticleIndices;
+#endif
 
 /** Offset in to the particle indices buffer. */
 uint ParticleIndicesOffset;
@@ -152,7 +158,7 @@ void GetSpriteTangents(
 	float3 CameraUp = lerp(-View.ViewUp, EmitterDynamicUniforms.AxisLockUp.xyz, EmitterDynamicUniforms.AxisLockUp.w);
 
 	// Determine the vector from the particle to the camera and the particle's movement direction.
-	float3 CameraDirection	= SafeNormalize(View.TranslatedViewOrigin.xyz - ParticleWorldPosition.xyz);
+	float3 CameraDirection	= SafeNormalize(View.TranslatedWorldCameraOrigin - ParticleWorldPosition.xyz);
 	float3 RightVector = CameraRight.xyz;
 	float3 UpVector = CameraUp.xyz;
 
@@ -272,7 +278,7 @@ FVertexFactoryIntermediates GetVertexFactoryIntermediates( FVertexFactoryInput I
 
 	// Optional camera motion blur.
 #if USES_PARTICLE_MOTION_BLUR
-	float3 MblurVector = -View.ViewOriginDelta;
+	float3 MblurVector = -View.WorldCameraMovementSinceLastFrame;
 	float3 MblurDirection = normalize(MblurVector + 0.0001f);
 	//float MblurFactor = saturate(dot(MblurDirection,normalize(VertexWorldOffset)) * 100000.0f);
 	float MblurFactor = clamp(dot(MblurDirection,normalize(VertexWorldOffset)) * 100000.0f,-1.0f,1.0f);
@@ -368,7 +374,7 @@ FMaterialPixelParameters GetMaterialPixelParameters( FVertexFactoryInterpolantsV
 #endif
 
 #if USE_SPHERICAL_NORMALS
-	Result.TangentToWorld = GetSphericalParticleNormal(PixelPosition.xyz + View.ViewOrigin.xyz, Interpolants.ParticlePositionAndSize.xyz, Interpolants.ParticlePositionAndSize.w);
+	Result.TangentToWorld = GetSphericalParticleNormal(PixelPosition.xyz + View.WorldCameraOrigin, Interpolants.ParticlePositionAndSize.xyz, Interpolants.ParticlePositionAndSize.w);
 #else
 	half3 TangentToWorld0 = Interpolants.TangentToWorld0.xyz;
 	half4 TangentToWorld2 = Interpolants.TangentToWorld2;

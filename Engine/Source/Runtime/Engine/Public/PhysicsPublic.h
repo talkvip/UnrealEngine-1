@@ -45,6 +45,8 @@ DECLARE_DWORD_COUNTER_STAT_EXTERN(TEXT("Active Kinematic Bodies"), STAT_NumActiv
 DECLARE_DWORD_COUNTER_STAT_EXTERN(TEXT("Mobile Bodies"), STAT_NumMobileBodies, STATGROUP_Physics, );
 DECLARE_DWORD_COUNTER_STAT_EXTERN(TEXT("Static Bodies"), STAT_NumStaticBodies, STATGROUP_Physics, );
 DECLARE_DWORD_COUNTER_STAT_EXTERN(TEXT("Shapes"), STAT_NumShapes, STATGROUP_Physics, );
+DECLARE_DWORD_COUNTER_STAT_EXTERN(TEXT("Cloths"), STAT_NumCloths, STATGROUP_Physics, );
+DECLARE_DWORD_COUNTER_STAT_EXTERN(TEXT("ClothVerts"), STAT_NumClothVerts, STATGROUP_Physics, );
 
 DECLARE_DWORD_COUNTER_STAT_EXTERN(TEXT("(ASync) Broadphase Adds"), STAT_NumBroadphaseAddsAsync, STATGROUP_Physics, );
 DECLARE_DWORD_COUNTER_STAT_EXTERN(TEXT("(ASync) Broadphase Removes"), STAT_NumBroadphaseRemovesAsync, STATGROUP_Physics, );
@@ -264,6 +266,8 @@ namespace SleepEvent
 
 }
 
+class FClothManager;
+
 /** Container object for a physics engine 'scene'. */
 
 class FPhysScene
@@ -285,8 +289,15 @@ public:
 	/** Gets the array of collision notifications, pending execution at the end of the physics engine run. */
 	TArray<FCollisionNotifyInfo>& GetPendingCollisionNotifies(int32 SceneType){ return PendingCollisionData[SceneType].PendingCollisionNotifies; }
 
+private:
 	/** World that owns this physics scene */
 	UWorld*							OwningWorld;
+
+public:
+	//Owning world is made private so that any code which depends on setting an owning world can update
+	void SetOwningWorld(UWorld* InOwningWorld);
+	UWorld* GetOwningWorld(){ return OwningWorld; }
+	const UWorld* GetOwningWorld() const { return OwningWorld; }
 
 	/** These indices are used to get the actual PxScene or NxApexScene from the GPhysXSceneMap. */
 	int16								PhysXSceneIndex[PST_MAX];
@@ -336,6 +347,8 @@ public:
 	void AddPendingSleepingEvent(PxActor* Actor, SleepEvent::Type SleepEventType, int32 SceneType);
 #endif
 
+	FClothManager* GetClothManager() const { return ClothManager; }
+
 private:
 	/** DeltaSeconds from UWorld. */
 	float										DeltaSeconds;
@@ -352,6 +365,8 @@ private:
 	FGraphEventRef FrameLaggedPhysicsSubsceneCompletion[PST_MAX];
 	/** Completion events (task) for the physics scenes	(both apex and non-apex). This is a "join" of the above. */
 	FGraphEventRef PhysicsSceneCompletion;
+
+	FClothManager* ClothManager;
 
 #if WITH_PHYSX
 
@@ -430,6 +445,9 @@ public:
 
 	/** Starts cloth Simulation*/
 	ENGINE_API void StartCloth();
+
+	/** Starts cloth Simulation*/
+	ENGINE_API void StartAsync();
 
 	/** returns the completion event for a frame */
 	FGraphEventRef GetCompletionEvent()
@@ -579,9 +597,6 @@ public:
 	/** Adds a damage event to be fired when fetchResults is done */
 	void AddPendingDamageEvent(class UDestructibleComponent* DestructibleComponent, const NxApexDamageEventReportData& DamageEvent);
 #endif
-
-	/** DeferredCommandHandler - this is mainly used for scene specific APEX calls that need to be deferred */
-	FPhysCommandHandler DeferredCommandHandler;
 
 private:
 	/** Initialize a scene of the given type.  Must only be called once for each scene type. */

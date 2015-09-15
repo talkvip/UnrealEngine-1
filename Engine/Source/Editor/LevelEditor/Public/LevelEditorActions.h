@@ -71,7 +71,6 @@ public:
 	TSharedPtr< FUICommandInfo > BuildGeometryOnly_OnlyCurrentLevel;
 	TSharedPtr< FUICommandInfo > BuildPathsOnly;
 	TSharedPtr< FUICommandInfo > BuildLODsOnly;
-	TSharedPtr< FUICommandInfo > PreviewHLODClustersOnly;
 	TSharedPtr< FUICommandInfo > LightingQuality_Production;
 	TSharedPtr< FUICommandInfo > LightingQuality_High;
 	TSharedPtr< FUICommandInfo > LightingQuality_Medium;
@@ -349,6 +348,9 @@ public:
 
 	/** Selects all actors using the same static mesh(es) and same actor class as the current selection */
 	TSharedPtr< FUICommandInfo > SelectStaticMeshesAllClasses;
+
+	/** Selects the HLOD cluster (ALODActor), if available, that has this actor as one of its SubActors */
+	TSharedPtr< FUICommandInfo > SelectOwningHierarchicalLODCluster;
 
 	/** Selects all actors using the same skeletal mesh(es) as the current selection */
 	TSharedPtr< FUICommandInfo > SelectSkeletalMeshesOfSameClass;
@@ -699,7 +701,6 @@ public:
 	static void BuildGeometryOnly_OnlyCurrentLevel_Execute();
 	static void BuildPathsOnly_Execute();
 	static void BuildLODsOnly_Execute();
-	static void PreviewHLODClustersOnly_Execute();
 	static void SetLightingQuality( ELightingBuildQuality NewQuality );
 	static bool IsLightingQualityChecked( ELightingBuildQuality TestQuality );
 	static float GetLightingDensityIdeal();
@@ -927,6 +928,11 @@ public:
 	 * Called when selecting all actors that's controlled by currently selected matinee actor
 	 */
 	static void OnSelectAllActorsControlledByMatinee();
+	
+	/**
+	* Called when selecting an Actor's (if available) owning HLOD cluster
+	*/
+	static void OnSelectOwningHLODCluster();
 	
 	/**
 	 * Called to change bsp surface alignment

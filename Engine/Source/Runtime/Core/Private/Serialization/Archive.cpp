@@ -63,7 +63,7 @@ void FArchive::Reset()
 	ArNetVer							= GEngineNegotiationVersion;
 	ArUE4Ver							= GPackageFileUE4Version;
 	ArLicenseeUE4Ver					= GPackageFileLicenseeUE4Version;
-	ArEngineVer = GEngineVersion;
+	ArEngineVer							= FEngineVersion::Current();
 	ArIsLoading							= false;
 	ArIsSaving							= false;
 	ArIsTransacting						= false;
@@ -92,7 +92,9 @@ void FArchive::Reset()
 	ArIsSaveGame						= false;
 	CookingTargetPlatform = nullptr;
 	SerializedProperty = nullptr;
-
+#if WITH_EDITORONLY_DATA
+	EditorOnlyPropertyStack = 0;
+#endif
 	// Reset all custom versions to the current registered versions.
 	ResetCustomVersions();
 }
@@ -130,6 +132,10 @@ void FArchive::CopyTrivialFArchiveStatusMembers(const FArchive& ArchiveToCopy)
 	ArIsFilterEditorOnly                 = ArchiveToCopy.ArIsFilterEditorOnly;
 	ArIsSaveGame                         = ArchiveToCopy.ArIsSaveGame;
 	CookingTargetPlatform                = ArchiveToCopy.CookingTargetPlatform;
+	SerializedProperty = ArchiveToCopy.SerializedProperty;
+#if WITH_EDITORONLY_DATA
+	EditorOnlyPropertyStack = ArchiveToCopy.EditorOnlyPropertyStack;
+#endif
 }
 
 /**
@@ -208,7 +214,7 @@ void FArchive::UsingCustomVersion(const FGuid& Key)
 	// If this fails, you probably don't have an FCustomVersionRegistration variable defined for this GUID.
 	check(RegisteredVersion);
 
-	const_cast<FCustomVersionContainer&>(GetCustomVersions()).SetVersion(Key, RegisteredVersion->Version, RegisteredVersion->FriendlyName);
+	const_cast<FCustomVersionContainer&>(GetCustomVersions()).SetVersion(Key, RegisteredVersion->Version, RegisteredVersion->GetFriendlyName());
 }
 
 int32 FArchive::CustomVer(const FGuid& Key) const
@@ -222,7 +228,7 @@ int32 FArchive::CustomVer(const FGuid& Key) const
 	return CustomVersion ? CustomVersion->Version : -1;
 }
 
-void FArchive::SetCustomVersion(const FGuid&  Key, int32 Version, FString FriendlyName)
+void FArchive::SetCustomVersion(const FGuid& Key, int32 Version, FName FriendlyName)
 {
 	const_cast<FCustomVersionContainer&>(GetCustomVersions()).SetVersion(Key, Version, FriendlyName);
 }

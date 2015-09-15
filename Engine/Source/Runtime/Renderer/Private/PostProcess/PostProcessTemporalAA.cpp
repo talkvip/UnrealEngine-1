@@ -114,7 +114,7 @@ public:
 		FilterTable[2] = FilterTable[0];
 		FilterTable[3] = FilterTable[0];
 
-		PostprocessParameter.SetPS(ShaderRHI, Context, 0, false, FilterTable);
+		PostprocessParameter.SetPS(ShaderRHI, Context, 0, eFC_0000, FilterTable);
 
 		DeferredParameters.Set(Context.RHICmdList, ShaderRHI, Context.View);
 
@@ -268,16 +268,17 @@ void FRCPassPostProcessSSRTemporalAA::Process(FRenderingCompositePassContext& Co
 	VertexShader->SetVS(Context);
 	PixelShader->SetParameters(Context);
 
-	// Draw a quad mapping scene color to the view's render target
-	DrawRectangle(
+	DrawPostProcessPass(
 		Context.RHICmdList,
 		0, 0,
 		SrcRect.Width(), SrcRect.Height(),
-		SrcRect.Min.X, SrcRect.Min.Y, 
+		SrcRect.Min.X, SrcRect.Min.Y,
 		SrcRect.Width(), SrcRect.Height(),
 		SrcRect.Size(),
 		SrcSize,
 		*VertexShader,
+		View.StereoPass,
+		Context.HasHmdMesh(),
 		EDRF_UseTriangleOptimization);
 
 	Context.RHICmdList.CopyToResolveTarget(DestRenderTarget.TargetableTexture, DestRenderTarget.ShaderResourceTexture, false, FResolveParams());
@@ -345,16 +346,17 @@ void FRCPassPostProcessDOFTemporalAA::Process(FRenderingCompositePassContext& Co
 	VertexShader->SetVS(Context);
 	PixelShader->SetParameters(Context);
 
-	// Draw a quad mapping scene color to the view's render target
-	DrawRectangle(
+	DrawPostProcessPass(
 		Context.RHICmdList,
 		0, 0,
 		SrcRect.Width(), SrcRect.Height(),
-		SrcRect.Min.X, SrcRect.Min.Y, 
+		SrcRect.Min.X, SrcRect.Min.Y,
 		SrcRect.Width(), SrcRect.Height(),
 		SrcRect.Size(),
 		SrcSize,
 		*VertexShader,
+		View.StereoPass,
+		Context.HasHmdMesh(),
 		EDRF_UseTriangleOptimization);
 
 	Context.RHICmdList.CopyToResolveTarget(DestRenderTarget.TargetableTexture, DestRenderTarget.ShaderResourceTexture, false, FResolveParams());
@@ -426,16 +428,17 @@ void FRCPassPostProcessDOFTemporalAANear::Process(FRenderingCompositePassContext
 	VertexShader->SetVS(Context);
 	PixelShader->SetParameters(Context);
 
-	// Draw a quad mapping scene color to the view's render target
-	DrawRectangle(
+	DrawPostProcessPass(
 		Context.RHICmdList,
 		0, 0,
 		SrcRect.Width(), SrcRect.Height(),
-		SrcRect.Min.X, SrcRect.Min.Y, 
+		SrcRect.Min.X, SrcRect.Min.Y,
 		SrcRect.Width(), SrcRect.Height(),
 		SrcRect.Size(),
 		SrcSize,
 		*VertexShader,
+		View.StereoPass,
+		Context.HasHmdMesh(),
 		EDRF_UseTriangleOptimization);
 
 	Context.RHICmdList.CopyToResolveTarget(DestRenderTarget.TargetableTexture, DestRenderTarget.ShaderResourceTexture, false, FResolveParams());
@@ -506,16 +509,17 @@ void FRCPassPostProcessLightShaftTemporalAA::Process(FRenderingCompositePassCont
 	VertexShader->SetVS(Context);
 	PixelShader->SetParameters(Context);
 
-	// Draw a quad mapping scene color to the view's render target
-	DrawRectangle(
+	DrawPostProcessPass(
 		Context.RHICmdList,
 		0, 0,
 		SrcRect.Width(), SrcRect.Height(),
-		SrcRect.Min.X, SrcRect.Min.Y, 
+		SrcRect.Min.X, SrcRect.Min.Y,
 		SrcRect.Width(), SrcRect.Height(),
 		SrcRect.Size(),
 		SrcSize,
 		*VertexShader,
+		View.StereoPass,
+		Context.HasHmdMesh(),
 		EDRF_UseTriangleOptimization);
 
 	Context.RHICmdList.CopyToResolveTarget(DestRenderTarget.TargetableTexture, DestRenderTarget.ShaderResourceTexture, false, FResolveParams());
@@ -533,8 +537,6 @@ FPooledRenderTargetDesc FRCPassPostProcessLightShaftTemporalAA::ComputeOutputDes
 
 void FRCPassPostProcessTemporalAA::Process(FRenderingCompositePassContext& Context)
 {
-	SCOPED_DRAW_EVENT(Context.RHICmdList, TemporalAA);
-
 	const FPooledRenderTargetDesc* InputDesc = GetInputDesc(ePId_Input0);
 
 	if(!InputDesc)
@@ -559,6 +561,8 @@ void FRCPassPostProcessTemporalAA::Process(FRenderingCompositePassContext& Conte
 
 	FIntRect SrcRect = View.ViewRect / ScaleFactor;
 	FIntRect DestRect = SrcRect;
+
+	SCOPED_DRAW_EVENTF(Context.RHICmdList, TemporalAA, TEXT("TemporalAA %dx%d"), SrcRect.Width(), SrcRect.Height());
 
 	const FSceneRenderTargetItem& DestRenderTarget = PassOutputs[0].RequestSurface(Context);
 
@@ -611,16 +615,17 @@ void FRCPassPostProcessTemporalAA::Process(FRenderingCompositePassContext& Conte
 			PixelShader->SetParameters(Context);
 		}
 	
-		// Draw a quad mapping scene color to the view's render target
-		DrawRectangle(
+		DrawPostProcessPass(
 			Context.RHICmdList,
 			0, 0,
 			SrcRect.Width(), SrcRect.Height(),
-			SrcRect.Min.X, SrcRect.Min.Y, 
+			SrcRect.Min.X, SrcRect.Min.Y,
 			SrcRect.Width(), SrcRect.Height(),
 			SrcRect.Size(),
 			SrcSize,
 			*VertexShader,
+			View.StereoPass,
+			Context.HasHmdMesh(),
 			EDRF_UseTriangleOptimization);
 	}
 	else
@@ -656,16 +661,17 @@ void FRCPassPostProcessTemporalAA::Process(FRenderingCompositePassContext& Conte
 				PixelShader->SetParameters(Context);
 			}
 		
-			// Draw a quad mapping scene color to the view's render target
-			DrawRectangle(
+			DrawPostProcessPass(
 				Context.RHICmdList,
 				0, 0,
 				SrcRect.Width(), SrcRect.Height(),
-				SrcRect.Min.X, SrcRect.Min.Y, 
+				SrcRect.Min.X, SrcRect.Min.Y,
 				SrcRect.Width(), SrcRect.Height(),
 				SrcRect.Size(),
 				SrcSize,
 				*VertexShader,
+				View.StereoPass,
+				Context.HasHmdMesh(),
 				EDRF_UseTriangleOptimization);
 		}
 	
@@ -699,16 +705,17 @@ void FRCPassPostProcessTemporalAA::Process(FRenderingCompositePassContext& Conte
 				PixelShader->SetParameters(Context);
 			}
 	
-			// Draw a quad mapping scene color to the view's render target
-			DrawRectangle(
+			DrawPostProcessPass(
 				Context.RHICmdList,
 				0, 0,
 				SrcRect.Width(), SrcRect.Height(),
-				SrcRect.Min.X, SrcRect.Min.Y, 
+				SrcRect.Min.X, SrcRect.Min.Y,
 				SrcRect.Width(), SrcRect.Height(),
 				SrcRect.Size(),
 				SrcSize,
 				*VertexShader,
+				View.StereoPass,
+				Context.HasHmdMesh(),
 				EDRF_UseTriangleOptimization);
 		}
 	}
@@ -724,7 +731,8 @@ void FRCPassPostProcessTemporalAA::Process(FRenderingCompositePassContext& Conte
 		ViewState->TemporalAAHistoryRT = PassOutputs[0].PooledRenderTarget;
 	}
 
-	// TODO draw separate translucency after jitter has been removed
+#if WITH_EDITOR
+	FRHICommandListExecutor::GetImmediateCommandList().ImmediateFlush(EImmediateFlushType::WaitForOutstandingTasksOnly);
 
 	// Remove jitter
 	View.ViewMatrices.RemoveTemporalJitter();
@@ -738,6 +746,7 @@ void FRCPassPostProcessTemporalAA::Process(FRenderingCompositePassContext& Conte
 	View.ViewMatrices.InvTranslatedViewProjectionMatrix = View.ViewMatrices.GetInvProjMatrix() * View.ViewMatrices.TranslatedViewMatrix.Inverse();
 
 	View.InitRHIResources(nullptr);
+#endif
 }
 
 FPooledRenderTargetDesc FRCPassPostProcessTemporalAA::ComputeOutputDesc(EPassOutputId InPassOutputId) const

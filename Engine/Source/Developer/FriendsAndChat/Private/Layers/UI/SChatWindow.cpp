@@ -28,6 +28,9 @@ public:
 		FChatViewModel* ViewModelPtr = ViewModel.Get();
 		ViewModel->OnChatListUpdated().AddSP(this, &SChatWindowImpl::RefreshChatList);
 		ViewModel->OnSettingsUpdated().AddSP(this, &SChatWindowImpl::SettingsChanged);
+		ViewModel->OnMessageCommitted().AddSP(this, &SChatWindowImpl::HandleChatMessageCommitted);
+		ViewModel->OnChatListSetFocus().AddSP(this, &SChatWindowImpl::HandleChatListGotFocus);
+		bUserHasScrolled = false;
 
 		FFriendsAndChatModuleStyle::Initialize(FriendStyle);
 
@@ -54,11 +57,18 @@ public:
 
 		SUserWidget::Construct(SUserWidget::FArguments()
 		[
-			SNew(SBorder)
-			.BorderImage(&FriendStyle.FriendsChatStyle.ChatBackgroundBrush)
-			.BorderBackgroundColor(this, &SChatWindowImpl::GetTimedFadeSlateColor)
-			.Visibility(this, &SChatWindowImpl::GetChatBackgroundVisibility)
-			.Padding(0)
+			SNew(SOverlay)
+			+SOverlay::Slot()
+			.VAlign(VAlign_Fill)
+			.HAlign(HAlign_Fill)
+			[
+				SNew(SBorder)
+				.BorderImage(&FriendStyle.FriendsChatStyle.ChatBackgroundBrush)
+				.BorderBackgroundColor(this, &SChatWindowImpl::GetTimedFadeSlateColor)
+				.Visibility(this, &SChatWindowImpl::GetChatBackgroundVisibility)
+				.Padding(0)
+			]
+			+SOverlay::Slot()
 			[
 				SNew(SVerticalBox)
 				+SVerticalBox::Slot()
@@ -72,6 +82,7 @@ public:
 					[
 						SAssignNew(ChatScrollBox, SScrollBox)
 						.ExternalScrollbar(ExternalScrollbar)
+						.Style(&FriendStyle.FriendsChatStyle.ScrollBorderStyle)
 					]
 					+ SOverlay::Slot()
 					.HAlign(HAlign_Right)
@@ -118,6 +129,7 @@ public:
 								.Expose(ChannelTextSlot)
 								.AutoHeight()
 								+ SVerticalBox::Slot()
+								.VAlign(VAlign_Center)
 								[
 									SAssignNew(ChatTextBox, SChatEntryWidget, ViewModel.ToSharedRef())
 								 	.FriendStyle(&FriendStyle)
@@ -150,8 +162,31 @@ public:
 		if(ChannelTextSlot && ViewModel->MultiChat())
 		{
 			ChannelTextSlot->AttachWidget(
-				SNew(STextBlock)
-				.Text(ViewModelPtr, &FChatViewModel::GetOutgoingChannelText)
+				SNew(SHorizontalBox)
+				+SHorizontalBox::Slot()
+				.AutoWidth()
+				[
+					SNew(STextBlock)
+					.Font(FriendStyle.FriendsNormalFontStyle.FriendsFontSmallBold)
+					.ColorAndOpacity(this, &SChatWindowImpl::GetOutgoingChannelTextColor)
+					.Text(ViewModelPtr, &FChatViewModel::GetOutgoingChannelText)
+				]
+				+SHorizontalBox::Slot()
+				.Padding(10, 0)
+				[
+					SNew(STextBlock)
+					.Font(FriendStyle.FriendsNormalFontStyle.FriendsFontSmallBold)
+					.ColorAndOpacity(FLinearColor::Red)
+					.Text(ViewModelPtr, &FChatViewModel::GetChannelErrorText)
+				]
+				+SHorizontalBox::Slot()
+				.HAlign(HAlign_Right)
+				[
+					SNew(SButton)
+					.ButtonStyle(&FriendStyle.FriendsChatStyle.FriendsMaximizeButtonStyle)
+					.Visibility(this, &SChatWindowImpl::GetChatMaximizeVisibility)
+					.OnClicked(this, &SChatWindowImpl::HandleMaximizeClicked)
+				]
 			);
 		}
 
@@ -160,7 +195,6 @@ public:
 
 	virtual void HandleWindowActivated() override
 	{
-		ViewModel->SetFocus();
 		ViewModel->SetIsActive(true);
 	}
 
@@ -180,9 +214,13 @@ public:
 
 		if(ViewModel.IsValid())
 		{
-			if (IsHovered() || ChatTextBox->HasKeyboardFocus())
+			if (!IsFadeBackgroundEnabled() || IsHovered() || ChatTextBox->HasKeyboardFocus() || ChatTextBox->HasFocusedDescendants())
 			{
-				if (FadeCurve.GetLerp() == 0.0f)
+				if (FadeAnimation.IsInReverse())
+				{
+					FadeAnimation.Reverse();
+				}
+				else if (FadeCurve.GetLerp() == 0.0f)
 				{
 					FadeAnimation.Play(this->AsShared());
 				}
@@ -200,12 +238,21 @@ public:
 		{
 			bUserHasScrolled = true;
 		}
+		if (bUserHasScrolled && ExternalScrollbar.IsValid() && !ExternalScrollbar->IsScrolling())
+		{
+			if (ExternalScrollbar->DistanceFromBottom() == 0)
+			{
+				bUserHasScrolled = false;
+				ViewModel->SetMessageShown(true);
+			}
+		}
 	}
 
 	virtual FReply OnMouseWheel( const FGeometry& MyGeometry, const FPointerEvent& MouseEvent ) override
 	{
 		bUserHasScrolled = true;
-		return FReply::Unhandled();
+		ViewModel->SetInteracted();
+		return FReply::Handled();
 	}
 
 private:
@@ -225,6 +272,15 @@ private:
 	{
 		CreateChatWidgets();
 		RefreshChatList();
+	}
+
+	void HandleChatMessageCommitted()
+	{
+		if (RichText.IsValid() && ChatScrollBox.IsValid())
+		{
+			ChatScrollBox->ScrollToEnd();
+			bUserHasScrolled = false;
+		}
 	}
 
 	void CreateChatWidgets()
@@ -249,6 +305,14 @@ private:
 			];
 
 			ChatTextBox->RebuildTextEntry();
+		}
+	}
+
+	void HandleChatListGotFocus()
+	{
+		if(ExternalScrollbar.IsValid() && ExternalScrollbar->DistanceFromBottom() == 0)
+		{
+			ViewModel->SetMessageShown(true);
 		}
 	}
 
@@ -286,9 +350,24 @@ private:
 
 		if (RichText.IsValid() && ChatScrollBox.IsValid())
 		{
-			if(ExternalScrollbar.IsValid() && ExternalScrollbar->DistanceFromBottom() == 0)
+			if(!bUserHasScrolled || ExternalScrollbar->DistanceFromBottom() == 0)
 			{
 				ChatScrollBox->ScrollToEnd();
+				bUserHasScrolled = false;
+				if(!ViewModel->IsChatMinimized())
+				{
+					ViewModel->SetMessageShown(true);
+				}
+				else
+				{
+					// Minimized so not seeing message
+					ViewModel->SetMessageShown(false);
+				}
+			}
+			else
+			{
+				// Scrolled up so not seeing message
+				ViewModel->SetMessageShown(false);
 			}
 		}
 	}
@@ -302,13 +381,16 @@ private:
 		{
 			FText Username = FText::FromString(*UsernameString);
 			const TSharedRef<FFriendViewModel> FriendViewModel = ViewModel->GetFriendViewModel(*UniqueIDString, Username).ToSharedRef();
-			TSharedRef<SWidget> Widget = SNew(SFriendActions, FriendViewModel).FriendStyle(&FriendStyle).FromChat(true);
+
+			bool DisplayChatOption = ViewModel->DisplayChatOption(FriendViewModel);
+
+			TSharedRef<SWidget> Widget = SNew(SFriendActions, FriendViewModel).FriendStyle(&FriendStyle).FromChat(true).DisplayChatOption(DisplayChatOption);
 
 			FSlateApplication::Get().PushMenu(
 				SharedThis(this),
 				FWidgetPath(),
 				Widget,
-				FSlateApplication::Get().GetCursorPos(),
+				FSlateApplication::Get().GetCursorPos() + FVector2D(30,0),
 				FPopupTransitionEffect(FPopupTransitionEffect::ContextMenu)
 				);
 		}
@@ -320,8 +402,7 @@ private:
 
 		if (ChannelString)
 		{
-			ViewModel->SetOutgoingMessageChannel(EChatMessageType::EnumFromString(*ChannelString));
-			ViewModel->SetFocus();
+			ViewModel->NavigateToChannel(EChatMessageType::EnumFromString(*ChannelString));
 		}
 	}
 
@@ -333,6 +414,11 @@ private:
 	EVisibility GetChatEntryVisibility() const
 	{
 		return ViewModel->GetTextEntryVisibility();
+	}
+
+	bool IsFadeBackgroundEnabled() const
+	{
+		return ViewModel->IsFadeBackgroundEnabled();
 	}
 
 	EVisibility GetChatBackgroundVisibility() const
@@ -357,6 +443,14 @@ private:
 
 	EVisibility GetChatListVisibility() const
 	{
+		if (ViewModel->IsChatMinimized())
+		{
+			return EVisibility::Hidden;
+		}
+		if (FadeCurve.GetLerp() != 0.0f)
+		{
+			return EVisibility::Visible;
+		}
 		return ViewModel->GetChatListVisibility();
 	}
 
@@ -365,6 +459,23 @@ private:
 		return FMath::Max(WindowWidth - 40, 0.0f);
 	}
 	
+	FReply HandleMaximizeClicked()
+	{
+		ViewModel->ToggleChatMinimized();
+		return FReply::Handled();
+	}
+
+	FSlateColor GetOutgoingChannelTextColor() const 
+	{
+		EChatMessageType::Type Channel = ViewModel->GetOutgoingChatChannel();
+		return FriendStyle.FriendsChatStyle.GetChannelTextColor(Channel);
+	}
+
+	EVisibility GetChatMaximizeVisibility() const
+	{
+		return ViewModel->GetChatMaximizeVisibility();
+	}
+
 private:
 
 	TSharedPtr<SScrollBox> ChatScrollBox;

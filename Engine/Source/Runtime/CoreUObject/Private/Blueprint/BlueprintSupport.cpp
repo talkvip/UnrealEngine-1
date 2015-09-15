@@ -8,6 +8,7 @@
 #include "PropertyTag.h"
 #include "UObject/StructScriptLoader.h"
 #include "UObject/UObjectThreadContext.h"
+#include "ModuleManager.h"
 
 /** 
  * Defined in BlueprintSupport.cpp
@@ -1060,6 +1061,19 @@ void FLinkerLoad::FinalizeBlueprint(UClass* LoadClass)
 		FLinkerLoad* SuperLinker = SuperClass->GetLinker();
 		if ((SuperLinker != nullptr) && SuperLinker->IsBlueprintFinalizationPending())
 		{
+			DEFERRED_DEPENDENCY_CHECK(SuperLinker->DeferredCDOIndex != INDEX_NONE);
+			UObject* SuperCDO = SuperLinker->ExportMap[SuperLinker->DeferredCDOIndex].Object;
+			// we MUST have the super fully serialized before we can finalize  
+			// this (class and CDO); if the SuperCDO is already in the midst of 
+			// serializing somewhere up the stack (and a cyclic dependency has  
+			// landed us here, finalizing one of it's children), then it is 
+			// paramount that we force it through serialization (so we reset the 
+			// RF_NeedLoad guard, and leave it to ResolveDeferredExports, for it
+			// to re-run the serialization)
+			if ( (SuperCDO != nullptr) && !SuperCDO->HasAnyFlags(RF_NeedLoad|RF_LoadCompleted) )
+			{
+				SuperCDO->SetFlags(RF_NeedLoad);
+			}
 			SuperLinker->FinalizeBlueprint(SuperClass);
 		}
 	}
@@ -1496,7 +1510,8 @@ FObjectInitializer* FDeferredObjInitializerTracker::Add(const FObjectInitializer
 		SuperClassMap.AddUnique(SuperClass, LoadClass);
 #if USE_DEFERRED_DEPENDENCY_CHECK_VERIFICATION_TESTS
 		UObject* SuperCDO = SuperClass->GetDefaultObject(/*bCreateIfNeeded =*/false);
-		DEFERRED_DEPENDENCY_CHECK( SuperCDO && (SuperCDO->HasAnyFlags(RF_NeedLoad) || SuperCDO->HasAnyFlags(RF_LoadCompleted) || IsCdoDeferred(SuperClass)) );
+		DEFERRED_DEPENDENCY_CHECK( SuperCDO && (SuperCDO->HasAnyFlags(RF_NeedLoad) ||
+			(SuperClass->GetLinker() && SuperClass->GetLinker()->IsBlueprintFinalizationPending()) || IsCdoDeferred(SuperClass)) );
 #endif // USE_DEFERRED_DEPENDENCY_CHECK_VERIFICATION_TESTS
 		
 		auto& InitializersCache = ThreadInst.DeferredInitializers;
@@ -1639,3 +1654,117 @@ void FDeferredObjInitializerTracker::ResolveDeferredSubClassObjects(UClass* Supe
 
 // don't want other files ending up with this internal define
 #undef DEFERRED_DEPENDENCY_CHECK
+
+#if WITH_EDITOR
+
+FReplaceConvertedAssetManager::FReplaceConvertedAssetManager() 
+	: bIsEnabled(false)
+{
+	FModuleManager::Get().OnModulesChanged().AddStatic(&FReplaceConvertedAssetManager::OnModulesChanged);
+
+	// FOR DEVELOPMENT/TEST ONLY:
+	const FBoolConfigValueHelper LoadNativeConvertedBPClass(TEXT("Kismet"), TEXT("bLoadNativeConvertedBPClassInEditor"), GEngineIni);
+	SetEnabled(LoadNativeConvertedBPClass);
+}
+
+void FReplaceConvertedAssetManager::OnModulesChanged(FName ModuleThatChanged, EModuleChangeReason ReasonForChange)
+{
+	Get().GatherOriginalPathsOfConvertedAssets();
+}
+
+FReplaceConvertedAssetManager& FReplaceConvertedAssetManager::Get()
+{
+	static FReplaceConvertedAssetManager ReplaceConvertedAssetManager;
+	return ReplaceConvertedAssetManager;
+}
+
+UObject* FReplaceConvertedAssetManager::FindReplacement(const FString& OriginalPathName) const
+{
+	UObject* const* ObjPtr = ReplaceMap.Find(OriginalPathName);
+	return ObjPtr ? *ObjPtr : nullptr;
+}
+
+UPackage* FReplaceConvertedAssetManager::FindPackageReplacement(const FString& OriginalPathName) const
+{
+	for (auto It = ReplaceMap.CreateConstIterator(); It; ++It)
+	{
+		if (It.Key().StartsWith(OriginalPathName))
+		{
+			auto Val = It.Value();
+			return ensure(Val) ? Val->GetOutermost() : nullptr;
+		}
+	}
+	return nullptr;
+}
+
+void FReplaceConvertedAssetManager::AddReferencedObjects(FReferenceCollector& Collector)
+{
+	Collector.AddReferencedObjects(ReplaceMap);
+}
+
+void FReplaceConvertedAssetManager::GatherOriginalPathsOfConvertedAssets()
+{
+	if (!IsEnabled())
+	{
+		return;
+	}
+
+	ReplaceMap.Reset();
+	const FName ReplaceConverted(TEXT("ReplaceConverted"));
+
+	auto FillMap = [&](UField* Field)
+	{
+		if (Field && Field->HasMetaData(ReplaceConverted))
+		{
+			auto CombinedPaths = Field->GetMetaData(ReplaceConverted);
+			TArray<FString> Paths;
+			CombinedPaths.ParseIntoArray(Paths, TEXT(","));
+			for (auto& Path : Paths)
+			{
+				ReplaceMap.Add(Path, Field);
+			}
+		}
+	};
+
+	for (auto FuncIter : FConvertedBlueprintsDependencies::Get().CreateClassFunctions)
+	{
+		auto DynamicClass = (*FuncIter)();
+		FillMap(DynamicClass);
+	}
+
+	for (UScriptStruct* LocalScriptStruct : TObjectRange<UScriptStruct>())
+	{
+		FillMap(LocalScriptStruct);
+	}
+
+	for (UEnum* LocalEnum : TObjectRange<UEnum>())
+	{
+		FillMap(LocalEnum);
+	}
+}
+
+#endif //WITH_EDITOR
+
+FConvertedBlueprintsDependencies& FConvertedBlueprintsDependencies::Get()
+{
+	static FConvertedBlueprintsDependencies ConvertedBlueprintsDependencies;
+	return ConvertedBlueprintsDependencies;
+}
+
+void FConvertedBlueprintsDependencies::RegisterClass(FName ClassName, GetDependenciesNamesFunc GetAssets)
+{
+	check(!ClassNameToGetter.Contains(ClassName));
+	ensure(GetAssets);
+	ClassNameToGetter.Add(ClassName, GetAssets);
+}
+
+void FConvertedBlueprintsDependencies::GetAssets(FName ClassName, TArray<FName>& OutPackagePaths) const
+{
+	auto FuncPtr = ClassNameToGetter.Find(ClassName);
+	auto Func = (FuncPtr) ? (*FuncPtr) : nullptr;
+	ensure(Func || !FuncPtr);
+	if (Func)
+	{
+		Func(OutPackagePaths);
+	}
+}

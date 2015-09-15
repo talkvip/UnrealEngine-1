@@ -14,6 +14,7 @@ FMovieSceneColorTrackInstance::FMovieSceneColorTrackInstance( UMovieSceneColorTr
 	PropertyBindings = MakeShareable( new FTrackInstancePropertyBindings( ColorTrack->GetPropertyName(), ColorTrack->GetPropertyPath() ) );
 }
 
+
 void FMovieSceneColorTrackInstance::SaveState(const TArray<UObject*>& RuntimeObjects)
 {
 	for( UObject* Object : RuntimeObjects )
@@ -43,6 +44,7 @@ void FMovieSceneColorTrackInstance::SaveState(const TArray<UObject*>& RuntimeObj
 	}
 }
 
+
 void FMovieSceneColorTrackInstance::RestoreState(const TArray<UObject*>& RuntimeObjects)
 {
 	for( UObject* Object : RuntimeObjects )
@@ -55,18 +57,18 @@ void FMovieSceneColorTrackInstance::RestoreState(const TArray<UObject*>& Runtime
 		if( ColorType == EColorType::Slate )
 		{
 			FSlateColor* ColorValue = InitSlateColorMap.Find(Object);
-			if (ColorValue != NULL)
+			if (ColorValue != nullptr)
 			{
-				PropertyBindings->CallFunction(Object, ColorValue);
+				PropertyBindings->CallFunction<FSlateColor>(Object, ColorValue);
 			}
 		}
 		else if( ColorType == EColorType::Linear || ColorType == EColorType::RegularColor )
 		{
-			// todo 
+			//todo
 			FLinearColor* ColorValue = InitLinearColorMap.Find(Object);
-			if (ColorValue != NULL)
+			if (ColorValue != nullptr)
 			{
-				PropertyBindings->CallFunction(Object, ColorValue);
+				PropertyBindings->CallFunction<FLinearColor>(Object, ColorValue);
 			}
 		}
 		else
@@ -77,6 +79,7 @@ void FMovieSceneColorTrackInstance::RestoreState(const TArray<UObject*>& Runtime
 
 	PropertyBindings->UpdateBindings( RuntimeObjects );
 }
+
 
 void FMovieSceneColorTrackInstance::Update( float Position, float LastPosition, const TArray<UObject*>& RuntimeObjects, class IMovieScenePlayer& Player ) 
 {
@@ -89,7 +92,7 @@ void FMovieSceneColorTrackInstance::Update( float Position, float LastPosition, 
 			if(ColorTrack->Eval(Position, LastPosition, LinearColor))
 			{
 				FSlateColor NewColor(LinearColor);
-				PropertyBindings->CallFunction(Object, &NewColor);
+				PropertyBindings->CallFunction<FSlateColor>(Object, &NewColor);
 			}
 		}
 		else
@@ -97,41 +100,50 @@ void FMovieSceneColorTrackInstance::Update( float Position, float LastPosition, 
 			FLinearColor ColorValue = ColorType == EColorType::Linear ? PropertyBindings->GetCurrentValue<FLinearColor>(Object) : PropertyBindings->GetCurrentValue<FColor>(Object).ReinterpretAsLinear();
 			if(ColorTrack->Eval(Position, LastPosition, ColorValue))
 			{
-				PropertyBindings->CallFunction(Object, &ColorValue);
+				// LightComponent's SetLightColor applies an sRGB conversion by default, so invert it here before applying the value 
+				if (ColorType == EColorType::RegularColor)
+				{
+					const bool sRGB = false;
+					ColorValue = FLinearColor(ColorValue.ToFColor(sRGB));
+				}
+
+				PropertyBindings->CallFunction<FLinearColor>(Object, &ColorValue);
 			}
 		}
 	}
 }
 
+
 void FMovieSceneColorTrackInstance::RefreshInstance( const TArray<UObject*>& RuntimeObjects, class IMovieScenePlayer& Player )
 {
-	if( RuntimeObjects.Num() > 0 )
+	if( RuntimeObjects.Num() == 0 )
 	{
-		PropertyBindings->UpdateBindings( RuntimeObjects );
-
-		// Cache off what type of color this is. Just examine the first object since the property should be the same
-		UProperty* ColorProp = PropertyBindings->GetProperty( RuntimeObjects[0] );
-
-		const UStructProperty* StructProp = Cast<const UStructProperty>(ColorProp);
-		if (StructProp && StructProp->Struct)
-		{
-			FName StructName = StructProp->Struct->GetFName();
-
-			static const FName SlateColor("SlateColor");
-
-			if( StructName == NAME_Color )
-			{
-				ColorType = EColorType::RegularColor;
-			}
-			else if( StructName == SlateColor )
-			{
-				ColorType = EColorType::Slate;
-			}
-			else
-			{
-				ColorType = EColorType::Linear;
-			}
-		}
+		return;
 	}
 
+	PropertyBindings->UpdateBindings( RuntimeObjects );
+
+	// Cache off what type of color this is. Just examine the first object since the property should be the same
+	UProperty* ColorProp = PropertyBindings->GetProperty( RuntimeObjects[0] );
+
+	const UStructProperty* StructProp = Cast<const UStructProperty>(ColorProp);
+	if (StructProp && StructProp->Struct)
+	{
+		FName StructName = StructProp->Struct->GetFName();
+
+		static const FName SlateColor("SlateColor");
+
+		if( StructName == NAME_Color )
+		{
+			ColorType = EColorType::RegularColor;
+		}
+		else if( StructName == SlateColor )
+		{
+			ColorType = EColorType::Slate;
+		}
+		else
+		{
+			ColorType = EColorType::Linear;
+		}
+	}
 }

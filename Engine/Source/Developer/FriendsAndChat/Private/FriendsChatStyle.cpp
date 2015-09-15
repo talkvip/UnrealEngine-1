@@ -54,7 +54,7 @@ FFriendsChatStyle& FFriendsChatStyle::SetGlobalChatColor(const FLinearColor& InF
 
 FFriendsChatStyle& FFriendsChatStyle::SetWhisplerChatColor(const FLinearColor& InFontColor)
 {
-	WhisplerChatColor = InFontColor;
+	WhisperChatColor = InFontColor;
 	return *this;
 }
 
@@ -70,6 +70,35 @@ FFriendsChatStyle& FFriendsChatStyle::SetPartyChatColor(const FLinearColor& InFo
 	return *this;
 }
 
+FFriendsChatStyle& FFriendsChatStyle::SetAdminChatColor(const FLinearColor& InFontColor)
+{
+	AdminChatColor = InFontColor;
+	return *this;
+}
+
+FFriendsChatStyle& FFriendsChatStyle::SetWhisplerHyperlinkChatColor(const FLinearColor& InFontColor)
+{
+	WhisperHyperlinkChatColor = InFontColor;
+	return *this;
+}
+
+FFriendsChatStyle& FFriendsChatStyle::SetGlobalHyperlinkChatColor(const FLinearColor& InFontColor)
+{
+	GlobalHyperlinkChatColor = InFontColor;
+	return *this;
+}
+
+FFriendsChatStyle& FFriendsChatStyle::SetGameHyperlinkChatColor(const FLinearColor& InFontColor)
+{
+	GameHyperlinkChatColor = InFontColor;
+	return *this;
+}
+
+FFriendsChatStyle& FFriendsChatStyle::SetPartyHyperlinkChatColor(const FLinearColor& InFontColor)
+{
+	PartyHyperlinkChatColor = InFontColor;
+	return *this;
+}
 
 FFriendsChatStyle& FFriendsChatStyle::SetChatGlobalBrush(const FSlateBrush& Brush)
 {
@@ -113,7 +142,7 @@ FFriendsChatStyle& FFriendsChatStyle::SetChatDisplayTextStyle(const FEditableTex
 	return *this;
 }
 
-FFriendsChatStyle& FFriendsChatStyle::SetScrollBorderStyle(const FScrollBorderStyle& InScrollBorderStyle)
+FFriendsChatStyle& FFriendsChatStyle::SetScrollBorderStyle(const FScrollBoxStyle& InScrollBorderStyle)
 {
 	ScrollBorderStyle = InScrollBorderStyle;
 	return *this;
@@ -147,4 +176,37 @@ FFriendsChatStyle& FFriendsChatStyle::SetChatSettingsBrush(const FSlateBrush& Br
 {
 	ChatSettingsBrush = Brush;
 	return *this;
+}
+
+FFriendsChatStyle& FFriendsChatStyle::SetMessageNotificationBrush(const FSlateBrush& Brush)
+{
+	MessageNotificationBrush = Brush;
+	return *this;
+}
+
+FFriendsChatStyle& FFriendsChatStyle::SetMinimizeButtonStyle(const FButtonStyle& Button)
+{
+	FriendsMinimizeButtonStyle = Button;
+	return *this;
+}
+
+FFriendsChatStyle& FFriendsChatStyle::SetMaximizeButtonStyle(const FButtonStyle& Button)
+{
+	FriendsMaximizeButtonStyle = Button;
+	return *this;
+}
+
+FLinearColor FFriendsChatStyle::GetChannelTextColor(EChatMessageType::Type Channel) const
+{
+	switch (Channel)
+	{
+	case EChatMessageType::Global:
+		return GlobalChatColor;
+	case EChatMessageType::Party:
+		return PartyChatColor;
+	case EChatMessageType::Whisper:
+		return WhisperChatColor;
+	default:
+		return GameChatColor;
+	}
 }

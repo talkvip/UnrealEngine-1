@@ -555,14 +555,18 @@ bool ExecPhysCommands(const TCHAR* Cmd, FOutputDevice* Ar, UWorld* InWorld)
 		{
 			if(FParse::Command(&Cmd, TEXT("CONNECT")))
 			{
+				
+				
+				const bool bVizualization = !FParse::Command(&Cmd, TEXT("NODEBUG"));
+
 				// setup connection parameters
 				FString Host = TEXT("localhost");
-				if(*Cmd)
+				if (*Cmd)
 				{
 					Host = Cmd;
 				}
 
-				const bool bVizualization = !FParse::Command(&Cmd, TEXT("NODEBUG"));
+				
 
 				PvdConnect(Host, bVizualization);
 
@@ -585,6 +589,24 @@ bool ExecPhysCommands(const TCHAR* Cmd, FOutputDevice* Ar, UWorld* InWorld)
 	else if(FParse::Command(&Cmd, TEXT("PHYSXSHARED")) )
 	{
 		FPhysxSharedData::Get().DumpSharedMemoryUsage(Ar);
+		return 1;
+	}
+	else if(FParse::Command(&Cmd, TEXT("PHYSXINFO")))
+	{
+		Ar->Logf(TEXT("PhysX Info:"));
+		Ar->Logf(TEXT("  Version: %d.%d.%d"), PX_PHYSICS_VERSION_MAJOR, PX_PHYSICS_VERSION_MINOR, PX_PHYSICS_VERSION_BUGFIX);
+#if UE_BUILD_DEBUG && !defined(NDEBUG)
+		Ar->Logf(TEXT("  Configuration: DEBUG"));
+#elif WITH_PHYSX_RELEASE
+		Ar->Logf(TEXT("  Configuration: RELEASE"));
+#else
+		Ar->Logf(TEXT("  Configuration: PROFILE"));
+#endif
+#if WITH_PHYSICS_COOKING || WITH_RUNTIME_PHYSICS_COOKING
+		Ar->Logf(TEXT("  Cooking Module: TRUE"));
+#else
+		Ar->Logf(TEXT("  Cooking Module: FALSE"));
+#endif
 		return 1;
 	}
 

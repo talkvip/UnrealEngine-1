@@ -10,6 +10,26 @@ DECLARE_LOG_CATEGORY_EXTERN( LogDemo, Log, All );
 
 DECLARE_DELEGATE_OneParam(FOnGotoTimeDelegate, const bool);
 
+class UDemoNetDriver;
+
+class FQueuedReplayTask
+{
+public:
+	FQueuedReplayTask( UDemoNetDriver* InDriver ) : Driver( InDriver )
+	{
+	}
+
+	virtual ~FQueuedReplayTask()
+	{
+	}
+
+	virtual void	StartTask() = 0;
+	virtual bool	Tick() = 0;
+	virtual FString	GetName() = 0;
+
+	UDemoNetDriver* Driver;
+};
+
 /**
  * Simulated network driver for recording and playing back game sessions.
  */
@@ -61,24 +81,19 @@ class ENGINE_API UDemoNetDriver : public UNetDriver
 	double		LastRecordAvgFlush;
 	double		MaxRecordTime;
 	int32		RecordCountSinceFlush;
-	float		TimeToSkip;
-	float		QueuedGotoTimeInSeconds;
-	uint32		InitialLiveDemoTime;
-	double		InitialLiveDemoTimeRealtime;
 
 	bool		bSavingCheckpoint;
 	double		LastCheckpointTime;
 
 	void		SaveCheckpoint();
 
-	FArchive*	GotoCheckpointArchive;
-	int64		GotoCheckpointSkipExtraTimeInMS;
+	void		LoadCheckpoint( FArchive* GotoCheckpointArchive, int64 GotoCheckpointSkipExtraTimeInMS );
 
-	void		LoadCheckpoint();
+	FOnGotoTimeDelegate OnGotoTimeDelegate;
 
 private:
 	bool		bIsFastForwarding;
-	bool		bIsLoadingCheckpoint;
+	bool		bIsFastForwardingForCheckpoint;
 	bool		bWasStartStreamingSuccessful;
 
 	TArray<FNetworkGUID> NonQueuedGUIDsForScrubbing;
@@ -86,7 +101,10 @@ private:
 	// If a channel is associated with Actor, adds the channel's GUID to the list of GUIDs excluded from queuing bunches during scrubbing.
 	void		AddNonQueuedActorForScrubbing(AActor* Actor);
 
-	FOnGotoTimeDelegate OnGotoTimeDelegate;
+	// Replay tasks
+	TArray< TSharedPtr< FQueuedReplayTask > >	QueuedReplayTasks;
+	TSharedPtr< FQueuedReplayTask >				ActiveReplayTask;
+	TSharedPtr< FQueuedReplayTask >				ActiveScrubReplayTask;
 
 public:
 
@@ -101,12 +119,16 @@ public:
 	virtual void ProcessRemoteFunction( class AActor* Actor, class UFunction* Function, void* Parameters, struct FOutParmRec* OutParms, struct FFrame* Stack, class UObject* SubObject = nullptr ) override;
 	virtual bool IsAvailable() const override { return true; }
 	void SkipTime(const float InTimeToSkip);
+	void SkipTimeInternal( const float SecondsToSkip, const bool InFastForward, const bool InIsForCheckpoint );
 	bool InitConnectInternal( FString& Error );
 	virtual bool ShouldClientDestroyTearOffActors() const override;
 	virtual bool ShouldSkipRepNotifies() const override;
 	virtual bool ShouldQueueBunchesForActorGUID(FNetworkGUID InGUID) const override;
 
 	void GotoTimeInSeconds(const float TimeInSeconds, const FOnGotoTimeDelegate& InOnGotoTimeDelegate = FOnGotoTimeDelegate());
+
+	bool IsRecording();
+	bool IsPlaying();
 
 public:
 
@@ -130,11 +152,13 @@ public:
 	bool ConditionallyReadDemoFrame();
 	bool ReadDemoFrame( FArchive* Archive );
 	void TickDemoPlayback( float DeltaSeconds );
-	void SpawnDemoRecSpectator( UNetConnection* Connection );
+	void FinalizeFastForward( const float StartTime );
+	void SpawnDemoRecSpectator( UNetConnection* Connection, const FURL& ListenURL );
 	void ResetDemoState();
 	void JumpToEndOfLiveReplay();
 	void AddEvent(const FString& Group, const FString& Meta, const TArray<uint8>& Data);
 	void EnumerateEvents(const FString& Group, FEnumerateEventsCompleteDelegate& EnumerationCompleteDelegate);
+	void RequestEventData(const FString& EventID, FOnRequestEventDataComplete& RequestEventDataCompleteDelegate);
 	virtual bool IsFastForwarding() { return bIsFastForwarding; }
 
 	/**
@@ -147,5 +171,10 @@ public:
 	void StopDemo();
 
 	void ReplayStreamingReady( bool bSuccess, bool bRecord );
-	void CheckpointReady( const bool bSuccess, const int64 SkipExtraTimeInMS );
+
+	void AddReplayTask( FQueuedReplayTask* NewTask );
+	bool IsAnyTaskPending();
+	void ClearReplayTasks();
+	bool ProcessReplayTasks();
+	bool IsNamedTaskInQueue( const FString& Name );
 };

@@ -540,7 +540,7 @@ bool FCurlHttpRequest::StartRequest()
 	// set up headers
 	if (GetHeader("User-Agent").IsEmpty())
 	{
-		SetHeader(TEXT("User-Agent"), FString::Printf(TEXT("game=%s, engine=UE4, version=%s"), FApp::GetGameName(), *GEngineVersion.ToString()));
+		SetHeader(TEXT("User-Agent"), FString::Printf(TEXT("game=%s, engine=UE4, version=%s"), FApp::GetGameName(), *FEngineVersion::Current().ToString()));
 	}
 
 	// content-length should be present http://www.w3.org/Protocols/rfc2616/rfc2616-sec4.html#sec4.4
@@ -566,7 +566,10 @@ bool FCurlHttpRequest::StartRequest()
 	const int32 NumAllHeaders = AllHeaders.Num();
 	for (int32 Idx = 0; Idx < NumAllHeaders; ++Idx)
 	{
-		UE_LOG(LogHttp, Verbose, TEXT("%p: Adding header '%s'"), this, *AllHeaders[Idx] );
+		if (!AllHeaders[Idx].Contains(TEXT("Authorization")))
+		{
+			UE_LOG(LogHttp, Verbose, TEXT("%p: Adding header '%s'"), this, *AllHeaders[Idx]);
+		}
 		HeaderList = curl_slist_append(HeaderList, TCHAR_TO_UTF8(*AllHeaders[Idx]));
 	}
 
@@ -605,6 +608,7 @@ bool FCurlHttpRequest::ProcessRequest()
 	FHttpModule::Get().GetHttpManager().AddRequest(SharedThis(this));
 	// reset timeout
 	ElapsedTime = 0.0f;
+	TimeSinceLastResponse = 0.0f;
 	
 	UE_LOG(LogHttp, Verbose, TEXT("%p: request (easy handle:%p) has been added to multi handle for processing"), this, EasyHandle );
 

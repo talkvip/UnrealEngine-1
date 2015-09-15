@@ -14,8 +14,10 @@ public class LevelEditor : ModuleRules
                 "PlacementMode",
 				"ReferenceViewer",
 				"SizeMap",
+				"SlateReflector",
                 "IntroTutorials",
-                "AppFramework"
+                "AppFramework",
+                "PortalServices"
 			}
 		);
 
@@ -36,7 +38,6 @@ public class LevelEditor : ModuleRules
                 "InputCore",
 				"Slate",
 				"SlateCore",
-				"SlateReflector",
                 "EditorStyle",
 				"Engine",
 				"MessageLog",
@@ -60,7 +61,8 @@ public class LevelEditor : ModuleRules
                 "Kismet",
 				"KismetWidgets",
 				"Sequencer",
-                "Foliage"
+                "Foliage",
+                "HierarchicalLODOutliner"
 			}
 		);
 
@@ -71,6 +73,7 @@ public class LevelEditor : ModuleRules
 				"DeviceManager",
 				"SettingsEditor",
 				"SessionFrontend",
+				"SlateReflector",
 				"AutomationWindow",
 				"Layers",
                 "WorldBrowser",

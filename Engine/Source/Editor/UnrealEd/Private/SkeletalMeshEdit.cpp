@@ -78,7 +78,6 @@ UAnimSequence * UEditorEngine::ImportFbxAnimation( USkeleton* Skeleton, UObject*
 				// since to know full path, reimport will need to do same
 				UFbxAnimSequenceImportData* ImportData = UFbxAnimSequenceImportData::GetImportDataForAnimSequence(NewAnimation, TemplateImportData);
 				ImportData->Update(UFactory::CurrentFilename);
-				ImportData->bDirty = false;
 			}
 		}
 	}
@@ -237,7 +236,7 @@ static void ApplyUnroll(FbxNode *pNode, FbxAnimLayer* pLayer, FbxAnimCurveFilter
 		// Set bone rotation order
 		EFbxRotationOrder RotationOrder = eEulerXYZ;
 		pNode->GetRotationOrder(FbxNode::eSourcePivot, RotationOrder);
-		pUnrollFilter->SetRotationOrder(RotationOrder*2);
+		pUnrollFilter->SetRotationOrder((FbxEuler::EOrder)(RotationOrder*2));
 
 		pUnrollFilter->Apply(lRCurve, 3);
 	}
@@ -549,7 +548,6 @@ UAnimSequence * UnFbx::FFbxImporter::ImportAnimations(USkeleton* Skeleton, UObje
 		// since to know full path, reimport will need to do same
 		UFbxAnimSequenceImportData* ImportData = UFbxAnimSequenceImportData::GetImportDataForAnimSequence(DestSeq, TemplateImportData);
 		ImportData->Update(UFactory::CurrentFilename);
-		ImportData->bDirty = false;
 
 		ImportAnimation(Skeleton, DestSeq, Name, SortedLinks, NodeArray, CurAnimStack, ResampleRate, AnimTimeSpan);
 
@@ -701,7 +699,7 @@ bool UnFbx::FFbxImporter::ImportCurve(const FbxAnimCurve* FbxCurve, FFloatCurve 
 			FbxAnimCurveKey Key = FbxCurve->KeyGet(KeyIndex);
 			FbxTime KeyTime = Key.GetTime() - AnimTimeSpan.GetStart();
 			float Value = Key.GetValue() * ValueScale;
-			FKeyHandle NewKeyHandle = Curve->FloatCurve.AddKey(KeyTime.GetSecondDouble(), Value, true);
+			FKeyHandle NewKeyHandle = Curve->FloatCurve.AddKey(KeyTime.GetSecondDouble(), Value, false);
 
 			FbxAnimCurveDef::ETangentMode KeyTangentMode = Key.GetTangentMode();
 			FbxAnimCurveDef::EInterpolationType KeyInterpMode = Key.GetInterpolation();
@@ -744,17 +742,21 @@ bool UnFbx::FFbxImporter::ImportCurve(const FbxAnimCurve* FbxCurve, FFloatCurve 
 				break;
 			}
 
+			// break or any other tangent mode doesn't work well with DCC
+			// it's because we don't support tangent weights, break with tangent weights won't work
+			// I added new ticket to support this, but meanwhile, we'll have to just import using auto. 
+			// @Todo: fix me: UE-20414
 			// when we import tangent, we only support break or user
 			// since it's modified by DCC and we only assume these two are valid
 			// auto does our own stuff, which doesn't work with what you see in DCC
-			if (KeyTangentMode & FbxAnimCurveDef::eTangentBreak)
-			{
-				NewTangentMode = RCTM_Break;
-			}
-			else
-			{
-				NewTangentMode = RCTM_User;
-			}
+// 			if (KeyTangentMode & FbxAnimCurveDef::eTangentGenericBreak)
+// 			{
+// 				NewTangentMode = RCTM_Break;
+// 			}
+// 			else
+// 			{
+// 				NewTangentMode = RCTM_User;
+// 			}
 
 			// @fix me : weight of tangent is not used, but we'll just save this for future where we might use it. 
 			switch (KeyTangentWeightMode)
@@ -1073,7 +1075,7 @@ bool UnFbx::FFbxImporter::ImportAnimation(USkeleton* Skeleton, UAnimSequence * D
 			{
 				FbxAnimCurveNode* CurveNode = Property.GetCurveNode();
 				// do this if user defined and animated and leaf node
-				if( CurveNode && Property.GetFlag(FbxPropertyAttr::eUserDefined) && 
+				if( CurveNode && Property.GetFlag(FbxPropertyFlags::eUserDefined) &&
 					CurveNode->IsAnimated() && IsSupportedCurveDataType(Property.GetPropertyDataType().GetType()) )
 				{
 					FString CurveName = UTF8_TO_TCHAR(CurveNode->GetName());

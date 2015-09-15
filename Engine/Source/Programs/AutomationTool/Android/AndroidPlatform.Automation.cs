@@ -63,13 +63,13 @@ public class AndroidPlatform : Platform
 		string PackageName = GetPackageInfo(ApkName, false);
 		if (PackageName == null)
 		{
-			throw new AutomationException(ErrorCodes.Error_FailureGettingPackageInfo, "Failed to get package name from " + ApkName);
+			throw new AutomationException(ExitCode.Error_FailureGettingPackageInfo, "Failed to get package name from " + ApkName);
 		}
 
 		string PackageVersion = GetPackageInfo(ApkName, true);
 		if (PackageVersion == null || PackageVersion.Length == 0)
 		{
-			throw new AutomationException(ErrorCodes.Error_FailureGettingPackageInfo, "Failed to get package version from " + ApkName);
+			throw new AutomationException(ExitCode.Error_FailureGettingPackageInfo, "Failed to get package version from " + ApkName);
 		}
 
 		if (PackageVersion.Length > 0)
@@ -120,7 +120,7 @@ public class AndroidPlatform : Platform
 		var Deploy = UEBuildDeploy.GetBuildDeploy(UnrealTargetPlatform.Android);
 
 		string BaseApkName = GetFinalApkName(Params, SC.StageExecutables[0], true, "", "");
-		LogConsole("BaseApkName = {0}", BaseApkName);
+		Log("BaseApkName = {0}", BaseApkName);
 
 		// Create main OBB with entire contents of staging dir. This
 		// includes any PAK files, movie files, etc.
@@ -134,7 +134,7 @@ public class AndroidPlatform : Platform
 		}
 
 		// Now create the OBB as a ZIP archive.
-		LogConsole("Creating {0} from {1}", LocalObbName, SC.StageDirectory);
+		Log("Creating {0} from {1}", LocalObbName, SC.StageDirectory);
 		using (ZipFile ObbFile = new ZipFile(LocalObbName))
 		{
 			ObbFile.CompressionMethod = CompressionMethod.None;
@@ -146,7 +146,7 @@ public class AndroidPlatform : Platform
 					if (e.EventType == ZipProgressEventType.Adding_AfterAddEntry)
 					{
 						ObbFileCount += 1;
-						LogConsole("[{0}/{1}] Adding {2} to OBB",
+						Log("[{0}/{1}] Adding {2} to OBB",
 							ObbFileCount, e.EntriesTotal,
 							e.CurrentEntry.FileName);
 					}
@@ -166,8 +166,8 @@ public class AndroidPlatform : Platform
                     UE4SOName = UE4SOName.Replace(".apk", ".so");
                     if (FileExists_NoExceptions(UE4SOName) == false)
 					{
-						LogConsole("Failed to find game .so " + UE4SOName);
-                        throw new AutomationException(ErrorCodes.Error_MissingExecutable, "Stage Failed. Could not find .so {0}. You may need to build the UE4 project with your target configuration and platform.", UE4SOName);
+						Log("Failed to find game .so " + UE4SOName);
+                        throw new AutomationException(ExitCode.Error_MissingExecutable, "Stage Failed. Could not find .so {0}. You may need to build the UE4 project with your target configuration and platform.", UE4SOName);
 					}
 				}
 				
@@ -227,7 +227,7 @@ public class AndroidPlatform : Platform
         {
             string OBBInstallCommand = bNoObbInstall ? "shell 'rm -r $EXTERNAL_STORAGE/" + DeviceObbName + "'" : "push " + Path.GetFileName(ObbName) + " $STORAGE/" + DeviceObbName;
 
-			LogConsole("Writing shell script for install with {0}", bPackageDataInsideApk ? "data in APK" : "separate obb");
+			Log("Writing shell script for install with {0}", bPackageDataInsideApk ? "data in APK" : "separate obb");
             BatchLines = new string[] {
 						"#!/bin/sh",
 						"cd \"`dirname \"$0\"`\"",
@@ -271,7 +271,7 @@ public class AndroidPlatform : Platform
         {
             string OBBInstallCommand = bNoObbInstall ? "shell rm -r %STORAGE%/" + DeviceObbName : "push " + Path.GetFileName(ObbName) + " %STORAGE%/" + DeviceObbName;
 
-			LogConsole("Writing bat for install with {0}", bPackageDataInsideApk ? "data in APK" : "separate OBB");
+			Log("Writing bat for install with {0}", bPackageDataInsideApk ? "data in APK" : "separate OBB");
             BatchLines = new string[] {
 						"setlocal",
                         "set ANDROIDHOME=%ANDROID_HOME%",
@@ -314,7 +314,7 @@ public class AndroidPlatform : Platform
 	{
 		if (SC.StageTargetConfigurations.Count != 1)
 		{
-			throw new AutomationException(ErrorCodes.Error_OnlyOneTargetConfigurationSupported, "Android is currently only able to package one target configuration at a time, but StageTargetConfigurations contained {0} configurations", SC.StageTargetConfigurations.Count);
+			throw new AutomationException(ExitCode.Error_OnlyOneTargetConfigurationSupported, "Android is currently only able to package one target configuration at a time, but StageTargetConfigurations contained {0} configurations", SC.StageTargetConfigurations.Count);
 		}
 
 		var Architectures = UnrealBuildTool.AndroidToolChain.GetAllArchitectures();
@@ -335,11 +335,11 @@ public class AndroidPlatform : Platform
 				// verify the files exist
 				if (!FileExists(ApkName))
 				{
-					throw new AutomationException(ErrorCodes.Error_AppNotFound, "ARCHIVE FAILED - {0} was not found", ApkName);
+					throw new AutomationException(ExitCode.Error_AppNotFound, "ARCHIVE FAILED - {0} was not found", ApkName);
 				}
 				if (!bPackageDataInsideApk && !FileExists(ObbName))
 				{
-                    throw new AutomationException(ErrorCodes.Error_ObbNotFound, "ARCHIVE FAILED - {0} was not found", ObbName);
+                    throw new AutomationException(ExitCode.Error_ObbNotFound, "ARCHIVE FAILED - {0} was not found", ObbName);
 				}
 
 				SC.ArchiveFiles(Path.GetDirectoryName(ApkName), Path.GetFileName(ApkName));
@@ -462,9 +462,11 @@ public class AndroidPlatform : Platform
 		string RemoteDir = StorageLocation + "/UE4Game/" + Params.ShortProjectName;
 
 		// Note: appends the device name to make the filename unique; these files will be deleted later during delta manifest generation
+		// Replace colon with underscore for legal filename (colon may be present for wifi connected devices)
+		string DeviceName = Params.Device.Replace(":", "_");
 
 		// Try retrieving the UFS files manifest files from the device
-		string UFSManifestFileName = CombinePaths(SC.StageDirectory, DeploymentContext.UFSDeployedManifestFileName + "_" + Params.Device);
+		string UFSManifestFileName = CombinePaths(SC.StageDirectory, DeploymentContext.UFSDeployedManifestFileName + "_" + DeviceName);
 		ProcessResult UFSResult = RunAdbCommand(Params, " pull " + RemoteDir + "/" + DeploymentContext.UFSDeployedManifestFileName + " \"" + UFSManifestFileName + "\"", null, ERunOptions.AppMustExist);
 		if (!UFSResult.Output.Contains("bytes"))
 		{
@@ -472,7 +474,7 @@ public class AndroidPlatform : Platform
 		}
 
 		// Try retrieving the non UFS files manifest files from the device
-		string NonUFSManifestFileName = CombinePaths(SC.StageDirectory, DeploymentContext.NonUFSDeployedManifestFileName + "_" + Params.Device);
+		string NonUFSManifestFileName = CombinePaths(SC.StageDirectory, DeploymentContext.NonUFSDeployedManifestFileName + "_" + DeviceName);
 		ProcessResult NonUFSResult = RunAdbCommand(Params, " pull " + RemoteDir + "/" + DeploymentContext.NonUFSDeployedManifestFileName + " \"" + NonUFSManifestFileName + "\"", null, ERunOptions.AppMustExist);
 		if (!NonUFSResult.Output.Contains("bytes"))
 		{
@@ -586,7 +588,7 @@ public class AndroidPlatform : Platform
 					}
 				}
 
-				throw new AutomationException(ErrorCodes.Error_AppInstallFailed, ErrorMessage);
+				throw new AutomationException(ExitCode.Error_AppInstallFailed, ErrorMessage);
 			}
 		}
  
@@ -800,6 +802,7 @@ public class AndroidPlatform : Platform
 	/** Internal usage for GetPackageName */
 	private static string PackageLine = null;
 	private static Mutex PackageInfoMutex = new Mutex();
+	private static string LaunchableActivityLine = null;
 
 	/** Run an external exe (and capture the output), given the exe path and the commandline. */
 	private static string GetPackageInfo(string ApkName, bool bRetrieveVersionCode)
@@ -815,6 +818,7 @@ public class AndroidPlatform : Platform
 		using (var GameProcess = Process.Start(ExeInfo))
 		{
 			PackageLine = null;
+			LaunchableActivityLine = null;
 			GameProcess.BeginOutputReadLine();
 			GameProcess.OutputDataReceived += ParsePackageName;
 			GameProcess.WaitForExit();
@@ -836,6 +840,22 @@ public class AndroidPlatform : Platform
 		return ReturnValue;
 	}
 
+	/** Returns the launch activity name to launch (must call GetPackageInfo first), returns "com.epicgames.ue4.SplashActivity" default if not found */
+	private static string GetLaunchableActivityName()
+	{
+		string ReturnValue = "com.epicgames.ue4.SplashActivity";
+		if (LaunchableActivityLine != null)
+		{
+			// the line should look like: launchable-activity: name='com.epicgames.ue4.SplashActivity'  label='TappyChicken' icon=''
+			string[] Tokens = LaunchableActivityLine.Split("'".ToCharArray());
+			if (Tokens.Length >= 2)
+			{
+				ReturnValue = Tokens[1];
+			}
+		}
+		return ReturnValue;
+	}
+
 	/** Simple function to pipe output asynchronously */
 	private static void ParsePackageName(object Sender, DataReceivedEventArgs Event)
 	{
@@ -851,20 +871,100 @@ public class AndroidPlatform : Platform
 					PackageLine = Line;
 				}
 			}
+			if (LaunchableActivityLine == null)
+			{
+				string Line = Event.Data;
+				if (Line.StartsWith("launchable-activity:"))
+				{
+					LaunchableActivityLine = Line;
+				}
+			}
 		}
 	}
 
+	static private string CachedAaptPath = null;
+	static private string LastAndroidHomePath = null;
+
+	private static uint GetRevisionValue(string VersionString)
+	{
+		// read up to 4 sections (ie. 20.0.3.5), first section most significant
+		// each section assumed to be 0 to 255 range
+		uint Value = 0;
+		try
+		{
+			string[] Sections= VersionString.Split(".".ToCharArray());
+			Value |= (Sections.Length > 0) ? (uint.Parse(Sections[0]) << 24) : 0;
+			Value |= (Sections.Length > 1) ? (uint.Parse(Sections[1]) << 16) : 0;
+			Value |= (Sections.Length > 2) ? (uint.Parse(Sections[2]) <<  8) : 0;
+			Value |= (Sections.Length > 3) ?  uint.Parse(Sections[3])        : 0;
+		}
+		catch (Exception)
+		{
+			// ignore poorly formed version
+		}
+		return Value;
+	}	
+
 	private static string GetAaptPath()
 	{
-		// there is a numbered directory in here, hunt it down
-        string path = Environment.ExpandEnvironmentVariables("%ANDROID_HOME%/build-tools/");
-		string[] Subdirs = Directory.GetDirectories(path);
+		// return cached path if ANDROID_HOME has not changed
+        string HomePath = Environment.ExpandEnvironmentVariables("%ANDROID_HOME%");
+		if (CachedAaptPath != null && LastAndroidHomePath == HomePath)
+		{
+			return CachedAaptPath;
+		}
+
+		// get a list of the directories in build-tools.. may be more than one set installed (or none which is bad)
+		string[] Subdirs = Directory.GetDirectories(Path.Combine(HomePath, "build-tools"));
         if (Subdirs.Length == 0)
         {
-            throw new AutomationException(ErrorCodes.Error_AndroidBuildToolsPathNotFound, "Failed to find %ANDROID_HOME%/build-tools subdirectory");
+            throw new AutomationException(ExitCode.Error_AndroidBuildToolsPathNotFound, "Failed to find %ANDROID_HOME%/build-tools subdirectory. Run SDK manager and install build-tools.");
         }
-		// we expect there to be one, so use the first one
-		return Path.Combine(Subdirs[0], Utils.IsRunningOnMono ? "aapt" : "aapt.exe");
+
+		// valid directories will have a source.properties with the Pkg.Revision (there is no guarantee we can use the directory name as revision)
+		string BestToolPath = null;
+		uint BestVersion = 0;
+		foreach (string CandidateDir in Subdirs)
+		{
+			string AaptFilename = Path.Combine(CandidateDir, Utils.IsRunningOnMono ? "aapt" : "aapt.exe");
+			uint RevisionValue = 0;
+
+			if (File.Exists(AaptFilename))
+			{
+				string SourcePropFilename = Path.Combine(CandidateDir, "source.properties");
+				if (File.Exists(SourcePropFilename))
+				{
+					string[] PropertyContents = File.ReadAllLines(SourcePropFilename);
+					foreach (string PropertyLine in PropertyContents)
+					{
+						if (PropertyLine.StartsWith("Pkg.Revision="))
+						{
+							RevisionValue = GetRevisionValue(PropertyLine.Substring(13));
+							break;
+						}
+					}
+				}
+			}
+
+			// remember it if newer version or haven't found one yet
+			if (RevisionValue > BestVersion || BestToolPath == null)
+			{
+				BestVersion = RevisionValue;
+				BestToolPath = AaptFilename;
+			}
+		}
+
+		if (BestToolPath == null)
+		{
+            throw new AutomationException(ExitCode.Error_AndroidBuildToolsPathNotFound, "Failed to find %ANDROID_HOME%/build-tools subdirectory with aapt. Run SDK manager and install build-tools.");
+		}
+
+		CachedAaptPath = BestToolPath;
+		LastAndroidHomePath = HomePath;
+
+		Log("Using this aapt: {0}", CachedAaptPath);
+
+		return CachedAaptPath;
 	}
 
 	private string GetBestDeviceArchitecture(ProjectParams Params)
@@ -926,7 +1026,7 @@ public class AndroidPlatform : Platform
 		// if after the fallbacks, we still don't have it, we can't continue
 		if (!AppArchitectures.Contains(DeviceArch))
 		{
-            throw new AutomationException(ErrorCodes.Error_NoApkSuitableForArchitecture, "Unable to run because you don't have an apk that is usable on {0}. Looked for {1}", Params.Device, DeviceArch);
+            throw new AutomationException(ExitCode.Error_NoApkSuitableForArchitecture, "Unable to run because you don't have an apk that is usable on {0}. Looked for {1}", Params.Device, DeviceArch);
 		}
 
 		return DeviceArch;
@@ -976,7 +1076,7 @@ public class AndroidPlatform : Platform
 		string PackageName = GetPackageInfo(ApkName, false);
 		if (PackageName == null)
 		{
-            throw new AutomationException(ErrorCodes.Error_FailureGettingPackageInfo, "Failed to get package name from " + ClientApp);
+            throw new AutomationException(ExitCode.Error_FailureGettingPackageInfo, "Failed to get package name from " + ClientApp);
 		}
 
 		if (Params.Prebuilt)
@@ -986,7 +1086,7 @@ public class AndroidPlatform : Platform
 		}
 
 		// start the app on device!
-		string CommandLine = "shell am start -n " + PackageName + "/com.epicgames.ue4.GameActivity";
+		string CommandLine = "shell am start -n " + PackageName + "/" + GetLaunchableActivityName();
 		ProcessResult ClientProcess = RunAdbCommand(Params, CommandLine, null, ClientRunFlags);
 
 
@@ -1018,7 +1118,7 @@ public class AndroidPlatform : Platform
 				TimeSpan DeltaRunTime = DateTime.Now - StartTime;
 				if ((DeltaRunTime.TotalSeconds > TimeOutSeconds) && (TimeOutSeconds != 0))
 				{
-					LogConsole("Device: " + Params.Device + " timed out while waiting for run to finish");
+					Log("Device: " + Params.Device + " timed out while waiting for run to finish");
 					break;
 				}
 			}

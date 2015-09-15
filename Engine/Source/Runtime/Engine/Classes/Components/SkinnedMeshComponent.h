@@ -294,7 +294,7 @@ public:
 	uint32 bDisplayBones:1;
 
 	/** Disable Morphtarget for this component. */
-	UPROPERTY()
+	UPROPERTY(EditAnywhere, AdvancedDisplay, BlueprintReadWrite, Category = SkeletalMesh)
 	uint32 bDisableMorphTarget:1;
 
 	/** Don't bother rendering the skin. */
@@ -337,8 +337,8 @@ private:
 	uint32 bForceMeshObjectUpdate:1;
 
 public:
-	/** If true, DistanceFactor for this SkinnedMeshComponent will be added to global chart. */
-	UPROPERTY()
+
+	DEPRECATED(4.11, "bChartDistanceFactor is no longer useful, please remove references to it")
 	uint32 bChartDistanceFactor:1;
 
 	/** Whether or not we can highlight selected sections - this should really only be done in the editor */
@@ -369,6 +369,22 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, Category="Components|SkinnedMesh")
 	virtual void SetPhysicsAsset(class UPhysicsAsset* NewPhysicsAsset, bool bForceReInit = false);
+
+	/**
+	 * Set MinLodModel of the mesh component
+	 *
+	 * @param	InNewMinLOD	Set new MinLodModel that make sure the LOD does not go below of this value. Range from [0, Max Number of LOD - 1]. This will affect in the next tick update. 
+	 */
+	UFUNCTION(BlueprintCallable, Category="Components|SkinnedMesh")
+	void SetMinLOD(int32 InNewMinLOD);
+
+	/**
+	 * Set MinLodModel of the mesh component
+	 *
+	 * @param	InNewForcedLOD	Set new ForcedLODModel that forces to set the incoming LOD. Range from [1, Max Number of LOD]. This will affect in the next tick update. 
+	 */
+	UFUNCTION(BlueprintCallable, Category="Components|SkinnedMesh")
+	void SetForcedLOD(int32 InNewForcedLOD);
 
 	/**
 	 * Find the index of bone by name. Looks in the current SkeletalMesh being used by this SkeletalMeshComponent.
@@ -427,17 +443,17 @@ public:
 	/** Gets the skeletal mesh resource used for rendering the component. */
 	FSkeletalMeshResource* GetSkeletalMeshResource() const;
 
-	// Begin UObject interface
+	//~ Begin UObject Interface
 	virtual void Serialize(FArchive& Ar) override;
 	virtual SIZE_T GetResourceSize(EResourceSizeMode::Type Mode) override;
 	virtual FString GetDetailedInfoInternal() const override;
 #if WITH_EDITOR
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 #endif // WITH_EDITOR
-	// End UObject interface
+	//~ End UObject Interface
 
 protected:
-	// Begin UActorComponent interface
+	//~ Begin UActorComponent Interface
 	virtual void OnRegister() override;
 	virtual void OnUnregister() override;
 	virtual void CreateRenderState_Concurrent() override;
@@ -449,25 +465,25 @@ protected:
 	}
 	virtual void TickComponent(float DeltaTime, enum ELevelTick TickType, FActorComponentTickFunction *ThisTickFunction) override;
 	virtual UObject const* AdditionalStatObject() const override;
-	// End UActorComponent interface
+	//~ End UActorComponent Interface
 
 public:
-	// Begin USceneComponent interface
+	//~ Begin USceneComponent Interface
 	virtual FBoxSphereBounds CalcBounds(const FTransform& LocalToWorld) const override;
 	virtual FTransform GetSocketTransform(FName InSocketName, ERelativeTransformSpace TransformSpace = RTS_World) const override;
 	virtual bool DoesSocketExist(FName InSocketName) const override;
 	virtual bool HasAnySockets() const override;
 	virtual void QuerySupportedSockets(TArray<FComponentSocketDescription>& OutSockets) const override;
 	virtual void UpdateOverlaps(TArray<FOverlapInfo> const* PendingOverlaps=NULL, bool bDoNotifies=true, const TArray<FOverlapInfo>* OverlapsAtEndLocation=NULL) override;
-	// End USceneComponent interface
+	//~ End USceneComponent Interface
 
-	// Begin UPrimitiveComponent interface
+	//~ Begin UPrimitiveComponent Interface
 	virtual UMaterialInterface* GetMaterial(int32 MaterialIndex) const override;
 	virtual FPrimitiveSceneProxy* CreateSceneProxy() override;
 	virtual void GetUsedMaterials(TArray<UMaterialInterface*>& OutMaterials) const override;
 	virtual void GetStreamingTextureInfo(TArray<FStreamingTexturePrimitiveInfo>& OutStreamingTextures) const override;
 	virtual int32 GetNumMaterials() const override;
-	// End UPrimitiveComponent interface
+	//~ End UPrimitiveComponent Interface
 
 	/**
 	 *	Sets the value of the bForceWireframe flag and reattaches the component as necessary.
@@ -475,6 +491,13 @@ public:
 	 *	@param	InForceWireframe		New value of bForceWireframe.
 	 */
 	void SetForceWireframe(bool InForceWireframe);
+
+	/**
+	*	Sets the value of the SectionIndexPreview flag and reattaches the component as necessary.
+	*
+	*	@param	InSectionIndexPreview		New value of SectionIndexPreview.
+	*/
+	void SetSectionPreview(int32 InSectionIndexPreview);
 
 	/**
 	 * Function returns whether or not CPU skinning should be applied
@@ -912,4 +935,6 @@ public:
 	virtual bool IsPlayingRootMotion(){ return false; }
 
 	virtual bool IsPlayingRootMotionFromEverything(){ return false; }
+
+	bool ShouldUseUpdateRateOptimizations() const;
 };

@@ -9,64 +9,111 @@
 #include "ScopedTransaction.h"
 #include "MovieScene.h"
 #include "MovieSceneTrackEditor.h"
-#include "PropertyTrackEditor.h"
+
+#include "BoolPropertyTrackEditor.h"
+#include "BytePropertyTrackEditor.h"
+#include "ColorPropertyTrackEditor.h"
+#include "FloatPropertyTrackEditor.h"
+#include "VectorPropertyTrackEditor.h"
+#include "VisibilityPropertyTrackEditor.h"
+
 #include "TransformTrackEditor.h"
 #include "ShotTrackEditor.h"
 #include "SubMovieSceneTrackEditor.h"
 #include "AudioTrackEditor.h"
 #include "SkeletalAnimationTrackEditor.h"
 #include "ParticleTrackEditor.h"
+#include "AttachTrackEditor.h"
+#include "EventTrackEditor.h"
 #include "PathTrackEditor.h"
+#include "MaterialTrackEditor.h"
 
 
 /**
  * Implements the MovieSceneTools module.
  */
-class FMovieSceneToolsModule : public IMovieSceneTools
+class FMovieSceneToolsModule
+	: public IMovieSceneTools
 {
+public:
+
+	// IModuleInterface interface
+
 	virtual void StartupModule() override
 	{
-		// Register with the sequencer module that we provide auto-key handlers.
 		ISequencerModule& SequencerModule = FModuleManager::Get().LoadModuleChecked<ISequencerModule>( "Sequencer" );
-		PropertyTrackEditorCreateTrackEditorDelegateHandle      = SequencerModule.RegisterTrackEditor_Handle( FOnCreateTrackEditor::CreateStatic( &FPropertyTrackEditor::CreateTrackEditor ) );
-		TransformTrackEditorCreateTrackEditorDelegateHandle     = SequencerModule.RegisterTrackEditor_Handle( FOnCreateTrackEditor::CreateStatic( &F3DTransformTrackEditor::CreateTrackEditor ) );
-		EditorCreateTrackEditorDelegateHandle					= SequencerModule.RegisterTrackEditor_Handle( FOnCreateTrackEditor::CreateStatic( &FShotTrackEditor::CreateTrackEditor ) );
-		SubMovieSceneTrackEditorCreateTrackEditorDelegateHandle = SequencerModule.RegisterTrackEditor_Handle( FOnCreateTrackEditor::CreateStatic( &FSubMovieSceneTrackEditor::CreateTrackEditor ) );
-		AudioTrackEditorCreateTrackEditorDelegateHandle         = SequencerModule.RegisterTrackEditor_Handle( FOnCreateTrackEditor::CreateStatic( &FAudioTrackEditor::CreateTrackEditor ) );
-		AnimationTrackEditorCreateTrackEditorDelegateHandle     = SequencerModule.RegisterTrackEditor_Handle( FOnCreateTrackEditor::CreateStatic( &FSkeletalAnimationTrackEditor::CreateTrackEditor ) );
-		ParticleTrackEditorCreateTrackEditorDelegateHandle      = SequencerModule.RegisterTrackEditor_Handle( FOnCreateTrackEditor::CreateStatic( &FParticleTrackEditor::CreateTrackEditor ) );
-		PathTrackEditorCreateTrackEditorDelegateHandle          = SequencerModule.RegisterTrackEditor_Handle( FOnCreateTrackEditor::CreateStatic( &F3DPathTrackEditor::CreateTrackEditor ) );
+
+		// register property track editors
+		BoolPropertyTrackCreateEditorHandle = SequencerModule.RegisterTrackEditor_Handle( FOnCreateTrackEditor::CreateStatic( &FBoolPropertyTrackEditor::CreateTrackEditor ) );
+		BytePropertyTrackCreateEditorHandle = SequencerModule.RegisterTrackEditor_Handle( FOnCreateTrackEditor::CreateStatic( &FBytePropertyTrackEditor::CreateTrackEditor ) );
+		ColorPropertyTrackCreateEditorHandle = SequencerModule.RegisterTrackEditor_Handle( FOnCreateTrackEditor::CreateStatic( &FColorPropertyTrackEditor::CreateTrackEditor ) );
+		FloatPropertyTrackCreateEditorHandle = SequencerModule.RegisterTrackEditor_Handle( FOnCreateTrackEditor::CreateStatic( &FFloatPropertyTrackEditor::CreateTrackEditor ) );
+		VectorPropertyTrackCreateEditorHandle = SequencerModule.RegisterTrackEditor_Handle( FOnCreateTrackEditor::CreateStatic( &FVectorPropertyTrackEditor::CreateTrackEditor ) );
+		VisibilityPropertyTrackCreateEditorHandle = SequencerModule.RegisterTrackEditor_Handle( FOnCreateTrackEditor::CreateStatic( &FVisibilityPropertyTrackEditor::CreateTrackEditor ) );
+
+		// register specialty track editors
+		AnimationTrackCreateEditorHandle = SequencerModule.RegisterTrackEditor_Handle( FOnCreateTrackEditor::CreateStatic( &FSkeletalAnimationTrackEditor::CreateTrackEditor ) );
+		AttachTrackCreateEditorHandle = SequencerModule.RegisterTrackEditor_Handle( FOnCreateTrackEditor::CreateStatic( &F3DAttachTrackEditor::CreateTrackEditor ) );
+		AudioTrackCreateEditorHandle = SequencerModule.RegisterTrackEditor_Handle( FOnCreateTrackEditor::CreateStatic( &FAudioTrackEditor::CreateTrackEditor ) );
+		EventTrackCreateEditorHandle = SequencerModule.RegisterTrackEditor_Handle( FOnCreateTrackEditor::CreateStatic( &FEventTrackEditor::CreateTrackEditor ) );
+		ParticleTrackCreateEditorHandle = SequencerModule.RegisterTrackEditor_Handle( FOnCreateTrackEditor::CreateStatic( &FParticleTrackEditor::CreateTrackEditor ) );
+		PathTrackCreateEditorHandle = SequencerModule.RegisterTrackEditor_Handle( FOnCreateTrackEditor::CreateStatic( &F3DPathTrackEditor::CreateTrackEditor ) );
+		ShotTrackCreateEditorHandle = SequencerModule.RegisterTrackEditor_Handle( FOnCreateTrackEditor::CreateStatic( &FShotTrackEditor::CreateTrackEditor ) );
+		SubMovieSceneTrackCreateEditorHandle = SequencerModule.RegisterTrackEditor_Handle( FOnCreateTrackEditor::CreateStatic( &FSubMovieSceneTrackEditor::CreateTrackEditor ) );
+		TransformTrackCreateEditorHandle = SequencerModule.RegisterTrackEditor_Handle( FOnCreateTrackEditor::CreateStatic( &F3DTransformTrackEditor::CreateTrackEditor ) );
+		ComponentMaterialTrackCreatEditorHandle = SequencerModule.RegisterTrackEditor_Handle( FOnCreateTrackEditor::CreateStatic( &FComponentMaterialTrackEditor::CreateTrackEditor ) );
 	}
 
 	virtual void ShutdownModule() override
 	{
-		if( FModuleManager::Get().IsModuleLoaded( "Sequencer" ) )
+		if (!FModuleManager::Get().IsModuleLoaded("Sequencer"))
 		{
-			// Unregister auto key handlers
-			ISequencerModule& SequencerModule = FModuleManager::Get().GetModuleChecked<ISequencerModule>( "Sequencer" );
-			SequencerModule.UnRegisterTrackEditor_Handle( PropertyTrackEditorCreateTrackEditorDelegateHandle );
-			SequencerModule.UnRegisterTrackEditor_Handle( TransformTrackEditorCreateTrackEditorDelegateHandle );
-			SequencerModule.UnRegisterTrackEditor_Handle( EditorCreateTrackEditorDelegateHandle );
-			SequencerModule.UnRegisterTrackEditor_Handle( SubMovieSceneTrackEditorCreateTrackEditorDelegateHandle );
-			SequencerModule.UnRegisterTrackEditor_Handle( AudioTrackEditorCreateTrackEditorDelegateHandle );
-			SequencerModule.UnRegisterTrackEditor_Handle( AnimationTrackEditorCreateTrackEditorDelegateHandle );
-			SequencerModule.UnRegisterTrackEditor_Handle( ParticleTrackEditorCreateTrackEditorDelegateHandle );
-			SequencerModule.UnRegisterTrackEditor_Handle( PathTrackEditorCreateTrackEditorDelegateHandle );
+			return;
 		}
-		
+
+		ISequencerModule& SequencerModule = FModuleManager::Get().GetModuleChecked<ISequencerModule>( "Sequencer" );
+
+		// unregister property track editors
+		SequencerModule.UnRegisterTrackEditor_Handle( BoolPropertyTrackCreateEditorHandle );
+		SequencerModule.UnRegisterTrackEditor_Handle( BytePropertyTrackCreateEditorHandle );
+		SequencerModule.UnRegisterTrackEditor_Handle( ColorPropertyTrackCreateEditorHandle );
+		SequencerModule.UnRegisterTrackEditor_Handle( FloatPropertyTrackCreateEditorHandle );
+		SequencerModule.UnRegisterTrackEditor_Handle( VectorPropertyTrackCreateEditorHandle );
+		SequencerModule.UnRegisterTrackEditor_Handle( VisibilityPropertyTrackCreateEditorHandle );
+
+		// unregister specialty track editors
+		SequencerModule.UnRegisterTrackEditor_Handle( AnimationTrackCreateEditorHandle );
+		SequencerModule.UnRegisterTrackEditor_Handle( AttachTrackCreateEditorHandle );
+		SequencerModule.UnRegisterTrackEditor_Handle( AudioTrackCreateEditorHandle );
+		SequencerModule.UnRegisterTrackEditor_Handle( EventTrackCreateEditorHandle );
+		SequencerModule.UnRegisterTrackEditor_Handle( ParticleTrackCreateEditorHandle );
+		SequencerModule.UnRegisterTrackEditor_Handle( PathTrackCreateEditorHandle );
+		SequencerModule.UnRegisterTrackEditor_Handle( ShotTrackCreateEditorHandle );
+		SequencerModule.UnRegisterTrackEditor_Handle( SubMovieSceneTrackCreateEditorHandle );
+		SequencerModule.UnRegisterTrackEditor_Handle( TransformTrackCreateEditorHandle );
+		SequencerModule.UnRegisterTrackEditor_Handle( ComponentMaterialTrackCreatEditorHandle );
 	}
 
 private:
 
 	/** Registered delegate handles */
-	FDelegateHandle PropertyTrackEditorCreateTrackEditorDelegateHandle;
-	FDelegateHandle TransformTrackEditorCreateTrackEditorDelegateHandle;
-	FDelegateHandle EditorCreateTrackEditorDelegateHandle;
-	FDelegateHandle SubMovieSceneTrackEditorCreateTrackEditorDelegateHandle;
-	FDelegateHandle AudioTrackEditorCreateTrackEditorDelegateHandle;
-	FDelegateHandle AnimationTrackEditorCreateTrackEditorDelegateHandle;
-	FDelegateHandle ParticleTrackEditorCreateTrackEditorDelegateHandle;
-	FDelegateHandle PathTrackEditorCreateTrackEditorDelegateHandle;
+	FDelegateHandle BoolPropertyTrackCreateEditorHandle;
+	FDelegateHandle BytePropertyTrackCreateEditorHandle;
+	FDelegateHandle ColorPropertyTrackCreateEditorHandle;
+	FDelegateHandle FloatPropertyTrackCreateEditorHandle;
+	FDelegateHandle VectorPropertyTrackCreateEditorHandle;
+	FDelegateHandle VisibilityPropertyTrackCreateEditorHandle;
+
+	FDelegateHandle AnimationTrackCreateEditorHandle;
+	FDelegateHandle AttachTrackCreateEditorHandle;
+	FDelegateHandle AudioTrackCreateEditorHandle;
+	FDelegateHandle EventTrackCreateEditorHandle;
+	FDelegateHandle ParticleTrackCreateEditorHandle;
+	FDelegateHandle PathTrackCreateEditorHandle;
+	FDelegateHandle ShotTrackCreateEditorHandle;
+	FDelegateHandle SubMovieSceneTrackCreateEditorHandle;
+	FDelegateHandle TransformTrackCreateEditorHandle;
+	FDelegateHandle ComponentMaterialTrackCreatEditorHandle;
 };
 
 

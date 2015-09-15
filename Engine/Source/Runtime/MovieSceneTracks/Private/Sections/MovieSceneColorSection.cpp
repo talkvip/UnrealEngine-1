@@ -7,8 +7,8 @@
 
 UMovieSceneColorSection::UMovieSceneColorSection( const FObjectInitializer& ObjectInitializer )
 	: Super( ObjectInitializer )
-{
-}
+{ }
+
 
 void UMovieSceneColorSection::MoveSection( float DeltaTime, TSet<FKeyHandle>& KeyHandles )
 {
@@ -21,6 +21,7 @@ void UMovieSceneColorSection::MoveSection( float DeltaTime, TSet<FKeyHandle>& Ke
 	AlphaCurve.ShiftCurve(DeltaTime, KeyHandles);
 }
 
+
 void UMovieSceneColorSection::DilateSection( float DilationFactor, float Origin, TSet<FKeyHandle>& KeyHandles )
 {
 	Super::DilateSection(DilationFactor, Origin, KeyHandles);
@@ -30,6 +31,7 @@ void UMovieSceneColorSection::DilateSection( float DilationFactor, float Origin,
 	BlueCurve.ScaleCurve(Origin, DilationFactor, KeyHandles);
 	AlphaCurve.ScaleCurve(Origin, DilationFactor, KeyHandles);
 }
+
 
 void UMovieSceneColorSection::GetKeyHandles(TSet<FKeyHandle>& KeyHandles) const
 {
@@ -41,6 +43,7 @@ void UMovieSceneColorSection::GetKeyHandles(TSet<FKeyHandle>& KeyHandles) const
 			KeyHandles.Add(It.Key());
 		}
 	}
+
 	for (auto It(GreenCurve.GetKeyHandleIterator()); It; ++It)
 	{
 		float Time = GreenCurve.GetKeyTime(It.Key());
@@ -49,6 +52,7 @@ void UMovieSceneColorSection::GetKeyHandles(TSet<FKeyHandle>& KeyHandles) const
 			KeyHandles.Add(It.Key());
 		}
 	}
+
 	for (auto It(BlueCurve.GetKeyHandleIterator()); It; ++It)
 	{
 		float Time = BlueCurve.GetKeyTime(It.Key());
@@ -57,6 +61,7 @@ void UMovieSceneColorSection::GetKeyHandles(TSet<FKeyHandle>& KeyHandles) const
 			KeyHandles.Add(It.Key());
 		}
 	}
+
 	for (auto It(AlphaCurve.GetKeyHandleIterator()); It; ++It)
 	{
 		float Time = AlphaCurve.GetKeyTime(It.Key());
@@ -64,6 +69,7 @@ void UMovieSceneColorSection::GetKeyHandles(TSet<FKeyHandle>& KeyHandles) const
 			KeyHandles.Add(It.Key());
 	}
 }
+
 
 FLinearColor UMovieSceneColorSection::Eval( float Position, const FLinearColor& DefaultColor ) const
 {
@@ -73,54 +79,74 @@ FLinearColor UMovieSceneColorSection::Eval( float Position, const FLinearColor& 
 						AlphaCurve.Eval(Position, DefaultColor.A));
 }
 
-void UMovieSceneColorSection::AddKey( float Time, const FColorKey& Key )
+
+void UMovieSceneColorSection::AddKey( float Time, const FColorKey& Key, FKeyParams KeyParams )
 {
 	Modify();
 
-	if( Key.CurveName == NAME_None )
+	static FName RedName("R");
+	static FName GreenName("G");
+	static FName BlueName("B");
+	static FName AlphaName("A");
+
+	FName CurveName = Key.CurveName;
+
+	bool bRedKeyExists = RedCurve.IsKeyHandleValid(RedCurve.FindKey(Time));
+	bool bGreenKeyExists = GreenCurve.IsKeyHandleValid(GreenCurve.FindKey(Time));
+	bool bBlueKeyExists = BlueCurve.IsKeyHandleValid(BlueCurve.FindKey(Time));
+	bool bAlphaKeyExists = AlphaCurve.IsKeyHandleValid(AlphaCurve.FindKey(Time));
+
+	if ( (CurveName == NAME_None || CurveName == RedName) &&
+			(KeyParams.bAddKeyEvenIfUnchanged || !(!bRedKeyExists && !KeyParams.bAutoKeying && RedCurve.GetNumKeys() > 0) ) )
 	{
-		AddKeyToCurve(RedCurve, Time, Key.Value.R);
-		AddKeyToCurve(GreenCurve, Time, Key.Value.G);
-		AddKeyToCurve(BlueCurve, Time, Key.Value.B);
-		AddKeyToCurve(AlphaCurve, Time, Key.Value.A);
+		AddKeyToCurve(RedCurve, Time, Key.Value.R, KeyParams);
 	}
-	else
+
+	if ( (CurveName == NAME_None || CurveName == GreenName) &&
+			(KeyParams.bAddKeyEvenIfUnchanged || !(!bGreenKeyExists && !KeyParams.bAutoKeying && GreenCurve.GetNumKeys() > 0) ) )
 	{
-		AddKeyToNamedCurve( Time, Key );
+		AddKeyToCurve(GreenCurve, Time, Key.Value.G, KeyParams);
+	}
+
+	if ( (CurveName == NAME_None || CurveName == BlueName) &&
+			(KeyParams.bAddKeyEvenIfUnchanged || !(!bBlueKeyExists && !KeyParams.bAutoKeying && BlueCurve.GetNumKeys() > 0) ) )
+	{
+		AddKeyToCurve(BlueCurve, Time, Key.Value.B, KeyParams);
+	}
+
+	if ( (CurveName == NAME_None || CurveName == AlphaName) &&
+			(KeyParams.bAddKeyEvenIfUnchanged || !(!bAlphaKeyExists && !KeyParams.bAutoKeying && AlphaCurve.GetNumKeys() > 0) ) )
+	{
+		AddKeyToCurve(AlphaCurve, Time, Key.Value.A, KeyParams);
 	}
 }
 
-bool UMovieSceneColorSection::NewKeyIsNewData(float Time, FLinearColor Value) const
+
+bool UMovieSceneColorSection::NewKeyIsNewData(float Time, FLinearColor Value, FKeyParams KeyParams) const
 {
-	return RedCurve.GetNumKeys() == 0 ||
+	bool bHasEmptyKeys = 
+		RedCurve.GetNumKeys() == 0 ||
 		GreenCurve.GetNumKeys() == 0 ||
 		BlueCurve.GetNumKeys() == 0 ||
 		AlphaCurve.GetNumKeys() == 0 ||
 		!Eval(Time,Value).Equals(Value);
-}
 
-void UMovieSceneColorSection::AddKeyToNamedCurve(float Time, const FColorKey& Key)
-{
-	static FName R("R");
-	static FName G("G");
-	static FName B("B");
-	static FName A("A");
+	if (bHasEmptyKeys)
+	{
+		// Don't add a keyframe if there are existing keys and auto key is not enabled.
+		bool bRedKeyExists = RedCurve.IsKeyHandleValid(RedCurve.FindKey(Time));
+		bool bGreenKeyExists = GreenCurve.IsKeyHandleValid(GreenCurve.FindKey(Time));
+		bool bBlueKeyExists = BlueCurve.IsKeyHandleValid(BlueCurve.FindKey(Time));
+		bool bAlphaKeyExists = AlphaCurve.IsKeyHandleValid(AlphaCurve.FindKey(Time));
 
-	FName CurveName = Key.CurveName;
-	if (CurveName == R)
-	{
-		AddKeyToCurve(RedCurve, Time, Key.Value.R);
+		if ( !(!bRedKeyExists && !KeyParams.bAutoKeying && RedCurve.GetNumKeys() > 0) ||
+			 !(!bGreenKeyExists && !KeyParams.bAutoKeying && GreenCurve.GetNumKeys() > 0) ||
+			 !(!bBlueKeyExists && !KeyParams.bAutoKeying && BlueCurve.GetNumKeys() > 0) ||
+			 !(!bAlphaKeyExists && !KeyParams.bAutoKeying && AlphaCurve.GetNumKeys() > 0) )
+		{
+			return true;
+		}
 	}
-	else if (CurveName == G)
-	{
-		AddKeyToCurve(GreenCurve, Time, Key.Value.G);
-	}
-	else if (CurveName == B)
-	{
-		AddKeyToCurve(BlueCurve, Time, Key.Value.B);
-	}
-	else if (CurveName == A)
-	{
-		AddKeyToCurve(AlphaCurve, Time, Key.Value.A);
-	}
+
+	return false;
 }

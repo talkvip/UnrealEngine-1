@@ -25,9 +25,9 @@ public class HTML5Platform : Platform
 
 	public override void Package(ProjectParams Params, DeploymentContext SC, int WorkingCL)
 	{
-		LogConsole("Package {0}", Params.RawProjectPath);
+		Log("Package {0}", Params.RawProjectPath);
 
-		LogConsole("Setting Emscripten SDK for packaging..");
+		Log("Setting Emscripten SDK for packaging..");
 		HTML5SDKInfo.SetupEmscriptenTemp();
 		HTML5SDKInfo.SetUpEmscriptenConfigFile();
 
@@ -98,8 +98,8 @@ public class HTML5Platform : Platform
         string FullGameExePath = Path.Combine(Path.GetDirectoryName(Params.ProjectGameExeFilename), GameExe);
         if (!SC.IsCodeBasedProject && !FileExists_NoExceptions(FullGameExePath))
         {
-			LogConsole("Failed to find game application " + FullGameExePath);
-	        throw new AutomationException(ErrorCodes.Error_MissingExecutable, "Stage Failed. Could not find application {0}. You may need to build the UE4 project with your target configuration and platform.", FullGameExePath);
+			Log("Failed to find game application " + FullGameExePath);
+	        throw new AutomationException(ExitCode.Error_MissingExecutable, "Stage Failed. Could not find application {0}. You may need to build the UE4 project with your target configuration and platform.", FullGameExePath);
         }
 
 		if (Path.Combine(Path.GetDirectoryName(Params.ProjectGameExeFilename), GameExe) != Path.Combine(PackagePath, GameExe))
@@ -133,15 +133,20 @@ public class HTML5Platform : Platform
 			if (!ConfigCache.GetInt32("BuildSettings", "HeapSize", out ConfigHeapSize))
 			{
 				ConfigHeapSize = Params.IsCodeBasedProject ? 1024 : 512;
-				LogConsole("Could not find Heap Size setting in .ini for Client config {0}", Params.ClientConfigsToBuild[0].ToString());
+				Log("Could not find Heap Size setting in .ini for Client config {0}", Params.ClientConfigsToBuild[0].ToString());
 			}
 		}
 
 		HeapSize = (ulong)ConfigHeapSize * 1024L * 1024L; // convert to bytes.
-		LogConsole("Setting Heap size to {0} Mb ", ConfigHeapSize);
+		Log("Setting Heap size to {0} Mb ", ConfigHeapSize);
 
 
 		GenerateFileFromTemplate(TemplateFile, OutputFile, Params.ShortProjectName, Params.ClientConfigsToBuild[0].ToString(), Params.StageCommandline, !Params.IsCodeBasedProject, HeapSize);
+		
+		string MacBashTemplateFile = Path.Combine(CombinePaths(CmdEnv.LocalRoot, "Engine"), "Build", "HTML5", "RunMacHTML5LaunchHelper.command.template");
+		string MacBashOutputFile = Path.Combine(PackagePath, "RunMacHTML5LaunchHelper.command");
+		string MonoPath = Path.Combine(CombinePaths(CmdEnv.LocalRoot, "Engine"), "Build", "BatchFiles", "Mac", "SetupMono.sh");
+		GenerateMacCommandFromTemplate(MacBashTemplateFile, MacBashOutputFile, MonoPath);
 
 		string JSDir = Path.Combine(CombinePaths(CmdEnv.LocalRoot, "Engine"), "Build", "HTML5");
 		string OutDir = PackagePath;
@@ -171,13 +176,14 @@ public class HTML5Platform : Platform
 		// Utility 
 		CompressionTasks[5] = Task.Factory.StartNew(() => CompressFile(OutDir + "/Utility.js", OutDir + "/Utility.js.gz"));
 
+		File.Copy(CombinePaths(CmdEnv.LocalRoot, "Engine/Binaries/DotNET/HTML5LaunchHelper.exe"),CombinePaths(OutDir, "HTML5LaunchHelper.exe"),true);
 		Task.WaitAll(CompressionTasks);
 		PrintRunTime();
 	}
 
 	void CompressFile(string Source, string Destination)
 	{
-		LogConsole(" Compressing " + Source); 
+		Log(" Compressing " + Source); 
 		bool DeleteSource = false; 
 
 		if(  Source == Destination )
@@ -284,6 +290,55 @@ public class HTML5Platform : Platform
 		}
 	}
 
+	protected void GenerateMacCommandFromTemplate(string InTemplateFile, string InOutputFile, string InMonoPath)
+	{
+		StringBuilder outputContents = new StringBuilder();
+		using (StreamReader reader = new StreamReader(InTemplateFile))
+		{
+			string InMonoPathParent = Path.GetDirectoryName(InMonoPath);
+			string LineStr = null;
+			while (reader.Peek() != -1)
+			{
+				LineStr = reader.ReadLine();
+				if (LineStr.Contains("${unreal_mono_pkg_path}"))
+				{
+					LineStr = LineStr.Replace("${unreal_mono_pkg_path}", InMonoPath);
+				}
+				if (LineStr.Contains("${unreal_mono_pkg_path_base}"))
+				{
+					LineStr = LineStr.Replace("${unreal_mono_pkg_path_base}", InMonoPathParent);
+				}
+
+				outputContents.Append(LineStr + '\n');
+			}
+		}
+
+		if (outputContents.Length > 0)
+		{
+			// Save the file. We Copy the template file to keep any permissions set to it.
+			try
+			{
+				Directory.CreateDirectory(Path.GetDirectoryName(InOutputFile));
+				if (File.Exists(InOutputFile))
+				{
+					File.SetAttributes(InOutputFile, File.GetAttributes(InOutputFile) & ~FileAttributes.ReadOnly);
+					File.Delete(InOutputFile);
+				}
+				File.Copy(InTemplateFile, InOutputFile);
+				File.SetAttributes(InOutputFile, File.GetAttributes(InOutputFile) & ~FileAttributes.ReadOnly);
+				using (var CmdFile = File.Open(InOutputFile, FileMode.OpenOrCreate | FileMode.Truncate)) 
+				{
+					Byte[] BytesToWrite = new UTF8Encoding(true).GetBytes(outputContents.ToString());
+					CmdFile.Write(BytesToWrite, 0, BytesToWrite.Length);
+				}
+			}
+			catch (Exception)
+			{
+				// Unable to write to the project file.
+			}
+		}
+	}
+
 	public override void GetFilesToDeployOrStage(ProjectParams Params, DeploymentContext SC)
 	{
 	}
@@ -328,6 +383,7 @@ public class HTML5Platform : Platform
 		var LaunchHelperPath = CombinePaths(CmdEnv.LocalRoot, "Engine/Binaries/DotNET/");
 		SC.ArchiveFiles(LaunchHelperPath, "HTML5LaunchHelper.exe");
 		SC.ArchiveFiles(Path.Combine(CombinePaths(CmdEnv.LocalRoot, "Engine"), "Build", "HTML5"), "Readme.txt");
+		SC.ArchiveFiles(PackagePath, Path.GetFileName(Path.Combine(PackagePath, "RunMacHTML5LaunchHelper.command")));
 
 		if (HTMLPakAutomation.CanCreateMapPaks(Params))
 		{
@@ -381,7 +437,7 @@ public class HTML5Platform : Platform
 		// Check HTML5LaunchHelper source for command line args
 
 		var LowerBrowserPath = BrowserPath.ToLower();
-		var ProfileDirectory = Path.Combine(Utils.GetUserSettingDirectory(), "UE4_HTML5", "user");
+		var ProfileDirectory = Path.Combine(Utils.GetUserSettingDirectory().FullName, "UE4_HTML5", "user");
 
 		string BrowserCommandline = url; 
 
@@ -467,7 +523,7 @@ public class HTML5Platform : Platform
 #region AMAZON S3 
 	public void UploadToS3(DeploymentContext SC)
 	{
-		ConfigCacheIni Ini = new ConfigCacheIni(SC.StageTargetPlatform.PlatformType, "Engine", Path.GetDirectoryName(SC.RawProjectPath));
+		ConfigCacheIni Ini = ConfigCacheIni.CreateConfigCacheIni(SC.StageTargetPlatform.PlatformType, "Engine", new DirectoryReference(Path.GetDirectoryName(SC.RawProjectPath)));
 		bool Upload = false;
 
 		string KeyId = "";
@@ -491,7 +547,7 @@ public class HTML5Platform : Platform
 
 		if ( !AmazonIdentity )
 		{
-			LogConsole("Amazon S3 Incorrectly configured"); 
+			Log("Amazon S3 Incorrectly configured"); 
 			return; 
 		}
 
@@ -508,7 +564,7 @@ public class HTML5Platform : Platform
 		}
 
 		Task.WaitAll(UploadTasks.ToArray());
-		LogConsole("Upload Tasks finished.");
+		Log("Upload Tasks finished.");
 	}
 
 	private static IDictionary<string, string> MimeTypeMapping = new Dictionary<string, string>(StringComparer.InvariantCultureIgnoreCase) 
@@ -520,7 +576,7 @@ public class HTML5Platform : Platform
 
 	public void UploadToS3Worker(FileInfo Info, string KeyId, string AccessKey, string BucketName, string FolderName )
 	{
-		LogConsole(" Uploading " + Info.Name); 
+		Log(" Uploading " + Info.Name); 
 
 			// force upload files even if the timestamps haven't changed. 
 			string TimeStamp = string.Format("{0:r}", DateTime.UtcNow);
@@ -583,11 +639,11 @@ public class HTML5Platform : Platform
 			}
 			catch (Exception ex)
 			{
-				LogConsole("Could not connect to S3, incorrect S3 Keys? " + ex.ToString());
+				Log("Could not connect to S3, incorrect S3 Keys? " + ex.ToString());
 				throw ex;
 			}
 
-			LogConsole(Info.Name + " has been uploaded "); 
+			Log(Info.Name + " has been uploaded "); 
 	}
 
 #endregion 

@@ -61,10 +61,6 @@ USoundWave::USoundWave(const FObjectInitializer& ObjectInitializer)
 	Volume = 1.0;
 	Pitch = 1.0;
 	CompressionQuality = 40;
-
-#if WITH_EDITORONLY_DATA
-	AssetImportData = CreateEditorOnlyDefaultSubobject<UAssetImportData>(TEXT("AssetImportData"));
-#endif
 }
 
 SIZE_T USoundWave::GetResourceSize(EResourceSizeMode::Type Mode)
@@ -144,7 +140,7 @@ void USoundWave::GetAssetRegistryTags(TArray<FAssetRegistryTag>& OutTags) const
 #if WITH_EDITORONLY_DATA
 	if (AssetImportData)
 	{
-		OutTags.Add( FAssetRegistryTag(SourceFileTagName(), AssetImportData->ToJson(), FAssetRegistryTag::TT_Hidden) );
+		OutTags.Add( FAssetRegistryTag(SourceFileTagName(), AssetImportData->GetSourceData().ToJson(), FAssetRegistryTag::TT_Hidden) );
 	}
 #endif
 	// GetCompressedDataSize could technically modify this->CompressedFormatData therefore it is not const, however this information
@@ -278,6 +274,13 @@ void USoundWave::PostInitProperties()
 	{
 		InvalidateCompressedData();
 	}
+
+#if WITH_EDITORONLY_DATA
+	if (!HasAnyFlags(RF_ClassDefaultObject))
+	{
+		AssetImportData = NewObject<UAssetImportData>(this, TEXT("AssetImportData"));
+	}
+#endif
 }
 
 FByteBulkData* USoundWave::GetCompressedData(FName Format)
@@ -370,7 +373,7 @@ void USoundWave::PostLoad()
 	{
 		FAssetImportInfo Info;
 		Info.Insert(FAssetImportInfo::FSourceFile(SourceFilePath_DEPRECATED));
-		AssetImportData->CopyFrom(Info);
+		AssetImportData->SourceData = MoveTemp(Info);
 	}
 #endif // #if WITH_EDITORONLY_DATA
 
@@ -521,13 +524,13 @@ FWaveInstance* USoundWave::HandleStart( FActiveSound& ActiveSound, const UPTRINT
 	// Add in the subtitle if they exist
 	if (ActiveSound.bHandleSubtitles && Subtitles.Num() > 0)
 	{
-		if (UAudioComponent* AudioComponent = ActiveSound.AudioComponent.Get())
+		if (UAudioComponent* AudioComponent = ActiveSound.GetAudioComponent())
 		{
 			// TODO - Audio Threading. This would need to be a call back to the main thread.
 			if (AudioComponent->OnQueueSubtitles.IsBound())
 			{
 				// intercept the subtitles if the delegate is set
-				ActiveSound.AudioComponent->OnQueueSubtitles.ExecuteIfBound( Subtitles, Duration );
+				AudioComponent->OnQueueSubtitles.ExecuteIfBound( Subtitles, Duration );
 			}
 			else if( ActiveSound.World.IsValid() )
 			{
@@ -584,7 +587,7 @@ void USoundWave::Parse( FAudioDevice* AudioDevice, const UPTRINT NodeWaveInstanc
 	{
 		WaveInstance->bIsFinished = false;
 #if !NO_LOGGING
-		if (!ActiveSound.bWarnedAboutOrphanedLooping && !ActiveSound.AudioComponent.IsValid())
+		if (!ActiveSound.bWarnedAboutOrphanedLooping && ActiveSound.GetAudioComponent() == nullptr)
 		{
 			UE_LOG(LogAudio, Warning, TEXT("Detected orphaned looping sound '%s'."), *ActiveSound.Sound->GetName());
 			ActiveSound.bWarnedAboutOrphanedLooping = true;
@@ -604,7 +607,7 @@ void USoundWave::Parse( FAudioDevice* AudioDevice, const UPTRINT NodeWaveInstanc
 		WaveInstance->StartTime = ParseParams.StartTime;
 		WaveInstance->UserIndex = ActiveSound.UserIndex;
 		WaveInstance->OmniRadius = ParseParams.OmniRadius;
-
+		WaveInstance->StereoSpread = ParseParams.StereoSpread;
 		bool bAlwaysPlay = false;
 
 		// Properties from the sound class
@@ -649,7 +652,15 @@ void USoundWave::Parse( FAudioDevice* AudioDevice, const UPTRINT NodeWaveInstanc
 			bAlwaysPlay = ActiveSound.bAlwaysPlay;
 		}
 
-		WaveInstance->PlayPriority = WaveInstance->Volume + ( bAlwaysPlay ? 1.0f : 0.0f ) + WaveInstance->RadioFilterVolume;
+		// This is a first-guess at priority, this will later change according to VolumeWeightedPriorityScale
+		WaveInstance->PlayPriority = WaveInstance->Volume + (bAlwaysPlay ? 1.0f : 0.0f) + WaveInstance->RadioFilterVolume;
+
+		// If set to bAlwaysPlay, double the current sound's priority scale. This will still result in a possible 0-priority output if the sound has 0 actual volume
+		WaveInstance->VolumeWeightedPriorityScale = ParseParams.VolumeWeightedPriorityScale;
+		if (bAlwaysPlay)
+		{
+			WaveInstance->VolumeWeightedPriorityScale *= 2.0f;
+		}
 		WaveInstance->Location = ParseParams.Transform.GetTranslation();
 		WaveInstance->bIsStarted = true;
 		WaveInstance->bAlreadyNotifiedHook = false;
@@ -689,11 +700,11 @@ void USoundWave::Parse( FAudioDevice* AudioDevice, const UPTRINT NodeWaveInstanc
 					SoundWarningInfo += FString::Printf(TEXT(" SoundCue: %s"), *ActiveSound.Sound->GetName());
 				}
 
-				if (ActiveSound.AudioComponent.IsValid())
+				if (UAudioComponent* AudioComponent = ActiveSound.GetAudioComponent())
 				{
 					// TODO - Audio Threading. This log would have to be a task back to game thread
-					AActor* SoundOwner = ActiveSound.AudioComponent->GetOwner();
-					UE_LOG(LogAudio, Warning, TEXT( "%s Actor: %s AudioComponent: %s" ), *SoundWarningInfo, (SoundOwner ? *SoundOwner->GetName() : TEXT("None")), *ActiveSound.AudioComponent->GetName() );
+					AActor* SoundOwner = AudioComponent->GetOwner();
+					UE_LOG(LogAudio, Warning, TEXT( "%s Actor: %s AudioComponent: %s" ), *SoundWarningInfo, (SoundOwner ? *SoundOwner->GetName() : TEXT("None")), *AudioComponent->GetName() );
 				}
 				else
 				{

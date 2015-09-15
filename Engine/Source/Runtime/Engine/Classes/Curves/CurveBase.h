@@ -134,7 +134,8 @@ enum ERichCurveInterpMode
 {
 	RCIM_Linear,
 	RCIM_Constant,
-	RCIM_Cubic
+	RCIM_Cubic,
+	RCIM_None
 };
 
 /** If using RCIM_Cubic, this enum describes how the tangents should be controlled in editor. */
@@ -143,7 +144,8 @@ enum ERichCurveTangentMode
 {
 	RCTM_Auto,
 	RCTM_User,
-	RCTM_Break
+	RCTM_Break,
+	RCTM_None
 };
 
 /** Enum to indicate whether if a tangent is 'weighted' (ie can be stretched). */
@@ -164,7 +166,8 @@ enum ERichCurveExtrapolation
 	RCCE_CycleWithOffset,
 	RCCE_Oscillate,
 	RCCE_Linear,
-	RCCE_Constant
+	RCCE_Constant,
+	RCCE_None
 };
 
 /** One key in a rich, editable float curve */
@@ -286,6 +289,7 @@ public:
 	: FIndexedCurve()
 	, PreInfinityExtrap(RCCE_Constant)
 	, PostInfinityExtrap(RCCE_Constant)
+	, DefaultValue(MAX_flt)
 	{
 	}
 
@@ -329,7 +333,7 @@ public:
 	void DeleteKey(FKeyHandle KeyHandle);
 
 	/** Finds the key at InTime, and updates its value. If it can't find the key, it adds one at that time */
-	FKeyHandle UpdateOrAddKey(float InTime, float InValue);
+	FKeyHandle UpdateOrAddKey(float InTime, float InValue, const bool bUnwindRotation = false);
 
 	/** Move a key to a new time. This may change the index of the key, so the new key index is returned. */
 	FKeyHandle SetKeyTime(FKeyHandle KeyHandle, float NewTime);
@@ -345,6 +349,12 @@ public:
 
 	/** Returns the value of the specified key */
 	float GetKeyValue(FKeyHandle KeyHandle) const;
+
+	/** Set the default value of the curve */
+	void SetDefaultValue(float InDefaultValue) { DefaultValue = InDefaultValue; }
+
+	/** Get the default value for the curve */
+	float GetDefaultValue() const { return DefaultValue; }
 
 	/** Shifts all keys forwards or backwards in time by an even amount, preserving order */
 	void ShiftCurve(float DeltaTime);
@@ -382,7 +392,7 @@ public:
 	void RemapTimeValue(float& InTime, float& CycleValueOffset) const;
 
 	/** Evaluate this rich curve at the specified time */
-	float Eval(float InTime, float DefaultValue = 0.0f) const;
+	float Eval(float InTime, float InDefaultValue = 0.0f) const;
 
 	/** Auto set tangents for any 'auto' keys in curve */
 	void AutoSetTangents(float Tension = 0.f);
@@ -401,14 +411,17 @@ public:
 	UPROPERTY()
 	TEnumAsByte<ERichCurveExtrapolation> PostInfinityExtrap;
 
-private:
 	/** Sorted array of keys */
 	UPROPERTY()
 	TArray<FRichCurveKey> Keys;
+
+	/** Default value */
+	UPROPERTY()
+	float DefaultValue;
 };
 
 //////////////////////////////////////////////////////////////////////////
-// Curve editor interface
+//~ Begin Curve editor Interface
 
 /** Info about a curve to be edited */
 template<class T> struct FRichCurveEditInfoTemplate
@@ -529,7 +542,7 @@ public:
 	virtual bool IsValidCurve( FRichCurveEditInfo CurveInfo ) override { return false; };
 	// End FCurveOwnerInterface
 
-	// Begin UCurveBase interface
+	//~ Begin UCurveBase Interface
 
 	/** 
 	 *	Create curve from CSV style comma-separated string. 
@@ -540,15 +553,16 @@ public:
 	/** Reset all curve data */
 	void ResetCurve();
 
-	// End UCurveBase interface
+	//~ End UCurveBase Interface
 
-	// Begin UObject interface
+	//~ Begin UObject Interface
 #if WITH_EDITORONLY_DATA
 	/** Override to ensure we write out the asset import data */
 	virtual void GetAssetRegistryTags(TArray<FAssetRegistryTag>& OutTags) const override;
+	virtual void PostInitProperties() override;
 	virtual void PostLoad() override;
 
-	UPROPERTY()
+	UPROPERTY(VisibleAnywhere, Instanced, Category=ImportSettings)
 	class UAssetImportData* AssetImportData;
 
 	/** The filename imported to create this object. Relative to this object's package, BaseDir() or absolute */
@@ -556,7 +570,7 @@ public:
 	FString ImportPath_DEPRECATED;
 
 #endif
-	// End UObject interface
+	//~ End UObject Interface
 };
 
 //////////////////////////////////////////////////////////////////////////
@@ -586,6 +600,15 @@ struct ENGINE_API FIntegralCurve : public FIndexedCurve
 {
 	GENERATED_USTRUCT_BODY()
 public:
+	FIntegralCurve() 
+	: FIndexedCurve()
+	, DefaultValue(MAX_int32)
+	{
+	}
+
+	virtual ~FIntegralCurve()
+	{
+	}
 	
 	/** Get number of keys in curve. */
 	virtual int32 GetNumKeys() const override;
@@ -594,7 +617,7 @@ public:
 	virtual bool IsKeyHandleValid(FKeyHandle KeyHandle) const override;
 
 	/** Evaluates the value of an array of keys at a time */
-	int32 Evaluate(float Time, int32 DefaultValue = 0) const;
+	int32 Evaluate(float Time, int32 InDefaultValue = 0) const;
 
 	/** Const iterator for the keys, so the indices and handles stay valid */
 	TArray<FIntegralKey>::TConstIterator GetKeyIterator() const;
@@ -618,6 +641,12 @@ public:
 	/** Get the time for the Key with the specified index. */
 	float GetKeyTime(FKeyHandle KeyHandle) const;
 	
+	/** Set the default value for the curve */
+	void SetDefaultValue(int32 InDefaultValue) { DefaultValue = InDefaultValue; }
+
+	/** Get the default value for the curve */
+	int32 GetDefaultValue() const { return DefaultValue; }
+
 	/** Shifts all keys forwards or backwards in time by an even amount, preserving order */
 	void ShiftCurve(float DeltaTime);
 	void ShiftCurve(float DeltaTime, TSet<FKeyHandle>& KeyHandles);
@@ -636,4 +665,8 @@ private:
 	/** The keys, ordered by time */
 	UPROPERTY()
 	TArray<FIntegralKey> Keys;
+
+	/** Default value */
+	UPROPERTY()
+	int32 DefaultValue;
 };

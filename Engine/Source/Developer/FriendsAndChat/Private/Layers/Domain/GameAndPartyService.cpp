@@ -77,12 +77,21 @@ public:
 		OnPresenceReceivedCompleteDelegate = FOnPresenceReceivedDelegate::CreateSP(this, &FGameAndPartyServiceImpl::OnPresenceReceived);
 		OnQueryUserInfoCompleteDelegate = FOnQueryUserInfoCompleteDelegate::CreateSP(this, &FGameAndPartyServiceImpl::OnQueryUserInfoComplete);
 		OnGameInviteReceivedDelegate = FOnSessionInviteReceivedDelegate::CreateSP(this, &FGameAndPartyServiceImpl::OnGameInviteReceived);
+		OnGameSessionJoinedDelegate = FOnJoinSessionCompleteDelegate::CreateSP(this, &FGameAndPartyServiceImpl::OnGameSessionJoined);
+		OnGameSessionEndedDelegate = FOnDestroySessionCompleteDelegate::CreateSP(this, &FGameAndPartyServiceImpl::OnGameSessionLeft);
 		OnPartyInviteReceivedDelegate = FOnPartyInviteReceivedDelegate::CreateSP(this, &FGameAndPartyServiceImpl::OnPartyInviteReceived);
+		OnPartyMemberJoinedDelegate = FOnPartyMemberJoinedDelegate::CreateSP(this, &FGameAndPartyServiceImpl::HandlePartyMemberJoined);
+		OnPartyMemberExitedDelegate = FOnPartyMemberExitedDelegate::CreateSP(this, &FGameAndPartyServiceImpl::HandlePartyMemberExited);
+		
 		OnGameInviteResponseDelegate = IChatNotificationService::FOnNotificationResponseDelegate::CreateSP(this, &FGameAndPartyServiceImpl::OnHandleGameInviteResponse);
 		OnPresenceReceivedCompleteDelegateHandle = OSSScheduler->GetPresenceInterface()->AddOnPresenceReceivedDelegate_Handle(OnPresenceReceivedCompleteDelegate);
 		OnQueryUserInfoCompleteDelegateHandle = OSSScheduler->GetUserInterface()->AddOnQueryUserInfoCompleteDelegate_Handle(LocalControllerIndex, OnQueryUserInfoCompleteDelegate);
 		OnGameInviteReceivedDelegateHandle = OSSScheduler->GetSessionInterface()->AddOnSessionInviteReceivedDelegate_Handle(OnGameInviteReceivedDelegate);
+		OnGameSessionEndedDelegateHandle = OSSScheduler->GetSessionInterface()->AddOnDestroySessionCompleteDelegate_Handle(OnGameSessionEndedDelegate);
+		OnGameSessionJoinedDelegateHandle = OSSScheduler->GetSessionInterface()->AddOnJoinSessionCompleteDelegate_Handle(OnGameSessionJoinedDelegate);
 		OnPartyInviteReceivedDelegateHandle = OSSScheduler->GetPartyInterface()->AddOnPartyInviteReceivedDelegate_Handle(OnPartyInviteReceivedDelegate);
+		OnPartyMemberJoinedDelegateHandle = OSSScheduler->GetPartyInterface()->AddOnPartyMemberJoinedDelegate_Handle(OnPartyMemberJoinedDelegate);
+		OnPartyMemberExitedDelegateHandle = OSSScheduler->GetPartyInterface()->AddOnPartyMemberExitedDelegate_Handle(OnPartyMemberExitedDelegate);
 
 		OnRequestOSSAcceptedDelegate = FOSSScheduler::FOnRequestOSSAccepted::CreateSP(this, &FGameAndPartyServiceImpl::OnRequestOSSAccepted);
 	}
@@ -100,11 +109,15 @@ public:
 			if (OSSScheduler->GetSessionInterface().IsValid())
 			{
 				OSSScheduler->GetSessionInterface()->ClearOnSessionInviteReceivedDelegate_Handle(OnGameInviteReceivedDelegateHandle);
+				OSSScheduler->GetSessionInterface()->ClearOnDestroySessionCompleteDelegate_Handle(OnGameSessionEndedDelegateHandle);
+				OSSScheduler->GetSessionInterface()->ClearOnJoinSessionCompleteDelegate_Handle(OnGameSessionJoinedDelegateHandle);
 			}
 
 			if (OSSScheduler->GetPartyInterface().IsValid())
 			{
 				OSSScheduler->GetPartyInterface()->ClearOnPartyInviteReceivedDelegate_Handle(OnPartyInviteReceivedDelegateHandle);
+				OSSScheduler->GetPartyInterface()->ClearOnPartyMemberJoinedDelegate_Handle(OnPartyMemberJoinedDelegateHandle);
+				OSSScheduler->GetPartyInterface()->ClearOnPartyMemberExitedDelegate_Handle(OnPartyMemberExitedDelegateHandle);
 			}
 
 			if (OSSScheduler->GetPresenceInterface().IsValid())
@@ -190,26 +203,72 @@ private:
 		return false;
 	}
 
-	virtual bool IsInActiveParty() const override
+	virtual void SetCombineGameAndPartyChat(bool bCombine) override
 	{
-		if (OSSScheduler->GetOnlineIdentity().IsValid())
+		bIsCombiningGameAndPartyChat = bCombine;
+	}
+
+	virtual bool CombineGameAndPartyChat() const override
+	{
+		return bIsCombiningGameAndPartyChat;
+	}
+
+	virtual bool IsLocalPlayerInActiveParty() const override
+	{
+		if (OSSScheduler.IsValid())
 		{
-			TSharedPtr<const FUniqueNetId> UserId = OSSScheduler->GetOnlineIdentity()->GetUniquePlayerId(LocalControllerIndex);
-			TSharedPtr<const FOnlinePartyId> ActivePartyId = GetPartyChatRoomId();
-			if (ActivePartyId.IsValid() && UserId.IsValid())
+			if (OSSScheduler->GetOnlineIdentity().IsValid())
 			{
-				if (OSSScheduler.IsValid())
+				TSharedPtr<const FUniqueNetId> LocalUserId = OSSScheduler->GetOnlineIdentity()->GetUniquePlayerId(LocalControllerIndex);
+				if (LocalUserId.IsValid())
 				{
 					if (OSSScheduler->GetPartyInterface().IsValid())
 					{
-						TArray< TSharedRef<FOnlinePartyMember> > OutPartyMembers;
-						if (OSSScheduler->GetPartyInterface()->GetPartyMembers(*UserId, *ActivePartyId, OutPartyMembers)
-							&& OutPartyMembers.Num() > 1)
+						TSharedPtr<const FUniqueNetId> PartyId = GetActivePartyId();
+						if (PartyId.IsValid())
 						{
-							// Fortnite puts you in a party immediately, so we have to check size here to see if YOU think you're in a party & have anyone to talk to
-							// @todo What about if people leave and come back - should MUC persist w/ chat history?
-							//       Need UI flow to determine right way to do this & edge cases.  Can a party of 1 exist, should it allow party chat, etc.
-							return true;
+							TSharedPtr<FOnlinePartyInfo> PartyInfo = OSSScheduler->GetPartyInterface()->GetPartyInfo(*LocalUserId, *PartyId);
+							if (PartyInfo.IsValid())
+							{
+								return true;
+							}
+						}
+					}
+				}
+			}
+		}
+
+		return false;
+	}
+
+	virtual bool IsInPartyChat() const override
+	{
+		if (OSSScheduler.IsValid())
+		{
+			if (OSSScheduler->GetOnlineIdentity().IsValid())
+			{
+				TSharedPtr<const FUniqueNetId> UserId = OSSScheduler->GetOnlineIdentity()->GetUniquePlayerId(LocalControllerIndex);
+				FChatRoomId ActivePartyId = GetPartyChatRoomId();
+				if (!ActivePartyId.IsEmpty() && UserId.IsValid())
+				{
+					if (OSSScheduler->GetPartyInterface().IsValid())
+					{
+						TSharedPtr<const FOnlinePartyId> PartyId = GetActivePartyId();
+						if (PartyId.IsValid())
+						{
+							TSharedPtr<FOnlinePartyInfo> PartyInfo = OSSScheduler->GetPartyInterface()->GetPartyInfo(*UserId, *PartyId);
+							if (PartyInfo.IsValid())
+							{
+								TArray< TSharedRef<FOnlinePartyMember> > OutPartyMembers;
+								if (OSSScheduler->GetPartyInterface()->GetPartyMembers(*UserId, *(PartyInfo->PartyId), OutPartyMembers)
+									&& OutPartyMembers.Num() > 1)
+								{
+									// Fortnite puts you in a party immediately, so we have to check size here to see if YOU think you're in a party & have anyone to talk to
+									// @todo What about if people leave and come back - should MUC persist w/ chat history?
+									//       Need UI flow to determine right way to do this & edge cases.  Can a party of 1 exist, should it allow party chat, etc.
+									return true;
+								}
+							}
 						}
 					}
 				}
@@ -233,6 +292,34 @@ private:
 		return OSSScheduler->GetPartyJoinInfo(FriendItem);
 	}
 
+	virtual TSharedPtr<const FOnlinePartyId> GetActivePartyId() const override
+	{
+		TSharedPtr<const FOnlinePartyId> ActivePartyId = nullptr;
+
+		if (OSSScheduler.IsValid() &&
+			OSSScheduler->GetOnlineIdentity().IsValid() &&
+			OSSScheduler->GetPartyInterface().IsValid())
+		{
+			TSharedPtr<const FUniqueNetId> LocalUserId = OSSScheduler->GetOnlineIdentity()->GetUniquePlayerId(LocalControllerIndex);
+			if (LocalUserId.IsValid())
+			{
+				IOnlinePartyPtr PartyInt = OSSScheduler->GetPartyInterface();
+				if (PartyInt.IsValid())
+				{
+					TArray< TSharedRef<const FOnlinePartyId> > PartyIds;
+					PartyInt->GetJoinedParties(*LocalUserId, PartyIds);
+
+					if (PartyIds.Num() > 0)
+					{
+						ActivePartyId = PartyIds[0];
+					}
+				}
+			}
+		}
+
+		return ActivePartyId;
+	}
+
 	virtual bool IsInJoinableParty() const override
 	{
 		bool bIsJoinable = false;
@@ -241,13 +328,29 @@ private:
 			OSSScheduler->GetOnlineIdentity().IsValid() &&
 			OSSScheduler->GetPartyInterface().IsValid())
 		{
-			TSharedPtr<const FUniqueNetId> UserId = OSSScheduler->GetOnlineIdentity()->GetUniquePlayerId(LocalControllerIndex);
-			if (UserId.IsValid())
+			TSharedPtr<const FUniqueNetId> LocalUserId = OSSScheduler->GetOnlineIdentity()->GetUniquePlayerId(LocalControllerIndex);
+			if (LocalUserId.IsValid())
 			{
-				if (UserId.IsValid())
+				IOnlinePartyPtr PartyInt = OSSScheduler->GetPartyInterface();
+				if (PartyInt.IsValid())
 				{
-					TSharedPtr<IOnlinePartyJoinInfo> PartyJoinInfo = OSSScheduler->GetPartyInterface()->GetAdvertisedParty(*UserId, *UserId);
-					bIsJoinable = PartyJoinInfo.IsValid() && !PartyJoinInfo->IsInvalidForJoin();
+					TSharedPtr<const FOnlinePartyId> PartyId = GetActivePartyId();
+					TSharedPtr<FOnlinePartyInfo> PartyInfo = PartyInt->GetPartyInfo(*LocalUserId, *PartyId);
+					if (PartyInfo.IsValid())
+					{
+						bool bPublicJoinable = false;
+						bool bFriendJoinable = false;
+						bool bInviteOnly = false;
+						bool bAllowInvites = false;
+						if (PartyInfo->GetJoinability(*LocalUserId, bPublicJoinable, bFriendJoinable, bInviteOnly, bAllowInvites))
+						{
+							// User's party is joinable in some way if any of this is true (context needs to be handled outside this function)
+							//bIsJoinable = bPublicJoinable || bFriendJoinable || (bInviteOnly && bAllowInvites);
+
+							// Disable public joinable for now because no way to distinguish "public" from "friends only"
+							bIsJoinable = bFriendJoinable || (bInviteOnly && bAllowInvites);
+						}
+					}
 				}
 			}
 		}
@@ -283,7 +386,7 @@ private:
 		return bIsJoinable;
 	}
 
-	virtual bool JoinGameAllowed(FString ClientID) override
+	virtual bool JoinGameAllowed(const FString& ClientID) override
 	{
 		bool bJoinGameAllowed = true;
 
@@ -319,7 +422,7 @@ private:
 		return OSSScheduler->GetUserClientId();
 	}
 
-	virtual TSharedPtr<const FOnlinePartyId> GetPartyChatRoomId() const override
+	virtual FChatRoomId GetPartyChatRoomId() const override
 	{
 		return OSSScheduler->GetPartyChatRoomId();
 	}
@@ -342,7 +445,7 @@ private:
 			TSharedPtr<const FUniqueNetId> UserId = OSSScheduler->GetOnlineIdentity()->GetUniquePlayerId(LocalControllerIndex);
 			if (UserId.IsValid())
 			{
-				OSSScheduler->GetPartyInterface()->RejectInvitation(*UserId, *PartyInfo->GetPartyId());
+				OSSScheduler->GetPartyInterface()->RejectInvitation(*UserId, *(FriendItem->GetUniqueID()));
 			}
 		}
 
@@ -373,9 +476,9 @@ private:
 			// notify for further processing of join party request 
 			OnFriendsJoinParty().Broadcast(*FriendItem->GetUniqueID(), PartyInfo.ToSharedRef(), true);
 
-			AdditionalCommandline = OSSScheduler->GetPartyInterface()->MakeTokenFromJoinInfo(*PartyInfo);
+			AdditionalCommandline = TEXT("-party_joininfo_token=") + OSSScheduler->GetPartyInterface()->MakeTokenFromJoinInfo(*PartyInfo);
 		}
-		else
+		else if(FriendItem.IsValid() && FriendItem->GetGameSessionId().IsValid())
 		{
 			// notify for further processing of join game request 
 			OnFriendsJoinGame().Broadcast(*FriendItem->GetUniqueID(), *FriendItem->GetGameSessionId());
@@ -410,18 +513,24 @@ private:
 	{
 		bool bResult = false;
 
-		if (OSSScheduler->GetOnlineIdentity().IsValid())
+		// In a joinable party implies in a party at all 
+		if (IsInJoinableParty())
 		{
-			TSharedPtr<const FUniqueNetId> UserId = OSSScheduler->GetOnlineIdentity()->GetUniquePlayerId(LocalControllerIndex);
-			if (UserId.IsValid())
+			IOnlineIdentityPtr IdentityInt = OSSScheduler->GetOnlineIdentity();
+			if (IdentityInt.IsValid())
 			{
-				// party invite if available
-				if (OSSScheduler->GetPartyInterface().IsValid())
+				TSharedPtr<const FUniqueNetId> UserId = IdentityInt->GetUniquePlayerId(LocalControllerIndex);
+				if (UserId.IsValid())
 				{
-					TSharedPtr<IOnlinePartyJoinInfo> PartyJoinInfo = OSSScheduler->GetPartyInterface()->GetAdvertisedParty(*UserId, *UserId);
-					if (PartyJoinInfo.IsValid())
+					IOnlinePartyPtr PartyInt = OSSScheduler->GetPartyInterface();
+					// party invite if available
+					if (PartyInt.IsValid())
 					{
-						bResult = OSSScheduler->GetPartyInterface()->SendInvitation(*UserId, *PartyJoinInfo->GetPartyId(), ToUser);
+						TSharedPtr<const FUniqueNetId> PartyId = GetActivePartyId();
+						if (PartyId.IsValid())
+						{
+							bResult = PartyInt->SendInvitation(*UserId, *PartyId, ToUser);
+						}
 					}
 				}
 			}
@@ -545,25 +654,45 @@ private:
 		}
 	}
 
+	void OnGameSessionJoined(FName SessionName, EOnJoinSessionCompleteResult::Type Result)
+	{
+		OnGameSessionChanged().Broadcast();
+	}
+
+	void OnGameSessionLeft(FName SessionName, bool SessionResult)
+	{
+		OnGameSessionChanged().Broadcast();
+	}
+
 	void OnPartyInviteReceived(const FUniqueNetId& RecipientId, const FOnlinePartyId& PartyId, const FUniqueNetId& SenderId)
 	{
 		if (OSSScheduler->GetPartyInterface().IsValid())
 		{
-			TArray<TSharedRef<IOnlinePartyJoinInfo>> PartyInvites;
+			TArray<TSharedRef<IOnlinePartyInvite>> PartyInvites;
 			if (OSSScheduler->GetPartyInterface()->GetPendingInvites(RecipientId, PartyInvites))
 			{
 				for (auto PartyInvite : PartyInvites)
 				{
-					if (*PartyInvite->GetPartyId() == PartyId)
+					if (*PartyInvite->GetSenderId() == SenderId)
 					{
 						TSharedPtr<const FUniqueNetId> SenderIdPtr = OSSScheduler->GetOnlineIdentity()->CreateUniquePlayerId(SenderId.ToString());
-						ReceivedPartyInvites.AddUnique(FReceivedPartyInvite(SenderIdPtr.ToSharedRef(), PartyInvite));
+						ReceivedPartyInvites.AddUnique(FReceivedPartyInvite(SenderIdPtr.ToSharedRef(), PartyInvite->GetJoinInfo()));
 						RequestOSS();
 						break;
 					}
 				}
 			}
 		}
+	}
+
+	void HandlePartyMemberJoined(const FUniqueNetId& RecipientId, const FOnlinePartyId& PartyId, const FUniqueNetId& SenderId)
+	{
+		OnPartyMembersChanged().Broadcast();
+	}
+
+	void HandlePartyMemberExited(const FUniqueNetId& RecipientId, const FOnlinePartyId& PartyId, const FUniqueNetId& SenderId, const EMemberExitedReason Reason)
+	{
+		OnPartyMembersChanged().Broadcast();
 	}
 
 	void ProcessReceivedGameInvites()
@@ -692,10 +821,22 @@ private:
 		return FriendsJoinGameEvent;
 	}
 
+	DECLARE_DERIVED_EVENT(FGameAndPartyService, FGameAndPartyService::FOnPartyMembersChangedEvent, FOnPartyMembersChangedEvent)
+	virtual FOnPartyMembersChangedEvent& OnPartyMembersChanged() override
+	{
+		return PartyMembersChangedEvent;
+	}
+
 	DECLARE_DERIVED_EVENT(FGameAndPartyService, IGameAndPartyService::FOnFriendsJoinPartyEvent, FOnFriendsJoinPartyEvent)
 	virtual FOnFriendsJoinPartyEvent& OnFriendsJoinParty() override
 	{
 		return FriendsJoinPartyEvent;
+	}
+
+	DECLARE_DERIVED_EVENT(FGameAndPartyService, FGameAndPartyService::FOnGameSessionChangedEvent, FOnGameSessionChangedEvent)
+	virtual FOnGameSessionChangedEvent& OnGameSessionChanged() override
+	{
+		return GameSessionChangedEvent;
 	}
 
 private:
@@ -705,6 +846,7 @@ private:
 		, FriendsService(InFriendsService)
 		, NotificationService(InNotificationService)
 		, bIsInGame(bInIsInGame)
+		, bIsCombiningGameAndPartyChat(false)
 		, LocalControllerIndex(0)
 		, bHasOSS(false)
 	{
@@ -724,12 +866,24 @@ private:
 
 	// Holds the join game request delegate
 	FOnFriendsJoinGameEvent FriendsJoinGameEvent;
+	// Holds the party members changed delegate
+	FOnPartyMembersChangedEvent PartyMembersChangedEvent;
+	// Holds the game session changed delegate
+	FOnGameSessionChangedEvent GameSessionChangedEvent;
 	// Holds the join party request delegate
 	FOnFriendsJoinPartyEvent FriendsJoinPartyEvent;
 	// Delegate for a game invite received
 	FOnSessionInviteReceivedDelegate OnGameInviteReceivedDelegate;
+	// Delegate for a game session joined
+	FOnJoinSessionCompleteDelegate OnGameSessionJoinedDelegate;
+	// Delegate for a game session left
+	FOnDestroySessionCompleteDelegate OnGameSessionEndedDelegate;
 	// Delegate for a party invite received
 	FOnPartyInviteReceivedDelegate OnPartyInviteReceivedDelegate;
+	// Delegate for a party member joined
+	FOnPartyMemberJoinedDelegate OnPartyMemberJoinedDelegate;
+	// Delegate for a party member exited
+	FOnPartyMemberExitedDelegate OnPartyMemberExitedDelegate; 
 	// Delegate for a game session being destroyed
 	FOnDestroySessionCompleteDelegate OnDestroySessionCompleteDelegate;
 	// Delegate for joining another player's party
@@ -749,7 +903,11 @@ private:
 
 	/** Handle to various registered delegates */
 	FDelegateHandle OnGameInviteReceivedDelegateHandle;
+	FDelegateHandle OnGameSessionEndedDelegateHandle;
+	FDelegateHandle OnGameSessionJoinedDelegateHandle;
 	FDelegateHandle OnPartyInviteReceivedDelegateHandle;
+	FDelegateHandle OnPartyMemberJoinedDelegateHandle;
+	FDelegateHandle OnPartyMemberExitedDelegateHandle;
 	FDelegateHandle OnPartyJoinedDelegateHandle;
 	FDelegateHandle OnPresenceReceivedCompleteDelegateHandle;
 	FDelegateHandle OnQueryUserInfoCompleteDelegateHandle;
@@ -762,6 +920,7 @@ private:
 	TSharedPtr<class FChatNotificationService> NotificationService;
 	// Lets us know if we are in game for invites / join game sessions
 	bool bIsInGame;
+	bool bIsCombiningGameAndPartyChat;
 	// Controller index
 	int32 LocalControllerIndex;
 

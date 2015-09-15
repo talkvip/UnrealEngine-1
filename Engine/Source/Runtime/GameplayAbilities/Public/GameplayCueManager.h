@@ -220,6 +220,11 @@ class GAMEPLAYABILITIES_API UGameplayCueManager : public UDataAsset
 	/** Handles cleaning up an object library if it matches the passed in object */
 	void HandleAssetDeleted(UObject *Object);
 
+	/** Warns if we move a GameplayCue notify out of the valid search paths */
+	void HandleAssetRenamed(const FAssetData& Data, const FString& String);
+
+	void VerifyNotifyAssetIsInValidPath(FString Path);
+
 	bool RegisteredEditorCallbacks;
 
 	bool bAccelerationMapOutdated;
@@ -230,6 +235,8 @@ class GAMEPLAYABILITIES_API UGameplayCueManager : public UDataAsset
 
 	static UWorld* PreviewWorld;
 #endif
+	
+	virtual bool ShouldAsyncLoadObjectLibrariesAtStart() const { return true; }
 
 protected:
 
@@ -239,6 +246,8 @@ protected:
 #endif
 
 	void LoadObjectLibrary_Internal();
+
+	virtual bool ShouldAsyncLoadAtStartup() const { return true; }
 
 	void BuildCuesToAddToGlobalSet(const TArray<FAssetData>& AssetDataList, FName TagPropertyName, bool bAsyncLoadAfterAdd, TArray<struct FGameplayCueReferencePair>& OutCuesToAdd);
 

@@ -59,7 +59,7 @@ public:
 		FColor BadgeTextColor = FColor(128,128,128,255);
 		GConfig->GetColor(TEXT("LevelEditor"), TEXT("ProjectBadgeTextColor"), /*out*/ BadgeTextColor, GEditorPerProjectIni);
 
-		const FString EngineVersionString = GEngineVersion.ToString(GEngineVersion.HasChangelist() ? EVersionComponent::Changelist : EVersionComponent::Patch);
+		const FString EngineVersionString = FEngineVersion::Current().ToString(FEngineVersion::Current().HasChangelist() ? EVersionComponent::Changelist : EVersionComponent::Patch);
 		
 		FFormatNamedArguments Args;
 		Args.Add(TEXT("Branch"), FText::FromString(OptionalBranchPrefix));
@@ -331,12 +331,9 @@ void FLevelEditorModule::SummonWorldBrowserComposition()
 // @todo remove when world-centric mode is added
 void FLevelEditorModule::AttachSequencer( TSharedPtr<SWidget> SequencerWidget, TSharedPtr<IAssetEditorInstance> SequencerAssetEditor )
 {
-	if( FParse::Param( FCommandLine::Get(), TEXT( "Sequencer" ) ) )
-	{
-		TSharedPtr<SLevelEditor> LevelEditorInstance = LevelEditorInstancePtr.Pin();
+	TSharedPtr<SLevelEditor> LevelEditorInstance = LevelEditorInstancePtr.Pin();
 
-		LevelEditorInstance->AttachSequencer( SequencerWidget, SequencerAssetEditor );
-	}
+	LevelEditorInstance->AttachSequencer( SequencerWidget, SequencerAssetEditor );
 }
 
 TSharedPtr<ILevelViewport> FLevelEditorModule::GetFirstActiveViewport()
@@ -1050,6 +1047,11 @@ void FLevelEditorModule::BindGlobalLevelEditorCommands()
 		);
 
 	ActionList.MapAction(
+		Commands.SelectOwningHierarchicalLODCluster,
+		FExecuteAction::CreateStatic(&FLevelEditorActionCallbacks::OnSelectOwningHLODCluster)
+		);
+
+	ActionList.MapAction(
 		Commands.SelectSkeletalMeshesOfSameClass,
 		FExecuteAction::CreateStatic( &FLevelEditorActionCallbacks::ExecuteExecCommand, FString( TEXT("ACTOR SELECT MATCHINGSKELETALMESH") ) )
 		);
@@ -1372,10 +1374,7 @@ void FLevelEditorModule::BindGlobalLevelEditorCommands()
 
 	ActionList.MapAction(Commands.BuildLODsOnly,
 		FExecuteAction::CreateStatic(&FLevelEditorActionCallbacks::BuildLODsOnly_Execute));
-
-	ActionList.MapAction(Commands.PreviewHLODClustersOnly,
-		FExecuteAction::CreateStatic(&FLevelEditorActionCallbacks::PreviewHLODClustersOnly_Execute));
-
+	
 	ActionList.MapAction( 
 		Commands.LightingQuality_Production, 
 		FExecuteAction::CreateStatic( &FLevelEditorActionCallbacks::SetLightingQuality, (ELightingBuildQuality)Quality_Production ),

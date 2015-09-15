@@ -183,6 +183,7 @@ void UAnimSingleNodeInstance::RestartMontage(UAnimMontage * Montage, FName FromS
 {
 	if( Montage == CurrentAsset )
 	{
+		WeightInfo.Reset();
 		Montage_Play(Montage, PlayRate);
 		if( FromSection != NAME_None )
 		{
@@ -215,8 +216,7 @@ void UAnimSingleNodeInstance::NativeInitializeAnimation()
 		}
 	}
 }
-
-void UAnimSingleNodeInstance::NativeUpdateAnimation(float DeltaTimeX)
+void UAnimSingleNodeInstance::UpdateAnimationNode(float DeltaTimeX)
 {
 	float NewPlayRate = PlayRate;
 	UAnimSequence* PreviewBasePose = NULL;
@@ -233,6 +233,8 @@ void UAnimSingleNodeInstance::NativeUpdateAnimation(float DeltaTimeX)
 		if (UBlendSpaceBase* BlendSpace = Cast<UBlendSpaceBase>(CurrentAsset))
 		{
 			FAnimTickRecord& TickRecord = CreateUninitializedTickRecord(INDEX_NONE, /*out*/ SyncGroup);
+			TickRecord.SourceNodeRef = this;
+			InitTickRecordFromLastFrame(INDEX_NONE, TickRecord);
 			MakeBlendSpaceTickRecord(TickRecord, BlendSpace, BlendSpaceInput, BlendSampleData, BlendFilter, bLooping, NewPlayRate, 1.f, /*inout*/ CurrentTime);
 #if WITH_EDITORONLY_DATA
 			PreviewBasePose = BlendSpace->PreviewBasePose;
@@ -241,6 +243,8 @@ void UAnimSingleNodeInstance::NativeUpdateAnimation(float DeltaTimeX)
 		else if (UAnimSequence* Sequence = Cast<UAnimSequence>(CurrentAsset))
 		{
 			FAnimTickRecord& TickRecord = CreateUninitializedTickRecord(INDEX_NONE, /*out*/ SyncGroup);
+			TickRecord.SourceNodeRef = this;
+			InitTickRecordFromLastFrame(INDEX_NONE, TickRecord);
 			MakeSequenceTickRecord(TickRecord, Sequence, bLooping, NewPlayRate, 1.f, /*inout*/ CurrentTime);
 			// if it's not looping, just set play to be false when reached to end
 			if (!bLooping)
@@ -255,6 +259,8 @@ void UAnimSingleNodeInstance::NativeUpdateAnimation(float DeltaTimeX)
 		else if(UAnimComposite* Composite = Cast<UAnimComposite>(CurrentAsset))
 		{
 			FAnimTickRecord& TickRecord = CreateUninitializedTickRecord(INDEX_NONE, /*out*/ SyncGroup);
+			TickRecord.SourceNodeRef = this;
+			InitTickRecordFromLastFrame(INDEX_NONE, TickRecord);
 			MakeSequenceTickRecord(TickRecord, Composite, bLooping, NewPlayRate, 1.f, /*inout*/ CurrentTime);
 			// if it's not looping, just set play to be false when reached to end
 			if (!bLooping)
@@ -271,16 +277,15 @@ void UAnimSingleNodeInstance::NativeUpdateAnimation(float DeltaTimeX)
 			// Full weight , if you don't have slot track, you won't be able to see animation playing
 			if ( Montage->SlotAnimTracks.Num() > 0 )
 			{
-				UpdateSlotNodeWeight(Montage->SlotAnimTracks[0].SlotName, 1.f);		
+				// in the future, maybe we can support which slot
+				const FName CurrentSlotNodeName = Montage->SlotAnimTracks[0].SlotName;
+				GetSlotWeight(CurrentSlotNodeName, WeightInfo.SlotNodeWeight, WeightInfo.SourceWeight, WeightInfo.TotalNodeWeight);
+				UpdateSlotNodeWeight(CurrentSlotNodeName, WeightInfo.SlotNodeWeight);		
 			}
 			// get the montage position
 			// @todo anim: temporarily just choose first slot and show the location
 			FAnimMontageInstance * ActiveMontageInstance = GetActiveMontageInstance();
-			if (ActiveMontageInstance)
-			{
-				CurrentTime = ActiveMontageInstance->GetPosition();
-			}
-			else if (bPlaying)
+			if (!ActiveMontageInstance && bPlaying)
 			{
 				SetPlaying(false);
 			}
@@ -404,7 +409,7 @@ bool UAnimSingleNodeInstance::NativeEvaluateAnimation(FPoseContext& Output)
 					SourcePose.ResetToRefPose();			
 				}
 
-				SlotEvaluatePose(Montage->SlotAnimTracks[0].SlotName, SourcePose, SourceCurve, Output.Pose, Output.Curve, 1.f);
+				SlotEvaluatePose(Montage->SlotAnimTracks[0].SlotName, SourcePose, SourceCurve, WeightInfo.SourceWeight, Output.Pose, Output.Curve, WeightInfo.SlotNodeWeight, WeightInfo.TotalNodeWeight);
 			}
 		}
 	}
@@ -422,6 +427,16 @@ void UAnimSingleNodeInstance::NativePostEvaluateAnimation()
 	PostEvaluateAnimEvent.ExecuteIfBound();
 
 	Super::NativePostEvaluateAnimation();
+}
+
+void UAnimSingleNodeInstance::OnMontageInstanceStopped(FAnimMontageInstance& StoppedMontageInstance) 
+{
+	if (StoppedMontageInstance.Montage == CurrentAsset)
+	{
+		CurrentTime = StoppedMontageInstance.GetPosition();
+	}
+
+	Super::OnMontageInstanceStopped(StoppedMontageInstance);
 }
 
 void UAnimSingleNodeInstance::Montage_Advance(float DeltaTime)

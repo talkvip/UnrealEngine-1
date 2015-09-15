@@ -10,7 +10,6 @@
 #include "GameplayCueManager.h"
 #include "GameplayTagResponseTable.h"
 
-
 UAbilitySystemGlobals::UAbilitySystemGlobals(const FObjectInitializer& ObjectInitializer)
 : Super(ObjectInitializer)
 {
@@ -199,6 +198,32 @@ UFunction* UAbilitySystemGlobals::GetGameplayCueFunction(const FGameplayTag& Chi
 
 // --------------------------------------------------------------------
 
+void UAbilitySystemGlobals::InitGameplayCueParameters(FGameplayCueParameters& CueParameters, const FGameplayEffectSpecForRPC &Spec)
+{
+	CueParameters.AggregatedSourceTags = Spec.AggregatedSourceTags;
+	CueParameters.AggregatedTargetTags = Spec.AggregatedTargetTags;
+
+	InitGameplayCueParameters(CueParameters, Spec.GetContext());
+}
+
+void UAbilitySystemGlobals::InitGameplayCueParameters(FGameplayCueParameters& CueParameters, const FGameplayEffectContextHandle& EffectContext)
+{
+	if (EffectContext.IsValid())
+	{
+		// Copy Context over wholesale. Projects may want to override this and not copy over all data
+		CueParameters.EffectContext = EffectContext;
+	}
+}
+
+// --------------------------------------------------------------------
+
+void UAbilitySystemGlobals::StartAsyncLoadingObjectLibraries()
+{
+	GlobalGameplayCueManager->LoadObjectLibraryFromPaths(GameplayCueNotifyPaths);
+}
+
+// --------------------------------------------------------------------
+
 /** Initialize FAttributeSetInitter. This is virtual so projects can override what class they use */
 void UAbilitySystemGlobals::AllocAttributeSetInitter()
 {
@@ -231,13 +256,28 @@ UGameplayCueManager* UAbilitySystemGlobals::GetGameplayCueManager()
 {
 	if (GlobalGameplayCueManager == nullptr)
 	{
-		GlobalGameplayCueManager = LoadObject<UGameplayCueManager>(nullptr, *GlobalGameplayCueManagerName.ToString(), nullptr, LOAD_None, nullptr);
-		if (GameplayCueNotifyPaths.Num() > 0)
+		if (GlobalGameplayCueManagerName.IsValid())
 		{
-			GlobalGameplayCueManager->LoadObjectLibraryFromPaths(GameplayCueNotifyPaths);
+			GlobalGameplayCueManager = LoadObject<UGameplayCueManager>(nullptr, *GlobalGameplayCueManagerName.ToString(), nullptr, LOAD_None, nullptr);
+			if (GlobalGameplayCueManager == nullptr)
+			{
+				ABILITY_LOG(Error, TEXT("Unable to Load GameplayCueManager %s"), *GlobalGameplayCueManagerName.ToString() );
+			}
+		}
+
+		if ( GlobalGameplayCueManager == nullptr)
+		{
+			// Fallback to CDO
+			GlobalGameplayCueManager = UGameplayCueManager::StaticClass()->GetDefaultObject<UGameplayCueManager>();
+		}
+		
+		if (GlobalGameplayCueManager->ShouldAsyncLoadObjectLibrariesAtStart() && GameplayCueNotifyPaths.Num() > 0)
+		{
+			StartAsyncLoadingObjectLibraries();
 		}
 	}
 
+	check(GlobalGameplayCueManager);
 	return GlobalGameplayCueManager;
 }
 

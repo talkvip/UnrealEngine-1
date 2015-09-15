@@ -108,6 +108,9 @@ namespace UnrealBuildTool
 			return SupportWindowsXP;
 		}
 
+		/// True if we allow using addresses larger than 2GB on 32 bit builds
+		public static bool bBuildLargeAddressAwareBinary = true;
+
         /** True if VS EnvDTE is available (false when building using Visual Studio Express) */
         public static bool bHasVisualStudioDTE
         {
@@ -397,7 +400,7 @@ namespace UnrealBuildTool
             return false;
         }
 
-		public override bool HasDefaultBuildConfig(UnrealTargetPlatform Platform, string ProjectPath)
+		public override bool HasDefaultBuildConfig(UnrealTargetPlatform Platform, DirectoryReference ProjectPath)
 		{
 			if (Platform == UnrealTargetPlatform.Win32)
 			{
@@ -427,7 +430,7 @@ namespace UnrealBuildTool
 			// ...check if it was supported from a config.
 			if (!SupportWindowsXPIfAvailable)
 			{
-				ConfigCacheIni Ini = new ConfigCacheIni(UnrealTargetPlatform.Win64, "Engine", UnrealBuildTool.GetUProjectPath());
+				ConfigCacheIni Ini = ConfigCacheIni.CreateConfigCacheIni(UnrealTargetPlatform.Win64, "Engine", UnrealBuildTool.GetUProjectPath());
 				string MinimumOS;
 				if (Ini.GetString("/Script/WindowsTargetPlatform.WindowsTargetSettings", "MinimumOSVersion", out MinimumOS))
 				{
@@ -477,7 +480,7 @@ namespace UnrealBuildTool
             UEBuildConfiguration.bCompileICU = true;
         }
 
-        public override void ModifyNewlyLoadedModule(UEBuildModule InModule, TargetInfo Target)
+		public override void ModifyModuleRules(string ModuleName, ModuleRules Rules, TargetInfo Target)
         {
             if ((Target.Platform == UnrealTargetPlatform.Win32) || (Target.Platform == UnrealTargetPlatform.Win64))
             {
@@ -485,47 +488,50 @@ namespace UnrealBuildTool
 
                 if (!UEBuildConfiguration.bBuildRequiresCookedData)
                 {
-                    if (InModule.ToString() == "TargetPlatform")
+                    if (ModuleName == "TargetPlatform")
                     {
                         bBuildShaderFormats = true;
                     }
                 }
 
                 // allow standalone tools to use target platform modules, without needing Engine
-                if (UEBuildConfiguration.bForceBuildTargetPlatforms)
-                {
-                    InModule.AddDynamicallyLoadedModule("WindowsTargetPlatform");
-                    InModule.AddDynamicallyLoadedModule("WindowsNoEditorTargetPlatform");
-                    InModule.AddDynamicallyLoadedModule("WindowsServerTargetPlatform");
-                    InModule.AddDynamicallyLoadedModule("WindowsClientTargetPlatform");
-					InModule.AddDynamicallyLoadedModule("AllDesktopTargetPlatform");
-                }
-
-                if (bBuildShaderFormats)
-                {
-                    InModule.AddDynamicallyLoadedModule("ShaderFormatD3D");
-                    InModule.AddDynamicallyLoadedModule("ShaderFormatOpenGL");
-
-//#todo-rco: Remove when public
-					{
-						string VulkanSDKPath = Environment.GetEnvironmentVariable("VulkanSDK");
-						if (!String.IsNullOrEmpty(VulkanSDKPath))
-						{
-							InModule.AddDynamicallyLoadedModule("VulkanShaderFormat");
-						}
-					}
+				if(ModuleName == "TargetPlatform")
+				{
+                    if (UEBuildConfiguration.bForceBuildTargetPlatforms)
+                    {
+                        Rules.DynamicallyLoadedModuleNames.Add("WindowsTargetPlatform");
+                        Rules.DynamicallyLoadedModuleNames.Add("WindowsNoEditorTargetPlatform");
+                        Rules.DynamicallyLoadedModuleNames.Add("WindowsServerTargetPlatform");
+                        Rules.DynamicallyLoadedModuleNames.Add("WindowsClientTargetPlatform");
+					    Rules.DynamicallyLoadedModuleNames.Add("AllDesktopTargetPlatform");
+                    }
+    
+                    if (bBuildShaderFormats)
+                    {
+                        Rules.DynamicallyLoadedModuleNames.Add("ShaderFormatD3D");
+                        Rules.DynamicallyLoadedModuleNames.Add("ShaderFormatOpenGL");
+    
+    //#todo-rco: Remove when public
+						string VulkanSDKPath = Environment.GetEnvironmentVariable("VK_SDK_PATH");
+					    {
+						    if (!String.IsNullOrEmpty(VulkanSDKPath))
+						    {
+							    Rules.DynamicallyLoadedModuleNames.Add("VulkanShaderFormat");
+						    }
+					    }
+				    }
 				}
-
-                if (InModule.ToString() == "D3D11RHI")
+				
+                if (ModuleName == "D3D11RHI")
                 {
                     // To enable platform specific D3D11 RHI Types
-                    InModule.AddPrivateIncludePath("Runtime/Windows/D3D11RHI/Private/Windows");
+                    Rules.PrivateIncludePaths.Add("Runtime/Windows/D3D11RHI/Private/Windows");
                 }
 
-				if (InModule.ToString() == "D3D12RHI")
+				if (ModuleName == "D3D12RHI")
 				{
 					// To enable platform specific D3D12 RHI Types
-					InModule.AddPrivateIncludePath("Runtime/Windows/D3D12RHI/Private/Windows");
+					Rules.PrivateIncludePaths.Add("Runtime/Windows/D3D12RHI/Private/Windows");
 				}
 			}
         }
@@ -577,7 +583,8 @@ namespace UnrealBuildTool
 			InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("PLATFORM_WINDOWS=1");
 
             String MorpheusShaderPath = Path.Combine(BuildConfiguration.RelativeEnginePath, "Shaders/PS4/PostProcessHMDMorpheus.usf");
-            if (File.Exists(MorpheusShaderPath))
+            //@todo: VS2015 currently does not have support for Morpheus
+            if (File.Exists(MorpheusShaderPath) && WindowsPlatform.Compiler != WindowsCompiler.VisualStudio2015)
             {
                 InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("HAS_MORPHEUS=1");                
 
@@ -729,7 +736,7 @@ namespace UnrealBuildTool
                     InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("UE_BUILD_DEBUG=1");
                     break;
                 case UnrealTargetConfiguration.DebugGame:
-                    // Default to Development; can be overriden by individual modules.
+                    // Default to Development; can be overridden by individual modules.
                 case UnrealTargetConfiguration.Development:
                     CompileConfiguration = CPPTargetConfiguration.Development;
                     InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("NDEBUG=1"); // the engine doesn't use this, but lots of 3rd party stuff does

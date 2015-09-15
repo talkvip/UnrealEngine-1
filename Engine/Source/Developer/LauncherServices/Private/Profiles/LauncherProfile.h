@@ -2,15 +2,32 @@
 
 #pragma once
 
-#define LAUNCHERSERVICES_ADDEDINCREMENTALDEPLOYVERSION 11
-#define LAUNCHERSERVICES_ADDEDPATCHSOURCECONTENTPATH 12
-#define LAUNCHERSERVICES_ADDEDRELEASEVERSION 13
-#define LAUNCHERSERVICES_REMOVEDPATCHSOURCECONTENTPATH 14
-#define LAUNCHERSERVICES_ADDEDDLCINCLUDEENGINECONTENT 15
-#define LAUNCHERSERVICES_ADDEDGENERATECHUNKS 16
-#define LAUNCHERSERVICES_ADDEDNUMCOOKERSTOSPAWN 17
-#define LAUNCHERSERVICES_ADDEDSKIPCOOKINGEDITORCONTENT 18
-#define LAUNCHERSERVICES_ADDEDDEFAULTDEPLOYPLATFORM 19
+enum ELauncherVersion
+{
+	LAUNCHERSERVICES_MINPROFILEVERSION=10,
+	LAUNCHERSERVICES_ADDEDINCREMENTALDEPLOYVERSION=11,
+	LAUNCHERSERVICES_ADDEDPATCHSOURCECONTENTPATH=12,
+	LAUNCHERSERVICES_ADDEDRELEASEVERSION=13,
+	LAUNCHERSERVICES_REMOVEDPATCHSOURCECONTENTPATH=14,
+	LAUNCHERSERVICES_ADDEDDLCINCLUDEENGINECONTENT=15,
+	LAUNCHERSERVICES_ADDEDGENERATECHUNKS=16,
+	LAUNCHERSERVICES_ADDEDNUMCOOKERSTOSPAWN=17,
+	LAUNCHERSERVICES_ADDEDSKIPCOOKINGEDITORCONTENT=18,
+	LAUNCHERSERVICES_ADDEDDEFAULTDEPLOYPLATFORM=19,
+	LAUNCHERSERVICES_FIXCOMPRESSIONSERIALIZE=20,
+	LAUNCHERSERVICES_SHAREABLEPROJECTPATHS = 21,
+
+	//ADD NEW STUFF HERE
+
+
+	LAUNCHERSERVICES_FINALPLUSONE,
+	LAUNCHERSERVICES_FINAL = LAUNCHERSERVICES_FINALPLUSONE-1,
+};
+
+enum ESimpleLauncherVersion
+{
+	LAUNCHERSERVICES_SIMPLEPROFILEVERSION=1,
+};
 
 /**
 * Implements a simple profile which controls the desired output of the Launcher for simple
@@ -26,7 +43,7 @@ public:
 		SetDefaults();
 	}
 
-	// Begin ILauncherSimpleProfile interface
+	//~ Begin ILauncherSimpleProfile Interface
 
 	virtual const FString& GetDeviceName() const override
 	{
@@ -191,7 +208,7 @@ public:
 
 public:
 
-	// Begin ILauncherProfile interface
+	//~ Begin ILauncherProfile Interface
 
 	virtual void AddCookedCulture( const FString& CultureName ) override
 	{
@@ -521,7 +538,7 @@ public:
 	{
 		if (ProjectSpecified)
 		{
-			FString Path = FLauncherProjectPath::GetProjectName(ProjectPath);
+			FString Path = FLauncherProjectPath::GetProjectName(FullProjectPath);
 			return Path;
 		}
 		return LauncherProfileManager->GetProjectName();
@@ -531,7 +548,7 @@ public:
 	{
 		if (ProjectSpecified)
 		{
-			return FLauncherProjectPath::GetProjectBasePath(ProjectPath);
+			return FLauncherProjectPath::GetProjectBasePath(FullProjectPath);
 		}
 		return LauncherProfileManager->GetProjectBasePath();
 	}
@@ -540,7 +557,7 @@ public:
 	{
 		if (ProjectSpecified)
 		{
-			return ProjectPath;
+			return FullProjectPath;
 		}
 		return LauncherProfileManager->GetProjectPath();
 	}
@@ -679,11 +696,16 @@ public:
 
 	virtual bool Serialize( FArchive& Archive ) override
 	{
-		int32 Version = LAUNCHERSERVICES_ADDEDDEFAULTDEPLOYPLATFORM;
+		int32 Version = LAUNCHERSERVICES_FINAL;
 
 		Archive	<< Version;
 
 		if (Version < LAUNCHERSERVICES_MINPROFILEVERSION)
+		{
+			return false;
+		}
+
+		if (Version > LAUNCHERSERVICES_FINAL)
 		{
 			return false;
 		}
@@ -706,7 +728,7 @@ public:
 				<< Description
 				<< BuildConfiguration
 				<< ProjectSpecified
-				<< ProjectPath
+				<< ShareableProjectPath
 				<< CookConfiguration
 				<< CookIncremental
 				<< CookOptions
@@ -727,7 +749,16 @@ public:
                 << ForceClose
                 << Timeout;
 
+		if (LAUNCHERSERVICES_SHAREABLEPROJECTPATHS)
+		{
+			FullProjectPath = FPaths::ConvertRelativePathToFull(FPaths::RootDir(), ShareableProjectPath);
+		}
+
 		FString DeployPlatformString = DefaultDeployPlatform.ToString();
+		if (Version >= LAUNCHERSERVICES_FIXCOMPRESSIONSERIALIZE)
+		{
+			Archive << Compressed;
+		}
 		if (Version >= LAUNCHERSERVICES_ADDEDDEFAULTDEPLOYPLATFORM)
 		{
 			Archive << DeployPlatformString;
@@ -823,15 +854,15 @@ public:
 		// default project settings
 		if (FPaths::IsProjectFilePathSet())
 		{
-			ProjectPath = FPaths::GetProjectFilePath();
+			FullProjectPath = FPaths::GetProjectFilePath();
 		}
 		else if (FGameProjectHelper::IsGameAvailable(FApp::GetGameName()))
 		{
-			ProjectPath = FPaths::RootDir() / FApp::GetGameName() / FApp::GetGameName() + TEXT(".uproject");
+			FullProjectPath = FPaths::RootDir() / FApp::GetGameName() / FApp::GetGameName() + TEXT(".uproject");
 		}
 		else
 		{
-			ProjectPath = FString();
+			FullProjectPath = FString();
 		}
 
 		// Use the locally specified project path is resolving through the root isn't working
@@ -844,8 +875,8 @@ public:
 		FInternationalization& I18N = FInternationalization::Get();
 
 		// default build settings
-		BuildGame = false;
-		BuildUAT = false;
+		BuildGame = !FApp::GetEngineIsPromotedBuild() && !FApp::IsEngineInstalled();
+		BuildUAT = !FApp::GetEngineIsPromotedBuild() && !FApp::IsEngineInstalled();
 
 		// default cook settings
 		CookConfiguration = FApp::GetBuildConfiguration();
@@ -902,7 +933,29 @@ public:
 		PackagingMode = ELauncherProfilePackagingModes::DoNotPackage;
 
 		// default UAT settings
-		EditorExe.Empty();
+		EditorExe = FPlatformProcess::ExecutableName(false);
+		if (EditorExe.Contains(TEXT("Editor")))
+		{
+#if PLATFORM_WINDOWS
+			// turn UE4editor into UE4editor-cmd
+			if (EditorExe.EndsWith(".exe", ESearchCase::IgnoreCase) && !FPaths::GetBaseFilename(EditorExe).EndsWith("-cmd", ESearchCase::IgnoreCase))
+			{
+				FString NewExeName = EditorExe.Left(EditorExe.Len() - 4) + "-Cmd.exe";
+				if (FPaths::FileExists(NewExeName))
+				{
+					EditorExe = NewExeName;
+				}
+				else
+				{
+					EditorExe.Empty();
+				}
+			}
+#endif
+		}
+		else
+		{
+			EditorExe.Empty();
+		}
 
 		bNotForLicensees = false;
 
@@ -1203,15 +1256,28 @@ public:
 
 	virtual void SetProjectPath( const FString& Path ) override
 	{
-		if (ProjectPath != Path)
+		if (FullProjectPath != Path)
 		{
 			if(Path.IsEmpty())
 			{
-				ProjectPath = Path;
+				FullProjectPath = Path;
 			}
 			else
 			{
-				ProjectPath = FPaths::ConvertRelativePathToFull(Path);
+				FullProjectPath = FPaths::ConvertRelativePathToFull(Path);
+
+				FString RelativeProjectPath = Path;
+				bool bRelative = FPaths::MakePathRelativeTo(RelativeProjectPath, *FPaths::RootDir());
+
+				bool bIsUnderUE4Root = bRelative && !(RelativeProjectPath.StartsWith(FString("../"), ESearchCase::CaseSensitive));
+				if (bIsUnderUE4Root)
+				{
+					ShareableProjectPath = RelativeProjectPath;
+				}
+				else
+				{
+					ShareableProjectPath = FullProjectPath;
+				}				
 			}
 			CookedMaps.Reset();
 
@@ -1276,7 +1342,7 @@ public:
 		return EditorExe;
 	}
 
-	// End ILauncherProfile interface
+	//~ End ILauncherProfile Interface
 
 protected:
 
@@ -1608,8 +1674,12 @@ private:
 	// Holds a flag indicating whether the project is specified by this profile.
 	bool ProjectSpecified;
 
-	// Holds the path to the Unreal project used by this profile.
-	FString ProjectPath;
+	// Holds the full absolute path to the Unreal project used by this profile.
+	FString FullProjectPath;
+
+	// Holds the path that might be shareable between people.  Only works if the project is under the UE4 root.
+	// otherwise this is an absolute path.
+	FString ShareableProjectPath;
 
 	// Holds the collection of validation errors.
 	TArray<ELauncherProfileValidationErrors::Type> ValidationErrors;

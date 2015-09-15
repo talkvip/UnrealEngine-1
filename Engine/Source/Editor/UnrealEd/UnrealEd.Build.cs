@@ -57,6 +57,9 @@ public class UnrealEd : ModuleRules
                 "Niagara",
 				"SizeMap",
                 "LocalizationService",
+                "MessagingRpc",
+                "PortalRpc",
+                "PortalServices",
 			}
 		);
 
@@ -133,7 +136,7 @@ public class UnrealEd : ModuleRules
                 "MaterialUtilities",
                 "LocalizationService",
 				"AddContentDialog",
-				"GameProjectGeneration",
+				"GameProjectGeneration"                
 			}
 		);
 
@@ -201,6 +204,9 @@ public class UnrealEd : ModuleRules
                 "IOSPlatformEditor",
 				"HTML5PlatformEditor",
 				"SizeMap",
+                "PortalProxies",
+                "PortalServices",
+                "GeometryCacheEd"
 			}
 		);
 
@@ -229,7 +235,8 @@ public class UnrealEd : ModuleRules
 				"NiagaraEditor",
                 "Niagara",
                 "VectorVM",
-				"AddContentDialog",
+				"AddContentDialog",                
+                "MeshUtilities"
 			}
 			);
 

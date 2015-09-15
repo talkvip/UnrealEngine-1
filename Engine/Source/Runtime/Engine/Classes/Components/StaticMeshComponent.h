@@ -156,10 +156,21 @@ class ENGINE_API UStaticMeshComponent : public UMeshComponent
 	FColor WireframeColorOverride;
 
 #if WITH_EDITORONLY_DATA
-	/** The section currently selected in the Editor. */
+	/** The section currently selected in the Editor. Used for highlighting */
 	UPROPERTY(transient)
 	int32 SelectedEditorSection;
+	/** Index of the section to preview. If set to INDEX_NONE, all section will be rendered. Used for isolating in Static Mesh Tool **/
+	UPROPERTY(transient)
+	int32 SectionIndexPreview;
 #endif
+
+	/** If true, bForceNavigationObstacle flag will take priority over navigation data stored in StaticMesh */
+	UPROPERTY(transient)
+	uint32 bOverrideNavigationExport : 1;
+
+	/** Allows overriding navigation export behavior per component: full collisions or dynamic obstacle */
+	UPROPERTY(transient)
+	uint32 bForceNavigationObstacle : 1;
 
 	/**
 	 *	Ignore this instance of this static mesh when calculating streaming information.
@@ -228,7 +239,7 @@ class ENGINE_API UStaticMeshComponent : public UMeshComponent
 
 public:
 
-	// Begin UObject interface.
+	//~ Begin UObject Interface.
 	virtual void BeginDestroy() override;
 	virtual void ExportCustomProperties(FOutputDevice& Out, uint32 Indent) override;
 	virtual void ImportCustomProperties(const TCHAR* SourceText, FFeedbackContext* Warn) override;	
@@ -243,9 +254,9 @@ public:
 	virtual bool AreNativePropertiesIdenticalTo( UObject* Other ) const override;
 	virtual FString GetDetailedInfoInternal() const override;
 	static void AddReferencedObjects(UObject* InThis, FReferenceCollector& Collector);
-	// End UObject interface.
+	//~ End UObject Interface.
 
-	// Begin USceneComponent Interface
+	//~ Begin USceneComponent Interface
 	virtual FBoxSphereBounds CalcBounds(const FTransform& LocalToWorld) const override;
 	virtual bool HasAnySockets() const override;
 	virtual void QuerySupportedSockets(TArray<FComponentSocketDescription>& OutSockets) const override;
@@ -257,9 +268,9 @@ public:
 		// return IsCollisionEnabled() && (StaticMesh != NULL);
 		return false;
 	}
-	// End USceneComponent Interface
+	//~ End USceneComponent Interface
 
-	// Begin UActorComponent interface.
+	//~ Begin UActorComponent Interface.
 protected: 
 	virtual void OnRegister() override;
 	virtual void OnUnregister() override;
@@ -270,9 +281,9 @@ public:
 	virtual void CheckForErrors() override;
 #endif
 	virtual FActorComponentInstanceData* GetComponentInstanceData() const override;
-	// End UActorComponent interface.
+	//~ End UActorComponent Interface.
 
-	// Begin UPrimitiveComponent interface.
+	//~ Begin UPrimitiveComponent Interface.
 	virtual int32 GetNumMaterials() const override;
 #if WITH_EDITOR
 	virtual void GetStaticLightingInfo(FStaticLightingPrimitiveInfo& OutPrimitiveInfo,const TArray<ULightComponent*>& InRelevantLights,const FLightingBuildOptions& Options) override;
@@ -304,12 +315,12 @@ public:
 	virtual bool ComponentIsTouchingSelectionBox(const FBox& InSelBBox, const FEngineShowFlags& ShowFlags, const bool bConsiderOnlyBSP, const bool bMustEncompassEntireComponent) const override;
 	virtual bool ComponentIsTouchingSelectionFrustum(const FConvexVolume& InSelBBox, const FEngineShowFlags& ShowFlags, const bool bConsiderOnlyBSP, const bool bMustEncompassEntireComponent) const override;
 #endif
-	// End UPrimitiveComponent interface.
+	//~ End UPrimitiveComponent Interface.
 
-	// Begin INavRelevantInterface interface.
+	//~ Begin INavRelevantInterface Interface.
 	virtual bool IsNavigationRelevant() const override;
 	virtual void GetNavigationData(FNavigationRelevantData& Data) const override;
-	// End INavRelevantInterface interface.
+	//~ End INavRelevantInterface Interface.
 	/**
 	 *	Returns true if the component uses texture lightmaps
 	 *
@@ -400,6 +411,13 @@ public:
 	 * Removes instance vertex colors from all LODs
 	 */
 	void RemoveInstanceVertexColors();
+
+	/**
+	*	Sets the value of the SectionIndexPreview flag and reattaches the component as necessary.
+	*	@param	InSectionIndexPreview		New value of SectionIndexPreview.
+	*/
+	void SetSectionPreview(int32 InSectionIndexPreview);
+
 
 private:
 	/** Initializes the resources used by the static mesh component. */

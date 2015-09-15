@@ -117,6 +117,16 @@ namespace AutomationTool
 			throw new AutomationException("{0} does not yet implement Packaging.", PlatformType);
 		}
 
+        /// <summary>
+        /// Does the reverse of the output from the package process
+        /// </summary>
+        /// <param name="SourcePath"></param>
+        /// <param name="DestinationPath"></param>
+        public virtual void ExtractPackage(ProjectParams Params, string SourcePath, string DestinationPath)
+        {
+            throw new AutomationException("{0} does not yet implement ExtractPackage.", PlatformType);
+        }
+
 		/// <summary>
 		/// Allow platform to do platform specific work on archived project before it's deployed.
 		/// </summary>
@@ -172,6 +182,11 @@ namespace AutomationTool
 		public virtual void PostRunClient(ProcessResult Result, ProjectParams Params)
 		{
 			// do nothing in the default case
+		}
+
+		public virtual void UploadSymbols(ProjectParams Params, DeploymentContext SC)
+		{
+			LogWarning("{0} does not implement UploadSymbols...", PlatformType);
 		}
 
 		/// <summary>
@@ -431,6 +446,16 @@ namespace AutomationTool
         {
             return "";
         }
+
+		/// <summary>
+		/// Returns true if the platform wants patches to generate a small .pak file containing the difference
+		/// of current data against a shipped pak file.
+		/// </summary>
+		/// <returns></returns>
+		public virtual bool GetPlatformPatchesWithDiffPak()
+		{
+			return true;
+		}
 
 		/// <summary>
 		///  Returns whether the platform requires a package to deploy to a device

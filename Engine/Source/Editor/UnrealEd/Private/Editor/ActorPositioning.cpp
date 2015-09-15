@@ -111,14 +111,14 @@ FActorPositionTraceResult FActorPositioning::TraceWorldForPosition(const UWorld&
 		}
 
 		// Go through all hits and find closest
-		float ClosestHitDistance = TNumericLimits<float>::Max();
+		float ClosestHitDistanceSqr = TNumericLimits<float>::Max();
 
 		for (const auto& Hit : Hits)
 		{
-			const float DistanceToHit = (Hit.ImpactPoint - RayStart).Size();
-			if (DistanceToHit < ClosestHitDistance)
+			const float DistanceToHitSqr = (Hit.ImpactPoint - RayStart).SizeSquared();
+			if (DistanceToHitSqr < ClosestHitDistanceSqr)
 			{
-				ClosestHitDistance = DistanceToHit;
+				ClosestHitDistanceSqr = DistanceToHitSqr;
 				Results.Location = Hit.Location;
 				Results.SurfaceNormal = Hit.Normal.GetSafeNormal();
 				Results.State = FActorPositionTraceResult::HitSuccess;
@@ -153,6 +153,17 @@ FTransform FActorPositioning::GetCurrentViewportPlacementTransform(const AActor&
 			.UsePlacementExtent(Actor.GetPlacementExtent());
 
 		ActorTransform = bSnap ? GetSnappedSurfaceAlignedTransform(PositioningData) : GetSurfaceAlignedTransform(PositioningData);
+
+		if (GetDefault<ULevelEditorViewportSettings>()->SnapToSurface.bEnabled)
+		{
+			// HACK: If we are aligning rotation to surfaces, we have to factor in the inverse of the actor transform so that the resulting transform after SpawnActor is correct.
+
+			if (auto* RootComponent = Actor.GetRootComponent())
+			{
+				RootComponent->UpdateComponentToWorld();
+			}
+			ActorTransform = Actor.GetTransform().Inverse() * ActorTransform;
+		}
 	}
 
 	return ActorTransform;

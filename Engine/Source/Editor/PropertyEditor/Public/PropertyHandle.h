@@ -29,7 +29,7 @@ public:
 	virtual ~IPropertyHandle(){}
 
 	/**
-	 * @return Whether or not the handle is valid
+	 * @return Whether or not the handle points to a valid property node. This can be true but GetProperty may still return null
 	 */
 	virtual bool IsValidHandle() const = 0;
 	
@@ -169,6 +169,13 @@ public:
 	 * @param InOnPropertyValueChanged	The delegate to call
 	 */
 	virtual void SetOnPropertyValueChanged( const FSimpleDelegate& InOnPropertyValueChanged ) = 0;
+	
+	/**
+	 * Sets a delegate to call when the value of the property of a child is changed
+	 * 
+	 * @param InOnChildPropertyValueChanged	The delegate to call
+	 */
+	virtual void SetOnChildPropertyValueChanged( const FSimpleDelegate& InOnChildPropertyValueChanged ) = 0;
 
 	/**
 	 * Gets the typed value of a property.  
@@ -235,6 +242,12 @@ public:
 	 * This does not need to be called when SetValue functions are used since it will be called automatically
 	 */
 	virtual void NotifyPostChange() = 0;
+
+	/**
+	 * Called to manually notify root objects that this property has finished changing
+	 * This does not need to be called when SetValue functions are used since it will be called automatically
+	 */
+	virtual void NotifyFinishedChangingProperties() = 0;
 
 	/**
 	 * Sets the object value from the current editor selection

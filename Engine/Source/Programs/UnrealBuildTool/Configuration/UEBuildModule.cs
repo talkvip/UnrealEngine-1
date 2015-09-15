@@ -78,8 +78,9 @@ namespace UnrealBuildTool
 			}
 		}
 
-		public static UEBuildModuleType GetEngineModuleTypeBasedOnLocation(string ModuleName, UEBuildModuleType ModuleType, string ModuleFileRelativeToEngineDirectory)
+		public static UEBuildModuleType GetEngineModuleTypeBasedOnLocation(string ModuleName, UEBuildModuleType ModuleType, FileReference ModuleFileName)
 		{
+			string ModuleFileRelativeToEngineDirectory = ModuleFileName.MakeRelativeTo(UnrealBuildTool.EngineDirectory);
 			if (ModuleFileRelativeToEngineDirectory.IndexOf(UEBuildModule.RuntimeFolder, StringComparison.InvariantCultureIgnoreCase) >= 0)
 			{
 				ModuleType = UEBuildModuleType.Runtime;
@@ -135,23 +136,25 @@ namespace UnrealBuildTool
 		/**
 		 * Determines the distribution level of a module based on its directory and includes.
 		 */
-		private void SetupModuleDistributionLevel()
+		public UEBuildModuleDistribution DetermineDistributionLevel()
 		{
 			List<string> PathsToCheck = new List<string>();
-			PathsToCheck.Add(ModuleDirectory);
+			PathsToCheck.Add(ModuleDirectory.FullName);
 			PathsToCheck.AddRange(PublicIncludePaths);
 			PathsToCheck.AddRange(PrivateIncludePaths);
 			// Not sure if these two are necessary as paths will usually be in basic includes too
 			PathsToCheck.AddRange(PublicSystemIncludePaths);
 			PathsToCheck.AddRange(PublicLibraryPaths);
 
-			DistributionLevel = UEBuildModuleDistribution.Public;
+			UEBuildModuleDistribution DistributionLevel = UEBuildModuleDistribution.Public;
 
 			// Keep checking as long as we haven't reached the maximum level
 			for (int PathIndex = 0; PathIndex < PathsToCheck.Count && DistributionLevel != UEBuildModuleDistribution.NoRedist; ++PathIndex)
 			{
 				DistributionLevel = Utils.Max(DistributionLevel, UEBuildModule.GetModuleDistributionLevelBasedOnLocation(PathsToCheck[PathIndex]));
 			}
+
+			return DistributionLevel;
 		}
 
 		/** Converts an optional string list parameter to a well-defined hash set. */
@@ -169,18 +172,17 @@ namespace UnrealBuildTool
 		/** The type of module being built. Used to switch between debug/development and precompiled/source configurations. */
 		public UEBuildModuleType Type;
 
-		/** The distribution level of the module being built. Used to check where build products are placed. */
-		public UEBuildModuleDistribution DistributionLevel;
+		/** The rules for this module */
+		public ModuleRules Rules;
 
 		/** Path to the module directory */
-		public readonly string ModuleDirectory;
+		public readonly DirectoryReference ModuleDirectory;
 
 		/** Is this module allowed to be redistributed. */
 		private readonly bool? IsRedistributableOverride;
 
 		/** The name of the .Build.cs file this module was created from, if any */
-		private readonly string BuildCsFilenameField;
-		public string BuildCsFilename { get { return BuildCsFilenameField; } }
+		public FileReference RulesFile;
 
 		/**
 		 * Tells if this module can be redistributed.
@@ -200,6 +202,12 @@ namespace UnrealBuildTool
 		/** Whether this module is included in the current target.  Only set after UEBuildBinary.BindModules is called. */
 		public bool bIncludedInTarget = false;
 
+		/** Include path for this module's base directory, relative to the Engine/Source directory */
+		protected string NormalizedModuleIncludePath;
+
+		/** The name of the _API define for this module */
+		protected readonly string ModuleApiDefine;
+
 		protected readonly HashSet<string> PublicDefinitions;
 		protected readonly HashSet<string> PublicIncludePaths;
 		protected readonly HashSet<string> PrivateIncludePaths;
@@ -213,32 +221,25 @@ namespace UnrealBuildTool
 		protected readonly HashSet<UEBuildBundleResource> PublicAdditionalBundleResources;
 
 		/** Names of modules with header files that this module's public interface needs access to. */
-		protected HashSet<string> PublicIncludePathModuleNames;
+		protected List<UEBuildModule> PublicIncludePathModules;
 
 		/** Names of modules that this module's public interface depends on. */
-		protected HashSet<string> PublicDependencyModuleNames;
+		protected List<UEBuildModule> PublicDependencyModules;
 
 		/** Names of DLLs that this module should delay load */
 		protected HashSet<string> PublicDelayLoadDLLs;
 
 		/** Names of modules with header files that this module's private implementation needs access to. */
-		protected HashSet<string> PrivateIncludePathModuleNames;
+		protected List<UEBuildModule> PrivateIncludePathModules;
 	
 		/** Names of modules that this module's private implementation depends on. */
-		protected HashSet<string> PrivateDependencyModuleNames;
-
-		/** If any of this module's dependent modules circularly reference this module, then they must be added to this list */
-		public HashSet<string> CircularlyReferencedDependentModules
-		{
-			get;
-			protected set;
-		}
+		protected List<UEBuildModule> PrivateDependencyModules;
 
 		/** Extra modules this module may require at run time */
-		protected HashSet<string> DynamicallyLoadedModuleNames;
+		protected List<UEBuildModule> DynamicallyLoadedModules;
 
         /** Extra modules this module may require at run time, that are on behalf of another platform (i.e. shader formats and the like) */
-		protected HashSet<string> PlatformSpecificDynamicallyLoadedModuleNames;
+		protected List<UEBuildModule> PlatformSpecificDynamicallyLoadedModules;
 
 		/** Files which this module depends on at runtime. */
 		public List<RuntimeDependency> RuntimeDependencies;
@@ -247,323 +248,43 @@ namespace UnrealBuildTool
 			UEBuildTarget InTarget,
 			string InName,
 			UEBuildModuleType InType,
-			string InModuleDirectory,
-			bool? InIsRedistributableOverride,
-			IEnumerable<string> InPublicDefinitions,
-			IEnumerable<string> InPublicIncludePaths,
-			IEnumerable<string> InPublicSystemIncludePaths,
-			IEnumerable<string> InPublicLibraryPaths,
-			IEnumerable<string> InPublicAdditionalLibraries,
-			IEnumerable<string> InPublicFrameworks,
-			IEnumerable<string> InPublicWeakFrameworks,
-			IEnumerable<UEBuildFramework> InPublicAdditionalFrameworks,
-			IEnumerable<string> InPublicAdditionalShadowFiles,
-			IEnumerable<UEBuildBundleResource> InPublicAdditionalBundleResources,
-			IEnumerable<string> InPublicIncludePathModuleNames,
-			IEnumerable<string> InPublicDependencyModuleNames,
-			IEnumerable<string> InPublicDelayLoadDLLs,
-			IEnumerable<string> InPrivateIncludePaths,
-			IEnumerable<string> InPrivateIncludePathModuleNames,
-			IEnumerable<string> InPrivateDependencyModuleNames,
-			IEnumerable<string> InCircularlyReferencedDependentModules,
-			IEnumerable<string> InDynamicallyLoadedModuleNames,
-            IEnumerable<string> InPlatformSpecificDynamicallyLoadedModuleNames,
-			IEnumerable<RuntimeDependency> InRuntimeDependencies,
-			string InBuildCsFilename
+			DirectoryReference InModuleDirectory,
+			ModuleRules InRules,
+			FileReference InRulesFile
 			)
 		{
 			Target = InTarget;
 			Name = InName;
 			Type = InType;
 			ModuleDirectory = InModuleDirectory;
-			PublicDefinitions = HashSetFromOptionalEnumerableStringParameter(InPublicDefinitions);
-			PublicIncludePaths = HashSetFromOptionalEnumerableStringParameter(InPublicIncludePaths);
-			PublicSystemIncludePaths = HashSetFromOptionalEnumerableStringParameter(InPublicSystemIncludePaths);
-			PublicLibraryPaths = HashSetFromOptionalEnumerableStringParameter(InPublicLibraryPaths);
-			PublicAdditionalLibraries = HashSetFromOptionalEnumerableStringParameter(InPublicAdditionalLibraries);
-			PublicFrameworks = HashSetFromOptionalEnumerableStringParameter(InPublicFrameworks);
-			PublicWeakFrameworks = HashSetFromOptionalEnumerableStringParameter(InPublicWeakFrameworks);
-			PublicAdditionalFrameworks = InPublicAdditionalFrameworks == null ? new HashSet<UEBuildFramework>() : new HashSet<UEBuildFramework>(InPublicAdditionalFrameworks);
-			PublicAdditionalShadowFiles = HashSetFromOptionalEnumerableStringParameter(InPublicAdditionalShadowFiles);
-			PublicAdditionalBundleResources = InPublicAdditionalBundleResources == null ? new HashSet<UEBuildBundleResource>() : new HashSet<UEBuildBundleResource>(InPublicAdditionalBundleResources);
-			PublicIncludePathModuleNames = HashSetFromOptionalEnumerableStringParameter( InPublicIncludePathModuleNames );
-			PublicDependencyModuleNames = HashSetFromOptionalEnumerableStringParameter(InPublicDependencyModuleNames);
-			PublicDelayLoadDLLs = HashSetFromOptionalEnumerableStringParameter(InPublicDelayLoadDLLs);
-			PrivateIncludePaths = HashSetFromOptionalEnumerableStringParameter(InPrivateIncludePaths);
-			PrivateIncludePathModuleNames = HashSetFromOptionalEnumerableStringParameter( InPrivateIncludePathModuleNames );
-			PrivateDependencyModuleNames = HashSetFromOptionalEnumerableStringParameter( InPrivateDependencyModuleNames );
-			CircularlyReferencedDependentModules = new HashSet<string>( HashSetFromOptionalEnumerableStringParameter( InCircularlyReferencedDependentModules ) );
-			DynamicallyLoadedModuleNames = HashSetFromOptionalEnumerableStringParameter( InDynamicallyLoadedModuleNames );
-            PlatformSpecificDynamicallyLoadedModuleNames = HashSetFromOptionalEnumerableStringParameter(InPlatformSpecificDynamicallyLoadedModuleNames);
-			RuntimeDependencies = (InRuntimeDependencies == null)? new List<RuntimeDependency>() : new List<RuntimeDependency>(InRuntimeDependencies);
-			IsRedistributableOverride = InIsRedistributableOverride;
+			Rules = InRules;
+			RulesFile = InRulesFile;
 
-			Debug.Assert(InBuildCsFilename == null || InBuildCsFilename.EndsWith(".Build.cs", StringComparison.InvariantCultureIgnoreCase));
-			BuildCsFilenameField = InBuildCsFilename;
+			NormalizedModuleIncludePath = Utils.CleanDirectorySeparators(ModuleDirectory.MakeRelativeTo(UnrealBuildTool.EngineSourceDirectory), '/');
+			ModuleApiDefine = Name.ToUpperInvariant() + "_API";
 
-			SetupModuleDistributionLevel();
+			PublicDefinitions = HashSetFromOptionalEnumerableStringParameter(InRules.Definitions);
+			PublicIncludePaths = HashSetFromOptionalEnumerableStringParameter(InRules.PublicIncludePaths);
+			PublicSystemIncludePaths = HashSetFromOptionalEnumerableStringParameter(InRules.PublicSystemIncludePaths);
+			PublicLibraryPaths = HashSetFromOptionalEnumerableStringParameter(InRules.PublicLibraryPaths);
+			PublicAdditionalLibraries = HashSetFromOptionalEnumerableStringParameter(InRules.PublicAdditionalLibraries);
+			PublicFrameworks = HashSetFromOptionalEnumerableStringParameter(InRules.PublicFrameworks);
+			PublicWeakFrameworks = HashSetFromOptionalEnumerableStringParameter(InRules.PublicWeakFrameworks);
+			PublicAdditionalFrameworks = InRules.PublicAdditionalFrameworks == null ? new HashSet<UEBuildFramework>() : new HashSet<UEBuildFramework>(InRules.PublicAdditionalFrameworks);
+			PublicAdditionalShadowFiles = HashSetFromOptionalEnumerableStringParameter(InRules.PublicAdditionalShadowFiles);
+			PublicAdditionalBundleResources = InRules.AdditionalBundleResources == null ? new HashSet<UEBuildBundleResource>() : new HashSet<UEBuildBundleResource>(InRules.AdditionalBundleResources);
+			PublicDelayLoadDLLs = HashSetFromOptionalEnumerableStringParameter(InRules.PublicDelayLoadDLLs);
+			PrivateIncludePaths = HashSetFromOptionalEnumerableStringParameter(InRules.PrivateIncludePaths);
+			RuntimeDependencies = (InRules.RuntimeDependencies == null)? new List<RuntimeDependency>() : new List<RuntimeDependency>(InRules.RuntimeDependencies);
+			IsRedistributableOverride = InRules.IsRedistributableOverride;
 
 			Target.RegisterModule(this);
 		}
 
-		/** Adds a public definition */
-		public virtual void AddPublicDefinition(string Definition)
+		/** Determines whether this module has a circular dependency on the given module */
+		public bool HasCircularDependencyOn(string ModuleName)
 		{
-			PublicDefinitions.Add(Definition);
-		}
-
-		/** Adds a public include path. */
-		public virtual void AddPublicIncludePath(string PathName, bool bCheckForDuplicates = true)
-		{
-			if (bCheckForDuplicates == true)
-			{
-				if (PublicIncludePaths.Contains(PathName))
-				{
-					return;
-				}
-			}
-			PublicIncludePaths.Add(PathName);
-		}
-
-		/** Adds a public library path */
-		public virtual void AddPublicLibraryPath(string PathName, bool bCheckForDuplicates = true)
-		{
-			if (bCheckForDuplicates == true)
-			{
-				if (PublicLibraryPaths.Contains(PathName))
-				{
-					return;
-				}
-			}
-			PublicLibraryPaths.Add(PathName);
-		}
-
-		/** Adds a public additional library */
-		public virtual void AddPublicAdditionalLibrary(string LibraryName, bool bCheckForDuplicates = true)
-		{
-			if (bCheckForDuplicates == true)
-			{
-				if (PublicAdditionalLibraries.Contains(LibraryName))
-				{
-					return;
-				}
-			}
-			PublicAdditionalLibraries.Add(LibraryName);
-		}
-
-		/** Adds a public framework */
-		public virtual void AddPublicFramework(string LibraryName, bool bCheckForDuplicates = true)
-		{
-			if (bCheckForDuplicates == true)
-			{
-				if (PublicFrameworks.Contains(LibraryName))
-				{
-					return;
-				}
-			}
-			PublicFrameworks.Add(LibraryName);
-		}
-
-		/** Adds a public weak framework */
-		public virtual void AddPublicWeakFramework(string LibraryName, bool bCheckForDuplicates = true)
-		{
-			if (bCheckForDuplicates == true)
-			{
-				if (PublicWeakFrameworks.Contains(LibraryName))
-				{
-					return;
-				}
-			}
-			PublicWeakFrameworks.Add(LibraryName);
-		}
-
-		/** Adds a public additional framework */
-		public virtual void AddPublicAdditionalFramework(UEBuildFramework Framework, bool bCheckForDuplicates = true)
-		{
-			if (bCheckForDuplicates == true)
-			{
-				if ( PublicAdditionalFrameworks.Contains( Framework ) )
-				{
-					return;
-				}
-			}
-			PublicAdditionalFrameworks.Add( Framework );
-		}
-
-		/** Adds a file that will be synced to a remote machine if a remote build is being executed */
-		public virtual void AddPublicAdditionalShadowFile(string FileName)
-		{
-			PublicAdditionalShadowFiles.Add(FileName);
-		}
-
-		/** Adds a file or folder that will be copied to Mac or iOS app bundle */
-		public virtual void AddAdditionalBundleResource(UEBuildBundleResource Resource, bool bCheckForDuplicates = true)
-		{
-			if (bCheckForDuplicates == true)
-			{
-				if ( PublicAdditionalBundleResources.Contains( Resource ) )
-				{
-					return;
-				}
-			}
-			PublicAdditionalBundleResources.Add( Resource );
-		}
-
-		/** Adds a public include path module. */
-		public virtual void AddPublicIncludePathModule(string ModuleName, bool bCheckForDuplicates = true)
-		{
-			if (bCheckForDuplicates == true)
-			{
-				if (PublicIncludePathModuleNames.Contains(ModuleName))
-				{
-					return;
-				}
-			}
-			PublicIncludePathModuleNames.Add(ModuleName);
-		}
-
-		/** Adds a public dependency module. */
-		public virtual void AddPublicDependencyModule(string ModuleName, bool bCheckForDuplicates = true)
-		{
-			if (bCheckForDuplicates == true)
-			{
-				if (PublicDependencyModuleNames.Contains(ModuleName))
-				{
-					return;
-				}
-			}
-			PublicDependencyModuleNames.Add(ModuleName);
-		}
-		
-		/** Adds a dynamically loaded module. */
-		public virtual void AddDynamicallyLoadedModule(string ModuleName, bool bCheckForDuplicates = true)
-		{
-			if (bCheckForDuplicates == true)
-			{
-				if (DynamicallyLoadedModuleNames.Contains(ModuleName))
-				{
-					return;
-				}
-			}
-			DynamicallyLoadedModuleNames.Add(ModuleName);
-		}
-        /** Adds a dynamically loaded module platform specifc. */
-		public virtual void AddPlatformSpecificDynamicallyLoadedModule(string ModuleName, bool bCheckForDuplicates = true)
-        {
-            if (bCheckForDuplicates == true)
-            {
-                if (PlatformSpecificDynamicallyLoadedModuleNames.Contains(ModuleName))
-                {
-                    return;
-                }
-            }
-            PlatformSpecificDynamicallyLoadedModuleNames.Add(ModuleName);
-        }
-		/** Adds a public delay load DLL */
-		public virtual void AddPublicDelayLoadDLLs(string DelayLoadDLLName, bool bCheckForDuplicates = true)
-		{
-			if (bCheckForDuplicates == true)
-			{
-				if (PublicDelayLoadDLLs.Contains(DelayLoadDLLName))
-				{
-					return;
-				}
-			}
-			PublicDelayLoadDLLs.Add(DelayLoadDLLName);
-		}
-
-		/** Adds a private include path. */
-		public virtual void AddPrivateIncludePath(string PathName, bool bCheckForDuplicates = true)
-		{
-			if (bCheckForDuplicates == true)
-			{
-				if (PrivateIncludePaths.Contains(PathName))
-				{
-					return;
-				}
-			}
-			PrivateIncludePaths.Add(PathName);
-		}
-
-		/** Adds a private include path module. */
-		public virtual void AddPrivateIncludePathModule(string ModuleName, bool bCheckForDuplicates = true)
-		{
-			if (bCheckForDuplicates == true)
-			{
-				if (PrivateIncludePathModuleNames.Contains(ModuleName))
-				{
-					return;
-				}
-			}
-			PrivateIncludePathModuleNames.Add(ModuleName);
-		}
-
-		/** Adds a dependency module. */
-		public virtual void AddPrivateDependencyModule(string ModuleName, bool bCheckForDuplicates = true)
-		{
-			if (bCheckForDuplicates == true)
-			{
-				if (PrivateDependencyModuleNames.Contains(ModuleName))
-				{
-					return;
-				}
-			}
-			PrivateDependencyModuleNames.Add(ModuleName);
-		}
-
-		/** Tells the module that a specific dependency is circularly reference */
-		public virtual void AddCircularlyReferencedDependentModule(string ModuleName)
-		{
-			CircularlyReferencedDependentModules.Add( ModuleName );
-		}
-
-		/** Adds an extra module name */
-		public virtual void AddExtraModuleName(string ModuleName)
-		{
-			DynamicallyLoadedModuleNames.Add( ModuleName );
-		}
-
-		/**
-		 * Clears all public include paths.
-		 */
-		internal void ClearPublicIncludePaths()
-		{
-			PublicIncludePaths.Clear();
-		}
-
-		/** 
-		 * Clears all public library paths.
-		 * This is to allow a given platform the opportunity to remove set libraries.
-		 */
-		internal void ClearPublicLibraryPaths()
-		{
-			PublicLibraryPaths.Clear();
-		}
-
-		/** 
-		 * Clears all public additional libraries from the module.
-		 * This is to allow a given platform the opportunity to remove set libraries.
-		 */
-		internal void ClearPublicAdditionalLibraries()
-		{
-			PublicAdditionalLibraries.Clear();
-		}
-
-		/// <summary>
-		/// If present, remove the given library from the PublicAdditionalLibraries array
-		/// </summary>
-		/// <param name="InLibrary">The library to remove from the list</param>
-		internal void RemovePublicAdditionalLibrary(string InLibrary)
-		{
-			PublicAdditionalLibraries.Remove(InLibrary);
-		}
-
-		/**
-		 * If found, remove the given entry from the definitions of the module.
-		 */
-		internal void RemovePublicDefinition(string InDefintion)
-		{
-			PublicDefinitions.Remove(InDefintion);
+			return Rules.CircularlyReferencedDependentModules.Contains(ModuleName);
 		}
 
 		/** Sets up the environment for compiling any module that includes the public interface of this module. */
@@ -574,42 +295,51 @@ namespace UnrealBuildTool
 			HashSet<string> SystemIncludePaths,
 			List<string> Definitions,
 			List<UEBuildFramework> AdditionalFrameworks,
-			Dictionary<UEBuildModule, bool> VisitedModules
+			HashSet<UEBuildModule> VisitedModules
 			)
 		{
 			// There may be circular dependencies in compile dependencies, so we need to avoid reentrance.
-			if(!VisitedModules.ContainsKey(this))
+			if(VisitedModules.Add(this))
 			{
-				VisitedModules.Add(this,true);
-
 				// Add this module's public include paths and definitions.
 				AddIncludePathsWithChecks(IncludePaths, PublicIncludePaths);
 				AddIncludePathsWithChecks(SystemIncludePaths, PublicSystemIncludePaths);
 				Definitions.AddRange(PublicDefinitions);
 				
 				// If this module is being built into a DLL or EXE, set up an IMPORTS or EXPORTS definition for it.
-				if (Binary != null)
+				if (Binary == null)
 				{
-					string BinaryPath = Binary.Config.OutputFilePaths[0];
-					string SourceBinaryPath = SourceBinary.Config.OutputFilePaths[0];
+					// If we're referencing include paths for a module that's not being built, we don't actually need to import anything from it, but we need to avoid barfing when
+					// the compiler encounters an _API define. We also want to avoid changing the compile environment in cases where the module happens to be compiled because it's a dependency
+					// of something else, which cause a fall-through to the code below and set up an empty _API define.
+					if(bIncludePathsOnly)
+					{
+						Log.TraceVerbose( "{0}: Include paths only for {1} (no binary)", SourceBinary.Config.OutputFilePaths[0].GetFileNameWithoutExtension(), Name );
+						Definitions.Add( ModuleApiDefine + "=" );
+					}
+				}
+				else
+				{
+					FileReference BinaryPath = Binary.Config.OutputFilePaths[0];
+					FileReference SourceBinaryPath = SourceBinary.Config.OutputFilePaths[0];
 
 					if (ProjectFileGenerator.bGenerateProjectFiles || (Binary.Config.Type == UEBuildBinaryType.StaticLibrary))
 					{
 						// When generating IntelliSense files, never add dllimport/dllexport specifiers as it
 						// simply confuses the compiler
-						Definitions.Add( Name.ToUpperInvariant() + "_API=" );
+						Definitions.Add( ModuleApiDefine + "=" );
 					}
 					else if( Binary == SourceBinary )
 					{
 						if( Binary.Config.bAllowExports )
 						{
-							Log.TraceVerbose( "{0}: Exporting {1} from {2}", Path.GetFileNameWithoutExtension( SourceBinaryPath ), Name, Path.GetFileNameWithoutExtension( BinaryPath ) );
-							Definitions.Add( Name.ToUpperInvariant() + "_API=DLLEXPORT" );
+							Log.TraceVerbose( "{0}: Exporting {1} from {2}", SourceBinaryPath.GetFileNameWithoutExtension(), Name, BinaryPath.GetFileNameWithoutExtension() );
+							Definitions.Add( ModuleApiDefine + "=DLLEXPORT" );
 						}
 						else
 						{
-							Log.TraceVerbose( "{0}: Not importing/exporting {1} (binary: {2})", Path.GetFileNameWithoutExtension( SourceBinaryPath ), Name, Path.GetFileNameWithoutExtension( BinaryPath ) );
-							Definitions.Add( Name.ToUpperInvariant() + "_API=" );
+							Log.TraceVerbose( "{0}: Not importing/exporting {1} (binary: {2})", SourceBinaryPath.GetFileNameWithoutExtension(), Name, BinaryPath.GetFileNameWithoutExtension() );
+							Definitions.Add( ModuleApiDefine + "=" );
 						}
 					}
 					else
@@ -619,18 +349,18 @@ namespace UnrealBuildTool
 						//		this, we need to suppress warnings at compile time.
 						if( bIncludePathsOnly )
 						{
-							Log.TraceVerbose( "{0}: Include paths only for {1} (binary: {2})", Path.GetFileNameWithoutExtension( SourceBinaryPath ), Name, Path.GetFileNameWithoutExtension( BinaryPath ) );
-							Definitions.Add( Name.ToUpperInvariant() + "_API=" );
+							Log.TraceVerbose( "{0}: Include paths only for {1} (binary: {2})", SourceBinaryPath.GetFileNameWithoutExtension(), Name, BinaryPath.GetFileNameWithoutExtension() );
+							Definitions.Add( ModuleApiDefine + "=" );
 						}
 						else if (Binary.Config.bAllowExports)
 						{
-							Log.TraceVerbose( "{0}: Importing {1} from {2}", Path.GetFileNameWithoutExtension( SourceBinaryPath ), Name, Path.GetFileNameWithoutExtension( BinaryPath ) );
-							Definitions.Add( Name.ToUpperInvariant() + "_API=DLLIMPORT" );
+							Log.TraceVerbose( "{0}: Importing {1} from {2}", SourceBinaryPath.GetFileNameWithoutExtension(), Name, BinaryPath.GetFileNameWithoutExtension() );
+							Definitions.Add( ModuleApiDefine + "=DLLIMPORT" );
 						}
 						else
 						{
-							Log.TraceVerbose( "{0}: Not importing/exporting {1} (binary: {2})", Path.GetFileNameWithoutExtension( SourceBinaryPath ), Name, Path.GetFileNameWithoutExtension( BinaryPath ));
-							Definitions.Add( Name.ToUpperInvariant() + "_API=" );
+							Log.TraceVerbose( "{0}: Not importing/exporting {1} (binary: {2})", SourceBinaryPath.GetFileNameWithoutExtension(), Name, BinaryPath.GetFileNameWithoutExtension());
+							Definitions.Add( ModuleApiDefine + "=" );
 						}
 					}
 				}
@@ -638,23 +368,21 @@ namespace UnrealBuildTool
 				if( !bIncludePathsOnly )
 				{
 					// Recurse on this module's public dependencies.
-					foreach(var DependencyName in PublicDependencyModuleNames)
+					foreach(UEBuildModule DependencyModule in PublicDependencyModules)
 					{
-						var DependencyModule = Target.GetModuleByName(DependencyName);
 						DependencyModule.SetupPublicCompileEnvironment(SourceBinary,bIncludePathsOnly, IncludePaths, SystemIncludePaths, Definitions, AdditionalFrameworks, VisitedModules);
 					}
 				}
 
 				// Now add an include paths from modules with header files that we need access to, but won't necessarily be importing
-				foreach( var IncludePathModuleName in PublicIncludePathModuleNames )
+				foreach( UEBuildModule IncludePathModule in PublicIncludePathModules )
 				{
 					bool bInnerIncludePathsOnly = true;
-					var IncludePathModule = Target.GetModuleByName(IncludePathModuleName);
 					IncludePathModule.SetupPublicCompileEnvironment( SourceBinary, bInnerIncludePathsOnly, IncludePaths, SystemIncludePaths, Definitions, AdditionalFrameworks, VisitedModules );
 				}
 
 				// Add the module's directory to the include path, so we can root #includes to it
-				IncludePaths.Add(Utils.CleanDirectorySeparators(Utils.MakePathRelativeTo(ModuleDirectory, Path.Combine(ProjectFileGenerator.RootRelativePath, "Engine/Source")), '/'));
+				IncludePaths.Add(NormalizedModuleIncludePath);
 
 				// Add the additional frameworks so that the compiler can know about their #include paths
 				AdditionalFrameworks.AddRange(PublicAdditionalFrameworks);
@@ -706,7 +434,7 @@ namespace UnrealBuildTool
 			List<UEBuildFramework> AdditionalFrameworks
 			)
 		{
-			var VisitedModules = new Dictionary<UEBuildModule, bool>();
+			HashSet<UEBuildModule> VisitedModules = new HashSet<UEBuildModule>();
 
 			if (this.Type == UEBuildModuleType.Game)
 			{
@@ -721,17 +449,15 @@ namespace UnrealBuildTool
 			SetupPublicCompileEnvironment(Binary,bIncludePathsOnly, IncludePaths, SystemIncludePaths, Definitions, AdditionalFrameworks, VisitedModules);
 
 			// Also allow the module's private dependencies to modify the compile environment.
-			foreach(var DependencyName in PrivateDependencyModuleNames)
+			foreach(UEBuildModule DependencyModule in PrivateDependencyModules)
 			{
-				var DependencyModule = Target.GetModuleByName(DependencyName);
 				DependencyModule.SetupPublicCompileEnvironment(Binary,bIncludePathsOnly, IncludePaths, SystemIncludePaths, Definitions, AdditionalFrameworks, VisitedModules);
 			}
 
 			// Add include paths from modules with header files that our private files need access to, but won't necessarily be importing
-			foreach( var IncludePathModuleName in PrivateIncludePathModuleNames )
+			foreach(UEBuildModule IncludePathModule in PrivateIncludePathModules)
 			{
 				bool bInnerIncludePathsOnly = true;
-				var IncludePathModule = Target.GetModuleByName(IncludePathModuleName);
 				IncludePathModule.SetupPublicCompileEnvironment(Binary, bInnerIncludePathsOnly, IncludePaths, SystemIncludePaths, Definitions, AdditionalFrameworks, VisitedModules);
 			}
 		}
@@ -748,14 +474,12 @@ namespace UnrealBuildTool
 			List<UEBuildBundleResource> AdditionalBundleResources,
 			List<string> DelayLoadDLLs,
 			List<UEBuildBinary> BinaryDependencies,
-			Dictionary<UEBuildModule, bool> VisitedModules
+			HashSet<UEBuildModule> VisitedModules
 			)
 		{
 			// There may be circular dependencies in compile dependencies, so we need to avoid reentrance.
-			if(!VisitedModules.ContainsKey(this))
+			if(VisitedModules.Add(this))
 			{
-				VisitedModules.Add(this,true);
-
 				// Only process modules that are included in the current target.
 				if(bIncludedInTarget)
 				{
@@ -775,12 +499,12 @@ namespace UnrealBuildTool
 					if (!bIsBuildingAStaticLibrary && bIsModuleBinaryAStaticLibrary)
 					{
 						// Gather all dependencies and recursively call SetupPublicLinkEnvironmnet
-						List<string> AllDependencyModuleNames = new List<string>(PrivateDependencyModuleNames);
-						AllDependencyModuleNames.AddRange(PublicDependencyModuleNames);
+						List<UEBuildModule> AllDependencyModules = new List<UEBuildModule>();
+						AllDependencyModules.AddRange(PrivateDependencyModules);
+						AllDependencyModules.AddRange(PublicDependencyModules);
 
-						foreach (var DependencyName in AllDependencyModuleNames)
+						foreach (UEBuildModule DependencyModule in AllDependencyModules)
 						{
-							var DependencyModule = Target.GetModuleByName(DependencyName);
 							bool bIsExternalModule = (DependencyModule as UEBuildExternalModule != null);
 							bool bIsInStaticLibrary = (DependencyModule.Binary != null && DependencyModule.Binary.Config.Type == UEBuildBinaryType.StaticLibrary);
 							if (bIsExternalModule || bIsInStaticLibrary)
@@ -814,7 +538,7 @@ namespace UnrealBuildTool
 			UEBuildBinary SourceBinary,
 			LinkEnvironment LinkEnvironment,
 			List<UEBuildBinary> BinaryDependencies,
-			Dictionary<UEBuildModule, bool> VisitedModules
+			HashSet<UEBuildModule> VisitedModules
 			)
 		{
 			// Allow the module's public dependencies to add library paths and additional libraries to the link environment.
@@ -822,12 +546,12 @@ namespace UnrealBuildTool
 				LinkEnvironment.Config.AdditionalFrameworks,LinkEnvironment.Config.AdditionalShadowFiles, LinkEnvironment.Config.AdditionalBundleResources, LinkEnvironment.Config.DelayLoadDLLs, BinaryDependencies, VisitedModules);
 
 			// Also allow the module's public and private dependencies to modify the link environment.
-			List<string> AllDependencyModuleNames = new List<string>(PrivateDependencyModuleNames);
-			AllDependencyModuleNames.AddRange(PublicDependencyModuleNames);
+			List<UEBuildModule> AllDependencyModules = new List<UEBuildModule>();
+			AllDependencyModules.AddRange(PrivateDependencyModules);
+			AllDependencyModules.AddRange(PublicDependencyModules);
 
-			foreach (var DependencyName in AllDependencyModuleNames)
+			foreach (UEBuildModule DependencyModule in AllDependencyModules)
 			{
-				var DependencyModule = Target.GetModuleByName(DependencyName);
 				DependencyModule.SetupPublicLinkEnvironment(SourceBinary, LinkEnvironment.Config.LibraryPaths, LinkEnvironment.Config.AdditionalLibraries, LinkEnvironment.Config.Frameworks, LinkEnvironment.Config.WeakFrameworks,
 					LinkEnvironment.Config.AdditionalFrameworks, LinkEnvironment.Config.AdditionalShadowFiles, LinkEnvironment.Config.AdditionalBundleResources, LinkEnvironment.Config.DelayLoadDLLs, BinaryDependencies, VisitedModules);
 			}
@@ -878,13 +602,53 @@ namespace UnrealBuildTool
 		}
 
 		/**
-		 * Recursively adds modules that are referenced only for include paths (not actual dependencies).
-		 * 
-		 * @param	Target	The target we are currently building
-		 * @param	bPublicIncludesOnly	True to only add modules for public includes, false to add all include path modules.  Regardless of what you pass here, recursive adds will only add public include path modules.
+		 * Creates all the modules required for this target
 		 */
-		public virtual void RecursivelyAddIncludePathModules( UEBuildTarget Target, bool bPublicIncludesOnly )
+		public void RecursivelyCreateModules()
 		{
+			// Create all the include path modules. These modules may not be added to the target (and we don't process their dependencies), but they need 
+			// to be created to set up their compile environment.
+			RecursivelyCreateIncludePathModulesByName(Target, Rules.PublicIncludePathModuleNames, ref PublicIncludePathModules);
+			RecursivelyCreateIncludePathModulesByName(Target, Rules.PrivateIncludePathModuleNames, ref PrivateIncludePathModules);
+
+			// Create all the dependency modules
+			RecursivelyCreateModulesByName(Target, Rules.PublicDependencyModuleNames, ref PublicDependencyModules);
+			RecursivelyCreateModulesByName(Target, Rules.PrivateDependencyModuleNames, ref PrivateDependencyModules);
+			RecursivelyCreateModulesByName(Target, Rules.DynamicallyLoadedModuleNames, ref DynamicallyLoadedModules);
+			RecursivelyCreateModulesByName(Target, Rules.PlatformSpecificDynamicallyLoadedModuleNames, ref PlatformSpecificDynamicallyLoadedModules);
+		}
+
+		private static void RecursivelyCreateModulesByName(UEBuildTarget Target, List<string> ModuleNames, ref List<UEBuildModule> Modules)
+		{
+			// Check whether the module list is already set. We set this immediately (via the ref) to avoid infinite recursion.
+			if(Modules == null)
+			{
+				Modules = new List<UEBuildModule>();
+				foreach(string ModuleName in ModuleNames)
+				{
+					UEBuildModule Module = Target.FindOrCreateModuleByName(ModuleName);
+					if(!Modules.Contains(Module))
+					{
+						Module.RecursivelyCreateModules();
+						Modules.Add(Module);
+					}
+				}
+			}
+		}
+
+		private static void RecursivelyCreateIncludePathModulesByName(UEBuildTarget Target, List<string> ModuleNames, ref List<UEBuildModule> Modules)
+		{
+			// Check whether the module list is already set. We set this immediately (via the ref) to avoid infinite recursion.
+			if(Modules == null)
+			{
+				Modules = new List<UEBuildModule>();
+				foreach(string ModuleName in ModuleNames)
+				{
+					UEBuildModule Module = Target.FindOrCreateModuleByName(ModuleName);
+					RecursivelyCreateIncludePathModulesByName(Target, Module.Rules.PublicIncludePathModuleNames, ref Module.PublicIncludePathModules);
+					Modules.Add(Module);
+				}
+			}
 		}
 	};
 
@@ -895,50 +659,17 @@ namespace UnrealBuildTool
 			UEBuildTarget InTarget,
 			UEBuildModuleType InType,
 			string InName,
-			string InModuleDirectory,
-			bool? InIsRedistributableOverride,
-			IEnumerable<string> InPublicDefinitions,
-			IEnumerable<string> InPublicIncludePaths,
-			IEnumerable<string> InPublicSystemIncludePaths,
-			IEnumerable<string> InPublicLibraryPaths,
-			IEnumerable<string> InPublicAdditionalLibraries,
-			IEnumerable<string> InPublicFrameworks,
-			IEnumerable<string> InPublicWeakFrameworks,
-			IEnumerable<UEBuildFramework> InPublicAdditionalFrameworks,
-			IEnumerable<string> InPublicAdditionalShadowFiles,
-			IEnumerable<UEBuildBundleResource> InPublicAdditionalBundleResources,
-			IEnumerable<string> InPublicDependencyModuleNames,
-			IEnumerable<string> InPublicDelayLoadDLLs,		// Delay loaded DLLs that should be setup when including this module
-			IEnumerable<RuntimeDependency> InRuntimeDependencies,
-			string InBuildCsFilename
+			DirectoryReference InModuleDirectory,
+			ModuleRules InRules,
+			FileReference InRulesFile
 			)
 		: base(
 			InTarget:										InTarget,
 			InType:											InType,
 			InName:											InName,
 			InModuleDirectory:								InModuleDirectory,
-			InIsRedistributableOverride:					InIsRedistributableOverride,
-			InPublicDefinitions:							InPublicDefinitions,
-			InPublicIncludePaths:							InPublicIncludePaths,
-			InPublicSystemIncludePaths:						InPublicSystemIncludePaths,
-			InPublicLibraryPaths:							InPublicLibraryPaths,
-			InPublicAdditionalLibraries:					InPublicAdditionalLibraries,
-			InPublicFrameworks:								InPublicFrameworks,
-			InPublicWeakFrameworks:							InPublicWeakFrameworks,
-			InPublicAdditionalFrameworks:					InPublicAdditionalFrameworks,
-			InPublicAdditionalShadowFiles:					InPublicAdditionalShadowFiles,
-			InPublicAdditionalBundleResources:				InPublicAdditionalBundleResources,
-			InPublicIncludePathModuleNames:					null,
-			InPublicDependencyModuleNames:					InPublicDependencyModuleNames,
-			InPublicDelayLoadDLLs:							InPublicDelayLoadDLLs,
-			InPrivateIncludePaths:							null,
-			InPrivateIncludePathModuleNames:				null,
-			InPrivateDependencyModuleNames:					null,
-			InCircularlyReferencedDependentModules:			null,
-			InDynamicallyLoadedModuleNames:					null,
-			InPlatformSpecificDynamicallyLoadedModuleNames: null,
-			InRuntimeDependencies:							InRuntimeDependencies,
-			InBuildCsFilename:								InBuildCsFilename
+			InRules:										InRules,
+			InRulesFile:									InRulesFile
 			)
 		{
 			bIncludedInTarget = true;
@@ -1049,48 +780,13 @@ namespace UnrealBuildTool
 		public readonly SourceFilesClass SourceFilesFound = new SourceFilesClass();
 
 		/** The directory for this module's generated code */
-		public readonly string GeneratedCodeDirectory;
+		public readonly DirectoryReference GeneratedCodeDirectory;
 
 		/** The preprocessor definitions used to compile this module's private implementation. */
 		HashSet<string> Definitions;
 
 		/// When set, allows this module to report compiler definitions and include paths for Intellisense
 		IntelliSenseGatherer IntelliSenseGatherer;
-
-		/** Whether this module contains performance critical code. */
-		ModuleRules.CodeOptimization OptimizeCode = ModuleRules.CodeOptimization.Default;
-
-		/** Whether this module should use a "shared PCH" header if possible.  Disable this for modules that have lots of global includes
-			in a private PCH header (e.g. game modules) */
-		public bool bAllowSharedPCH = true;
-
-		/** Header file name for a shared PCH provided by this module.  Must be a valid relative path to a public C++ header file.
-			This should only be set for header files that are included by a significant number of other C++ modules. */
-		public string SharedPCHHeaderFile = String.Empty;
-
-		/** Use run time type information */
-		public bool bUseRTTI = false;
-
-		/** Use AVX instructions */
-		public bool bUseAVX = false;
-
-		/** Enable buffer security checks. This should usually be enabled as it prevents severe security risks. */
-		public bool bEnableBufferSecurityChecks = true;
-
-		/** If true and unity builds are enabled, this module will build without unity. */
-		public bool bFasterWithoutUnity = false;
-
-		/** Overrides BuildConfiguration.MinFilesUsingPrecompiledHeader if non-zero. */
-		public int MinFilesUsingPrecompiledHeaderOverride = 0;
-
-		/**  Module uses a #import so must be built locally when compiling with SN-DBS */
-		public bool bBuildLocallyWithSNDBS = false;
-		
-		/** Enable exception handling */
-		public bool bEnableExceptions = false;
-
-		/** Enable warnings for shadowed variables */
-		public bool bEnableShadowVariableWarnings;
 
 		public List<string> IncludeSearchPaths = new List<string>();
 
@@ -1147,71 +843,20 @@ namespace UnrealBuildTool
 			UEBuildTarget InTarget,
 			string InName,
 			UEBuildModuleType InType,
-			string InModuleDirectory,
-			string InGeneratedCodeDirectory,
-			bool? InIsRedistributableOverride,
+			DirectoryReference InModuleDirectory,
+			DirectoryReference InGeneratedCodeDirectory,
 			IntelliSenseGatherer InIntelliSenseGatherer,
 			IEnumerable<FileItem> InSourceFiles,
-			IEnumerable<string> InPublicIncludePaths,
-			IEnumerable<string> InPublicSystemIncludePaths,
-            IEnumerable<string> InPublicLibraryPaths,
-			IEnumerable<string> InDefinitions,
-			IEnumerable<string> InPublicIncludePathModuleNames,
-			IEnumerable<string> InPublicDependencyModuleNames,
-			IEnumerable<string> InPublicDelayLoadDLLs,
-			IEnumerable<string> InPublicAdditionalLibraries,
-			IEnumerable<string> InPublicFrameworks,
-			IEnumerable<string> InPublicWeakFrameworks,
-			IEnumerable<UEBuildFramework> InPublicAdditionalFrameworks,
-			IEnumerable<string> InPublicAdditionalShadowFiles,
-			IEnumerable<UEBuildBundleResource> InPublicAdditionalBundleResources,
-			IEnumerable<string> InPrivateIncludePaths,
-			IEnumerable<string> InPrivateIncludePathModuleNames,
-			IEnumerable<string> InPrivateDependencyModuleNames,
-			IEnumerable<string> InCircularlyReferencedDependentModules,
-			IEnumerable<string> InDynamicallyLoadedModuleNames,
-            IEnumerable<string> InPlatformSpecificDynamicallyLoadedModuleNames,
-			IEnumerable<RuntimeDependency> InRuntimeDependencies,
-            ModuleRules.CodeOptimization InOptimizeCode,
-			bool InAllowSharedPCH,
-			string InSharedPCHHeaderFile,
-			bool InUseRTTI,
-			bool InEnableBufferSecurityChecks,
-			bool InFasterWithoutUnity,
-			int InMinFilesUsingPrecompiledHeaderOverride,
-			bool InBuildLocallyWithSNDBS,
-			bool InEnableExceptions,
-			bool InEnableShadowVariableWarnings,
+			ModuleRules InRules,
 			bool bInBuildSourceFiles,
-			string InBuildCsFilename,
-			bool bInUseAVX
+			FileReference InRulesFile
 			)
 			: base(	InTarget,
 					InName, 
 					InType,
 					InModuleDirectory,
-					InIsRedistributableOverride,
-					InDefinitions, 
-					InPublicIncludePaths,
-					InPublicSystemIncludePaths, 
-					InPublicLibraryPaths, 
-					InPublicAdditionalLibraries,
-					InPublicFrameworks,
-					InPublicWeakFrameworks,
-					InPublicAdditionalFrameworks,
-					InPublicAdditionalShadowFiles,
-					InPublicAdditionalBundleResources,
-					InPublicIncludePathModuleNames,
-					InPublicDependencyModuleNames,
-					InPublicDelayLoadDLLs,
-					InPrivateIncludePaths, 
-					InPrivateIncludePathModuleNames,
-					InPrivateDependencyModuleNames, 
-					InCircularlyReferencedDependentModules,
-					InDynamicallyLoadedModuleNames,
-                    InPlatformSpecificDynamicallyLoadedModuleNames,
-					InRuntimeDependencies,
-					InBuildCsFilename
+					InRules,
+					InRulesFile
 				)
 		{
 			GeneratedCodeDirectory = InGeneratedCodeDirectory;
@@ -1223,22 +868,11 @@ namespace UnrealBuildTool
 				SourceFilesToBuild.CopyFrom(SourceFilesFound);
 			}
 
-			Definitions = HashSetFromOptionalEnumerableStringParameter(InDefinitions);
+			Definitions = HashSetFromOptionalEnumerableStringParameter(InRules.Definitions);
 			foreach (var Def in Definitions)
 			{
 				Log.TraceVerbose("Compile Env {0}: {1}", Name, Def);
 			}
-			OptimizeCode                           = InOptimizeCode;
-			bAllowSharedPCH                        = InAllowSharedPCH;
-			SharedPCHHeaderFile                    = InSharedPCHHeaderFile;
-			bUseRTTI                               = InUseRTTI;
-			bUseAVX                                = bInUseAVX;
-			bEnableBufferSecurityChecks 		   = InEnableBufferSecurityChecks;
-			bFasterWithoutUnity                    = InFasterWithoutUnity;
-			MinFilesUsingPrecompiledHeaderOverride = InMinFilesUsingPrecompiledHeaderOverride;
-			bBuildLocallyWithSNDBS				   = InBuildLocallyWithSNDBS;
-			bEnableExceptions                      = InEnableExceptions;
-			bEnableShadowVariableWarnings          = InEnableShadowVariableWarnings;
 		}
 
 		// UEBuildModule interface.
@@ -1287,14 +921,14 @@ namespace UnrealBuildTool
 				// Add default PCLaunch.rc file if this module has no own resource file specified
 				if (SourceFilesToBuild.RCFiles.Count <= 0)
 				{
-					string DefRC = Utils.CleanDirectorySeparators( Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "Runtime/Launch/Resources/Windows/PCLaunch.rc")) );
-					FileItem Item = FileItem.GetItemByFullPath(DefRC);
+					FileReference DefRC = FileReference.Combine(UnrealBuildTool.EngineSourceDirectory, "Runtime", "Launch", "Resources", "Windows", "PCLaunch.rc");
+					FileItem Item = FileItem.GetItemByFileReference(DefRC);
 					SourceFilesToBuild.RCFiles.Add(Item);
 				}
 
 				// Always compile in the API version resource separately. This is required for the module manager to detect compatible API versions.
-				string ModuleVersionRC = Utils.CleanDirectorySeparators( Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "Runtime/Core/Resources/Windows/ModuleVersionResource.rc.inl")) );
-				FileItem ModuleVersionItem = FileItem.GetItemByFullPath(ModuleVersionRC);
+				FileReference ModuleVersionRC = FileReference.Combine(UnrealBuildTool.EngineSourceDirectory, "Runtime", "Core", "Resources", "Windows", "ModuleVersionResource.rc.inl");
+				FileItem ModuleVersionItem = FileItem.GetItemByFileReference(ModuleVersionRC);
 				if( !SourceFilesToBuild.RCFiles.Contains(ModuleVersionItem) )
 				{
 					SourceFilesToBuild.RCFiles.Add(ModuleVersionItem);
@@ -1315,16 +949,17 @@ namespace UnrealBuildTool
 
 
 			// Check to see if this is an Engine module (including program or plugin modules).  That is, the module is located under the "Engine" folder
-			var IsGameModule = !Utils.IsFileUnderDirectory( this.ModuleDirectory, Path.Combine( ProjectFileGenerator.EngineRelativePath ) );
+			var IsPluginModule = ModuleDirectory.IsUnderDirectory( DirectoryReference.Combine(Target.ProjectDirectory, "Plugins") );
+			var IsGameModule = !IsPluginModule && !ModuleDirectory.IsUnderDirectory(UnrealBuildTool.EngineDirectory);
 
 			// Should we force a precompiled header to be generated for this module?  Usually, we only bother with a
 			// precompiled header if there are at least several source files in the module (after combining them for unity
 			// builds.)  But for game modules, it can be convenient to always have a precompiled header to single-file
 			// changes to code is really quick to compile.
 			int MinFilesUsingPrecompiledHeader = BuildConfiguration.MinFilesUsingPrecompiledHeader;
-			if( MinFilesUsingPrecompiledHeaderOverride != 0 )
+			if( Rules.MinFilesUsingPrecompiledHeaderOverride != 0 )
 			{
-				MinFilesUsingPrecompiledHeader = MinFilesUsingPrecompiledHeaderOverride;
+				MinFilesUsingPrecompiledHeader = Rules.MinFilesUsingPrecompiledHeaderOverride;
 			}
 			else if( IsGameModule && BuildConfiguration.bForcePrecompiledHeaderForGameModules )
 			{
@@ -1334,20 +969,51 @@ namespace UnrealBuildTool
 			}
 
 
-			// Should we use unity build mode for this module?
-			bool bModuleUsesUnityBuild = BuildConfiguration.bUseUnityBuild || BuildConfiguration.bForceUnityBuild;
-			if (!BuildConfiguration.bForceUnityBuild)
+			// Engine modules will always use unity build mode unless MinSourceFilesForUnityBuildOverride is specified in
+			// the module rules file.  By default, game modules only use unity of they have enough source files for that
+			// to be worthwhile.  If you have a lot of small game modules, consider specifying MinSourceFilesForUnityBuildOverride=0
+			// in the modules that you don't typically iterate on source files in very frequently.
+			int MinSourceFilesForUnityBuild = 0;
+			if (Rules.MinSourceFilesForUnityBuildOverride != 0)
 			{
-				if (bFasterWithoutUnity)
+				MinSourceFilesForUnityBuild = Rules.MinSourceFilesForUnityBuildOverride;
+			}
+			else if ( IsGameModule )
+			{
+				// Game modules with only a small number of source files are usually better off having faster iteration times
+				// on single source file changes, so we forcibly disable unity build for those modules
+				MinSourceFilesForUnityBuild = BuildConfiguration.MinGameModuleSourceFilesForUnityBuild;
+			}
+
+
+			// Should we use unity build mode for this module?
+			bool bModuleUsesUnityBuild = false;
+			if (BuildConfiguration.bUseUnityBuild || BuildConfiguration.bForceUnityBuild)
+			{
+				if (BuildConfiguration.bForceUnityBuild)
 				{
+					Log.TraceVerbose("Module '{0}' using unity build mode (bForceUnityBuild enabled for this module)", this.Name);
+					bModuleUsesUnityBuild = true;
+				}
+				else if (Rules.bFasterWithoutUnity)
+				{
+					Log.TraceVerbose("Module '{0}' not using unity build mode (bFasterWithoutUnity enabled for this module)", this.Name);
 					bModuleUsesUnityBuild = false;
 				}
-				else if (IsGameModule && SourceFilesToBuild.CPPFiles.Count < BuildConfiguration.MinGameModuleSourceFilesForUnityBuild)
+				else if (SourceFilesToBuild.CPPFiles.Count < MinSourceFilesForUnityBuild)
 				{
-					// Game modules with only a small number of source files are usually better off having faster iteration times
-					// on single source file changes, so we forcibly disable unity build for those modules
+					Log.TraceVerbose("Module '{0}' not using unity build mode (module with fewer than {1} source files)", this.Name, MinSourceFilesForUnityBuild);
 					bModuleUsesUnityBuild = false;
 				}
+				else
+				{
+					Log.TraceVerbose("Module '{0}' using unity build mode (enabled in BuildConfiguration)", this.Name);
+					bModuleUsesUnityBuild = true;
+				}
+			}
+			else
+			{
+				Log.TraceVerbose("Module '{0}' not using unity build mode (disabled in BuildConfiguration)", this.Name);
 			}
 
 			// The environment with which to compile the CPP files
@@ -1376,16 +1042,17 @@ namespace UnrealBuildTool
 
 				if( bUseSharedPCHFiles )
 				{
-					string SharingPCHHeaderFilePath = null;
+					FileReference SharingPCHHeaderFilePath = null;
 					bool bIsASharedPCHModule = bUseSharedPCHFiles && GlobalCompileEnvironment.SharedPCHHeaderFiles.Any( PCH => PCH.Module == this );
 					if( bIsASharedPCHModule )
 					{
-						SharingPCHHeaderFilePath = Path.GetFullPath( Path.Combine( ProjectFileGenerator.RootRelativePath, "Engine", "Source", this.SharedPCHHeaderFile ) );
+						SharingPCHHeaderFilePath = FileReference.Combine( UnrealBuildTool.EngineSourceDirectory, Rules.SharedPCHHeaderFile );
 					}
 
 					// We can't use a shared PCH file when compiling a module
 					// with exports, because the shared PCH can only have imports in it to work correctly.
-					bool bCanModuleUseOwnSharedPCH = bAllowSharedPCH && bIsASharedPCHModule && !Binary.Config.bAllowExports && ProcessedDependencies.UniquePCHHeaderFile.AbsolutePath.Equals( SharingPCHHeaderFilePath, StringComparison.InvariantCultureIgnoreCase );
+					bool bAllowSharedPCH = (Rules.PCHUsage == ModuleRules.PCHUsageMode.NoSharedPCHs)? false : true;
+					bool bCanModuleUseOwnSharedPCH = bAllowSharedPCH && bIsASharedPCHModule && !Binary.Config.bAllowExports && ProcessedDependencies.UniquePCHHeaderFile.Reference == SharingPCHHeaderFilePath;
 					if( bAllowSharedPCH && ( !bIsASharedPCHModule || bCanModuleUseOwnSharedPCH ) )
 					{
 						// Figure out which shared PCH tier we're in
@@ -1471,7 +1138,7 @@ namespace UnrealBuildTool
 						foreach (var CPPFile in SourceFilesToBuild.CPPFiles)
 						{
 							CPPFile.PCHHeaderNameInCode              = PCHToUse.AbsolutePath;
-							CPPFile.PrecompiledHeaderIncludeFilename = PCHToUse.AbsolutePath;
+							CPPFile.PrecompiledHeaderIncludeFilename = PCHToUse.Reference;
 						}
 					}
 
@@ -1514,7 +1181,7 @@ namespace UnrealBuildTool
 
 					var ModulePCHCompileEnvironment = ModuleCompileEnvironment.DeepCopy();
 					ModulePCHCompileEnvironment.Config.PrecompiledHeaderAction          = PrecompiledHeaderAction.Include;
-					ModulePCHCompileEnvironment.Config.PrecompiledHeaderIncludeFilename = ModulePCHEnvironment.PrecompiledHeaderIncludeFilename.AbsolutePath;
+					ModulePCHCompileEnvironment.Config.PrecompiledHeaderIncludeFilename = ModulePCHEnvironment.PrecompiledHeaderIncludeFilename.Reference;
 					ModulePCHCompileEnvironment.Config.PCHHeaderNameInCode              = ModulePCHEnvironment.PCHHeaderNameInCode;
 
 					if( SharedPCHHeaderFile != null )
@@ -1553,7 +1220,7 @@ namespace UnrealBuildTool
 								UEBuildModuleCPP SharedPCHModule = (UEBuildModuleCPP)Target.FindOrCreateModuleByName(SharedPCHModuleName);
 
 								CPPEnvironment SharedPCHCompileEnvironment = GlobalCompileEnvironment.DeepCopy();
-								SharedPCHCompileEnvironment.Config.bEnableShadowVariableWarning = SharedPCHModule.bEnableShadowVariableWarnings;
+								SharedPCHCompileEnvironment.Config.bEnableShadowVariableWarning = SharedPCHModule.Rules.bEnableShadowVariableWarnings;
 
 								SharedPCHModule.SetupPublicCompileEnvironment(
 									Binary, 
@@ -1562,14 +1229,14 @@ namespace UnrealBuildTool
 									SharedPCHCompileEnvironment.Config.CPPIncludeInfo.SystemIncludePaths, 
 									SharedPCHCompileEnvironment.Config.Definitions, 
 									SharedPCHCompileEnvironment.Config.AdditionalFrameworks, 
-									new Dictionary<UEBuildModule,bool>());
+									new HashSet<UEBuildModule>());
 
 								PCHOutput = PrecompileHeaderEnvironment.GeneratePCHCreationAction( 
 									Target,
 									CPPFilesToBuild[0].PCHHeaderNameInCode,
 									ModulePCHEnvironment.PrecompiledHeaderIncludeFilename,
 									SharedPCHCompileEnvironment,
-									Path.Combine( CompileEnvironment.Config.OutputDirectory, "SharedPCHs" ),
+									DirectoryReference.Combine( CompileEnvironment.Config.OutputDirectory, "SharedPCHs" ),
 									"Shared", 
 									false );
 							}
@@ -1665,7 +1332,7 @@ namespace UnrealBuildTool
 				return null;
 			}
 			// Don't mix RTTI modes
-			if (bUseRTTI)
+			if (Rules.bUseRTTI)
 			{
 				Log.TraceVerbose("Module {0} cannot use existing Shared PCH '{1}' (from module '{2}') because RTTI modes don't match", Name, SharedPCHEnvironment.PrecompiledHeaderIncludeFilename.AbsolutePath, SharedPCHEnvironment.ModuleName);
 				SharedPCHHeaderFile = null;
@@ -1772,7 +1439,7 @@ namespace UnrealBuildTool
 				if( bFoundAProblemWithPCHs )
 				{
 					// Map from pch header string to the source files that use that PCH
-					var UsageMapPCH = new Dictionary<string, List<FileItem>>( StringComparer.InvariantCultureIgnoreCase );
+					var UsageMapPCH = new Dictionary<FileReference, List<FileItem>>();
 					foreach( var CPPFile in SourceFilesToBuild.CPPFiles )
 					{
 						// Create a new entry if not in the pch usage map
@@ -1797,7 +1464,7 @@ namespace UnrealBuildTool
 					if( UsageMapPCH.Count > 1 )
 					{
 						// Keep track of the PCH file that is most used within this module
-						string MostFilesAreIncludingPCH = string.Empty;
+						FileReference MostFilesAreIncludingPCH = null;
 						int MostFilesIncluded = 0;
 						foreach( var CurPCH in UsageMapPCH.Where( PCH => PCH.Value.Count > MostFilesIncluded ) )
 						{
@@ -1857,14 +1524,14 @@ namespace UnrealBuildTool
 
 			// Resolve the PCH header to an absolute path.
 			// Check NullOrEmpty here because if the file could not be resolved we need to throw an exception
-			if (!string.IsNullOrEmpty(FirstInclude.IncludeResolvedName) &&
+			if (FirstInclude.IncludeResolvedNameIfSuccessful != null &&
 				// ignore any preexisting resolve cache if we are not configured to use it.
 				BuildConfiguration.bUseIncludeDependencyResolveCache &&
 				// if we are testing the resolve cache, we force UBT to resolve every time to look for conflicts
 				!BuildConfiguration.bTestIncludeDependencyResolveCache)
 			{
-				CPPFile.PrecompiledHeaderIncludeFilename = FirstInclude.IncludeResolvedName;
-				return FileItem.GetItemByFullPath(CPPFile.PrecompiledHeaderIncludeFilename);
+				CPPFile.PrecompiledHeaderIncludeFilename = FirstInclude.IncludeResolvedNameIfSuccessful;
+				return FileItem.GetItemByFileReference(CPPFile.PrecompiledHeaderIncludeFilename);
 			}
 
 			// search the include paths to resolve the file.
@@ -1874,8 +1541,8 @@ namespace UnrealBuildTool
 				throw new BuildException("The first include statement in source file '{0}' is trying to include the file '{1}' as the precompiled header, but that file could not be located in any of the module's include search paths.", CPPFile.AbsolutePath, CPPFile.PCHHeaderNameInCode);
 			}
 
-			CPPEnvironment.IncludeDependencyCache[Target].CacheResolvedIncludeFullPath(CPPFile, 0, PrecompiledHeaderIncludeFile.AbsolutePath);
-			CPPFile.PrecompiledHeaderIncludeFilename = PrecompiledHeaderIncludeFile.AbsolutePath;
+			CPPEnvironment.IncludeDependencyCache[Target].CacheResolvedIncludeFullPath(CPPFile, 0, PrecompiledHeaderIncludeFile.Reference);
+			CPPFile.PrecompiledHeaderIncludeFilename = PrecompiledHeaderIncludeFile.Reference;
 
 			return PrecompiledHeaderIncludeFile;
 		}
@@ -1890,23 +1557,23 @@ namespace UnrealBuildTool
 			var Result = BaseCompileEnvironment.DeepCopy();
 
 			// Override compile environment
-			Result.Config.bFasterWithoutUnity                    = bFasterWithoutUnity;
-			Result.Config.OptimizeCode                           = OptimizeCode;
-			Result.Config.bUseRTTI                               = bUseRTTI;
-			Result.Config.bUseAVX                                = bUseAVX;
-			Result.Config.bEnableBufferSecurityChecks            = bEnableBufferSecurityChecks;
-			Result.Config.bFasterWithoutUnity                    = bFasterWithoutUnity;
-			Result.Config.MinFilesUsingPrecompiledHeaderOverride = MinFilesUsingPrecompiledHeaderOverride;
-			Result.Config.bBuildLocallyWithSNDBS				 = bBuildLocallyWithSNDBS;
-			Result.Config.bEnableExceptions                      = bEnableExceptions;
-			Result.Config.bEnableShadowVariableWarning          = bEnableShadowVariableWarnings;
+			Result.Config.bFasterWithoutUnity                    = Rules.bFasterWithoutUnity;
+			Result.Config.OptimizeCode                           = Rules.OptimizeCode;
+			Result.Config.bUseRTTI                               = Rules.bUseRTTI;
+			Result.Config.bUseAVX                                = Rules.bUseAVX;
+			Result.Config.bEnableBufferSecurityChecks            = Rules.bEnableBufferSecurityChecks;
+			Result.Config.MinSourceFilesForUnityBuildOverride	 = Rules.MinSourceFilesForUnityBuildOverride;
+			Result.Config.MinFilesUsingPrecompiledHeaderOverride = Rules.MinFilesUsingPrecompiledHeaderOverride;
+			Result.Config.bBuildLocallyWithSNDBS				 = Rules.bBuildLocallyWithSNDBS;
+			Result.Config.bEnableExceptions                      = Rules.bEnableExceptions;
+			Result.Config.bEnableShadowVariableWarning           = Rules.bEnableShadowVariableWarnings;
 			Result.Config.bUseStaticCRT							 = (Target.Rules != null && Target.Rules.bUseStaticCRT);
-			Result.Config.OutputDirectory                        = Path.Combine(Binary.Config.IntermediateDirectory, Name);
+			Result.Config.OutputDirectory                        = DirectoryReference.Combine(Binary.Config.IntermediateDirectory, Name);
 
 			// Switch the optimization flag if we're building a game module. Also pass the definition for building in DebugGame along (see ModuleManager.h for notes).
 			if (Target.Configuration == UnrealTargetConfiguration.DebugGame)
 			{
-				if(!Utils.IsFileUnderDirectory(ModuleDirectory, BuildConfiguration.RelativeEnginePath))
+				if(!ModuleDirectory.IsUnderDirectory(UnrealBuildTool.EngineDirectory))
 				{
 					Result.Config.Target.Configuration = CPPTargetConfiguration.Debug;
 					Result.Config.Definitions.Add("UE_BUILD_DEVELOPMENT_WITH_DEBUGGAME=1");
@@ -1958,7 +1625,7 @@ namespace UnrealBuildTool
 		{
 			if (UHTModuleInfoCache == null)
 			{
-				IEnumerable<string> HeaderFilenames = Directory.GetFiles( ModuleDirectory, "*.h", SearchOption.AllDirectories );
+				IEnumerable<string> HeaderFilenames = Directory.GetFiles( ModuleDirectory.FullName, "*.h", SearchOption.AllDirectories );
 				UHTModuleInfo       Info            = ExternalExecution.CreateUHTModuleInfo(HeaderFilenames, Target, Name, ModuleDirectory, Type);
 				UHTModuleInfoCache = new UHTModuleInfoCacheType(Info.PublicUObjectHeaders.Concat(Info.PublicUObjectClassesHeaders).Concat(Info.PrivateUObjectHeaders).Select(x => x.AbsolutePath).ToList(), Info);
 			}
@@ -1968,33 +1635,32 @@ namespace UnrealBuildTool
 
 		public override void GetAllDependencyModules( CaselessDictionary<ModuleIndexPair> ReferencedModules, bool bIncludeDynamicallyLoaded, bool bForceCircular, bool bOnlyDirectDependencies )
 		{
-			var AllModuleNames = new List<string>();
-			AllModuleNames.AddRange(PrivateDependencyModuleNames);
-			AllModuleNames.AddRange(PublicDependencyModuleNames);
+			List<UEBuildModule> AllDependencyModules = new List<UEBuildModule>();
+			AllDependencyModules.AddRange(PrivateDependencyModules);
+			AllDependencyModules.AddRange(PublicDependencyModules);
 			if( bIncludeDynamicallyLoaded )
 			{
-				AllModuleNames.AddRange(DynamicallyLoadedModuleNames);
-                AllModuleNames.AddRange(PlatformSpecificDynamicallyLoadedModuleNames);
+				AllDependencyModules.AddRange(DynamicallyLoadedModules);
+                AllDependencyModules.AddRange(PlatformSpecificDynamicallyLoadedModules);
             }
 
-			foreach (var DependencyName in AllModuleNames)
+			foreach (UEBuildModule DependencyModule in AllDependencyModules)
 			{
-				if (!ReferencedModules.ContainsKey(DependencyName))
+				if (!ReferencedModules.ContainsKey(DependencyModule.Name))
 				{
 					// Don't follow circular back-references!
-					bool bIsCircular = CircularlyReferencedDependentModules.Contains( DependencyName );
+					bool bIsCircular = HasCircularDependencyOn(DependencyModule.Name);
 					if (bForceCircular || !bIsCircular)
 					{
-						var Module = Target.GetModuleByName( DependencyName );
-						ReferencedModules[ DependencyName ] = null;
+						ReferencedModules[ DependencyModule.Name ] = null;
 
 						if( !bOnlyDirectDependencies )
 						{ 
 							// Recurse into dependent modules first
-							Module.GetAllDependencyModules(ReferencedModules, bIncludeDynamicallyLoaded, bForceCircular, bOnlyDirectDependencies);
+							DependencyModule.GetAllDependencyModules(ReferencedModules, bIncludeDynamicallyLoaded, bForceCircular, bOnlyDirectDependencies);
 						}
 
-						ReferencedModules[ DependencyName ] = new ModuleIndexPair{ Module = Module, Index = ReferencedModules.Where(x => x.Value != null).Count() - 1 };
+						ReferencedModules[ DependencyModule.Name ] = new ModuleIndexPair{ Module = DependencyModule, Index = ReferencedModules.Where(x => x.Value != null).Count() - 1 };
 					}
 				}
 			}
@@ -2007,39 +1673,29 @@ namespace UnrealBuildTool
 				Modules.Add(this);
 
 				// Get the dependent modules
-				List<string> DependentModuleNames = new List<string>();
-				DependentModuleNames.AddRange(PrivateDependencyModuleNames);
-				DependentModuleNames.AddRange(PublicDependencyModuleNames);
-				DependentModuleNames.AddRange(DynamicallyLoadedModuleNames);
-				DependentModuleNames.AddRange(PlatformSpecificDynamicallyLoadedModuleNames);
+				List<UEBuildModule> DependentModules = new List<UEBuildModule>();
+				if(PrivateDependencyModules != null)
+				{
+					DependentModules.AddRange(PrivateDependencyModules);
+				}
+				if(PublicDependencyModules != null)
+				{
+					DependentModules.AddRange(PublicDependencyModules);
+				}
+				if(DynamicallyLoadedModules != null)
+				{
+					DependentModules.AddRange(DynamicallyLoadedModules);
+				}
+				if(PlatformSpecificDynamicallyLoadedModules != null)
+				{
+					DependentModules.AddRange(PlatformSpecificDynamicallyLoadedModules);
+				}
 
 				// Find modules for each of them, and add their dependencies too
-				foreach(string DependentModuleName in DependentModuleNames)
+				foreach(UEBuildModule DependentModule in DependentModules)
 				{
-					UEBuildModule DependentModule = Target.FindOrCreateModuleByName(DependentModuleName);
 					DependentModule.RecursivelyAddPrecompiledModules(Modules);
 				}
-			}
-		}
-
-		public override void RecursivelyAddIncludePathModules( UEBuildTarget Target, bool bPublicIncludesOnly )
-		{
-			var AllIncludePathModuleNames = new List<string>();
-			AllIncludePathModuleNames.AddRange( PublicIncludePathModuleNames );
-			if( !bPublicIncludesOnly )
-			{
-				AllIncludePathModuleNames.AddRange( PrivateIncludePathModuleNames );
-			}
-			foreach( var IncludePathModuleName in AllIncludePathModuleNames )
-			{
-				var IncludePathModule = Target.FindOrCreateModuleByName( IncludePathModuleName );
-
-				// No need to do anything here.  We just want to make sure that we've instantiated our representation of the
-				// module so that we can find it later when processing include path module names.  Unlike actual dependency
-				// modules, these include path modules may never be "bound" (have Binary or bIncludedInTarget member variables set)
-
-				// We'll also need to make sure we know about all dependent public include path modules, too!
-				IncludePathModule.RecursivelyAddIncludePathModules( Target, bPublicIncludesOnly:true );
 			}
 		}
 
@@ -2053,23 +1709,21 @@ namespace UnrealBuildTool
 					throw new BuildException( "Module '{0}' should already have been bound to a binary!", Name );
 				}
 
-				var AllModuleNames = new List<string>();
-				AllModuleNames.AddRange( PrivateDependencyModuleNames );
-				AllModuleNames.AddRange( PublicDependencyModuleNames );
-				AllModuleNames.AddRange( DynamicallyLoadedModuleNames );
-				AllModuleNames.AddRange( PlatformSpecificDynamicallyLoadedModuleNames );
+				List<UEBuildModule> AllDependencyModules = new List<UEBuildModule>();
+				AllDependencyModules.AddRange( PrivateDependencyModules );
+				AllDependencyModules.AddRange( PublicDependencyModules );
+				AllDependencyModules.AddRange( DynamicallyLoadedModules );
+				AllDependencyModules.AddRange( PlatformSpecificDynamicallyLoadedModules );
 
-				foreach( var DependencyName in AllModuleNames )
+				foreach( UEBuildModule DependencyModule in AllDependencyModules )
 				{
-					var DependencyModule = Target.FindOrCreateModuleByName(DependencyName);
-
 					// Skip modules that are included with the target (externals)
 					if( !DependencyModule.bIncludedInTarget )
 					{
-						bool bIsCrossTarget = PlatformSpecificDynamicallyLoadedModuleNames.Contains(DependencyName) && !DynamicallyLoadedModuleNames.Contains(DependencyName);
+						bool bIsCrossTarget = Rules.PlatformSpecificDynamicallyLoadedModuleNames.Contains(DependencyModule.Name) && !Rules.DynamicallyLoadedModuleNames.Contains(DependencyModule.Name);
 
 						// Get the binary that this module should be bound to
-						UEBuildBinary BinaryToBindTo = Target.FindOrAddBinaryForModule(DependencyName, bIsCrossTarget);
+						UEBuildBinary BinaryToBindTo = Target.FindOrAddBinaryForModule(DependencyModule, bIsCrossTarget);
 
 						// Bind this module
 						DependencyModule.Binary = BinaryToBindTo;
@@ -2084,19 +1738,13 @@ namespace UnrealBuildTool
 						// Check to see if there is a circular relationship between the module and it's referencer
 						if( DependencyModule.Binary != null )
 						{
-							if( CircularlyReferencedDependentModules.Contains( DependencyName ) )
+							if( Rules.CircularlyReferencedDependentModules.Contains( DependencyModule.Name ) )
 							{
 								DependencyModule.Binary.SetCreateImportLibrarySeparately( true );
 							}
 						}
 					}
 				}
-
-				// Also make sure module entries are created for any module that is pulled in as an "include path" module.
-				// These modules are never linked in unless they were referenced as an actual dependency of a different module,
-				// but we still need to keep track of them so that we can find their include paths when setting up our
-				// module's include paths.
-				RecursivelyAddIncludePathModules( Target, bPublicIncludesOnly:false );
 			}
 			catch (System.Exception ex)
 			{
@@ -2115,53 +1763,19 @@ namespace UnrealBuildTool
 			UEBuildTarget InTarget,
 			string InName,
 			UEBuildModuleType InType,
-			string InModuleDirectory,
-			string InGeneratedCodeDirectory,
-			bool? InIsRedistributableOverride,
+			DirectoryReference InModuleDirectory,
+			DirectoryReference InGeneratedCodeDirectory,
 			IntelliSenseGatherer InIntelliSenseGatherer,
 			IEnumerable<FileItem> InSourceFiles,
-			IEnumerable<string> InPublicIncludePaths,
-			IEnumerable<string> InPublicSystemIncludePaths,
-			IEnumerable<string> InDefinitions,
-			IEnumerable<string> InPrivateAssemblyReferences,
-			IEnumerable<string> InPublicIncludePathModuleNames,
-			IEnumerable<string> InPublicDependencyModuleNames,
-			IEnumerable<string> InPublicDelayLoadDLLs,
-			IEnumerable<string> InPublicAdditionalLibraries,
-			IEnumerable<string> InPublicFrameworks,
-			IEnumerable<string> InPublicWeakFrameworks,
-			IEnumerable<UEBuildFramework> InPublicAdditionalFrameworks,
-			IEnumerable<string> InPublicAdditionalShadowFiles,
-			IEnumerable<UEBuildBundleResource> InPublicAdditionalBundleResources,
-			IEnumerable<string> InPrivateIncludePaths,
-			IEnumerable<string> InPrivateIncludePathModuleNames,
-			IEnumerable<string> InPrivateDependencyModuleNames,
-			IEnumerable<string> InCircularlyReferencedDependentModules,
-			IEnumerable<string> InDynamicallyLoadedModuleNames,
-            IEnumerable<string> InPlatformSpecificDynamicallyLoadedModuleNames,
-			IEnumerable<RuntimeDependency> InRuntimeDependencies,
-            ModuleRules.CodeOptimization InOptimizeCode,
-			bool InAllowSharedPCH,
-			string InSharedPCHHeaderFile,
-			bool InUseRTTI,
-			bool InEnableBufferSecurityChecks,
-			bool InFasterWithoutUnity,
-			int InMinFilesUsingPrecompiledHeaderOverride,
-			bool InEnableExceptions,
-			bool InEnableShadowVariableWarnings,
+			ModuleRules InRules,
 			bool bInBuildSourceFiles,
-			string InBuildCsFilename,
-			bool bInUseAVX
+			FileReference InRulesFile
 			)
-			: base(InTarget,InName,InType,InModuleDirectory,InGeneratedCodeDirectory,InIsRedistributableOverride,InIntelliSenseGatherer,
-			InSourceFiles,InPublicIncludePaths,InPublicSystemIncludePaths,null,InDefinitions,
-			InPublicIncludePathModuleNames,InPublicDependencyModuleNames,InPublicDelayLoadDLLs,InPublicAdditionalLibraries,InPublicFrameworks,InPublicWeakFrameworks,InPublicAdditionalFrameworks,InPublicAdditionalShadowFiles,InPublicAdditionalBundleResources,
-			InPrivateIncludePaths,InPrivateIncludePathModuleNames,InPrivateDependencyModuleNames,
-            InCircularlyReferencedDependentModules, InDynamicallyLoadedModuleNames, InPlatformSpecificDynamicallyLoadedModuleNames, InRuntimeDependencies, InOptimizeCode,
-			InAllowSharedPCH, InSharedPCHHeaderFile, InUseRTTI, InEnableBufferSecurityChecks, InFasterWithoutUnity, InMinFilesUsingPrecompiledHeaderOverride, true,
-			InEnableExceptions, InEnableShadowVariableWarnings, bInBuildSourceFiles, InBuildCsFilename, bInUseAVX)
+			: base(InTarget,InName,InType,InModuleDirectory,InGeneratedCodeDirectory,InIntelliSenseGatherer,
+			InSourceFiles,InRules,
+			bInBuildSourceFiles, InRulesFile)
 		{
-			PrivateAssemblyReferences = HashSetFromOptionalEnumerableStringParameter(InPrivateAssemblyReferences);
+			PrivateAssemblyReferences = HashSetFromOptionalEnumerableStringParameter(InRules.PrivateAssemblyReferences);
 		}
 
 		// UEBuildModule interface.
@@ -2186,7 +1800,7 @@ namespace UnrealBuildTool
 			UEBuildBinary SourceBinary,
 			LinkEnvironment LinkEnvironment,
 			List<UEBuildBinary> BinaryDependencies,
-			Dictionary<UEBuildModule, bool> VisitedModules
+			HashSet<UEBuildModule> VisitedModules
 			)
 		{
 			base.SetupPrivateLinkEnvironment(SourceBinary, LinkEnvironment, BinaryDependencies, VisitedModules);
@@ -2280,7 +1894,7 @@ namespace UnrealBuildTool
 		/// <param name="ModuleName">Name of the module this PCH is being generated for</param>
 		/// <param name="bAllowDLLExports">True if we should allow DLLEXPORT definitions for this PCH</param>
 		/// <returns>the compilation output result of the created pch.</returns>
-		public static CPPOutput GeneratePCHCreationAction(UEBuildTarget Target, string PCHHeaderNameInCode, FileItem PrecompiledHeaderIncludeFilename, CPPEnvironment ProjectCPPEnvironment, string OutputDirectory, string ModuleName, bool bAllowDLLExports )
+		public static CPPOutput GeneratePCHCreationAction(UEBuildTarget Target, string PCHHeaderNameInCode, FileItem PrecompiledHeaderIncludeFilename, CPPEnvironment ProjectCPPEnvironment, DirectoryReference OutputDirectory, string ModuleName, bool bAllowDLLExports )
 		{
 			// Find the header file to be precompiled. Don't skip external headers
 			if (PrecompiledHeaderIncludeFilename.bExists)
@@ -2290,7 +1904,7 @@ namespace UnrealBuildTool
 				string PCHGuardDefine = Path.GetFileNameWithoutExtension(PrecompiledHeaderIncludeFilename.AbsolutePath).ToUpper();
 				string LocalPCHHeaderNameInCode = ToolChain.ConvertPath(PrecompiledHeaderIncludeFilename.AbsolutePath);
 				string TmpPCHHeaderContents = String.Format("#ifndef __AUTO_{0}_H__\n#define __AUTO_{0}_H__\n//Last Write: {2}\n#include \"{1}\"\n#endif//__AUTO_{0}_H__", PCHGuardDefine, LocalPCHHeaderNameInCode, PrecompiledHeaderIncludeFilename.LastWriteTime);
-				string DummyPath = Path.Combine(
+				FileReference DummyPath = FileReference.Combine(
 					ProjectCPPEnvironment.Config.OutputDirectory,
 					Path.GetFileName(PrecompiledHeaderIncludeFilename.AbsolutePath));
 				FileItem DummyPCH = FileItem.CreateIntermediateTextFile(DummyPath, TmpPCHHeaderContents);
@@ -2298,7 +1912,7 @@ namespace UnrealBuildTool
 				// Create a new C++ environment that is used to create the PCH.
 				var ProjectPCHEnvironment = ProjectCPPEnvironment.DeepCopy();
 				ProjectPCHEnvironment.Config.PrecompiledHeaderAction = PrecompiledHeaderAction.Create;
-				ProjectPCHEnvironment.Config.PrecompiledHeaderIncludeFilename = PrecompiledHeaderIncludeFilename.AbsolutePath;
+				ProjectPCHEnvironment.Config.PrecompiledHeaderIncludeFilename = PrecompiledHeaderIncludeFilename.Reference;
 				ProjectPCHEnvironment.Config.PCHHeaderNameInCode = PCHHeaderNameInCode;
 				ProjectPCHEnvironment.Config.OutputDirectory = OutputDirectory;
 

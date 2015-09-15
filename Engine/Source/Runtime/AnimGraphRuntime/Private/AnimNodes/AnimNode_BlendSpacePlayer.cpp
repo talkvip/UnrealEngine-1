@@ -13,6 +13,7 @@ FAnimNode_BlendSpacePlayer::FAnimNode_BlendSpacePlayer()
 	, Z(0.0f)
 	, PlayRate(1.0f)
 	, bLoop(true)
+	, StartPosition(0.f)
 	, BlendSpace(NULL)
 	, GroupIndex(INDEX_NONE)
 {
@@ -20,14 +21,13 @@ FAnimNode_BlendSpacePlayer::FAnimNode_BlendSpacePlayer()
 
 void FAnimNode_BlendSpacePlayer::Initialize(const FAnimationInitializeContext& Context)
 {
+	FAnimNode_AssetPlayerBase::Initialize(Context);
+
 	BlendSampleDataCache.Empty();
 	
 	EvaluateGraphExposedInputs.Execute(Context);
-	if(PlayRate >= 0.0f)
-	{
-		InternalTimeAccumulator = 0.0f;
-	}
-	else
+	InternalTimeAccumulator = FMath::Clamp(StartPosition, 0.f, 1.0f);
+	if(StartPosition == 0.f && PlayRate < 0.0f)
 	{
 		// Blend spaces run between 0 and 1
 		InternalTimeAccumulator = 1.0f;
@@ -57,6 +57,8 @@ void FAnimNode_BlendSpacePlayer::UpdateInternal(const FAnimationUpdateContext& C
 		// Create a tick record and fill it out
 		FAnimGroupInstance* SyncGroup;
 		FAnimTickRecord& TickRecord = Context.AnimInstance->CreateUninitializedTickRecord(GroupIndex, /*out*/ SyncGroup);
+		TickRecord.SourceNodeRef = this;
+		Context.AnimInstance->InitTickRecordFromLastFrame(GroupIndex, TickRecord);
 
 		const FVector BlendInput(X, Y, Z);
 	

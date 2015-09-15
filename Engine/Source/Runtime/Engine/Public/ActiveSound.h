@@ -26,6 +26,8 @@ struct FSoundParseParameters
 	float Volume;
 	float VolumeMultiplier;
 
+	float VolumeWeightedPriorityScale;
+
 	float Pitch;
 	float HighFrequencyGain;
 
@@ -34,6 +36,9 @@ struct FSoundParseParameters
 
 	// At what distance from the source of the sound should spatialization begin
 	float OmniRadius;
+
+	// The distance between left and right channels when spatializing stereo assets
+	float StereoSpread;
 
 	// Which spatialization algorithm to use
 	ESoundSpatializationAlgorithm SpatializationAlgorithm;
@@ -53,6 +58,7 @@ struct FSoundParseParameters
 		, HighFrequencyGain(1.f)
 		, StartTime(-1.f)
 		, OmniRadius(0.0f)
+		, StereoSpread(0.0f)
 		, SpatializationAlgorithm(SPATIALIZATION_Default)
 		, bUseSpatialization(false)
 		, bLooping(false)
@@ -69,7 +75,20 @@ public:
 
 	class USoundBase* Sound;
 	TWeakObjectPtr<class UWorld> World;
+
+private:
 	TWeakObjectPtr<class UAudioComponent> AudioComponent;
+	UPTRINT AudioComponentIndex;
+
+public:
+
+	UAudioComponent* GetAudioComponent() const { return AudioComponent.Get(); }
+	UPTRINT GetAudioComponentIndex() const { return AudioComponentIndex; }
+	void SetAudioComponent(UAudioComponent* Component)
+	{
+		AudioComponent = Component;
+		AudioComponentIndex = (UPTRINT)Component;
+	}
 
 	/** Optional SoundClass to override Sound */
 	USoundClass* SoundClassOverride;
@@ -147,6 +166,7 @@ public:
 	float HighFrequencyGainMultiplier;
 
 	float SubtitlePriority;
+	float VolumeWeightedPriorityScale;
 
 	/** Frequency with which to check for occlusion from its closest listener */
 	float OcclusionCheckInterval;

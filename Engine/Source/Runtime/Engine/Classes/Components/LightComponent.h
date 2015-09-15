@@ -141,7 +141,7 @@ class ENGINE_API ULightComponent : public ULightComponentBase
 	 * Brightness factor applied to the light when the light function is specified but disabled, for example in scene captures that use SceneCapView_LitNoShadows. 
 	 * This should be set to the average brightness of the light function material's emissive input, which should be between 0 and 1.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category=LightFunction)
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category=LightFunction, meta=(UIMin = "0.0", UIMax = "1.0"))
 	float DisabledBrightness;
 
 	/** 
@@ -297,7 +297,7 @@ public:
 	/** Compute current light brightness based on whether there is a valid IES profile texture attached, and whether IES brightness is enabled */
 	float ComputeLightBrightness() const;
 
-	// Begin UObject interface.
+	//~ Begin UObject Interface.
 	virtual void Serialize(FArchive& Ar) override;
 	virtual void PostLoad() override;
 #if WITH_EDITOR
@@ -307,7 +307,7 @@ public:
 #endif // WITH_EDITOR
 	virtual void BeginDestroy() override;
 	virtual bool IsReadyForFinishDestroy() override;
-	// End UObject interface.
+	//~ End UObject Interface.
 
 	virtual FActorComponentInstanceData* GetComponentInstanceData() const override;
 	 void ApplyComponentInstanceData(class FPrecomputedLightInstanceData* ComponentInstanceData);
@@ -328,12 +328,12 @@ public:
 	}
 
 protected:
-	// Begin UActorComponent Interface
+	//~ Begin UActorComponent Interface
 	virtual void OnRegister() override;
 	virtual void CreateRenderState_Concurrent() override;
 	virtual void SendRenderTransform_Concurrent() override;
 	virtual void DestroyRenderState_Concurrent() override;
-	// Begin UActorComponent Interface
+	//~ Begin UActorComponent Interface
 
 public:
 	virtual void InvalidateLightingCacheDetailed(bool bInvalidateBuildEnqueuedLighting, bool bTranslationOnly) override;

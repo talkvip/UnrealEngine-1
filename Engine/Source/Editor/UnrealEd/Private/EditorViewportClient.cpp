@@ -656,7 +656,7 @@ FSceneView* FEditorViewportClient::CalcSceneView(FSceneViewFamily* ViewFamily)
 		{
 			if (bUsingOrbitCamera)
 			{
-				ViewInitOptions.ViewRotationMatrix = ViewTransform.ComputeOrbitMatrix().RemoveTranslation();
+				ViewInitOptions.ViewRotationMatrix = FTranslationMatrix(ViewLocation) * ViewTransform.ComputeOrbitMatrix();
 			}
 			else
 			{
@@ -801,14 +801,19 @@ FSceneView* FEditorViewportClient::CalcSceneView(FSceneViewFamily* ViewFamily)
 					FPlane(0, 1, 0, 0),
 					FPlane(0, 0, ViewLocation.X, 1));
 			}
+			else if (EffectiveViewportType == LVT_OrthoFreelook)
+			{
+				ViewInitOptions.ViewRotationMatrix = FMatrix(
+					FPlane(0, 0, 1, 0),
+					FPlane(1, 0, 0, 0),
+					FPlane(0, 1, 0, 0),
+					FPlane(0, 0, ViewLocation.X, 1));
+			}
 			else
 			{
 				// Unknown viewport type
 				check(false);
 			}
-
-			ViewInitOptions.ViewOrigin += ViewInitOptions.ViewRotationMatrix.InverseTransformPosition( FVector::ZeroVector );
-			ViewInitOptions.ViewRotationMatrix = ViewInitOptions.ViewRotationMatrix.RemoveTranslation();
 
 			ViewInitOptions.ProjectionMatrix = FReversedZOrthoMatrix(
 				OrthoWidth,
@@ -933,6 +938,10 @@ void FEditorViewportClient::Tick(float DeltaTime)
 
 	FViewportCameraTransform& ViewTransform = GetViewTransform();
 	const bool bIsAnimating = ViewTransform.UpdateTransition();
+	if (bIsAnimating && GetViewportType() == LVT_Perspective)
+	{
+		PerspectiveCameraMoved();
+	}
 
 	if ( bIsTracking )
 	{
@@ -1494,9 +1503,13 @@ void FEditorViewportClient::UpdateCameraMovement( float DeltaTime )
 			NewViewRotation = FRotator::MakeFromEuler( NewViewEuler );
 		}
 
-		if( !NewViewLocation.Equals( GetViewLocation(), SMALL_NUMBER ) ||
-			NewViewRotation != GetViewRotation() ||
-			!FMath::IsNearlyEqual( NewViewFOV, ViewFOV, float(SMALL_NUMBER) ) )
+		// See if translation/rotation have changed
+		const bool bTransformDifferent = !NewViewLocation.Equals(GetViewLocation(), SMALL_NUMBER) || NewViewRotation != GetViewRotation();
+		// See if FOV has changed
+		const bool bFOVDifferent = !FMath::IsNearlyEqual( NewViewFOV, ViewFOV, float(SMALL_NUMBER) );
+
+		// If something has changed, tell the actor
+		if(bTransformDifferent || bFOVDifferent)
 		{
 			// Something has changed!
 			const bool bInvalidateChildViews=true;
@@ -1509,9 +1522,12 @@ void FEditorViewportClient::UpdateCameraMovement( float DeltaTime )
 			ViewFOV = NewViewFOV;
 
 			// Actually move/rotate the camera
-			MoveViewportPerspectiveCamera(
-				NewViewLocation - GetViewLocation(),
-				NewViewRotation - GetViewRotation() );
+			if(bTransformDifferent)
+			{
+				MoveViewportPerspectiveCamera(
+					NewViewLocation - GetViewLocation(),
+					NewViewRotation - GetViewRotation() );
+			}
 
 			// Invalidate the viewport widget
 			if (EditorViewportWidget.IsValid())
@@ -1545,7 +1561,7 @@ void FEditorViewportClient::UpdateLightingShowFlags( FEngineShowFlags& InOutShow
 				{
 					// We have lights in the scene now so go ahead and turn lighting back on
 					// designer can see what they're interacting with!
-					InOutShowFlags.Lighting = true;
+					InOutShowFlags.SetLighting(true);
 				}
 
 				// No longer forcing lighting to be off
@@ -1558,7 +1574,7 @@ void FEditorViewportClient::UpdateLightingShowFlags( FEngineShowFlags& InOutShow
 				{
 					// No lights in the scene, so make sure that lighting is turned off so the level
 					// designer can see what they're interacting with!
-					InOutShowFlags.Lighting = false;
+					InOutShowFlags.SetLighting(false);
 				}
 			}
 		}
@@ -4249,12 +4265,12 @@ bool FEditorViewportClient::IsSetShowGridChecked() const
 
 void FEditorViewportClient::SetShowBounds(bool bShow)
 {
-	EngineShowFlags.Bounds = bShow;
+	EngineShowFlags.SetBounds(bShow);
 }
 
 void FEditorViewportClient::ToggleShowBounds()
 {
-	EngineShowFlags.Bounds = 1 - EngineShowFlags.Bounds;
+	EngineShowFlags.SetBounds(!EngineShowFlags.Bounds);
 	if (FEngineAnalytics::IsAvailable())
 	{
 		FEngineAnalytics::GetProvider().RecordEvent(TEXT("Editor.Usage.StaticMesh.Toolbar"), TEXT("Bounds"), FString::Printf(TEXT("%d"), EngineShowFlags.Bounds));
@@ -4269,7 +4285,7 @@ bool FEditorViewportClient::IsSetShowBoundsChecked() const
 
 void FEditorViewportClient::SetShowCollision()
 {
-	EngineShowFlags.Collision = !EngineShowFlags.Collision;
+	EngineShowFlags.SetCollision(!EngineShowFlags.Collision);
 	Invalidate();
 }
 
@@ -4778,17 +4794,17 @@ void FEditorViewportClient::SetGameView(bool bGameViewEnable)
 	}
 
 	// maintain this state
-	EngineShowFlags.CompositeEditorPrimitives = bCompositeEditorPrimitives;
-	LastEngineShowFlags.CompositeEditorPrimitives = bCompositeEditorPrimitives;
+	EngineShowFlags.SetCompositeEditorPrimitives(bCompositeEditorPrimitives);
+	LastEngineShowFlags.SetCompositeEditorPrimitives(bCompositeEditorPrimitives);
 
 	//reset game engine show flags that may have been turned on by making a selection in game view
 	if(bGameViewEnable)
 	{
-		EngineShowFlags.ModeWidgets = 0;
-		EngineShowFlags.Selection = 0;
+		EngineShowFlags.SetModeWidgets(false);
+		EngineShowFlags.SetSelection(false);
 	}
 
-	EngineShowFlags.SelectionOutline = bGameViewEnable ? false : GetDefault<ULevelEditorViewportSettings>()->bUseSelectionOutline;
+	EngineShowFlags.SetSelectionOutline(bGameViewEnable ? false : GetDefault<ULevelEditorViewportSettings>()->bUseSelectionOutline);
 
 	ApplyViewMode(GetViewMode(), IsPerspective(), EngineShowFlags);
 

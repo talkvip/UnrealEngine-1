@@ -230,6 +230,27 @@ void LineCheckTracker::CaptureLineCheck(int32 LineCheckFlags, const FVector* Ext
 	TArray<FString>	ThisFramePawnSpawns;
 #endif	//PERF_SHOW_MULTI_PAWN_SPAWN_FRAMES
 
+AActor* UWorld::SpawnActorAbsolute( UClass* Class, FTransform const& AbsoluteTransform, const FActorSpawnParameters& SpawnParameters)
+{
+	AActor* Template = SpawnParameters.Template;
+
+	if(!Template)
+	{
+		// Use class's default actor as a template.
+		Template = Class->GetDefaultObject<AActor>();
+	}
+
+	FTransform NewTransform = AbsoluteTransform;
+	USceneComponent* TemplateRootComponent = (Template)? Template->GetRootComponent() : NULL;
+	if(TemplateRootComponent)
+	{
+		TemplateRootComponent->UpdateComponentToWorld();
+		NewTransform = TemplateRootComponent->GetComponentToWorld().Inverse() * NewTransform;
+	}
+
+	return SpawnActor(Class, &NewTransform, SpawnParameters);
+}
+
 AActor* UWorld::SpawnActor( UClass* Class, FVector const* Location, FRotator const* Rotation, const FActorSpawnParameters& SpawnParameters )
 {
 	FTransform Transform;
@@ -496,20 +517,11 @@ bool UWorld::DestroyActor( AActor* ThisActor, bool bNetForce, bool bShouldModify
 			return false;
 		}
 
-		// Don't destroy player actors.
-		APlayerController* PC = Cast<APlayerController>(ThisActor);
-		if ( PC )
+		if (ThisActor->DestroyNetworkActorHandled())
 		{
-			UNetConnection* C = Cast<UNetConnection>(PC->Player);
-			if( C )
-			{	
-				if( C->Channels[0] && C->State!=USOCK_Closed )
-				{
-					C->bPendingDestroy = true;
-					C->Channels[0]->Close();
-				}
-				return false;
-			}
+			// Network actor short circuited the destroy (network will cleanup properly)
+			// Don't destroy PlayerControllers and BeaconClients
+			return false;
 		}
 	}
 	else
@@ -913,7 +925,7 @@ bool UWorld::EncroachingBlockingGeometry(AActor* TestActor, FVector TestLocation
 		// the world, and that component is the only one we care about encroaching (since the movement code will happily embedding
 		// other components in the world during movement updates)
 		UPrimitiveComponent* const MovedPrimComp = MoveComponent->UpdatedPrimitive;
-		if (MovedPrimComp->IsCollisionEnabled())
+		if (MovedPrimComp->IsQueryCollisionEnabled())
 		{
 			// might not be the root, so we need to compute the transform
 			FTransform const CompToRoot = MovedPrimComp->GetComponentToWorld() * WorldToOldRoot;
@@ -939,7 +951,7 @@ bool UWorld::EncroachingBlockingGeometry(AActor* TestActor, FVector TestLocation
 	{
 		// This actor does not have a movement component, so we'll assume all components are potentially important to keep out of the world
 		UPrimitiveComponent* const RootPrimComp = Cast<UPrimitiveComponent>(RootComponent);
-		if (RootPrimComp && RootPrimComp->IsCollisionEnabled())
+		if (RootPrimComp && RootPrimComp->IsQueryCollisionEnabled())
 		{
 			if (ComponentEncroachesBlockingGeometry(this, TestActor, RootPrimComp, TestRootToWorld, ProposedAdjustment))
 			{
@@ -963,7 +975,7 @@ bool UWorld::EncroachingBlockingGeometry(AActor* TestActor, FVector TestLocation
 
 		for (auto Child : Children)
 		{
-			if (Child->IsCollisionEnabled())
+			if (Child->IsQueryCollisionEnabled())
 			{
 				UPrimitiveComponent* const PrimComp = Cast<UPrimitiveComponent>(Child);
 				if (PrimComp)

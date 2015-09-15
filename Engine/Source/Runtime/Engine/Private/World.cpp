@@ -40,6 +40,7 @@
 #include "GameFramework/GameMode.h"
 #include "GameFramework/GameState.h"
 #include "GameFramework/PlayerState.h"
+#include "PhysicsEngine/PhysicsConstraintComponent.h"
 
 #include "Materials/MaterialParameterCollectionInstance.h"
 
@@ -81,11 +82,34 @@
 #include "Engine/GameInstance.h"
 #include "UObject/UObjectThreadContext.h"
 #include "Engine/CoreSettings.h"
+#include "PerfCountersHelpers.h"
+#include "NetworkReplayStreaming.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWorld, Log, All);
 DEFINE_LOG_CATEGORY(LogSpawn);
 
 #define LOCTEXT_NAMESPACE "World"
+
+// Deprecation warnings disabled to initialize bNoCollisionFail
+PRAGMA_DISABLE_DEPRECATION_WARNINGS
+
+FActorSpawnParameters::FActorSpawnParameters()
+: Name(NAME_None)
+, Template(NULL)
+, Owner(NULL)
+, Instigator(NULL)
+, OverrideLevel(NULL)
+, SpawnCollisionHandlingOverride(ESpawnActorCollisionHandlingMethod::Undefined)
+, bNoCollisionFail(false)
+, bRemoteOwned(false)
+, bNoFail(false)
+, bDeferConstruction(false)
+, bAllowDuringConstructionScript(false)
+, ObjectFlags(RF_Transactional)
+{
+}
+
+PRAGMA_ENABLE_DEPRECATION_WARNINGS
 
 /*-----------------------------------------------------------------------------
 	UWorld implementation.
@@ -812,6 +836,14 @@ void UWorld::RepairWorldSettings()
 			PersistentLevel->Actors[0]->Rename(NULL, PersistentLevel, REN_ForceNoResetLoaders);
 		}
 		
+		bool bClearOwningWorld = false;
+
+		if (PersistentLevel->OwningWorld == nullptr)
+		{
+			bClearOwningWorld = true;
+			PersistentLevel->OwningWorld = this;
+		}
+
 		FActorSpawnParameters SpawnInfo;
 		SpawnInfo.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 		SpawnInfo.Name = GEngine->WorldSettingsClass->GetFName();
@@ -837,6 +869,10 @@ void UWorld::RepairWorldSettings()
 		// Re-sort actor list as we just shuffled things around.
 		PersistentLevel->SortActorList();
 
+		if (bClearOwningWorld)
+		{
+			PersistentLevel->OwningWorld = nullptr;
+		}
 	}
 	check(GetWorldSettings());
 }
@@ -2272,6 +2308,7 @@ UWorld* UWorld::DuplicateWorldForPIE(const FString& PackageName, UWorld* OwningW
 
 	// Set up string asset reference fixups
 	TArray<FString> PackageNamesBeingDuplicatedForPIE;
+	PackageNamesBeingDuplicatedForPIE.Add(PrefixedLevelName);
 	if ( OwningWorld )
 	{
 		const FString PlayWorldMapName = ConvertToPIEPackageName(OwningWorld->GetOutermost()->GetName(), WorldContext.PIEInstance);
@@ -2283,7 +2320,7 @@ UWorld* UWorld::DuplicateWorldForPIE(const FString& PackageName, UWorld* OwningW
 			if (StreamingLevel)
 			{
 				const FString StreamingLevelPIEName = UWorld::ConvertToPIEPackageName(StreamingLevel->GetWorldAssetPackageName(), WorldContext.PIEInstance);
-				PackageNamesBeingDuplicatedForPIE.Add(StreamingLevelPIEName);
+				PackageNamesBeingDuplicatedForPIE.AddUnique(StreamingLevelPIEName);
 			}
 		}
 	}
@@ -2635,6 +2672,71 @@ bool UWorld::AllowLevelLoadRequests()
 	return true;
 }
 
+bool UWorld::HandleDemoScrubCommand(const TCHAR* Cmd, FOutputDevice& Ar, UWorld* InWorld)
+{
+	FString TimeString;
+	if (!FParse::Token(Cmd, TimeString, 0))
+	{
+		Ar.Log(TEXT("You must specify a time"));
+	}
+	else if (DemoNetDriver != nullptr && DemoNetDriver->ReplayStreamer.IsValid() && DemoNetDriver->ServerConnection != nullptr && DemoNetDriver->ServerConnection->OwningActor != nullptr)
+	{
+		APlayerController* PlayerController = Cast<APlayerController>(DemoNetDriver->ServerConnection->OwningActor);
+		if (PlayerController != nullptr)
+		{
+			GetWorldSettings()->Pauser = PlayerController->PlayerState;
+			const uint32 Time = FCString::Atoi(*TimeString);
+			DemoNetDriver->GotoTimeInSeconds(Time);
+		}
+	}
+	return true;
+}
+
+bool UWorld::HandleDemoPauseCommand(const TCHAR* Cmd, FOutputDevice& Ar, UWorld* InWorld)
+{
+	FString TimeString;
+
+	AWorldSettings* WorldSettings = GetWorldSettings();
+	check(WorldSettings != nullptr);
+
+	if (WorldSettings->Pauser == nullptr)
+	{
+		if (DemoNetDriver != nullptr && DemoNetDriver->ServerConnection != nullptr && DemoNetDriver->ServerConnection->OwningActor != nullptr)
+		{
+			APlayerController* PlayerController = Cast<APlayerController>(DemoNetDriver->ServerConnection->OwningActor);
+			if (PlayerController != nullptr)
+			{
+				WorldSettings->Pauser = PlayerController->PlayerState;
+			}
+		}
+	}
+	else
+	{
+		WorldSettings->Pauser = nullptr;
+	}
+	return true;
+}
+
+bool UWorld::HandleDemoSpeedCommand(const TCHAR* Cmd, FOutputDevice& Ar, UWorld* InWorld)
+{
+	FString TimeString;
+
+	AWorldSettings* WorldSettings = GetWorldSettings();
+	check(WorldSettings != nullptr);
+
+	FString SpeedString;
+	if (!FParse::Token(Cmd, SpeedString, 0))
+	{
+		Ar.Log(TEXT("You must specify a speed in the form of a float"));
+	}
+	else
+	{
+		const float Speed = FCString::Atof(*SpeedString);
+		WorldSettings->DemoPlayTimeDilation = Speed;
+	}
+	return true;
+}
+
 bool UWorld::Exec( UWorld* InWorld, const TCHAR* Cmd, FOutputDevice& Ar )
 {
 	if( FParse::Command( &Cmd, TEXT("TRACETAG") ) )
@@ -2660,6 +2762,18 @@ bool UWorld::Exec( UWorld* InWorld, const TCHAR* Cmd, FOutputDevice& Ar )
 	else if( FParse::Command( &Cmd, TEXT("DEMOSTOP") ) )
 	{		
 		return HandleDemoStopCommand( Cmd, Ar, InWorld );
+	}
+	else if (FParse::Command(&Cmd, TEXT("DEMOSCRUB")))
+	{
+		return HandleDemoScrubCommand(Cmd, Ar, InWorld);
+	}
+	else if (FParse::Command(&Cmd, TEXT("DEMOPAUSE")))
+	{
+		return HandleDemoPauseCommand(Cmd, Ar, InWorld);
+	}
+	else if (FParse::Command(&Cmd, TEXT("DEMOSPEED")))
+	{
+		return HandleDemoSpeedCommand(Cmd, Ar, InWorld);
 	}
 	else if( ExecPhysCommands( Cmd, &Ar, InWorld ) )
 	{
@@ -2846,16 +2960,7 @@ bool UWorld::SetGameMode(const FURL& InURL)
 
 		if ( !GameClass )
 		{
-			if( GIsAutomationTesting )
-			{
-				// fall back to raw GameMode if Automation Testing, as the shared engine maps were not designed to use what could be any developer default GameMode
-				GameClass = AGameMode::StaticClass();
-			}
-			else
-			{
-				// fall back to overall default game type
-				GameClass = StaticLoadClass(AGameMode::StaticClass(), NULL, *UGameMapsSettings::GetGlobalDefaultGameMode(), NULL, LOAD_None, NULL);
-			}
+			GameClass = StaticLoadClass(AGameMode::StaticClass(), NULL, *UGameMapsSettings::GetGlobalDefaultGameMode(), NULL, LOAD_None, NULL);
 		}
 
 		if ( !GameClass ) 
@@ -3357,7 +3462,7 @@ void UWorld::SetPhysicsScene(FPhysScene* InScene)
 	// Clear world pointer in old FPhysScene (if there is one)
 	if(PhysicsScene != NULL)
 	{
-		PhysicsScene->OwningWorld = NULL;
+		PhysicsScene->SetOwningWorld(nullptr);
 		delete PhysicsScene;
 	}
 
@@ -3367,7 +3472,7 @@ void UWorld::SetPhysicsScene(FPhysScene* InScene)
 	// Set pointer in scene to know which world its coming from
 	if(PhysicsScene != NULL)
 	{
-		PhysicsScene->OwningWorld = this;
+		PhysicsScene->SetOwningWorld(this);
 	}
 }
 
@@ -3579,7 +3684,7 @@ void UWorld::NotifyAcceptedConnection( UNetConnection* Connection )
 {
 	check(NetDriver!=NULL);
 	check(NetDriver->ServerConnection==NULL);
-	UE_LOG(LogNet, Log, TEXT("Open %s %s %s"), *GetName(), FPlatformTime::StrTimestamp(), *Connection->LowLevelGetRemoteAddress() );
+	UE_LOG(LogNet, Log, TEXT("NotifyAcceptedConnection: Name: %s, TimeStamp: %s, %s"), *GetName(), FPlatformTime::StrTimestamp(), *Connection->Describe() );
 	NETWORK_PROFILER(GNetworkProfiler.TrackEvent(TEXT("OPEN"), *(GetName() + TEXT(" ") + Connection->LowLevelGetRemoteAddress())));
 }
 
@@ -3598,6 +3703,13 @@ bool UWorld::NotifyAcceptingChannel( UChannel* Channel )
 		{
 			// Actor channel.
 			//UE_LOG(LogWorld, Log,  "Client accepting actor channel" );
+			return 1;
+		}
+		else if (Channel->ChType == CHTYPE_Voice)
+		{
+			// Accept server requests to open a voice channel, allowing for custom voip implementations
+			// which utilize multiple server controlled voice channels.
+			//UE_LOG(LogNet, Log,  "Client accepting voice channel" );
 			return 1;
 		}
 		else
@@ -3644,7 +3756,7 @@ void UWorld::WelcomePlayer(UNetConnection* Connection)
 	if (AuthorityGameMode != NULL)
 	{
 		GameName = AuthorityGameMode->GetClass()->GetPathName();
-		RedirectURL = AuthorityGameMode->GetRedirectURL(LevelName);
+		AuthorityGameMode->GameWelcomePlayer(Connection, RedirectURL);
 	}
 
 	FNetControlMessage<NMT_Welcome>::Send(Connection, LevelName, GameName, RedirectURL);
@@ -3755,6 +3867,8 @@ void UWorld::NotifyControlMessage(UNetConnection* Connection, uint8 MessageType,
 					FNetControlMessage<NMT_Upgrade>::Send(Connection, LocalNetworkVersion);
 					Connection->FlushNet(true);
 					Connection->Close();
+
+					PerfCountersIncrement(TEXT("ClosedConnectionsDueToIncompatibleVersion"));
 				}
 				else
 				{
@@ -4845,13 +4959,14 @@ UWorld* FSeamlessTravelHandler::Tick()
 			// Make sure "always loaded" sub-levels are fully loaded
 			LoadedWorld->FlushLevelStreaming(EFlushLevelStreamingType::Visibility);
 			
-			UNavigationSystem::InitializeForWorld(LoadedWorld, FNavigationSystemRunMode::GameMode);
-
 			// Note that AI system will be created only if ai-system-creation conditions are met
 			LoadedWorld->CreateAISystem();
 
 			// call initialize functions on everything that wasn't carried over from the old world
 			LoadedWorld->InitializeActorsForPlay(PendingTravelURL, false);
+
+			// calling it after InitializeActorsForPlay has been called to have all potential bounding boxed initialized
+			UNavigationSystem::InitializeForWorld(LoadedWorld, FNavigationSystemRunMode::GameMode);
 
 			// send loading complete notifications for all local players
 			for (FLocalPlayerIterator It(GEngine, LoadedWorld); It; ++It)
@@ -5120,6 +5235,11 @@ bool UWorld::IsPlayInMobilePreview() const
 bool UWorld::IsGameWorld() const
 {
 	return WorldType == EWorldType::Game || WorldType == EWorldType::PIE;
+}
+
+bool UWorld::IsPreviewWorld() const
+{
+	return WorldType == EWorldType::Preview;
 }
 
 bool UWorld::UsesGameHiddenFlags() const
@@ -5402,6 +5522,19 @@ ENetMode UWorld::GetNetMode() const
 
 	// Use NextURL or PendingNetURL to derive NetMode
 	return AttemptDeriveFromURL();
+}
+
+bool UWorld::IsRecordingClientReplay() const
+{
+	if (GetNetDriver() != nullptr && !GetNetDriver()->IsServer())
+	{
+		if (DemoNetDriver != nullptr && DemoNetDriver->IsServer())
+		{
+			return true;
+		}
+	}
+
+	return false;
 }
 
 #if WITH_EDITOR

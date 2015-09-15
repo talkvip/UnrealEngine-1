@@ -17,8 +17,6 @@ using System.Diagnostics;
 [Help("NoLinux", "Toggle to exclude the Linux (PC, 64-bit) host platform, default is Win64+Mac+Linux")]
 [Help("NoPC", "Toggle to exclude the PC host platform, default is Win64+Mac+Linux")]
 [Help("CleanLocal", "delete the local temp storage before we start")]
-[Help("Store=", "Sets the name of the temp storage block, normally, this is built for you.")]
-[Help("StoreSuffix=", "Tacked onto a store name constructed from CL, branch, etc")]
 [Help("TimeIndex=", "An integer used to determine subsets to run based on DependentCISFrequencyQuantumShift")]
 [Help("UserTimeIndex=", "An integer used to determine subsets to run based on DependentCISFrequencyQuantumShift, this one overrides TimeIndex")]
 [Help("PreflightUID=", "A unique integer tag from EC used as part of the tempstorage, builds and label names to distinguish multiple attempts.")]
@@ -26,7 +24,6 @@ using System.Diagnostics;
 [Help("TriggerNode=", "Trigger Nodes to process, -triggernode=Node.")]
 [Help("Game=", "Games to process, -game=Game1+Game2+Game3, if no games or nodes are specified, defaults to all nodes.")]
 [Help("ListOnly", "List Nodes in this branch")]
-[Help("SaveGraph", "Save graph as an xml file")]
 [Help("CommanderJobSetupOnly", "Set up the EC branch info via ectool and quit")]
 [Help("FakeEC", "don't run ectool, rather just do it locally, emulating what EC would have done.")]
 [Help("Fake", "Don't actually build anything, just store a record of success as the build product for each node.")]
@@ -52,7 +49,8 @@ public partial class GUBP : BuildCommand
 	const string FailedTempStorageSuffix = "_Failed";
 	const string SucceededTempStorageSuffix = "_Succeeded";
 
-	class NodeHistory
+    
+    class NodeHistory
 	{
 		public int LastSucceeded = 0;
 		public int LastFailed = 0;
@@ -68,27 +66,10 @@ public partial class GUBP : BuildCommand
 	/// <summary>
 	/// Main entry point for GUBP
 	/// </summary>
-    public override void ExecuteBuild()
+    public override ExitCode Execute()
     {
-		LogConsole("************************* GUBP");
+		Log("************************* GUBP");
 
-		bool bPreflightBuild = false;
-		int PreflightShelveCL = 0;
-        string PreflightShelveCLString = GetEnvVar("uebp_PreflightShelveCL");
-        if ((!String.IsNullOrEmpty(PreflightShelveCLString) && IsBuildMachine) || ParseParam("PreflightTest"))
-        {
-            LogConsole("**** Preflight shelve {0}", PreflightShelveCLString);
-            if (!String.IsNullOrEmpty(PreflightShelveCLString))
-            {
-                PreflightShelveCL = int.Parse(PreflightShelveCLString);
-                if (PreflightShelveCL < 2000000)
-                {
-                    throw new AutomationException(String.Format( "{0} does not look like a CL", PreflightShelveCL));
-                }
-            }
-            bPreflightBuild = true;
-        }
-        
 		List<UnrealTargetPlatform> HostPlatforms = new List<UnrealTargetPlatform>();
         if (!ParseParam("NoPC"))
         {
@@ -103,58 +84,60 @@ public partial class GUBP : BuildCommand
 			HostPlatforms.Add(UnrealTargetPlatform.Linux);
 		}
 
-        string StoreName = ParseParamValue("Store");
-        string StoreSuffix = ParseParamValue("StoreSuffix", "");
-
-		string PreflightMangleSuffix = "";
-        if (bPreflightBuild)
+	    if(ParseParam("CleanLocal"))
         {
-            int PreflightUID = ParseParamInt("PreflightUID", 0);
-            PreflightMangleSuffix = String.Format("-PF-{0}-{1}", PreflightShelveCL, PreflightUID);
-            StoreSuffix = StoreSuffix + PreflightMangleSuffix;
+            TempStorage.DeleteLocalTempStorage();
         }
-        int CL = ParseParamInt("CL", 0);
-        bool bCleanLocalTempStorage = ParseParam("CleanLocal");
+
         bool bSkipTriggers = ParseParam("SkipTriggers");
         bool bFake = ParseParam("fake");
         bool bFakeEC = ParseParam("FakeEC");
 
-        bool bSaveSharedTempStorage = false;
+        bool bSaveSharedTempStorage = P4Enabled && (IsBuildMachine || GlobalCommandLine.UseLocalBuildStorage);
 
-        bool LocalOnly = true;
-        string CLString = "";
-        if (String.IsNullOrEmpty(StoreName))
+        // Get the branch hacker options.
+        string BranchName = P4Enabled ? P4Env.BuildRootP4 : ParseParamValue("BranchName", "");
+        GUBPBranchHacker.BranchOptions BranchOptions = GetBranchOptions(BranchName);
+
+        // encapsulate the logic and temp vars to determine the job info.
+        // Ensures the temp vars don't escape the scope to be used later.
+        Func<JobInfo> GetJobInfo = () =>
         {
-            if (P4Enabled)
+            int PreflightShelveCL = 0;
+            int PreflightUID = 0;
+            string PreflightShelveCLString = GetEnvVar("uebp_PreflightShelveCL");
+            // We must be passed a valid shelve and be a build machine (or be running a preflight test) to be a valid preflight.
+            if (!string.IsNullOrEmpty(PreflightShelveCLString) && (IsBuildMachine || ParseParam("PreflightTest")))
             {
-                if (CL == 0)
+                Log("**** Preflight shelve {0}", PreflightShelveCLString);
+                PreflightShelveCL = int.Parse(PreflightShelveCLString);
+                if (PreflightShelveCL < 2000000)
                 {
-                    CL = P4Env.Changelist;
+                    throw new AutomationException("{0} does not look like a CL", PreflightShelveCL);
                 }
-                CLString = String.Format("{0}", CL);
-                StoreName = P4Env.BuildRootEscaped + "-" + CLString;
-                bSaveSharedTempStorage = CommandUtils.IsBuildMachine;
-                LocalOnly = false;
+                PreflightUID = ParseParamInt("PreflightUID", 0);
             }
-            else
-            {
-                StoreName = "TempLocal";
-                bSaveSharedTempStorage = false;
-            }
-        }
-        StoreName = StoreName + StoreSuffix;
-        if (bFakeEC)
-        {
-            LocalOnly = true;
-        } 
+            return new JobInfo(
+                BranchName,
+                P4Enabled ? P4Env.BuildRootEscaped : "NoP4",
+                BranchOptions.RootNameForTempStorage ?? "UE4",
+                P4Enabled ? ParseParamInt("CL", P4Env.Changelist) : 0,
+                PreflightShelveCL, 
+                PreflightUID);
+        };
+
+        var JobInfo = GetJobInfo();
+
+        bool LocalOnly = !P4Enabled || bFakeEC;
+
         if (bSaveSharedTempStorage)
         {
-            if (!TempStorage.HaveSharedTempStorage(true))
+            if (!TempStorage.IsSharedTempStorageAvailable(true))
             {
-                throw new AutomationException("Request to save to temp storage, but {0} is unavailable.", TempStorage.UE4TempStorageDirectory());
+                throw new AutomationException("Request to save to shared temp storage, but shared temp storage is unavailable or does not exist.");
             }
         }
-        else if (!LocalOnly && !TempStorage.HaveSharedTempStorage(false))
+        else if (!LocalOnly && !TempStorage.IsSharedTempStorageAvailable(false))
         {
             LogWarning("Looks like we want to use shared temp storage, but since we don't have it, we won't use it.");
             LocalOnly = true;
@@ -168,20 +151,14 @@ public partial class GUBP : BuildCommand
 			ExplicitTriggerName = ParseParamValue("TriggerNode", "");
 		}
 
-		List<BuildNode> AllNodes;
-		List<AggregateNode> AllAggregates;
 		int TimeQuantum = 20;
-		AddNodesForBranch(CL, HostPlatforms, bPreflightBuild, PreflightMangleSuffix, out AllNodes, out AllAggregates, ref TimeQuantum);
+		BuildGraphTemplate GraphTemplate = new BuildGraphTemplate();
 
-		LinkGraph(AllAggregates, AllNodes);
-		FindControllingTriggers(AllNodes);
-		FindCompletionState(AllNodes, StoreName, LocalOnly);
-		ComputeDependentFrequencies(AllNodes);
+        AddNodesForBranch(HostPlatforms, JobInfo, BranchOptions, out GraphTemplate.BuildNodeTemplates, out GraphTemplate.AggregateNodeTemplates, ref TimeQuantum);
 
-        if (bCleanLocalTempStorage)  // shared temp storage can never be wiped
-        {
-            TempStorage.DeleteLocalTempStorageManifests(CmdEnv);
-        }
+		BuildGraph Graph = new BuildGraph(GraphTemplate);
+		FindCompletionState(Graph.BuildNodes, JobInfo, LocalOnly);
+		ComputeDependentFrequencies(Graph.BuildNodes);
 
 		int TimeIndex = ParseParamInt("TimeIndex", 0);
 		if (TimeIndex == 0)
@@ -194,16 +171,19 @@ public partial class GUBP : BuildCommand
 			Log("Setting TimeIndex to {0}", TimeIndex);
 		}
 
-		HashSet<BuildNode> NodesToDo = ParseNodesToDo(AllNodes, AllAggregates);
+		HashSet<BuildNode> NodesToDo = ParseNodesToDo(Graph.BuildNodes, Graph.AggregateNodes);
 		CullNodesForTimeIndex(NodesToDo, TimeIndex);
-		CullNodesForPreflight(NodesToDo, bPreflightBuild);
+        if (JobInfo.IsPreflight)
+        {
+            CullNodesForPreflight(NodesToDo);
+        }
 
 		TriggerNode ExplicitTrigger = null;
 		if (CommanderSetup)
         {
             if (!String.IsNullOrEmpty(ExplicitTriggerName))
             {
-                foreach (TriggerNode Trigger in AllNodes.OfType<TriggerNode>())
+                foreach (TriggerNode Trigger in Graph.BuildNodes.OfType<TriggerNode>())
                 {
 					if (Trigger.Name.Equals(ExplicitTriggerName, StringComparison.InvariantCultureIgnoreCase))
                     {
@@ -221,7 +201,7 @@ public partial class GUBP : BuildCommand
             {
                 if (bSkipTriggers)
                 {
-                    foreach (TriggerNode Trigger in AllNodes.OfType<TriggerNode>())
+                    foreach (TriggerNode Trigger in Graph.BuildNodes.OfType<TriggerNode>())
                     {
 						Trigger.Activate();
                     }
@@ -233,7 +213,7 @@ public partial class GUBP : BuildCommand
 
 		List<TriggerNode> UnfinishedTriggers = FindUnfinishedTriggers(bSkipTriggers, ExplicitTrigger, OrderedToDo);
 
-		PrintNodes(this, OrderedToDo, AllAggregates, UnfinishedTriggers, TimeQuantum);
+		PrintNodes(this, OrderedToDo, Graph.AggregateNodes, UnfinishedTriggers, TimeQuantum);
 
         //check sorting
 		CheckSortOrder(OrderedToDo);
@@ -243,100 +223,34 @@ public partial class GUBP : BuildCommand
 		string ShowHistoryParam = ParseParamValue("ShowHistory", null);
 		if(ShowHistoryParam != null)
 		{
-			BuildNode Node = AllNodes.FirstOrDefault(x => x.Name.Equals(ShowHistoryParam, StringComparison.InvariantCultureIgnoreCase));
+			BuildNode Node = Graph.BuildNodes.FirstOrDefault(x => x.Name.Equals(ShowHistoryParam, StringComparison.InvariantCultureIgnoreCase));
 			if(Node == null)
 			{
 				throw new AutomationException("Couldn't find node {0}", ShowHistoryParam);
 			}
 
-			NodeHistory History = FindNodeHistory(Node, CLString, StoreName);
+            NodeHistory History = FindNodeHistory(Node, JobInfo);
 			if(History == null)
 			{
 				throw new AutomationException("Couldn't get history for {0}", ShowHistoryParam);
 			}
 
 			PrintDetailedChanges(History, P4Env.Changelist);
+			return ExitCode.Success;
 		}
 		else
 		{
-			string FakeFail = ParseParamValue("FakeFail");
 			if(CommanderSetup)
 			{
-				DoCommanderSetup(EC, AllNodes, AllAggregates, OrderedToDo, TimeIndex, TimeQuantum, bSkipTriggers, bFake, bFakeEC, CLString, ExplicitTrigger, UnfinishedTriggers, FakeFail, bPreflightBuild);
+				return DoCommanderSetup(EC, Graph.BuildNodes, Graph.AggregateNodes, OrderedToDo, TimeIndex, TimeQuantum, bSkipTriggers, bFake, bFakeEC, ExplicitTrigger, UnfinishedTriggers, JobInfo.IsPreflight);
 			}
-			else if(ParseParam("SaveGraph"))
+			else if(ParseParam("ListOnly"))
 			{
-				SaveGraphVisualization(OrderedToDo);
+				return ExitCode.Success;
 			}
-			else if(!ParseParam("ListOnly"))
+			else
 			{
-				ExecuteNodes(EC, OrderedToDo, bFake, bFakeEC, bSaveSharedTempStorage, CLString, StoreName, FakeFail);
-			}
-		}
-		PrintRunTime();
-	}
-
-	/// <summary>
-	/// Recursively update the ControllingTriggers array for each of the nodes passed in. 
-	/// </summary>
-	/// <param name="NodesToDo">Nodes to update</param>
-	static void FindControllingTriggers(IEnumerable<BuildNode> NodesToDo)
-	{
-		foreach(BuildNode NodeToDo in NodesToDo)
-		{
-			FindControllingTriggers(NodeToDo);
-		}
-	}
-
-	/// <summary>
-	/// Recursively find the controlling triggers for the given node.
-	/// </summary>
-	/// <param name="NodeToDo">Node to find the controlling triggers for</param>
-    static void FindControllingTriggers(BuildNode NodeToDo)
-    {
-		if(NodeToDo.ControllingTriggers == null)
-		{
-			NodeToDo.ControllingTriggers = new TriggerNode[0];
-
-			// Find all the dependencies of this node
-			List<BuildNode> AllDependencies = new List<BuildNode>();
-			AllDependencies.AddRange(NodeToDo.Dependencies);
-			AllDependencies.AddRange(NodeToDo.PseudoDependencies);
-
-			// Find the immediate trigger controlling this one
-			List<TriggerNode> PreviousTriggers = new List<TriggerNode>();
-			foreach (BuildNode Dependency in AllDependencies)
-			{
-				FindControllingTriggers(Dependency);
-
-				TriggerNode PreviousTrigger = Dependency as TriggerNode;
-				if(PreviousTrigger == null && Dependency.ControllingTriggers.Length > 0)
-				{
-					PreviousTrigger = Dependency.ControllingTriggers.Last();
-				}
-				
-				if(PreviousTrigger != null && !PreviousTriggers.Contains(PreviousTrigger))
-				{
-					PreviousTriggers.Add(PreviousTrigger);
-				}
-			}
-
-			// Remove previous triggers from the list that aren't the last in the chain. If there's a trigger chain of X.Y.Z, and a node has dependencies behind all three, the only trigger we care about is Z.
-			PreviousTriggers.RemoveAll(x => PreviousTriggers.Any(y => y.ControllingTriggers.Contains(x)));
-
-			// We only support one direct controlling trigger at the moment (though it may be in a chain with other triggers)
-			if(PreviousTriggers.Count > 1)
-			{
-				throw new AutomationException("Node {0} has multiple controlling triggers: {1}", NodeToDo.Name, String.Join(", ", PreviousTriggers.Select(x => x.Name)));
-			}
-
-			// Update the list of controlling triggers
-			if (PreviousTriggers.Count == 1)
-			{
-				List<TriggerNode> ControllingTriggers = new List<TriggerNode>();
-				ControllingTriggers.AddRange(PreviousTriggers[0].ControllingTriggers);
-				ControllingTriggers.Add(PreviousTriggers[0]);
-				NodeToDo.ControllingTriggers = ControllingTriggers.ToArray();
+				return ExecuteNodes(EC, OrderedToDo, bFake, bFakeEC, bSaveSharedTempStorage, JobInfo);
 			}
 		}
 	}
@@ -366,41 +280,37 @@ public partial class GUBP : BuildCommand
 	{
 		foreach(BuildNode Node in Nodes)
 		{
-			foreach(BuildNode IndirectDependency in Node.AllIndirectDependencies)
+			foreach(BuildNode OrderDependency in Node.OrderDependencies)
 			{
-				Node.FrequencyShift = Math.Max(Node.FrequencyShift, IndirectDependency.FrequencyShift);
+				Node.FrequencyShift = Math.Max(Node.FrequencyShift, OrderDependency.FrequencyShift);
 			}
 		}
 	}
 
-	static void FindCompletionState(IEnumerable<BuildNode> NodesToDo, string StoreName, bool LocalOnly)
+    static void FindCompletionState(IEnumerable<BuildNode> NodesToDo, JobInfo JobInfo, bool LocalOnly)
 	{
 		foreach(BuildNode NodeToDo in NodesToDo)
 		{
-			string NodeStoreName = StoreName + "-" + NodeToDo.Name;
-			string GameNameIfAny = NodeToDo.Node.GameNameIfAnyForTempStorage();
+            // Construct the full temp storage node info
+            var TempStorageNodeInfo = new TempStorageNodeInfo(JobInfo, NodeToDo.Name);
 
 			if (LocalOnly)
 			{
-				NodeToDo.IsComplete = TempStorage.LocalTempStorageExists(CmdEnv, NodeStoreName, bQuiet : true);
+                NodeToDo.IsComplete = TempStorage.LocalTempStorageManifestExists(TempStorageNodeInfo, bQuiet: true);
 			}
 			else
 			{
-				NodeToDo.IsComplete = TempStorage.TempStorageExists(CmdEnv, NodeStoreName, GameNameIfAny, bQuiet: true);
-				if(GameNameIfAny != "" && !NodeToDo.IsComplete)
-				{
-					NodeToDo.IsComplete = TempStorage.TempStorageExists(CmdEnv, NodeStoreName, "", bQuiet: true);
-				}
+                NodeToDo.IsComplete = TempStorage.TempStorageExists(TempStorageNodeInfo, bLocalOnly: false, bQuiet: true);
 			}
 
             LogVerbose("** {0}", NodeToDo.Name);
 			if (!NodeToDo.IsComplete)
 			{
-				LogVerbose("***** GUBP Trigger Node was already triggered {0} -> {1} : {2}", NodeToDo.Name, GameNameIfAny, NodeStoreName);
+                LogVerbose("***** GUBP Trigger Node was already triggered {0} -> {1} : {2}", NodeToDo.Name, JobInfo.RootNameForTempStorage, TempStorageNodeInfo.GetRelativeDirectory());
 			}
 			else
 			{
-				LogVerbose("***** GUBP Trigger Node was NOT yet triggered {0} -> {1} : {2}", NodeToDo.Name, GameNameIfAny, NodeStoreName);
+                LogVerbose("***** GUBP Trigger Node was NOT yet triggered {0} -> {1} : {2}", NodeToDo.Name, JobInfo.RootNameForTempStorage, TempStorageNodeInfo.GetRelativeDirectory());
 			}
 		}
     }
@@ -440,7 +350,8 @@ public partial class GUBP : BuildCommand
 	/// <param name="History">History for this node</param>
     static void PrintDetailedChanges(NodeHistory History, int CurrentCL)
     {
-        DateTime StartTime = DateTime.UtcNow;
+		Log("**** Changes since last succeeded *****************************");
+		Log("");
 
 		// Find all the changelists that we're interested in
 		SortedSet<int> BuildChanges = new SortedSet<int>();
@@ -449,43 +360,48 @@ public partial class GUBP : BuildCommand
 
 		// Find all the changelists that we're interested in
         List<P4Connection.ChangeRecord> ChangeRecords = GetSourceChangeRecords(BuildChanges.First(), BuildChanges.Last());
+		ChangeRecords.Reverse();
 
 		// Print all the changes in the set
-		int LastCL = BuildChanges.First();
-		foreach(int BuildCL in BuildChanges)
+		int[] BuildChangesArray = BuildChanges.ToArray();
+		for(int Idx = BuildChangesArray.Length - 1; Idx >= 0; Idx--)
 		{
-			// Show all the changes in this range
-			foreach(P4Connection.ChangeRecord Record in ChangeRecords.Where(x => x.CL > LastCL && x.CL <= BuildCL))
-			{
-				string[] Lines = Record.Summary.Split(new char[]{ '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-				Log("             {0} {1} {2}", Record.CL, Record.UserEmail, (Lines.Length > 0)? Lines[0] : "");
-			}
+			int BuildCL = BuildChangesArray[Idx];
 
 			// Show the status of this build
 			string BuildStatus;
 			if(BuildCL == CurrentCL)
 			{
-				BuildStatus = "this sync";
+				BuildStatus = "THIS CHANGE";
 			}
-            else if (History.AllSucceeded.Contains(BuildCL))
-            {
-				BuildStatus = "built";
-            }
             else if (History.AllFailed.Contains(BuildCL))
             {
 				BuildStatus = "FAILED";
             }
+            else if (History.AllSucceeded.Contains(BuildCL))
+            {
+				BuildStatus = "SUCCEEDED";
+            }
 			else
 			{
-				BuildStatus = "running";
+				BuildStatus = "still running";
 			}
 			Log(" {0} {1} {2}", (BuildCL == CurrentCL)? ">>>>" : "    ", BuildCL, BuildStatus.ToString());
 
-			// Update the last CL now that we've output this one
-			LastCL = BuildCL;
+			// Show all the changes in this range
+			if(Idx > 0)
+			{
+				int PrevCL = BuildChangesArray[Idx - 1];
+				foreach(P4Connection.ChangeRecord Record in ChangeRecords.Where(x => x.CL > PrevCL && x.CL <= BuildCL))
+				{
+					string[] Lines = Record.Summary.Split(new char[]{ '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+					Log("             {0} {1} {2}", Record.CL, Record.UserEmail, (Lines.Length > 0)? Lines[0] : "");
+				}
+			}
 		}
 
-        Log("Took {0:0.0}s to get P4 history", (DateTime.UtcNow - StartTime).TotalSeconds);
+		Log("");
+		Log("***************************************************************");
     }
 
     void PrintNodes(GUBP bp, List<BuildNode> Nodes, IEnumerable<AggregateNode> Aggregates, List<TriggerNode> UnfinishedTriggers, int TimeQuantum)
@@ -493,7 +409,7 @@ public partial class GUBP : BuildCommand
 		AggregateNode[] MatchingAggregates = Aggregates.Where(x => x.Dependencies.All(y => Nodes.Contains(y))).ToArray();
 		if (MatchingAggregates.Length > 0)
 		{
-			LogConsole("*********** Aggregates");
+			Log("*********** Aggregates");
 			foreach (AggregateNode Aggregate in MatchingAggregates.OrderBy(x => x.Name))
 			{
 				StringBuilder Note = new StringBuilder("    " + Aggregate.Name);
@@ -501,7 +417,7 @@ public partial class GUBP : BuildCommand
 				{
 					Note.Append(" (promotable)");
 				}
-				LogConsole(Note.ToString());
+				Log(Note.ToString());
 			}
 		}
 
@@ -510,7 +426,7 @@ public partial class GUBP : BuildCommand
         string LastControllingTrigger = "";
         string LastAgentGroup = "";
 
-		LogConsole("*********** Desired And Dependent Nodes, in order.");
+		Log("*********** Desired And Dependent Nodes, in order.");
         foreach (BuildNode NodeToDo in Nodes)
         {
             string MyControllingTrigger = NodeToDo.ControllingTriggerDotName;
@@ -531,13 +447,13 @@ public partial class GUBP : BuildCommand
                             Finished = "(already triggered)";
                         }
                     }
-					LogConsole("  Controlling Trigger: {0}    {1}", MyControllingTrigger, Finished);
+					Log("  Controlling Trigger: {0}    {1}", MyControllingTrigger, Finished);
                 }
             }
 
 			if (NodeToDo.AgentSharingGroup != LastAgentGroup && NodeToDo.AgentSharingGroup != "")
             {
-				LogConsole("    Agent Group: {0}", NodeToDo.AgentSharingGroup);
+				Log("    Agent Group: {0}", NodeToDo.AgentSharingGroup);
             }
             LastAgentGroup = NodeToDo.AgentSharingGroup;
 
@@ -561,7 +477,7 @@ public partial class GUBP : BuildCommand
 			}
 
             string Agent = NodeToDo.AgentRequirements;
-			if(ParseParamValue("AgentOverride") != "" && !NodeToDo.Node.GetFullName().Contains("Mac"))
+			if(ParseParamValue("AgentOverride") != "" && !NodeToDo.Name.Contains("Mac"))
 			{
 				Agent = ParseParamValue("AgentOverride");
 			}
@@ -577,102 +493,20 @@ public partial class GUBP : BuildCommand
             {
 				Builder.AppendFormat(" {0}", String.Join(" ", NodeToDo.RecipientsForFailureEmails));
             }
-			LogConsole(Builder.ToString());
+			Log(Builder.ToString());
 
             if (bShowDependencies)
             {
-                foreach (BuildNode Dep in NodeToDo.Dependencies)
+				foreach (BuildNode Dep in NodeToDo.InputDependencies.OrderBy(x => x.Name))
                 {
-					LogConsole("            dep> {0}", Dep.Name);
+					Log("            dep> {0}", Dep.Name);
                 }
-                foreach (BuildNode Dep in NodeToDo.PseudoDependencies)
-                {
-					LogConsole("           pdep> {0}", Dep.Name);
-                }
+				foreach (BuildNode Dep in NodeToDo.OrderDependencies.OrderBy(x => x.Name))
+				{
+					Log("           pdep> {0}", Dep.Name);
+				}
             }
         }
-    }
-
-	/// <summary>
-	/// Exports the build graph as a GEXF file, for visualization in an external tool (eg. Gephi).
-	/// </summary>
-	/// <param name="Nodes">The nodes in the graph</param>
-	static void SaveGraphVisualization(IEnumerable<BuildNode> Nodes)
-	{
-		// Create a graph node for each GUBP node in the graph
-		List<GraphNode> GraphNodes = new List<GraphNode>();
-		Dictionary<BuildNode, GraphNode> NodeToGraphNodeMap = new Dictionary<BuildNode, GraphNode>();
-		foreach(BuildNode Node in Nodes)
-		{
-			GraphNode GraphNode = new GraphNode();
-			GraphNode.Id = NodeToGraphNodeMap.Count;
-			GraphNode.Label = Node.Name;
-
-			NodeToGraphNodeMap.Add(Node, GraphNode);
-			GraphNodes.Add(GraphNode);
-		}
-
-		// Connect everything together
-		List<GraphEdge> GraphEdges = new List<GraphEdge>();
-		foreach(KeyValuePair<BuildNode, GraphNode> NodeToGraphNodePair in NodeToGraphNodeMap)
-		{
-			foreach (BuildNode Dependency in NodeToGraphNodePair.Key.Dependencies)
-			{
-				GraphNode PrerequisiteFileGraphNode;
-				if (NodeToGraphNodeMap.TryGetValue(Dependency, out PrerequisiteFileGraphNode))
-				{
-					// Connect a file our action is dependent on, to our action itself
-					GraphEdge NewGraphEdge = new GraphEdge();
-
-					NewGraphEdge.Id = GraphEdges.Count;
-					NewGraphEdge.Source = PrerequisiteFileGraphNode;
-					NewGraphEdge.Target = NodeToGraphNodePair.Value;
-					NewGraphEdge.Color = new GraphColor() { R = 0.0f, G = 0.0f, B = 0.0f, A = 0.75f };
-
-					GraphEdges.Add(NewGraphEdge);
-				}
-
-			}
-			foreach (BuildNode Dependency in NodeToGraphNodePair.Key.PseudoDependencies)
-			{
-				GraphNode PrerequisiteFileGraphNode;
-				if (NodeToGraphNodeMap.TryGetValue(Dependency, out PrerequisiteFileGraphNode))
-				{
-					// Connect a file our action is dependent on, to our action itself
-					GraphEdge NewGraphEdge = new GraphEdge();
-
-					NewGraphEdge.Id = GraphEdges.Count;
-					NewGraphEdge.Source = PrerequisiteFileGraphNode;
-					NewGraphEdge.Target = NodeToGraphNodePair.Value;
-					NewGraphEdge.Color = new GraphColor() { R = 0.0f, G = 0.0f, B = 0.0f, A = 0.25f };
-
-					GraphEdges.Add(NewGraphEdge);
-				}
-
-			}
-		}
-
-		// Export the graph definition
-		string Filename = CommandUtils.CombinePaths(CommandUtils.CmdEnv.LogFolder, "GubpGraph.gexf");
-		LogConsole("Writing graph to {0}", Filename);
-		GraphVisualization.WriteGraphFile(Filename, "GUBP Nodes", NodeToGraphNodeMap.Values.ToList(), GraphEdges);
-		LogConsole("Wrote graph to {0}", Filename);
-	 }
-
-    static List<int> ConvertCLToIntList(List<string> Strings)
-    {
-        List<int> Result = new List<int>();
-        foreach (string ThisString in Strings)
-        {
-            int ThisInt = int.Parse(ThisString);
-            if (ThisInt < 1960000 || ThisInt > 3000000)
-            {
-				LogConsole("CL {0} appears to be out of range", ThisInt);
-            }
-            Result.Add(ThisInt);
-        }
-        Result.Sort();
-        return Result;
     }
 
     int CountZeros(int Num)
@@ -696,9 +530,7 @@ public partial class GUBP : BuildCommand
 
     static List<BuildNode> TopologicalSort(HashSet<BuildNode> NodesToDo, BuildNode ExplicitTrigger, bool SubSort, bool DoNotConsiderCompletion)
     {
-        DateTime StartTime = DateTime.UtcNow;
-
-        List<BuildNode> OrdereredToDo = new List<BuildNode>();
+        List<BuildNode> OrderedToDo = new List<BuildNode>();
 
         Dictionary<string, List<BuildNode>> SortedAgentGroupChains = new Dictionary<string, List<BuildNode>>();
         if (!SubSort)
@@ -732,7 +564,6 @@ public partial class GUBP : BuildCommand
 					throw new AutomationException("Agent sharing group '{0}' has multiple controlling triggers: {1}", Chain.Key, Triggers);
 				}
 			}
-			LogConsole("***************Done with recursion");
         }
 
         // here we do a topological sort of the nodes, subject to a lexographical and priority sort
@@ -762,7 +593,7 @@ public partial class GUBP : BuildCommand
                         ExaminedAgentGroups.Add(NodeToDo.AgentSharingGroup);
                         foreach (BuildNode ChainNode in SortedAgentGroupChains[NodeToDo.AgentSharingGroup])
                         {
-                            foreach (BuildNode Dep in ChainNode.Dependencies)
+                            foreach (BuildNode Dep in ChainNode.InputDependencies)
                             {
                                 if (!SortedAgentGroupChains[NodeToDo.AgentSharingGroup].Contains(Dep) && NodesToDo.Contains(Dep))
                                 {
@@ -775,7 +606,7 @@ public partial class GUBP : BuildCommand
                                 NonReadyAgentGroups.Add(NodeToDo.AgentSharingGroup);
                                 break;
                             }
-                            foreach (BuildNode Dep in ChainNode.PseudoDependencies)
+                            foreach (BuildNode Dep in ChainNode.OrderDependencies)
                             {
                                 if (!SortedAgentGroupChains[NodeToDo.AgentSharingGroup].Contains(Dep) && NodesToDo.Contains(Dep))
                                 {
@@ -789,7 +620,7 @@ public partial class GUBP : BuildCommand
                 }
                 else
                 {
-                    foreach (BuildNode Dep in NodeToDo.Dependencies)
+                    foreach (BuildNode Dep in NodeToDo.InputDependencies)
                     {
                         if (NodesToDo.Contains(Dep))
                         {
@@ -797,7 +628,7 @@ public partial class GUBP : BuildCommand
                             break;
                         }
                     }
-                    foreach (BuildNode Dep in NodeToDo.PseudoDependencies)
+                    foreach (BuildNode Dep in NodeToDo.OrderDependencies)
                     {
                         if (NodesToDo.Contains(Dep))
                         {
@@ -871,20 +702,20 @@ public partial class GUBP : BuildCommand
                 {
                     foreach (BuildNode ChainNode in SortedAgentGroupChains[BestNode.AgentSharingGroup])
                     {
-                        OrdereredToDo.Add(ChainNode);
+                        OrderedToDo.Add(ChainNode);
                         NodesToDo.Remove(ChainNode);
                     }
                 }
                 else
                 {
-                    OrdereredToDo.Add(BestNode);
+                    OrderedToDo.Add(BestNode);
                     NodesToDo.Remove(BestNode);
                 }
             }
 
             if (!bProgressMade && NodesToDo.Count > 0)
             {
-				LogConsole("Cycle in GUBP, could not resolve:");
+				Log("Cycle in GUBP, could not resolve:");
                 foreach (BuildNode NodeToDo in NodesToDo)
                 {
                     string Deps = "";
@@ -892,7 +723,7 @@ public partial class GUBP : BuildCommand
                     {
                         foreach (BuildNode ChainNode in SortedAgentGroupChains[NodeToDo.AgentSharingGroup])
                         {
-                            foreach (BuildNode Dep in ChainNode.Dependencies)
+                            foreach (BuildNode Dep in ChainNode.InputDependencies)
                             {
                                 if (!SortedAgentGroupChains[NodeToDo.AgentSharingGroup].Contains(Dep) && NodesToDo.Contains(Dep))
                                 {
@@ -901,58 +732,50 @@ public partial class GUBP : BuildCommand
                             }
                         }
                     }
-                    foreach (BuildNode Dep in NodeToDo.Dependencies)
+                    foreach (BuildNode Dep in NodeToDo.InputDependencies)
                     {
                         if (NodesToDo.Contains(Dep))
                         {
                             Deps = Deps + Dep.Name + " ";
                         }
                     }
-                    foreach (BuildNode Dep in NodeToDo.PseudoDependencies)
+                    foreach (BuildNode Dep in NodeToDo.OrderDependencies)
                     {
                         if (NodesToDo.Contains(Dep))
                         {
                             Deps = Deps + Dep.Name + " ";
                         }
                     }
-					LogConsole("  {0}    deps: {1}", NodeToDo.Name, Deps);
+					Log("  {0}    deps: {1}", NodeToDo.Name, Deps);
                 }
                 throw new AutomationException("Cycle in GUBP");
             }
         }
-        if (!SubSort)
-        {
-            double BuildDuration = (DateTime.UtcNow - StartTime).TotalMilliseconds;
-			LogConsole("Took {0}s to sort {1} nodes", BuildDuration / 1000, OrdereredToDo.Count);
-        }
 
-        return OrdereredToDo;
+        return OrderedToDo;
     }
 
-    static NodeHistory FindNodeHistory(BuildNode NodeToDo, string CLString, string StoreName)
+    static NodeHistory FindNodeHistory(BuildNode NodeToDo, JobInfo JobInfo)
     {
 		NodeHistory History = null;
 
-        if (!(NodeToDo is TriggerNode) && CLString != "")
+        // Don't get node history on nodes that don't have a valid CL.
+        if (!(NodeToDo is TriggerNode) && JobInfo.Changelist > 0)
         {
-            string GameNameIfAny = NodeToDo.Node.GameNameIfAnyForTempStorage();
-            string NodeStoreWildCard = StoreName.Replace(CLString, "*") + "-" + NodeToDo.Name;
-            History = new NodeHistory();
-
-            History.AllStarted = ConvertCLToIntList(TempStorage.FindTempStorageManifests(CmdEnv, NodeStoreWildCard + StartedTempStorageSuffix, false, true, GameNameIfAny));
-            History.AllSucceeded = ConvertCLToIntList(TempStorage.FindTempStorageManifests(CmdEnv, NodeStoreWildCard + SucceededTempStorageSuffix, false, true, GameNameIfAny));
-            History.AllFailed = ConvertCLToIntList(TempStorage.FindTempStorageManifests(CmdEnv, NodeStoreWildCard + FailedTempStorageSuffix, false, true, GameNameIfAny));
-
-			int CL;
-			int.TryParse(CLString, out CL);
+            History = new NodeHistory
+            {
+                AllStarted = TempStorage.FindMatchingSharedTempStorageNodeCLs(new TempStorageNodeInfo(JobInfo, NodeToDo.Name + StartedTempStorageSuffix)),
+                AllSucceeded = TempStorage.FindMatchingSharedTempStorageNodeCLs(new TempStorageNodeInfo(JobInfo, NodeToDo.Name + SucceededTempStorageSuffix)),
+                AllFailed = TempStorage.FindMatchingSharedTempStorageNodeCLs(new TempStorageNodeInfo(JobInfo, NodeToDo.Name + FailedTempStorageSuffix))
+            };
 
             if (History.AllFailed.Count > 0)
             {
-                History.LastFailed = History.AllFailed.LastOrDefault(x => x < CL);
+                History.LastFailed = History.AllFailed.LastOrDefault(x => x < JobInfo.Changelist);
             }
             if (History.AllSucceeded.Count > 0)
             {
-                History.LastSucceeded = History.AllSucceeded.LastOrDefault(x => x < CL);
+                History.LastSucceeded = History.AllSucceeded.LastOrDefault(x => x < JobInfo.Changelist);
 
                 foreach (int Failed in History.AllFailed)
                 {
@@ -975,7 +798,7 @@ public partial class GUBP : BuildCommand
 
 		return History;
     }
-	void GetFailureEmails(ElectricCommander EC, BuildNode NodeToDo, NodeHistory History, string CLString, string StoreName, bool OnlyLateUpdates = false)
+    void GetFailureEmails(ElectricCommander EC, BuildNode NodeToDo, NodeHistory History, JobInfo JobInfo, bool OnlyLateUpdates = false)
 	{
         string FailCauserEMails = "";
         string EMailNote = "";
@@ -990,10 +813,10 @@ public partial class GUBP : BuildCommand
                 {
                     if (OnlyLateUpdates)
                     {
-						LastNonDuplicateFail = FindLastNonDuplicateFail(NodeToDo, History, CLString, StoreName);
+                        LastNonDuplicateFail = FindLastNonDuplicateFail(NodeToDo, History, JobInfo);
                         if (LastNonDuplicateFail < P4Env.Changelist)
                         {
-							LogConsole("*** Red-after-red spam reduction, changed CL {0} to CL {1} because the errors didn't change.", P4Env.Changelist, LastNonDuplicateFail);
+							Log("*** Red-after-red spam reduction, changed CL {0} to CL {1} because the errors didn't change.", P4Env.Changelist, LastNonDuplicateFail);
                         }
                     }
                 }
@@ -1080,12 +903,11 @@ public partial class GUBP : BuildCommand
         return true;
     }
 
-	int FindLastNonDuplicateFail(BuildNode NodeToDo, NodeHistory History, string CLString, string StoreName)
+    int FindLastNonDuplicateFail(BuildNode NodeToDo, NodeHistory History, JobInfo JobInfo)
     {
         int Result = P4Env.Changelist;
 
-        string GameNameIfAny = NodeToDo.Node.GameNameIfAnyForTempStorage();
-        string NodeStore = StoreName + "-" + NodeToDo.Name + FailedTempStorageSuffix;
+        var TempStorageNodeInfo = new TempStorageNodeInfo(JobInfo, NodeToDo.Name + FailedTempStorageSuffix);
 
         List<int> BackwardsFails = new List<int>(History.AllFailed);
         BackwardsFails.Add(P4Env.Changelist);
@@ -1102,14 +924,14 @@ public partial class GUBP : BuildCommand
             {
                 break;
             }
-            string ThisNodeStore = NodeStore.Replace(CLString, String.Format("{0}", CL));
-            TempStorage.DeleteLocalTempStorage(CmdEnv, ThisNodeStore, true); // these all clash locally, which is fine we just retrieve them from shared
+            // Find any local temp storage manifest for this changelist and delete it.
+            var ThisTempStorageNodeInfo = new TempStorageNodeInfo(JobInfo.CreateWithNewChangelist(CL), TempStorageNodeInfo.NodeStorageName);
+            TempStorage.DeleteLocalTempStorageManifest(ThisTempStorageNodeInfo, true); // these all clash locally, which is fine we just retrieve them from shared
 
             List<string> Files = null;
             try
             {
-                bool WasLocal;
-                Files = TempStorage.RetrieveFromTempStorage(CmdEnv, ThisNodeStore, out WasLocal, GameNameIfAny); // this will fail on our CL if we didn't fail or we are just setting up the branch
+                Files = TempStorage.RetrieveFromTempStorage(ThisTempStorageNodeInfo, CmdEnv.LocalRoot); // this will fail on our CL if we didn't fail or we are just setting up the branch
             }
             catch (Exception)
             {
@@ -1139,161 +961,6 @@ public partial class GUBP : BuildCommand
         }
         return Result;
     }
-
-	/// <summary>
-	/// Resolves the names of each node and aggregates' dependencies, and links them together into the build graph.
-	/// </summary>
-	/// <param name="AggregateNameToInfo">Map of aggregate names to their info objects</param>
-	/// <param name="NodeNameToInfo">Map of node names to their info objects</param>
-	private static void LinkGraph(IEnumerable<AggregateNode> Aggregates, IEnumerable<BuildNode> Nodes)
-	{
-		Dictionary<string, BuildNode> NodeNameToInfo = new Dictionary<string,BuildNode>();
-		foreach(BuildNode Node in Nodes)
-		{
-			NodeNameToInfo.Add(Node.Name, Node);
-		}
-
-		Dictionary<string, AggregateNode> AggregateNameToInfo = new Dictionary<string, AggregateNode>();
-		foreach(AggregateNode Aggregate in Aggregates)
-		{
-			AggregateNameToInfo.Add(Aggregate.Name, Aggregate);
-		}
-
-		int NumErrors = 0;
-		foreach (AggregateNode AggregateNode in AggregateNameToInfo.Values)
-		{
-			LinkAggregate(AggregateNode, AggregateNameToInfo, NodeNameToInfo, ref NumErrors);
-		}
-		foreach (BuildNode BuildNode in NodeNameToInfo.Values)
-		{
-			LinkNode(BuildNode, AggregateNameToInfo, NodeNameToInfo, ref NumErrors);
-		}
-		if(NumErrors > 0)
-		{
-			throw new AutomationException("Failed to link graph ({0} errors).", NumErrors);
-		}
-	}
-
-	/// <summary>
-	/// Resolves the dependency names in an aggregate to NodeInfo instances, filling in the AggregateInfo.Dependenices array. Any referenced aggregates will also be linked, recursively.
-	/// </summary>
-	/// <param name="Aggregate">The aggregate to link</param>
-	/// <param name="AggregateNameToInfo">Map of other aggregate names to their corresponding instance.</param>
-	/// <param name="NodeNameToInfo">Map from node names to their corresponding instance.</param>
-	/// <param name="NumErrors">The number of errors output so far. Incremented if resolving this aggregate fails.</param>
-	private static void LinkAggregate(AggregateNode Aggregate, Dictionary<string, AggregateNode> AggregateNameToInfo, Dictionary<string, BuildNode> NodeNameToInfo, ref int NumErrors)
-	{
-		if (Aggregate.Dependencies == null)
-		{
-			Aggregate.Dependencies = new BuildNode[0];
-
-			HashSet<BuildNode> Dependencies = new HashSet<BuildNode>();
-			foreach (string DependencyName in Aggregate.DependencyNames)
-			{
-				AggregateNode AggregateDependency;
-				if(AggregateNameToInfo.TryGetValue(DependencyName, out AggregateDependency))
-				{
-					LinkAggregate(AggregateDependency, AggregateNameToInfo, NodeNameToInfo, ref NumErrors);
-					Dependencies.UnionWith(AggregateDependency.Dependencies);
-					continue;
-				}
-
-				BuildNode Dependency;
-				if(NodeNameToInfo.TryGetValue(DependencyName, out Dependency))
-				{
-					Dependencies.Add(Dependency);
-					continue;
-				}
-
-				CommandUtils.LogError("Node {0} is not in the graph. It is a dependency of {1}.", DependencyName, Aggregate.Name);
-				NumErrors++;
-			}
-			Aggregate.Dependencies = Dependencies.ToArray();
-		}
-	}
-
-	/// <summary>
-	/// Resolve a node's dependency names to arrays of NodeInfo instances, filling in the appropriate fields in the NodeInfo object. 
-	/// </summary>
-	/// <param name="Node"></param>
-	/// <param name="AggregateNameToInfo">Map of other aggregate names to their corresponding instance.</param>
-	/// <param name="NodeNameToInfo">Map from node names to their corresponding instance.</param>
-	/// <param name="NumErrors">The number of errors output so far. Incremented if resolving this aggregate fails.</param>
-	private static void LinkNode(BuildNode Node, Dictionary<string, AggregateNode> AggregateNameToInfo, Dictionary<string, BuildNode> NodeNameToInfo, ref int NumErrors)
-	{
-		if(Node.Dependencies == null)
-		{
-			// Find all the dependencies
-			HashSet<BuildNode> Dependencies = new HashSet<BuildNode>();
-			foreach (string DependencyName in Node.Node.FullNamesOfDependencies)
-			{
-				if (!ResolveDependencies(DependencyName, AggregateNameToInfo, NodeNameToInfo, Dependencies))
-				{
-					CommandUtils.LogError("Node {0} is not in the graph. It is a dependency of {1}.", DependencyName, Node.Name);
-					NumErrors++;
-				}
-			}
-			Node.Dependencies = Dependencies.ToArray();
-
-			// Find all the pseudo-dependencies
-			HashSet<BuildNode> PseudoDependencies = new HashSet<BuildNode>();
-			foreach (string PseudoDependencyName in Node.Node.FullNamesOfPseudosependencies)
-			{
-				if (!ResolveDependencies(PseudoDependencyName, AggregateNameToInfo, NodeNameToInfo, PseudoDependencies))
-				{
-					CommandUtils.LogError("Node {0} is not in the graph. It is a pseudodependency of {1}.", PseudoDependencyName, Node.Name);
-					NumErrors++;
-				}
-			}
-			Node.PseudoDependencies = PseudoDependencies.ToArray();
-
-			// Set the direct dependencies list
-			Node.AllDirectDependencies = Node.Dependencies.Union(Node.PseudoDependencies).ToArray();
-
-			// Recursively find the dependencies for all the dependencies
-			HashSet<BuildNode> IndirectDependenices = new HashSet<BuildNode>(Node.AllDirectDependencies);
-			foreach(BuildNode DirectDependency in Node.AllDirectDependencies)
-			{
-				LinkNode(DirectDependency, AggregateNameToInfo, NodeNameToInfo, ref NumErrors);
-				IndirectDependenices.UnionWith(DirectDependency.AllIndirectDependencies);
-			}
-			Node.AllIndirectDependencies = IndirectDependenices.ToArray();
-
-			// Check the node doesn't reference itself
-			if(Node.AllIndirectDependencies.Contains(Node))
-			{
-				CommandUtils.LogError("Node {0} has a dependency on itself.", Node.Name);
-				NumErrors++;
-			}
-		}
-	}
-
-	/// <summary>
-	/// Adds all the nodes matching a given name to a hash set, expanding any aggregates to their dependencices.
-	/// </summary>
-	/// <param name="Name">The name to look for</param>
-	/// <param name="AggregateNameToInfo">Map of other aggregate names to their corresponding info instance.</param>
-	/// <param name="NodeNameToInfo">Map from node names to their corresponding info instance.</param>
-	/// <param name="Dependencies">The set of dependencies to add to.</param>
-	/// <returns>True if the name was found (and the dependencies list was updated), false otherwise.</returns>
-	private static bool ResolveDependencies(string Name, Dictionary<string, AggregateNode> AggregateNameToInfo, Dictionary<string, BuildNode> NodeNameToInfo, HashSet<BuildNode> Dependencies)
-	{
-		AggregateNode AggregateDependency;
-		if (AggregateNameToInfo.TryGetValue(Name, out AggregateDependency))
-		{
-			Dependencies.UnionWith(AggregateDependency.Dependencies);
-			return true;
-		}
-
-		BuildNode NodeDependency;
-		if (NodeNameToInfo.TryGetValue(Name, out NodeDependency))
-		{
-			Dependencies.Add(NodeDependency);
-			return true;
-		}
-
-		return false;
-	}
 
 	/// <summary>
 	/// Determine which nodes to build from the command line, or return everything if there's nothing specified explicitly.
@@ -1355,7 +1022,7 @@ public partial class GUBP : BuildCommand
 		HashSet<BuildNode> RecursiveNodesToDo = new HashSet<BuildNode>(NodesToDo);
 		foreach(BuildNode NodeToDo in NodesToDo)
 		{
-			RecursiveNodesToDo.UnionWith(NodeToDo.AllIndirectDependencies);
+			RecursiveNodesToDo.UnionWith(NodeToDo.InputDependencies);
 		}
 
 		return RecursiveNodesToDo;
@@ -1386,22 +1053,18 @@ public partial class GUBP : BuildCommand
 	/// Culls everything downstream of a trigger if we're running a preflight build.
 	/// </summary>
 	/// <param name="NodesToDo">The current list of nodes to do</param>
-	/// <param name="IsPreflightBuild">Whether this is a preflight build or not</param>
-	private void CullNodesForPreflight(HashSet<BuildNode> NodesToDo, bool IsPreflightBuild)
+	private void CullNodesForPreflight(HashSet<BuildNode> NodesToDo)
 	{
-		if (IsPreflightBuild)
+		HashSet<BuildNode> NodesToCull = new HashSet<BuildNode>();
+		foreach(BuildNode NodeToDo in NodesToDo)
 		{
-			HashSet<BuildNode> NodesToCull = new HashSet<BuildNode>();
-			foreach(BuildNode NodeToDo in NodesToDo)
+			if((NodeToDo is TriggerNode) || NodeToDo.ControllingTriggers.Length > 0)
 			{
-				if((NodeToDo is TriggerNode) || NodeToDo.ControllingTriggers.Length > 0)
-				{
-					LogVerbose(" Culling {0} due to being downstream of trigger in preflight", NodeToDo.Name);
-					NodesToCull.Add(NodeToDo);
-				}
+				LogVerbose(" Culling {0} due to being downstream of trigger in preflight", NodeToDo.Name);
+				NodesToCull.Add(NodeToDo);
 			}
-			NodesToDo.ExceptWith(NodesToCull);
 		}
+		NodesToDo.ExceptWith(NodesToCull);
 	}
 
 	private int UpdateCISCounter(int TimeQuantum)
@@ -1517,13 +1180,13 @@ public partial class GUBP : BuildCommand
 		throw new AutomationException("Failed to update the CIS counter after 20 tries.");
 	}
 
-	private List<TriggerNode> FindUnfinishedTriggers(bool bSkipTriggers, BuildNode ExplicitTrigger, List<BuildNode> OrdereredToDo)
+	private List<TriggerNode> FindUnfinishedTriggers(bool bSkipTriggers, BuildNode ExplicitTrigger, List<BuildNode> OrderedToDo)
 	{
 		// find all unfinished triggers, excepting the one we are triggering right now
 		List<TriggerNode> UnfinishedTriggers = new List<TriggerNode>();
 		if (!bSkipTriggers)
 		{
-			foreach (TriggerNode NodeToDo in OrdereredToDo.OfType<TriggerNode>())
+			foreach (TriggerNode NodeToDo in OrderedToDo.OfType<TriggerNode>())
 			{
 				if (!NodeToDo.IsComplete && ExplicitTrigger != NodeToDo)
 				{
@@ -1537,45 +1200,38 @@ public partial class GUBP : BuildCommand
 	/// <summary>
 	/// Validates that the given nodes are sorted correctly, so that all dependencies are met first
 	/// </summary>
-	/// <param name="OrdereredToDo">The sorted list of nodes</param>
-	private void CheckSortOrder(List<BuildNode> OrdereredToDo)
+	/// <param name="OrderedToDo">The sorted list of nodes</param>
+	private void CheckSortOrder(List<BuildNode> OrderedToDo)
 	{
-		foreach (BuildNode NodeToDo in OrdereredToDo)
+		foreach (BuildNode NodeToDo in OrderedToDo)
 		{
 			if ((NodeToDo is TriggerNode) && (NodeToDo.IsSticky || NodeToDo.IsComplete)) // these sticky triggers are ok, everything is already completed anyway
 			{
 				continue;
 			}
-			int MyIndex = OrdereredToDo.IndexOf(NodeToDo);
-			foreach (BuildNode Dep in NodeToDo.Dependencies)
+
+			int MyIndex = OrderedToDo.IndexOf(NodeToDo);
+			foreach (BuildNode OrderDependency in NodeToDo.OrderDependencies)
 			{
-				int DepIndex = OrdereredToDo.IndexOf(Dep);
-				if (DepIndex >= MyIndex)
+				int OrderDependencyIdx = OrderedToDo.IndexOf(OrderDependency);
+				if(OrderDependencyIdx >= MyIndex)
 				{
-					throw new AutomationException("Topological sort error, node {0} has a dependency of {1} which sorted after it.", NodeToDo.Name, Dep.Name);
-				}
-			}
-			foreach (BuildNode Dep in NodeToDo.PseudoDependencies)
-			{
-				int DepIndex = OrdereredToDo.IndexOf(Dep);
-				if (DepIndex >= MyIndex)
-				{
-					throw new AutomationException("Topological sort error, node {0} has a pseduodependency of {1} which sorted after it.", NodeToDo.Name, Dep.Name);
+					throw new AutomationException("Topological sort error, node {0} has an order dependency on {1} which sorted after it.", NodeToDo.Name, OrderDependency.Name);
 				}
 			}
 		}
 	}
 
-	private void DoCommanderSetup(ElectricCommander EC, IEnumerable<BuildNode> AllNodes, IEnumerable<AggregateNode> AllAggregates, List<BuildNode> OrdereredToDo, int TimeIndex, int TimeQuantum, bool bSkipTriggers, bool bFake, bool bFakeEC, string CLString, TriggerNode ExplicitTrigger, List<TriggerNode> UnfinishedTriggers, string FakeFail, bool bPreflightBuild)
+    private ExitCode DoCommanderSetup(ElectricCommander EC, IEnumerable<BuildNode> AllNodes, IEnumerable<AggregateNode> AllAggregates, List<BuildNode> OrderedToDo, int TimeIndex, int TimeQuantum, bool bSkipTriggers, bool bFake, bool bFakeEC, TriggerNode ExplicitTrigger, List<TriggerNode> UnfinishedTriggers, bool bPreflightBuild)
 	{
 		List<BuildNode> SortedNodes = TopologicalSort(new HashSet<BuildNode>(AllNodes), null, SubSort: false, DoNotConsiderCompletion: true);
-		LogConsole("******* {0} GUBP Nodes", SortedNodes.Count);
+		Log("******* {0} GUBP Nodes", SortedNodes.Count);
 
-		List<BuildNode> FilteredOrdereredToDo = new List<BuildNode>();
+		List<BuildNode> FilteredOrderedToDo = new List<BuildNode>();
 		using(TelemetryStopwatch StartFilterTimer = new TelemetryStopwatch("FilterNodes"))
 		{
 			// remove nodes that have unfinished triggers
-			foreach (BuildNode NodeToDo in OrdereredToDo)
+			foreach (BuildNode NodeToDo in OrderedToDo)
 			{
 				if (NodeToDo.ControllingTriggers.Length == 0 || !UnfinishedTriggers.Contains(NodeToDo.ControllingTriggers.Last()))
 				{
@@ -1591,288 +1247,169 @@ public partial class GUBP : BuildCommand
 						continue;
 					}
 
-					FilteredOrdereredToDo.Add(NodeToDo);
+					FilteredOrderedToDo.Add(NodeToDo);
 				}
 			}
 		}
 		using(TelemetryStopwatch PrintNodesTimer = new TelemetryStopwatch("SetupCommanderPrint"))
 		{
-			LogConsole("*********** EC Nodes, in order.");
-			PrintNodes(this, FilteredOrdereredToDo, AllAggregates, UnfinishedTriggers, TimeQuantum);
+			Log("*********** EC Nodes, in order.");
+			PrintNodes(this, FilteredOrderedToDo, AllAggregates, UnfinishedTriggers, TimeQuantum);
 		}
 
-		EC.DoCommanderSetup(AllNodes, AllAggregates, FilteredOrdereredToDo, SortedNodes, TimeIndex, TimeQuantum, bSkipTriggers, bFake, bFakeEC, CLString, ExplicitTrigger, UnfinishedTriggers, FakeFail);
+		EC.DoCommanderSetup(AllNodes, AllAggregates, FilteredOrderedToDo, SortedNodes, TimeIndex, TimeQuantum, bSkipTriggers, bFake, bFakeEC, ExplicitTrigger, UnfinishedTriggers);
+		return ExitCode.Success;
 	}
 
-	void ExecuteNodes(ElectricCommander EC, List<BuildNode> OrdereredToDo, bool bFake, bool bFakeEC, bool bSaveSharedTempStorage, string CLString, string StoreName, string FakeFail)
+    ExitCode ExecuteNodes(ElectricCommander EC, List<BuildNode> OrderedToDo, bool bFake, bool bFakeEC, bool bSaveSharedTempStorage, JobInfo JobInfo)
 	{
         Dictionary<string, BuildNode> BuildProductToNodeMap = new Dictionary<string, BuildNode>();
-		foreach (BuildNode NodeToDo in OrdereredToDo)
+		foreach (BuildNode NodeToDo in OrderedToDo)
         {
-            if (NodeToDo.Node.BuildProducts != null || NodeToDo.Node.AllDependencyBuildProducts != null)
+            if (NodeToDo.BuildProducts != null)
             {
                 throw new AutomationException("topological sort error");
             }
 
-            NodeToDo.Node.AllDependencyBuildProducts = new List<string>();
-            NodeToDo.Node.AllDependencies = new List<string>();
-            foreach (BuildNode Dep in NodeToDo.Dependencies)
-            {
-                NodeToDo.Node.AddAllDependent(Dep.Name);
-
-                if (Dep.Node.AllDependencies == null)
-                {
-					throw new AutomationException("Node {0} was not processed yet?  Processing {1}", Dep, NodeToDo.Name);
-                }
-
-				foreach (string DepDep in Dep.Node.AllDependencies)
-				{
-					NodeToDo.Node.AddAllDependent(DepDep);
-				}
-				
-                if (Dep.Node.BuildProducts == null)
-                {
-                    throw new AutomationException("Node {0} was not processed yet? Processing {1}", Dep, NodeToDo.Name);
-                }
-
-				foreach (string Prod in Dep.Node.BuildProducts)
-                {
-                    NodeToDo.Node.AddDependentBuildProduct(Prod);
-                }
-
-                if (Dep.Node.AllDependencyBuildProducts == null)
-                {
-                    throw new AutomationException("Node {0} was not processed yet2?  Processing {1}", Dep.Name, NodeToDo.Name);
-                }
-
-                foreach (string Prod in Dep.Node.AllDependencyBuildProducts)
-                {
-                    NodeToDo.Node.AddDependentBuildProduct(Prod);
-                }
-            }
-
-            string NodeStoreName = StoreName + "-" + NodeToDo.Name;
+            var TempStorageNodeInfo = new TempStorageNodeInfo(JobInfo, NodeToDo.Name);
             
-            string GameNameIfAny = NodeToDo.Node.GameNameIfAnyForTempStorage();
-            string StorageRootIfAny = NodeToDo.Node.RootIfAnyForTempStorage();
-					
-            if (bFake)
-            {
-                StorageRootIfAny = ""; // we don't rebase fake runs since those are entirely "records of success", which are always in the logs folder
-            }
+			string StorageRootIfAny = NodeToDo.RootIfAnyForTempStorage;
 
-            // this is kinda complicated
-            bool SaveSuccessRecords = (IsBuildMachine || bFakeEC) && // no real reason to make these locally except for fakeEC tests
-                (!(NodeToDo is TriggerNode) || NodeToDo.IsSticky); // trigger nodes are run twice, one to start the new workflow and once when it is actually triggered, we will save reconds for the latter
+			if (bFake)
+			{
+				StorageRootIfAny = ""; // we don't rebase fake runs since those are entirely "records of success", which are always in the logs folder
+			}
+			if (string.IsNullOrEmpty(StorageRootIfAny))
+			{
+				StorageRootIfAny = CmdEnv.LocalRoot;
+			}
 
-			LogConsole("***** Running GUBP Node {0} -> {1} : {2}", NodeToDo.Name, GameNameIfAny, NodeStoreName);
             if (NodeToDo.IsComplete)
             {
-                if (NodeToDo.Name == VersionFilesNode.StaticGetFullName() && !IsBuildMachine)
-                {
-					LogConsole("***** NOT ****** Retrieving GUBP Node {0} from {1}; it is the version files.", NodeToDo.Name, NodeStoreName);
-                    NodeToDo.Node.BuildProducts = new List<string>();
-
-                }
-                else
-                {
-					LogConsole("***** Retrieving GUBP Node {0} from {1}", NodeToDo.Name, NodeStoreName);
-                    bool WasLocal;
-					try
-					{
-						NodeToDo.Node.BuildProducts = TempStorage.RetrieveFromTempStorage(CmdEnv, NodeStoreName, out WasLocal, GameNameIfAny, StorageRootIfAny);
-					}
-					catch
-					{
-						if(GameNameIfAny != "")
-						{
-							NodeToDo.Node.BuildProducts = TempStorage.RetrieveFromTempStorage(CmdEnv, NodeStoreName, out WasLocal, "", StorageRootIfAny);
-						}
-						else
-						{
-							throw new AutomationException("Build Products cannot be found for node {0}", NodeToDo.Name);
-						}
-					}
-                    if (!WasLocal)
-                    {
-                        NodeToDo.Node.PostLoadFromSharedTempStorage(this);
-                    }
-                }
+				// Just fetch the build products from temp storage
+				Log("***** Retrieving GUBP Node {0} -> {1} : {2}", NodeToDo.Name, JobInfo.RootNameForTempStorage, TempStorageNodeInfo.GetRelativeDirectory());
+				NodeToDo.RetrieveBuildProducts(StorageRootIfAny, TempStorageNodeInfo);
             }
             else
             {
+				// this is kinda complicated
+				bool SaveSuccessRecords = (IsBuildMachine || bFakeEC) && // no real reason to make these locally except for fakeEC tests
+					(!(NodeToDo is TriggerNode) || NodeToDo.IsSticky); // trigger nodes are run twice, one to start the new workflow and once when it is actually triggered, we will save reconds for the latter
+
+                // Record that the node has started. We save our status to a new temp storage location specifically named with a suffix so we can find it later.
                 if (SaveSuccessRecords) 
                 {
-                    EC.SaveStatus(NodeToDo, StartedTempStorageSuffix, NodeStoreName, bSaveSharedTempStorage, GameNameIfAny);
+                    EC.SaveStatus(new TempStorageNodeInfo(JobInfo, NodeToDo.Name + StartedTempStorageSuffix), bSaveSharedTempStorage);
                 }
-				double BuildDuration = 0.0;
-                try
+
+				// Execute the node
+				DateTime StartTime = DateTime.UtcNow;
+				bool bResult = ExecuteNode(NodeToDo, bFake);
+				TimeSpan ElapsedTime = DateTime.UtcNow - StartTime;
+
+				// Archive the build products if the node succeeded
+				if(bResult)
+				{
+					NodeToDo.ArchiveBuildProducts(StorageRootIfAny, TempStorageNodeInfo, !bSaveSharedTempStorage);
+				}
+
+				// Record that the node has finished
+				NodeHistory History = null;
+                if (SaveSuccessRecords)
                 {
-                    if (!String.IsNullOrEmpty(FakeFail) && FakeFail.Equals(NodeToDo.Name, StringComparison.InvariantCultureIgnoreCase))
-                    {
-                        throw new AutomationException("Failing node {0} by request.", NodeToDo.Name);
-                    }
-                    if (bFake)
-                    {
-						LogConsole("***** FAKE!! Building GUBP Node {0} for {1}", NodeToDo.Name, NodeStoreName);
-                        NodeToDo.Node.DoFakeBuild(this);
-                    }
-                    else
-                    {
-						LogConsole("***** Building GUBP Node {0} for {1}", NodeToDo.Name, NodeStoreName);
-						DateTime StartTime = DateTime.UtcNow;
-						using(TelemetryStopwatch DoBuildStopwatch = new TelemetryStopwatch("DoBuild.{0}", NodeToDo.Name))
-						{
-							NodeToDo.Node.DoBuild(this);
-						}
-						BuildDuration = (DateTime.UtcNow - StartTime).TotalMilliseconds / 1000;
-						
-                    }
-
-					using(TelemetryStopwatch StoreBuildProductsStopwatch = new TelemetryStopwatch("StoreBuildProducts"))
-					{
-						double StoreDuration = 0.0;
-						DateTime StartTime = DateTime.UtcNow;
-						TempStorage.StoreToTempStorage(CmdEnv, NodeStoreName, NodeToDo.Node.BuildProducts, !bSaveSharedTempStorage, GameNameIfAny, StorageRootIfAny);
-						StoreDuration = (DateTime.UtcNow - StartTime).TotalMilliseconds / 1000;
-						LogConsole("Took {0} seconds to store build products", StoreDuration);
-						if (IsBuildMachine)
-						{
-							EC.RunECTool(String.Format("setProperty \"/myJobStep/StoreDuration\" \"{0}\"", StoreDuration.ToString()));
-						}
-					}
-                    if (ParseParam("StompCheck"))
-                    {
-                        foreach (string Dep in NodeToDo.Node.AllDependencies)
-                        {
-                            try
-                            {
-                                bool WasLocal;
-								using(TelemetryStopwatch RetrieveBuildProductsStopwatch = new TelemetryStopwatch("RetrieveBuildProducts"))
-								{
-									TempStorage.RetrieveFromTempStorage(CmdEnv, NodeStoreName, out WasLocal, GameNameIfAny, StorageRootIfAny);
-								}
-								if (!WasLocal)
-								{
-									throw new AutomationException("Retrieve was not local?");
-								}
-																	                                    
-                            }
-                            catch(Exception Ex)
-                            {
-                                throw new AutomationException("Node {0} stomped Node {1}   Ex: {2}", NodeToDo.Name, Dep, LogUtils.FormatException(Ex));
-                            }
-                        }
-                    }
-                }
-                catch (Exception Ex)
-                {
-					NodeHistory History = null;
-
-                    if (SaveSuccessRecords)
-                    {
-						using(TelemetryStopwatch UpdateNodeHistoryStopwatch = new TelemetryStopwatch("UpdateNodeHistory"))
-						{
-							History = FindNodeHistory(NodeToDo, CLString, StoreName);
-						}
-						using(TelemetryStopwatch SaveNodeStatusStopwatch = new TelemetryStopwatch("SaveNodeStatus"))
-						{
-							EC.SaveStatus(NodeToDo, FailedTempStorageSuffix, NodeStoreName, bSaveSharedTempStorage, GameNameIfAny, ParseParamValue("MyJobStepId"));
-						}
-						using(TelemetryStopwatch UpdateECPropsStopwatch = new TelemetryStopwatch("UpdateECProps"))
-						{
-							EC.UpdateECProps(NodeToDo);
-						}
-                        
-						if (IsBuildMachine)
-						{
-							using(TelemetryStopwatch GetFailEmailsStopwatch = new TelemetryStopwatch("GetFailEmails"))
-							{
-								GetFailureEmails(EC, NodeToDo, History, CLString, StoreName);
-							}
-						}
-						EC.UpdateECBuildTime(NodeToDo, BuildDuration);
-                    }
-
-					LogConsole("{0}", ExceptionToString(Ex));
-
-
-                    if (History != null)
-                    {
-						LogConsole("Changes since last green *********************************");
-						LogConsole("");
-						LogConsole("");
-						LogConsole("");
-                        PrintDetailedChanges(History, P4Env.Changelist);
-						LogConsole("End changes since last green");
-                    }
-
-                    string FailInfo = "";
-                    FailInfo += "********************************* Main log file";
-                    FailInfo += Environment.NewLine + Environment.NewLine;
-                    FailInfo += LogUtils.GetLogTail();
-                    FailInfo += Environment.NewLine + Environment.NewLine + Environment.NewLine;
-
-
-
-                    string OtherLog = "See logfile for details: '";
-                    if (FailInfo.Contains(OtherLog))
-                    {
-                        string LogFile = FailInfo.Substring(FailInfo.IndexOf(OtherLog) + OtherLog.Length);
-                        if (LogFile.Contains("'"))
-                        {
-                            LogFile = CombinePaths(CmdEnv.LogFolder, LogFile.Substring(0, LogFile.IndexOf("'")));
-                            if (FileExists_NoExceptions(LogFile))
-                            {
-                                FailInfo += "********************************* Sub log file " + LogFile;
-                                FailInfo += Environment.NewLine + Environment.NewLine;
-
-                                FailInfo += LogUtils.GetLogTail(LogFile);
-                                FailInfo += Environment.NewLine + Environment.NewLine + Environment.NewLine;
-                            }
-                        }
-                    }
-
-                    string Filename = CombinePaths(CmdEnv.LogFolder, "LogTailsAndChanges.log");
-                    WriteAllText(Filename, FailInfo);
-
-                    throw(Ex);
-                }
-                if (SaveSuccessRecords) 
-                {
-					NodeHistory History = null;
 					using(TelemetryStopwatch UpdateNodeHistoryStopwatch = new TelemetryStopwatch("UpdateNodeHistory"))
 					{
-						History = FindNodeHistory(NodeToDo, CLString, StoreName);
+                        History = FindNodeHistory(NodeToDo, JobInfo);
 					}
 					using(TelemetryStopwatch SaveNodeStatusStopwatch = new TelemetryStopwatch("SaveNodeStatus"))
 					{
-						EC.SaveStatus(NodeToDo, SucceededTempStorageSuffix, NodeStoreName, bSaveSharedTempStorage, GameNameIfAny);
+                        EC.SaveStatus(new TempStorageNodeInfo(JobInfo, NodeToDo.Name + (bResult? SucceededTempStorageSuffix : FailedTempStorageSuffix)), bSaveSharedTempStorage, ParseParamValue("MyJobStepId"));
 					}
 					using(TelemetryStopwatch UpdateECPropsStopwatch = new TelemetryStopwatch("UpdateECProps"))
 					{
 						EC.UpdateECProps(NodeToDo);
 					}
-                    
 					if (IsBuildMachine)
 					{
 						using(TelemetryStopwatch GetFailEmailsStopwatch = new TelemetryStopwatch("GetFailEmails"))
 						{
-							GetFailureEmails(EC, NodeToDo, History, CLString, StoreName);
+                            GetFailureEmails(EC, NodeToDo, History, JobInfo);
 						}
 					}
-					EC.UpdateECBuildTime(NodeToDo, BuildDuration);
+					EC.UpdateECBuildTime(NodeToDo, ElapsedTime.TotalSeconds);
+                }
+
+				// If it failed, print the diagnostic info and quit
+				if(!bResult)
+				{
+                    if (History != null)
+                    {
+                        PrintDetailedChanges(History, P4Env.Changelist);
+                    }
+
+					WriteFailureLog(CombinePaths(CmdEnv.LogFolder, "LogTailsAndChanges.log"));
+					return ExitCode.Error_Unknown;
                 }
             }
-            foreach (string Product in NodeToDo.Node.BuildProducts)
+            foreach (string Product in NodeToDo.BuildProducts)
             {
                 if (BuildProductToNodeMap.ContainsKey(Product))
                 {
-                    throw new AutomationException("Overlapping build product: {0} and {1} both produce {2}", BuildProductToNodeMap[Product], NodeToDo.Name, Product);
+                    throw new AutomationException("Overlapping build product: {0} and {1} both produce {2}", BuildProductToNodeMap[Product].ToString(), NodeToDo.Name, Product);
                 }
                 BuildProductToNodeMap.Add(Product, NodeToDo);
             }
-        }        
-        PrintRunTime();
-    }   
+        }
+		return ExitCode.Success;
+    }
+
+	bool ExecuteNode(BuildNode NodeToDo, bool bFake)
+	{
+		try
+		{
+			if (bFake)
+			{
+				NodeToDo.DoFakeBuild();
+			}
+			else
+			{
+				NodeToDo.DoBuild();
+			}
+			return true;
+		}
+		catch(Exception Ex)
+		{
+			Log("{0}", Ex.ToString());
+			return false;
+		}
+	}
+
+	static void WriteFailureLog(string FileName)
+	{
+		string FailInfo = "";
+		FailInfo += "********************************* Main log file";
+		FailInfo += Environment.NewLine + Environment.NewLine;
+		FailInfo += LogUtils.GetLogTail();
+		FailInfo += Environment.NewLine + Environment.NewLine + Environment.NewLine;
+
+		string OtherLog = "See logfile for details: '";
+		if (FailInfo.Contains(OtherLog))
+		{
+			string LogFile = FailInfo.Substring(FailInfo.IndexOf(OtherLog) + OtherLog.Length);
+			if (LogFile.Contains("'"))
+			{
+				LogFile = CombinePaths(CmdEnv.LogFolder, LogFile.Substring(0, LogFile.IndexOf("'")));
+				if (FileExists_NoExceptions(LogFile))
+				{
+					FailInfo += "********************************* Sub log file " + LogFile;
+					FailInfo += Environment.NewLine + Environment.NewLine;
+
+					FailInfo += LogUtils.GetLogTail(LogFile);
+					FailInfo += Environment.NewLine + Environment.NewLine + Environment.NewLine;
+				}
+			}
+		}
+
+		WriteAllText(FileName, FailInfo);
+	}
 }

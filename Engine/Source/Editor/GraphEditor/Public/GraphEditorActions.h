@@ -60,6 +60,26 @@ public:
 	TSharedPtr< FUICommandInfo > CollapseSelectionToFunction;
 	TSharedPtr< FUICommandInfo > CollapseSelectionToMacro;
 
+	// Alignment commands
+	TSharedPtr< FUICommandInfo > AlignNodesTop;
+	TSharedPtr< FUICommandInfo > AlignNodesMiddle;
+	TSharedPtr< FUICommandInfo > AlignNodesBottom;
+
+	TSharedPtr< FUICommandInfo > AlignNodesLeft;
+	TSharedPtr< FUICommandInfo > AlignNodesCenter;
+	TSharedPtr< FUICommandInfo > AlignNodesRight;
+
+	TSharedPtr< FUICommandInfo > StraightenConnections;
+
+	TSharedPtr< FUICommandInfo > DistributeNodesHorizontally;
+	TSharedPtr< FUICommandInfo > DistributeNodesVertically;
+	
+	// Enable/disable commands
+	TSharedPtr< FUICommandInfo > EnableNodes;
+	TSharedPtr< FUICommandInfo > DisableNodes;
+	TSharedPtr< FUICommandInfo > EnableNodes_Always;
+	TSharedPtr< FUICommandInfo > EnableNodes_DevelopmentOnly;
+
 	//
 	TSharedPtr< FUICommandInfo > SelectReferenceInLevel;
 	TSharedPtr< FUICommandInfo > AssignReferencedActor;

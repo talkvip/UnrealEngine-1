@@ -122,7 +122,7 @@ public:
 			FConsoleManager& ConsoleManager = (FConsoleManager&)IConsoleManager::Get();
 			FString CVarName = ConsoleManager.FindConsoleObjectName(this);
 			UE_LOG(LogConsoleManager, Warning,
-				TEXT("Console variable '%s' wasn't set ('%s' has a lower priority than '%s')"),
+				TEXT("A console variable Set() for '%s' failed. The access with 'SetBy%s' failed because 'SetBy%s' did set it before and and has a higher priority (this might be an intentional override)"),
 				CVarName.IsEmpty() ? TEXT("unknown?") : *CVarName,
 				GetSetByTCHAR((EConsoleVariableFlags)NewPri),
 				GetSetByTCHAR((EConsoleVariableFlags)OldPri)
@@ -1658,13 +1658,6 @@ static TAutoConsoleVariable<int32> CVarSceneColorFringeQuality(
 
 // ---------------------------------------
 
-static TAutoConsoleVariable<int32> CVarAmbientOcclusionLevels(
-	TEXT("r.AmbientOcclusionLevels"),
-	3,
-	TEXT("Defines how many mip levels are using during the ambient occlusion calculation. This is useful when tweaking the algorithm.\n")
-	TEXT(" 0:none, 1:one, 2:two, 3:three(default), 4:four(larger at little cost but can flicker)"),
-	ECVF_Scalability | ECVF_RenderThreadSafe);
-
 static TAutoConsoleVariable<float> CVarAmbientOcclusionRadiusScale(
 	TEXT("r.AmbientOcclusionRadiusScale"),
 	1.0f,
@@ -1884,7 +1877,7 @@ static TAutoConsoleVariable<int32> CVarFinishCurrentFrame(
 static TAutoConsoleVariable<int32> CVarMaxAnistropy(
 	TEXT("r.MaxAnisotropy"),
 	4,
-	TEXT("MaxAnisotropy should range from 1 to 16. Higher values mean better texure quality when using anisotropic filtering but at a cost to performance."),
+	TEXT("MaxAnisotropy should range from 1 to 16. Higher values mean better texure quality when using anisotropic filtering but at a cost to performance. Default is 4."),
 	ECVF_Scalability | ECVF_RenderThreadSafe);
 
 static TAutoConsoleVariable<int32> CVarShadowMaxResolution(
@@ -1906,6 +1899,14 @@ static TAutoConsoleVariable<float> CVarMobileContentScaleFactor(
 	TEXT("r.MobileContentScaleFactor"),
 	1.0f,
 	TEXT("Content scale multiplier (equates to iOS's contentScaleFactor to support Retina displays"),
+	ECVF_Default);
+
+static TAutoConsoleVariable<int32> CVarMobileOnChipMSAA(
+	TEXT("r.MobileOnChipMSAA"),
+	0,
+	TEXT("Whether to enable on-chip MSAA for tile based mobile GPUs")
+	TEXT("0: disabed (default)\n")
+	TEXT("1: enabled\n"),
 	ECVF_Default);
 
 // this cvar can be removed in shipping to not compile shaders for development (faster)
@@ -2029,16 +2030,6 @@ static TAutoConsoleVariable<int32> CVarDetailMode(
 	TEXT(" 2: high, show all objects (default)"),
 	ECVF_Scalability | ECVF_RenderThreadSafe);
 
-static TAutoConsoleVariable<int32> CVarRefractionQuality(
-	TEXT("r.RefractionQuality"),
-	2,
-	TEXT("Defines the distorion/refraction quality which allows to adjust for quality or performance.\n")
-	TEXT("<=0: off (fastest)\n")
-	TEXT("  1: low quality (not yet implemented)\n")
-	TEXT("  2: normal quality (default)\n")
-	TEXT("  3: high quality (e.g. color fringe, not yet implemented)"),
-	ECVF_Scalability | ECVF_RenderThreadSafe);
-
 static TAutoConsoleVariable<int32> CVarDBuffer(
 	TEXT("r.DBuffer"),
 	0,
@@ -2113,3 +2104,9 @@ static TAutoConsoleVariable<int32> CVarCheckSRVTransitions(
 	0,
 	TEXT("Tests that render targets are properly transitioned to SRV when SRVs are set."),
 	ECVF_RenderThreadSafe);  
+
+static TAutoConsoleVariable<int32> CVarHLODSystemEnabled(
+	TEXT("r.HLODEnabled"), 
+	1,
+	TEXT("Toggles whether or not the Hierarchical LOD system is enabled."),
+	ECVF_Scalability | ECVF_RenderThreadSafe);

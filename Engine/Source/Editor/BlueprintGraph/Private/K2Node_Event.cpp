@@ -46,16 +46,22 @@ void UK2Node_Event::Serialize(FArchive& Ar)
 	// Fix up legacy nodes that may not yet have a delegate pin
 	if(Ar.IsLoading())
 	{
-		if(!FindPin(DelegateOutputName))
-		{
-			const UEdGraphSchema_K2* K2Schema = GetDefault<UEdGraphSchema_K2>();
-			CreatePin(EGPD_Output, K2Schema->PC_Delegate, TEXT(""), NULL, false, false, DelegateOutputName);
-		}
-
 		if(Ar.UE4Ver() < VER_UE4_K2NODE_EVENT_MEMBER_REFERENCE)
 		{
 			EventReference.SetExternalMember(EventSignatureName_DEPRECATED, EventSignatureClass_DEPRECATED);
 		}
+	}
+}
+
+void UK2Node_Event::PostLoad()
+{
+	UK2Node_EditablePinBase::PostLoad();
+
+	// Fix up legacy nodes that may not yet have a delegate pin
+	if (!FindPin(DelegateOutputName))
+	{
+		const UEdGraphSchema_K2* K2Schema = GetDefault<UEdGraphSchema_K2>();
+		CreatePin(EGPD_Output, K2Schema->PC_Delegate, TEXT(""), NULL, false, false, DelegateOutputName);
 	}
 }
 
@@ -172,6 +178,8 @@ FString UK2Node_Event::GetDocumentationExcerptName() const
 void UK2Node_Event::PostReconstructNode()
 {
 	UpdateDelegatePin();
+
+	Super::PostReconstructNode();
 }
 
 void UK2Node_Event::UpdateDelegatePin(bool bSilent)
@@ -439,7 +447,7 @@ bool UK2Node_Event::CanPasteHere(const UEdGraph* TargetGraph) const
 						// If the event function is already handled in this Blueprint, don't paste this event
 						for(int32 i = 0; i < ExistingEventNodes.Num() && !bDisallowPaste; ++i)
 						{
-							bDisallowPaste = ExistingEventNodes[i]->bOverrideFunction && ExistingEventNodes[i]->bIsNodeEnabled && AreEventNodesIdentical(this, ExistingEventNodes[i]);
+							bDisallowPaste = ExistingEventNodes[i]->bOverrideFunction && ExistingEventNodes[i]->IsNodeEnabled() && AreEventNodesIdentical(this, ExistingEventNodes[i]);
 						}
 
 						// We need to also check for 'const' BPIE methods that might already be implemented as functions with a read-only 'self' context (these were previously implemented as events)

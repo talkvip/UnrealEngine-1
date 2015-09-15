@@ -240,8 +240,8 @@ struct ENGINE_API FHierarchicalSimplification
 
 	FHierarchicalSimplification()
 		: bSimplifyMesh(false)
-		, DrawDistance(3000)
-		, DesiredBoundRadius(3000)
+		, DrawDistance(2000)
+		, DesiredBoundRadius(2000)
 		, DesiredFillingPercentage(50)
 		, MinNumberOfActorsToBuild(2)
 	{
@@ -296,8 +296,11 @@ class ENGINE_API AWorldSettings : public AInfo, public IInterface_AssetUserData
 	TSubclassOf<UDamageType> KillZDamageType;
 
 	// current gravity actually being used
-	UPROPERTY(transient, replicated)
+	UPROPERTY(transient, ReplicatedUsing=OnRep_WorldGravityZ)
 	float WorldGravityZ;
+
+	UFUNCTION()
+	virtual void OnRep_WorldGravityZ();
 
 	// optional level specific gravity override set by level designer
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category=Physics, meta=(editcondition = "bGlobalGravitySet"))
@@ -417,6 +420,9 @@ class ENGINE_API AWorldSettings : public AInfo, public IInterface_AssetUserData
 	/** Hierarchical LOD Setup */
 	UPROPERTY(EditAnywhere, Category=LODSystem, meta=(editcondition = "bEnableHierarchicalLODSystem"))
 	TArray<struct FHierarchicalSimplification>	HierarchicalLODSetup;
+
+	UPROPERTY()
+	int32 NumHLODLevels;
 #endif
 	/************************************/
 	/** DEFAULT SETTINGS **/
@@ -479,21 +485,21 @@ class ENGINE_API AWorldSettings : public AInfo, public IInterface_AssetUserData
 	TArray<UAssetUserData*> AssetUserData;
 
 public:
-	// Begin UObject interface.
+	//~ Begin UObject Interface.
 	virtual void PostLoad() override;
 #if WITH_EDITOR
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 #endif // WITH_EDITOR
-	// End UObject interface.
+	//~ End UObject Interface.
 
 
-	// Begin AActor interface.
+	//~ Begin AActor Interface.
 #if WITH_EDITOR
 	virtual void CheckForErrors() override;
 #endif
 	virtual void PreInitializeComponents() override;
 	virtual void PostInitializeComponents() override;
-	// End AActor interface.
+	//~ End AActor Interface.
 
 	/**
 	 * Returns the Z component of the current world gravity and initializes it to the default
@@ -523,11 +529,11 @@ public:
 	 */	
 	virtual void NotifyMatchStarted();
 
-	// Begin IInterface_AssetUserData Interface
+	//~ Begin IInterface_AssetUserData Interface
 	virtual void AddAssetUserData(UAssetUserData* InUserData) override;
 	virtual void RemoveUserDataOfClass(TSubclassOf<UAssetUserData> InUserDataClass) override;
 	virtual UAssetUserData* GetAssetUserDataOfClass(TSubclassOf<UAssetUserData> InUserDataClass) override;
-	// End IInterface_AssetUserData Interface
+	//~ End IInterface_AssetUserData Interface
 
 
 private:

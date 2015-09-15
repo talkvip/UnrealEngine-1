@@ -67,6 +67,7 @@ APlayerController::APlayerController(const FObjectInitializer& ObjectInitializer
 	bIsUsingStreamingVolumes = true;
 	PrimaryActorTick.TickGroup = TG_PrePhysics;
 	PrimaryActorTick.bTickEvenWhenPaused = true;
+	bAllowTickBeforeBeginPlay = true;
 	bShouldPerformFullTickWhenPaused = false;
 	LastRetryPlayerTime = 0.f;
 	DefaultMouseCursor = EMouseCursor::Default;
@@ -120,6 +121,22 @@ UNetConnection* APlayerController::GetNetConnection() const
 {
 	// A controller without a player has no "owner"
 	return (Player != NULL) ? NetConnection : NULL;
+}
+
+bool APlayerController::DestroyNetworkActorHandled()
+{
+	UNetConnection* C = Cast<UNetConnection>(Player);
+	if (C)
+	{
+		if (C->Channels[0] && C->State != USOCK_Closed)
+		{
+			C->bPendingDestroy = true;
+			C->Channels[0]->Close();
+		}
+		return true;
+	}
+
+	return false;
 }
 
 bool APlayerController::IsLocalController() const
@@ -1222,6 +1239,11 @@ void APlayerController::OnActorChannelOpen(FInBunch& InBunch, UNetConnection* Co
 	}
 }
 
+bool APlayerController::UseShortConnectTimeout() const
+{
+	return bShortConnectTimeOut;
+}
+
 void APlayerController::OnSerializeNewActor(FOutBunch& OutBunch)
 {
 	// serialize PlayerIndex as part of the initial bunch for PlayerControllers so they can be matched to the correct client-side viewport
@@ -1302,9 +1324,13 @@ void APlayerController::ClientTeamMessage_Implementation( APlayerState* SenderPl
 	}
 
 	// since this is on the client, we can assume that if Player exists, it is a LocalPlayer
-	if( Player != NULL && CastChecked<ULocalPlayer>(Player)->ViewportClient->ViewportConsole )
+	if (Player != NULL)
 	{
-		CastChecked<ULocalPlayer>(Player)->ViewportClient->ViewportConsole->OutputText( SMod );
+		UGameViewportClient *ViewportClient = CastChecked<ULocalPlayer>(Player)->ViewportClient;
+		if ( ViewportClient && ViewportClient->ViewportConsole )
+		{
+			CastChecked<ULocalPlayer>(Player)->ViewportClient->ViewportConsole->OutputText(SMod);
+		}
 	}
 }
 
@@ -1708,7 +1734,7 @@ bool APlayerController::GetHitResultUnderCursor(ECollisionChannel TraceChannel, 
 {
 	ULocalPlayer* LocalPlayer = Cast<ULocalPlayer>(Player);
 	bool bHit = false;
-	if (LocalPlayer)
+	if (LocalPlayer && LocalPlayer->ViewportClient)
 	{
 		FVector2D MousePosition;
 		if (LocalPlayer->ViewportClient->GetMousePosition(MousePosition))
@@ -1729,7 +1755,7 @@ bool APlayerController::GetHitResultUnderCursorByChannel(ETraceTypeQuery TraceCh
 {
 	ULocalPlayer* LocalPlayer = Cast<ULocalPlayer>(Player);
 	bool bHit = false;
-	if (LocalPlayer)
+	if (LocalPlayer && LocalPlayer->ViewportClient)
 	{
 		FVector2D MousePosition;
 		if (LocalPlayer->ViewportClient->GetMousePosition(MousePosition))
@@ -1750,7 +1776,7 @@ bool APlayerController::GetHitResultUnderCursorForObjects(const TArray<TEnumAsBy
 {
 	ULocalPlayer* LocalPlayer = Cast<ULocalPlayer>(Player);
 	bool bHit = false;
-	if (LocalPlayer)
+	if (LocalPlayer && LocalPlayer->ViewportClient)
 	{
 		FVector2D MousePosition;
 		if (LocalPlayer->ViewportClient->GetMousePosition(MousePosition))
@@ -2014,7 +2040,8 @@ bool APlayerController::InputKey(FKey Key, EInputEvent EventType, float AmountDe
 		if (bEnableClickEvents && Key == EKeys::LeftMouseButton)
 		{
 			FVector2D MousePosition;
-			if (CastChecked<ULocalPlayer>(Player)->ViewportClient->GetMousePosition(MousePosition))
+			UGameViewportClient* ViewportClient = CastChecked<ULocalPlayer>(Player)->ViewportClient;
+			if (ViewportClient && ViewportClient->GetMousePosition(MousePosition))
 			{
 				UPrimitiveComponent* ClickedPrimitive = NULL;
 				if (bEnableMouseOverEvents)
@@ -2191,12 +2218,10 @@ void APlayerController::SetupInputComponent()
 		InputComponent->RegisterComponent();
 	}
 
-	// Only do this if this actor is of a blueprint class
-	UBlueprintGeneratedClass* BGClass = Cast<UBlueprintGeneratedClass>(GetClass());
-	if(BGClass != NULL)
+	if (UInputDelegateBinding::SupportsInputDelegate(GetClass()))
 	{
 		InputComponent->bBlockInput = bBlockInput;
-		UInputDelegateBinding::BindInputDelegates(BGClass, InputComponent);
+		UInputDelegateBinding::BindInputDelegates(GetClass(), InputComponent);
 	}
 }
 
@@ -2869,7 +2894,12 @@ void APlayerController::LevelStreamingStatusChanged(ULevelStreaming* LevelObject
 void APlayerController::ClientPrepareMapChange_Implementation(FName LevelName, bool bFirst, bool bLast)
 {
 	// Only call on the first local player controller to handle it being called on multiple PCs for splitscreen.
-	APlayerController* PlayerController = GetWorld()->GetFirstPlayerController();
+	if (GetWorld()->GetGameInstance() == nullptr)
+	{
+		return;
+	}
+
+	APlayerController* PlayerController = GetWorld()->GetGameInstance()->GetFirstLocalPlayerController();
 	if( PlayerController != this )
 	{
 		return;
@@ -3105,7 +3135,7 @@ void APlayerController::ConsoleKey(FKey Key)
 #if !UE_BUILD_SHIPPING
 	if (ULocalPlayer* LocalPlayer = Cast<ULocalPlayer>(Player))
 	{
-		if (LocalPlayer->ViewportClient->ViewportConsole)
+		if (LocalPlayer->ViewportClient && LocalPlayer->ViewportClient->ViewportConsole)
 		{
 			LocalPlayer->ViewportClient->ViewportConsole->InputKey(0, Key, IE_Pressed);
 		}
@@ -3117,7 +3147,7 @@ void APlayerController::SendToConsole(const FString& Command)
 #if !UE_BUILD_SHIPPING
 	if (ULocalPlayer* LocalPlayer = Cast<ULocalPlayer>(Player))
 	{
-		if (LocalPlayer->ViewportClient->ViewportConsole)
+		if (LocalPlayer->ViewportClient && LocalPlayer->ViewportClient->ViewportConsole)
 		{
 			LocalPlayer->ViewportClient->ViewportConsole->ConsoleCommand(Command);
 		}
@@ -3197,7 +3227,7 @@ APlayerState* APlayerController::GetSplitscreenPlayerByIndex(int32 PlayerIndex) 
 			UNetConnection* RemoteConnection = Cast<UNetConnection>(Player);
 			if ( LP != NULL )
 			{
-				const TArray<ULocalPlayer*>& GamePlayers = LP->ViewportClient->GetOuterUEngine()->GetGamePlayers(GetWorld());
+				const TArray<ULocalPlayer*>& GamePlayers = LP->GetOuterUEngine()->GetGamePlayers(GetWorld());
 				// this PC is a local player
 				if ( PlayerIndex >= 0 && PlayerIndex < GamePlayers.Num() )
 				{
@@ -3292,7 +3322,7 @@ int32 APlayerController::GetSplitscreenPlayerCount() const
 			UNetConnection* RemoteConnection = Cast<UNetConnection>(Player);
 			if ( LP != NULL )
 			{
-				Result = LP->ViewportClient->GetOuterUEngine()->GetNumGamePlayers(GetWorld());
+				Result = LP->GetOuterUEngine()->GetNumGamePlayers(GetWorld());
 			}
 			else if ( RemoteConnection != NULL )
 			{
@@ -3674,7 +3704,7 @@ void APlayerController::TickPlayerInput(const float DeltaSeconds, const bool bGa
 			UGameViewportClient* ViewportClient = LocalPlayer->ViewportClient;
 
 			// Only send mouse hit events if we're directly over the viewport.
-			if ( ViewportClient->GetGameViewportWidget().IsValid() && ViewportClient->GetGameViewportWidget()->IsDirectlyHovered() )
+			if ( ViewportClient && ViewportClient->GetGameViewportWidget().IsValid() && ViewportClient->GetGameViewportWidget()->IsDirectlyHovered() )
 			{
 				if ( LocalPlayer->ViewportClient->GetMousePosition(MousePosition) )
 				{
@@ -4232,7 +4262,7 @@ bool APlayerController::GetMousePosition(float& LocationX, float& LocationY) con
 	bool bGotMousePosition = false;
 	ULocalPlayer* LocalPlayer = Cast<ULocalPlayer>(Player);
 
-	if (LocalPlayer)
+	if (LocalPlayer && LocalPlayer->ViewportClient)
 	{
 		FVector2D MousePosition;
 		

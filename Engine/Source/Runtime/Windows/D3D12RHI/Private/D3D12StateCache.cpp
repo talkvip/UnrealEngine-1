@@ -628,7 +628,7 @@ void FD3D12DefaultBufferPool::ReleaseAllResources()
 // Grab a buffer from the available buffers or create a new buffer if none are available
 HRESULT FD3D12DefaultBufferAllocator::AllocDefaultResource(const D3D12_RESOURCE_DESC& Desc, D3D12_SUBRESOURCE_DATA *pInitialData, FD3D12ResourceLocation *ResourceLocation, uint32 Alignment)
 {
-	check (Desc.Flags < MAX_DEFAULT_POOLS);
+	check ((uint32)Desc.Flags < MAX_DEFAULT_POOLS);
 
 	return DefaultBufferPools[Desc.Flags]->AllocDefaultResource(Desc, pInitialData, ResourceLocation, Alignment);
 }
@@ -2778,6 +2778,7 @@ void FD3D12DescriptorCache::SetRenderTargets(FD3D12RenderTargetView **RenderTarg
 		{
 			// Depth is also bound as an SRV. Need to add some SRV state to the depth plane, so transition the depth and stencil separately.
 			const D3D12_DEPTH_STENCIL_VIEW_DESC &desc = DepthStencilTarget->GetDesc();
+			check(desc.Flags & D3D12_DSV_FLAG_READ_ONLY_DEPTH);
 			const D3D12_RESOURCE_STATES depthState = D3D12_RESOURCE_STATE_DEPTH_READ | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
 			FD3D12DynamicRHI::TransitionResource(CommandList, DepthStencilTarget->GetResource(), depthState, DepthStencilTarget->GetDepthOnlyViewSubresourceSubset());
 

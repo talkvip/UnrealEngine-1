@@ -5,11 +5,12 @@
 
 UMovieSceneSection::UMovieSceneSection( const FObjectInitializer& ObjectInitializer )
 	: Super( ObjectInitializer )
+	, StartTime(0.0f)
+	, EndTime(0.0f)
+	, RowIndex(0)
+	, bIsActive(true)
+	, bIsInfinite(false)
 {
-
-	StartTime = 0.0f;
-	EndTime = 0.0f;
-	RowIndex = 0;
 }
 
 const UMovieSceneSection* UMovieSceneSection::OverlapsWithSections(const TArray<UMovieSceneSection*>& Sections, int32 TrackDelta, float TimeDelta) const
@@ -62,11 +63,18 @@ void UMovieSceneSection::InitialPlacement(const TArray<UMovieSceneSection*>& Sec
 	}
 }
 
-void UMovieSceneSection::AddKeyToCurve( FRichCurve& InCurve, float Time, float Value )
+void UMovieSceneSection::AddKeyToCurve( FRichCurve& InCurve, float Time, float Value, FKeyParams KeyParams, const bool bUnwindRotation )
 {
 	if(IsTimeWithinSection(Time))
 	{
 		Modify();
-		InCurve.UpdateOrAddKey(Time, Value);
+		if (InCurve.GetNumKeys() == 0 && !KeyParams.bAddKeyEvenIfUnchanged)
+		{
+			InCurve.SetDefaultValue(Value);
+		}
+		else
+		{
+			InCurve.UpdateOrAddKey(Time, Value, bUnwindRotation);
+		}
 	}
 }

@@ -150,10 +150,11 @@ namespace UnrealBuildTool
 		 * This is not required - but allows for hiding details of a
 		 * particular platform.
 		 * 
-		 * @param InModule The newly loaded module
-		 * @param Target The target being build
+		 *  @param  ModuleName		The name of the module
+		 *	@param	Rules			The module rules
+		 *	@param	Target			The target being build
 		 */
-		void ModifyNewlyLoadedModule(UEBuildModule InModule, TargetInfo Target);
+		void ModifyModuleRules(string ModuleName, ModuleRules Rules, TargetInfo Target);
 
 		/**
 		 * Setup the target environment for building
@@ -180,7 +181,7 @@ namespace UnrealBuildTool
 		 * For platforms that need to output multiple files per binary (ie Android "fat" binaries)
 		 * this will emit multiple paths. By default, it simply makes an array from the input
 		 */
-		List<string> FinalizeBinaryPaths(string BinaryName);
+		List<FileReference> FinalizeBinaryPaths(FileReference BinaryName);
 
 		/**
 		 * Setup the configuration environment for building
@@ -274,7 +275,7 @@ namespace UnrealBuildTool
 		 *
 		 * return true if the project uses the default build config
 		 */
-		bool HasDefaultBuildConfig(UnrealTargetPlatform InPlatform, string InProjectPath);
+		bool HasDefaultBuildConfig(UnrealTargetPlatform InPlatform, DirectoryReference InProjectPath);
 	}
 
 	public abstract partial class UEBuildPlatform : IUEBuildPlatform
@@ -411,17 +412,18 @@ namespace UnrealBuildTool
 		 *	passed in for the given platform.
 		 *	This is not required - but allows for hiding details of a particular platform.
 		 *	
-		 *	@param	InModule		The newly loaded module
+		 *  @param  Name			The name of the module
+		 *	@param	Module			The module rules
 		 *	@param	Target			The target being build
 		 *	@param	Only			If this is not unknown, then only run that platform
 		 */
-		public static void PlatformModifyNewlyLoadedModule(UEBuildModule InModule, TargetInfo Target, UnrealTargetPlatform Only = UnrealTargetPlatform.Unknown)
+		public static void PlatformModifyModuleRules(string ModuleName, ModuleRules Rules, TargetInfo Target, UnrealTargetPlatform Only = UnrealTargetPlatform.Unknown)
 		{
 			foreach (var PlatformEntry in BuildPlatformDictionary)
 			{
 				if (Only == UnrealTargetPlatform.Unknown || PlatformEntry.Key == Only || PlatformEntry.Key == Target.Platform)
 				{
-					PlatformEntry.Value.ModifyNewlyLoadedModule(InModule, Target);
+					PlatformEntry.Value.ModifyModuleRules(ModuleName, Rules, Target);
 				}
 			}
 		}
@@ -635,10 +637,11 @@ namespace UnrealBuildTool
 		 *	This is not required - but allows for hiding details of a
 		 *	particular platform.
 		 *	
-		 *	@param	InModule		The newly loaded module
+		 *  @param  ModuleName		The name of the module
+		 *	@param	Rules			The module rules
 		 *	@param	Target			The target being build
 		 */
-		public virtual void ModifyNewlyLoadedModule(UEBuildModule InModule, TargetInfo Target)
+		public virtual void ModifyModuleRules(string ModuleName, ModuleRules Rules, TargetInfo Target)
 		{
 		}
 
@@ -661,7 +664,7 @@ namespace UnrealBuildTool
 		/**
 		 * Allow the platform to override the NMake output name
 		 */
-		public virtual string ModifyNMakeOutput(string ExeName)
+		public virtual FileReference ModifyNMakeOutput(FileReference ExeName)
 		{
 			// by default, use original
 			return ExeName;
@@ -684,9 +687,9 @@ namespace UnrealBuildTool
 		 * For platforms that need to output multiple files per binary (ie Android "fat" binaries)
 		 * this will emit multiple paths. By default, it simply makes an array from the input
 		 */
-		public virtual List<string> FinalizeBinaryPaths(string BinaryName)
+		public virtual List<FileReference> FinalizeBinaryPaths(FileReference BinaryName)
 		{
-			List<string> TempList = new List<string>() { BinaryName };
+			List<FileReference> TempList = new List<FileReference>() { BinaryName };
 			return TempList;
 		}
 
@@ -754,7 +757,7 @@ namespace UnrealBuildTool
 		{
 			if (!bInitializedProject)
 			{
-				ConfigCacheIni Ini = new ConfigCacheIni(InPlatform, "Engine", UnrealBuildTool.GetUProjectPath());
+				ConfigCacheIni Ini = ConfigCacheIni.CreateConfigCacheIni(InPlatform, "Engine", UnrealBuildTool.GetUProjectPath());
 				bool bValue = UEBuildConfiguration.bCompileAPEX;
 				if (Ini.GetBool("/Script/BuildSettings.BuildSettings", "bCompileApex", out bValue))
 				{
@@ -943,10 +946,12 @@ namespace UnrealBuildTool
 		{
 		}
 
-		protected static bool DoProjectSettingsMatchDefault(UnrealTargetPlatform Platform, string ProjectPath, string Section, string[] BoolKeys, string[] IntKeys, string[] StringKeys)
+		static Dictionary<UnrealTargetPlatform, ConfigCacheIni> EngineIniCache = new Dictionary<UnrealTargetPlatform, ConfigCacheIni>();
+
+		protected static bool DoProjectSettingsMatchDefault(UnrealTargetPlatform Platform, DirectoryReference ProjectDirectoryName, string Section, string[] BoolKeys, string[] IntKeys, string[] StringKeys)
 		{
-			ConfigCacheIni ProjIni = new ConfigCacheIni(Platform, "Engine", ProjectPath);
-			ConfigCacheIni DefaultIni = new ConfigCacheIni(Platform, "Engine", null);
+			ConfigCacheIni ProjIni = ConfigCacheIni.CreateConfigCacheIni(Platform, "Engine", ProjectDirectoryName);
+			ConfigCacheIni DefaultIni = ConfigCacheIni.CreateConfigCacheIni(Platform, "Engine", (DirectoryReference)null);
 
 			// look at all bool values
 			if (BoolKeys != null) foreach (string Key in BoolKeys)
@@ -996,7 +1001,7 @@ namespace UnrealBuildTool
 		 *
 		 * return true if the project uses the default build config
 		 */
-		public virtual bool HasDefaultBuildConfig(UnrealTargetPlatform Platform, string ProjectPath)
+		public virtual bool HasDefaultBuildConfig(UnrealTargetPlatform Platform, DirectoryReference ProjectDirectoryName)
 		{
 			string[] BoolKeys = new string[] {
 				"bCompileApex", "bCompileBox2D", "bCompileICU", "bCompileSimplygon", 
@@ -1005,7 +1010,7 @@ namespace UnrealBuildTool
 				"bCompileForSize", "bCompileCEF3"
 			};
 
-			return DoProjectSettingsMatchDefault(Platform, ProjectPath, "/Script/BuildSettings.BuildSettings",
+			return DoProjectSettingsMatchDefault(Platform, ProjectDirectoryName, "/Script/BuildSettings.BuildSettings",
 				BoolKeys, null, null);
 		}
 	}
@@ -1262,7 +1267,7 @@ namespace UnrealBuildTool
 
 		/**
 		* Returns Hook names as needed by the platform
-		* (e.g. can be overriden with custom executables or scripts)
+		* (e.g. can be overridden with custom executables or scripts)
 		*
 		* @param Hook Hook type
 		*/

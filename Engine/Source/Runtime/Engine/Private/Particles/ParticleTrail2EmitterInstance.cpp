@@ -2265,12 +2265,15 @@ bool FParticleRibbonEmitterInstance::ResolveSourcePoint(int32 InTrailIdx,
 					bool bEncounteredNaNError = false;
 
 					// Grab the particle
-					FBaseParticle* SourceParticle = (SourceIndices[InTrailIdx] != -1) ? SourceEmitter->GetParticleDirect(SourceIndices[InTrailIdx]) : NULL;
-					if (SourceParticle != NULL)
+					
+					const int32 SourceEmitterParticleIndex = SourceIndices[InTrailIdx];
+					FBaseParticle* SourceParticle = ((SourceEmitterParticleIndex >= 0) && (SourceEmitterParticleIndex < SourceEmitter->ActiveParticles)) ? SourceEmitter->GetParticleDirect(SourceEmitterParticleIndex) : nullptr;
+					if (SourceParticle != nullptr)
 					{
 						const FVector WorldOrigin = SourceEmitter->SimulationToWorld.GetOrigin();
 						UParticleSystemComponent* Comp = SourceEmitter->Component;
 						if (!ensureMsgf(!SourceParticle->Location.ContainsNaN(), TEXT("NaN in SourceParticle Location. Template: %s, Component: %s"), Comp ? *GetNameSafe(Comp->Template) : TEXT("UNKNOWN"), *GetPathNameSafe(Comp)) ||
+							!ensureMsgf(!SourceParticle->OldLocation.ContainsNaN(), TEXT("NaN in SourceParticle OldLocation. Template: %s, Component: %s"), Comp ? *GetNameSafe(Comp->Template) : TEXT("UNKNOWN"), *GetPathNameSafe(Comp)) ||
 							!ensureMsgf(!WorldOrigin.ContainsNaN(), TEXT("NaN in WorldOrigin. Template: %s, Component: %s"), Comp ? *GetNameSafe(Comp->Template) : TEXT("UNKNOWN"), *GetPathNameSafe(Comp))
 							)
 						{
@@ -2572,7 +2575,7 @@ FDynamicEmitterDataBase* FParticleRibbonEmitterInstance::GetDynamicData(bool bSe
 	}
 
 	// Allocate the dynamic data
-	FDynamicRibbonEmitterData* NewEmitterData = ::new FDynamicRibbonEmitterData(LODLevel->RequiredModule);
+	FDynamicRibbonEmitterData* NewEmitterData = new FDynamicRibbonEmitterData(LODLevel->RequiredModule);
 	{
 		SCOPE_CYCLE_COUNTER(STAT_ParticleMemTime);
 		INC_DWORD_STAT(STAT_DynamicEmitterCount);
@@ -2664,7 +2667,7 @@ FDynamicEmitterReplayDataBase* FParticleRibbonEmitterInstance::GetReplayData()
 		return NULL;
 	}
 
-	FDynamicEmitterReplayDataBase* NewEmitterReplayData = ::new FDynamicRibbonEmitterReplayData();
+	FDynamicEmitterReplayDataBase* NewEmitterReplayData = new FDynamicRibbonEmitterReplayData();
 	check(NewEmitterReplayData != NULL);
 
 	if (!FillReplayData(*NewEmitterReplayData))
@@ -3920,7 +3923,7 @@ FDynamicEmitterDataBase* FParticleAnimTrailEmitterInstance::GetDynamicData(bool 
 	}
 
 	// Allocate the dynamic data
-	FDynamicAnimTrailEmitterData* NewEmitterData = ::new FDynamicAnimTrailEmitterData(LODLevel->RequiredModule);
+	FDynamicAnimTrailEmitterData* NewEmitterData = new FDynamicAnimTrailEmitterData(LODLevel->RequiredModule);
 	{
 		SCOPE_CYCLE_COUNTER(STAT_ParticleMemTime);
 		INC_DWORD_STAT(STAT_DynamicEmitterCount);
@@ -4026,7 +4029,7 @@ FDynamicEmitterReplayDataBase* FParticleAnimTrailEmitterInstance::GetReplayData(
 		return NULL;
 	}
 
-	FDynamicTrailsEmitterReplayData* NewEmitterReplayData = ::new FDynamicTrailsEmitterReplayData();
+	FDynamicTrailsEmitterReplayData* NewEmitterReplayData = new FDynamicTrailsEmitterReplayData();
 	check(NewEmitterReplayData != NULL);
 
 	if (!FillReplayData(*NewEmitterReplayData))

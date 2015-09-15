@@ -325,12 +325,14 @@ void FAsyncAudioDecompressWorker::DoWork()
 			if (Wave->DecompressionType == DTYPE_RealTime)
 			{
 				const uint32 PCMBufferSize = MONO_PCM_BUFFER_SIZE * Wave->NumChannels;
+				check(Wave->CachedRealtimeFirstBuffer == nullptr);
 				Wave->CachedRealtimeFirstBuffer = (uint8*)FMemory::Malloc(PCMBufferSize * 2);
 				AudioInfo->ReadCompressedData( Wave->CachedRealtimeFirstBuffer, false, PCMBufferSize * 2 );
 			}
 			else
 			{
 				Wave->RawPCMDataSize = QualityInfo.SampleDataSize;
+				check(Wave->RawPCMData == nullptr);
 				Wave->RawPCMData = ( uint8* )FMemory::Malloc( Wave->RawPCMDataSize );
 
 				// Decompress all the sample data into preallocated memory

@@ -501,8 +501,7 @@ void FKismetCompilerUtilities::ValidateEnumProperties(UObject* DefaultObject, FC
 			if(Enum)
 			{		
 				const uint8 EnumValue = ByteProperty->GetPropertyValue_InContainer(DefaultObject);
-				const int32 EnumAcceptableMax = Enum->GetMaxEnumValue();
-				if(EnumValue >= EnumAcceptableMax)
+				if(!Enum->IsValidEnumValue(EnumValue))
 				{
 					MessageLog.Warning(
 						*FString::Printf(
@@ -808,6 +807,15 @@ UProperty* FKismetCompilerUtilities::CreatePropertyOnScope(UStruct* Scope, const
 				UStructProperty* NewPropertyStruct = NewObject<UStructProperty>(PropertyScope, ValidatedPropertyName, ObjectFlags);
 				NewPropertyStruct->Struct = SubType;
 				NewProperty = NewPropertyStruct;
+
+				if (SubType->StructFlags & STRUCT_HasInstancedReference)
+				{
+					NewProperty->SetPropertyFlags(CPF_ContainsInstancedReference);
+					if (NewArrayProperty)
+					{
+						NewArrayProperty->SetPropertyFlags(CPF_ContainsInstancedReference);
+					}
+				}
 			}
 			else
 			{
@@ -1424,6 +1432,33 @@ int32 FKismetFunctionContext::GetContextUniqueID()
 	return UUIDCounter++;
 }
 
+bool FKismetFunctionContext::MustUseSwitchState(const FBlueprintCompiledStatement* ExcludeThisOne) const
+{
+	for (auto Node : LinearExecutionList)
+	{
+		auto StatementList = StatementsPerNode.Find(Node);
+		if (StatementList)
+		{
+			for (auto Statement : (*StatementList))
+			{
+				if (Statement && (Statement != ExcludeThisOne) && (
+					Statement->Type == KCST_UnconditionalGoto ||
+					Statement->Type == KCST_PushState ||
+					Statement->Type == KCST_GotoIfNot ||
+					Statement->Type == KCST_ComputedGoto ||
+					Statement->Type == KCST_EndOfThread ||
+					Statement->Type == KCST_EndOfThreadIfNot ||
+					Statement->Type == KCST_GotoReturn ||
+					Statement->Type == KCST_GotoReturnIfNot))
+				{
+					return true;
+				}
+			}
+		}
+	}
+	return false;
+}
+
 void FKismetFunctionContext::MergeAdjacentStates()
 {
 	for (int32 ExecIndex = 0; ExecIndex < LinearExecutionList.Num(); ++ExecIndex)
@@ -1456,7 +1491,8 @@ void FKismetFunctionContext::MergeAdjacentStates()
 	const auto LastExecutedNode = LinearExecutionList.Num() ? LinearExecutionList.Last() : NULL;
 	TArray<FBlueprintCompiledStatement*>* StatementList = StatementsPerNode.Find(LastExecutedNode);
 	FBlueprintCompiledStatement* LastStatementInLastNode = (StatementList && StatementList->Num()) ? StatementList->Last() : NULL;
-	if (LastStatementInLastNode && (KCST_GotoReturn == LastStatementInLastNode->Type) && !LastStatementInLastNode->bIsJumpTarget)
+	const bool SafeForNativeCode = !bGeneratingCpp || !MustUseSwitchState(LastStatementInLastNode);
+	if (LastStatementInLastNode && SafeForNativeCode && (KCST_GotoReturn == LastStatementInLastNode->Type) && !LastStatementInLastNode->bIsJumpTarget)
 	{
 		StatementList->RemoveAt(StatementList->Num() - 1);
 	}
@@ -1789,7 +1825,7 @@ FBPTerminal* FKismetFunctionContext::CreateLocalTerminal(ETerminalSpecification 
 	switch (Spec)
 	{
 	case ETerminalSpecification::TS_ForcedShared:
-		// ensure(IsEventGraph()); it's used in function by UK2Node_AddComponent
+		ensure(IsEventGraph());
 		Result = new (EventGraphLocals)FBPTerminal();
 		break;
 	case ETerminalSpecification::TS_Literal:

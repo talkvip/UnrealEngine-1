@@ -341,7 +341,7 @@ void UNavigationSystem::DoInitialSetup()
 
 void UNavigationSystem::UpdateAbstractNavData()
 {
-	if (AbstractNavData != nullptr)
+	if (AbstractNavData != nullptr && !AbstractNavData->IsPendingKill())
 	{
 		return;
 	}
@@ -379,6 +379,13 @@ void UNavigationSystem::SetSupportedAgentsNavigationClass(int32 AgentIndex, TSub
 {
 	check(SupportedAgents.IsValidIndex(AgentIndex));
 	SupportedAgents[AgentIndex].NavigationDataClass = NavigationDataClass;
+
+	// keep preferred navigation data class in sync with actual class
+	// this will be passed to navigation data actor and will be required
+	// for comparisons done in DoesSupportAgent calls
+	//
+	// "Any" navigation data preference is valid only for instanced agents
+	SupportedAgents[AgentIndex].PreferredNavData = NavigationDataClass;
 
 	if (NavigationDataClass != nullptr)
 	{
@@ -514,6 +521,22 @@ bool UNavigationSystem::ConditionalPopulateNavOctree()
 			}
 		}
 	}
+	
+	// Add all found elements to octree, this will not add new dirty areas to navigation
+	if (PendingOctreeUpdates.Num())
+	{
+		TArray<FNavigationDirtyArea> SavedDirtyAreas; 
+		Exchange(SavedDirtyAreas, DirtyAreas);
+
+		for (TSet<FNavigationDirtyElement>::TIterator It(PendingOctreeUpdates); It; ++It)
+		{
+			AddElementToNavOctree(*It);
+		}
+		PendingOctreeUpdates.Empty(32);
+
+		// Discard all navigation updates caused by octree construction
+		Exchange(SavedDirtyAreas, DirtyAreas);
+	}
 
 	return bSupportRebuilding;
 }
@@ -595,6 +618,10 @@ void UNavigationSystem::OnWorldInitDone(FNavigationSystemRunMode Mode)
 	}
 	else
 	{
+		// Discard all bounds updates that was submitted during world initialization, 
+		// to avoid navigation rebuild right after map is loaded
+		PendingNavBoundsUpdates.Empty();
+		
 		// gather navigable bounds
 		GatherNavigationBounds();
 
@@ -1430,6 +1457,12 @@ const ANavigationData* UNavigationSystem::GetNavDataForProps(const FNavAgentProp
 		for (TArray<FNavAgentProperties>::TConstIterator It(AgentPropertiesList); It; ++It)
 		{
 			const FNavAgentProperties& NavIt = *It;
+			const bool bNavClassMatch = NavIt.IsNavDataMatching(AgentProperties);
+			if (!bNavClassMatch)
+			{
+				continue;
+			}
+
 			ExcessRadius = NavIt.AgentRadius - AgentProperties.AgentRadius;
 			ExcessHeight = NavIt.AgentHeight - AgentHeight;
 
@@ -1592,14 +1625,24 @@ FBox UNavigationSystem::GetWorldBounds() const
 
 	NavigableWorldBounds = FBox(0);
 
-	if (GetWorld() != NULL && bWholeWorldNavigable == true)
+	if (GetWorld() != nullptr)
 	{
-		// @TODO - super slow! Need to ask tech guys where I can get this from
-		for( FActorIterator It(GetWorld()); It; ++It )
+		if (bWholeWorldNavigable == false)
 		{
-			if (IsNavigationRelevant(*It))
+			for (const FNavigationBounds& Bounds : RegisteredNavBounds)
 			{
-				NavigableWorldBounds += (*It)->GetComponentsBoundingBox();
+				NavigableWorldBounds += Bounds.AreaBox;
+			}
+		}
+		else
+		{
+			// @TODO - super slow! Need to ask tech guys where I can get this from
+			for (FActorIterator It(GetWorld()); It; ++It)
+			{
+				if (IsNavigationRelevant(*It))
+				{
+					NavigableWorldBounds += (*It)->GetComponentsBoundingBox();
+				}
 			}
 		}
 	}
@@ -2206,9 +2249,8 @@ void UNavigationSystem::InitializeForWorld(UWorld* World, FNavigationSystemRunMo
 			NavSys = CreateNavigationSystem(World);
 		}
 
-		// Remove old/stale chunk data from all levels, when navigation auto-update is enabled
-		// In case navigation system will be created chunks will be regenerated anyway
-		if (Mode == FNavigationSystemRunMode::EditorMode && bNavigationAutoUpdateEnabled == true)
+		// Remove old/stale chunk data from all sub-levels when navigation system is disabled
+		if (NavSys == nullptr && Mode == FNavigationSystemRunMode::EditorMode)
 		{
 			DiscardNavigationDataChunks(World);
 		}
@@ -3175,6 +3217,8 @@ void UNavigationSystem::SpawnMissingNavigationData()
 		// update 
 		MainNavData = GetMainNavData(FNavigationSystem::DontCreate);
 	}
+
+	UpdateAbstractNavData();
 }
 
 ANavigationData* UNavigationSystem::CreateNavigationDataInstance(const FNavDataConfig& NavConfig)
@@ -4016,3 +4060,5 @@ bool UNavigationSystem::GetRandomPointInRadius(const FVector& Origin, float Radi
 {
 	return GetRandomReachablePointInRadius(Origin, Radius, ResultLocation, NavData, QueryFilter);
 }
+
+#undef LOCTEXT_NAMESPACE

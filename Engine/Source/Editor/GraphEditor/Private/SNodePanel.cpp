@@ -1378,17 +1378,17 @@ bool SNodePanel::IsNodeCulled(const TSharedRef<SNode>& Node, const FGeometry& Al
 
 }
 
-bool SNodePanel::GetBoundsForNode(const UObject* InNode, /*out*/ FVector2D& MinCorner, /*out*/ FVector2D& MaxCorner, float Padding)
+bool SNodePanel::GetBoundsForNode(const UObject* InNode, /*out*/ FVector2D& MinCorner, /*out*/ FVector2D& MaxCorner, float Padding) const
 {
 	MinCorner = FVector2D(MAX_FLT, MAX_FLT);
 	MaxCorner = FVector2D(-MAX_FLT, -MAX_FLT);
 
 	bool bValid = false;
 
-	TSharedRef<SNode>* pWidget = (InNode) ? NodeToWidgetLookup.Find(InNode) : nullptr;
+	const TSharedRef<SNode>* pWidget = (InNode) ? NodeToWidgetLookup.Find(InNode) : nullptr;
 	if (pWidget)
 	{
-		SNode& Widget = pWidget->Get();
+		const SNode& Widget = pWidget->Get();
 		const FVector2D Lower = Widget.GetPosition();
 		const FVector2D Upper = Lower + Widget.GetDesiredSize();
 
@@ -1474,7 +1474,7 @@ bool SNodePanel::ScrollToLocation(const FGeometry& MyGeometry, FVector2D Desired
 	ViewOffset = NewPosition - HalfOFScreenInGraphSpace;
 
 	// If within 1 pixel of target, stop interpolating
-	return ((NewPosition - DesiredCenterPosition).Size() < 1.f);
+	return ((NewPosition - DesiredCenterPosition).SizeSquared() < 1.f);
 }
 
 bool SNodePanel::ZoomToLocation(const FVector2D& CurrentSizeWithoutZoom, const FVector2D& DesiredSize, bool bDoneScrolling)

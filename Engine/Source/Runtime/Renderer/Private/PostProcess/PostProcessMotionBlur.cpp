@@ -144,8 +144,6 @@ IMPLEMENT_SHADER_TYPE(,FPostProcessMotionBlurSetupPS, TEXT("PostProcessMotionBlu
 
 void FRCPassPostProcessMotionBlurSetup::Process(FRenderingCompositePassContext& Context)
 {
-	SCOPED_DRAW_EVENT(Context.RHICmdList, MotionBlurSetup);
-
 	const FPooledRenderTargetDesc* InputDesc = GetInputDesc(ePId_Input0);
 
 	if(!InputDesc)
@@ -168,6 +166,8 @@ void FRCPassPostProcessMotionBlurSetup::Process(FRenderingCompositePassContext& 
 	// Viewport size not even also causes issue
 	FIntRect DestRect = FIntRect::DivideAndRoundUp(SrcRect, 2);
 
+	SCOPED_DRAW_EVENTF(Context.RHICmdList, MotionBlurSetup, TEXT("MotionBlurSetup %dx%d"), DestRect.Width(), DestRect.Height());
+	
 	const FSceneRenderTargetItem& DestRenderTarget0 = PassOutputs[0].RequestSurface(Context);
 	const FSceneRenderTargetItem& DestRenderTarget1 = PassOutputs[1].RequestSurface(Context);
 
@@ -203,8 +203,7 @@ void FRCPassPostProcessMotionBlurSetup::Process(FRenderingCompositePassContext& 
 		VertexShader->SetParameters(Context);
 	}
 
-	// Draw a quad mapping scene color to the view's render target
-	DrawRectangle(
+	DrawPostProcessPass(
 		Context.RHICmdList,
 		DestRect.Min.X, DestRect.Min.Y,
 		DestRect.Width(), DestRect.Height(),
@@ -213,6 +212,8 @@ void FRCPassPostProcessMotionBlurSetup::Process(FRenderingCompositePassContext& 
 		DestSize,
 		SrcSize,
 		*VertexShader,
+		View.StereoPass,
+		Context.HasHmdMesh(),
 		EDRF_UseTriangleOptimization);
 
 	Context.RHICmdList.CopyToResolveTarget(DestRenderTarget0.TargetableTexture, DestRenderTarget0.ShaderResourceTexture, false, FResolveParams());
@@ -456,8 +457,6 @@ FRCPassPostProcessMotionBlur::FRCPassPostProcessMotionBlur(uint32 InQuality)
 
 void FRCPassPostProcessMotionBlur::Process(FRenderingCompositePassContext& Context)
 {
-	SCOPED_DRAW_EVENT(Context.RHICmdList, MotionBlur);
-
 	const FPooledRenderTargetDesc* InputDesc = GetInputDesc(ePId_Input0);
 
 	if(!InputDesc)
@@ -479,6 +478,9 @@ void FRCPassPostProcessMotionBlur::Process(FRenderingCompositePassContext& Conte
 	uint32 ScaleFactor = FSceneRenderTargets::Get(Context.RHICmdList).GetBufferSizeXY().X / SrcSize.X;
 
 	FIntRect SrcRect = FIntRect::DivideAndRoundUp(View.ViewRect, ScaleFactor);
+
+	SCOPED_DRAW_EVENTF(Context.RHICmdList, MotionBlur, TEXT("MotionBlur(Old) %dx%d"), SrcRect.Width(), SrcRect.Height());
+
 	FIntRect DestRect = SrcRect;
 
 	const FSceneRenderTargetItem& DestRenderTarget = PassOutputs[0].RequestSurface(Context);
@@ -516,16 +518,17 @@ void FRCPassPostProcessMotionBlur::Process(FRenderingCompositePassContext& Conte
 
 	TShaderMapRef<FPostProcessVS> VertexShader(Context.GetShaderMap());
 
-	// Draw a quad mapping scene color to the view's render target
-	DrawRectangle(
+	DrawPostProcessPass(
 		Context.RHICmdList,
 		0, 0,
 		SrcRect.Width(), SrcRect.Height(),
-		SrcRect.Min.X, SrcRect.Min.Y, 
+		SrcRect.Min.X, SrcRect.Min.Y,
 		SrcRect.Width(), SrcRect.Height(),
 		SrcRect.Size(),
 		SrcSize,
 		*VertexShader,
+		View.StereoPass,
+		Context.HasHmdMesh(),
 		EDRF_UseTriangleOptimization);
 
 	Context.RHICmdList.CopyToResolveTarget(DestRenderTarget.TargetableTexture, DestRenderTarget.ShaderResourceTexture, false, FResolveParams());
@@ -598,8 +601,6 @@ IMPLEMENT_SHADER_TYPE(,FPostProcessMotionBlurRecombinePS,TEXT("PostProcessMotion
 
 void FRCPassPostProcessMotionBlurRecombine::Process(FRenderingCompositePassContext& Context)
 {
-	SCOPED_DRAW_EVENT(Context.RHICmdList, MotionBlurRecombine);
-
 	const FPooledRenderTargetDesc* InputDesc = GetInputDesc(ePId_Input0);
 
 	if(!InputDesc)
@@ -622,6 +623,8 @@ void FRCPassPostProcessMotionBlurRecombine::Process(FRenderingCompositePassConte
 
 	FIntRect SrcRect = View.ViewRect / ScaleFactor;
 	FIntRect DestRect = SrcRect;
+
+	SCOPED_DRAW_EVENTF(Context.RHICmdList, MotionBlurRecombine, TEXT("MotionBlurRecombine %dx%d"), DestRect.Width(), DestRect.Height());
 
 	const FSceneRenderTargetItem& DestRenderTarget = PassOutputs[0].RequestSurface(Context);
 
@@ -651,16 +654,17 @@ void FRCPassPostProcessMotionBlurRecombine::Process(FRenderingCompositePassConte
 	VertexShader->SetParameters(Context);
 	PixelShader->SetParameters(Context, bBilinear);
 
-	// Draw a quad mapping scene color to the view's render target
-	DrawRectangle(
+	DrawPostProcessPass(
 		Context.RHICmdList,
 		0, 0,
 		SrcRect.Width(), SrcRect.Height(),
-		SrcRect.Min.X, SrcRect.Min.Y, 
+		SrcRect.Min.X, SrcRect.Min.Y,
 		SrcRect.Width(), SrcRect.Height(),
 		SrcRect.Size(),
 		SrcSize,
 		*VertexShader,
+		View.StereoPass,
+		Context.HasHmdMesh(),
 		EDRF_UseTriangleOptimization);
 
 	Context.RHICmdList.CopyToResolveTarget(DestRenderTarget.TargetableTexture, DestRenderTarget.ShaderResourceTexture, false, FResolveParams());
@@ -880,21 +884,12 @@ public:
 		uint16* Indices = (uint16*)Buffer;
 		for (uint32 SpriteIndex = 0; SpriteIndex < 8; ++SpriteIndex)
 		{
-#if PLATFORM_MAC // Avoid a driver bug on OSX/NV cards that causes driver to generate an unwound index buffer
-			Indices[SpriteIndex*6 + 0] = SpriteIndex*6 + 0;
-			Indices[SpriteIndex*6 + 1] = SpriteIndex*6 + 1;
-			Indices[SpriteIndex*6 + 2] = SpriteIndex*6 + 2;
-			Indices[SpriteIndex*6 + 3] = SpriteIndex*6 + 3;
-			Indices[SpriteIndex*6 + 4] = SpriteIndex*6 + 4;
-			Indices[SpriteIndex*6 + 5] = SpriteIndex*6 + 5;
-#else
 			Indices[SpriteIndex*6 + 0] = SpriteIndex*4 + 0;
 			Indices[SpriteIndex*6 + 1] = SpriteIndex*4 + 3;
 			Indices[SpriteIndex*6 + 2] = SpriteIndex*4 + 2;
 			Indices[SpriteIndex*6 + 3] = SpriteIndex*4 + 0;
 			Indices[SpriteIndex*6 + 4] = SpriteIndex*4 + 1;
 			Indices[SpriteIndex*6 + 5] = SpriteIndex*4 + 3;
-#endif
 		}
 		RHIUnlockIndexBuffer( IndexBufferRHI );
 	}
@@ -1253,7 +1248,7 @@ public:
 					TStaticSamplerState<SF_Point,AM_Clamp,AM_Clamp,AM_Clamp>::GetRHI(),
 				};
 
-				PostprocessParameter.SetPS( ShaderRHI, Context, 0, false, Filters );
+				PostprocessParameter.SetPS( ShaderRHI, Context, 0, eFC_0000, Filters );
 			}
 			else if( CVarMotionBlurSmoothMax.GetValueOnRenderThread() )
 			{
@@ -1265,7 +1260,7 @@ public:
 					TStaticSamplerState<SF_Bilinear,AM_Clamp,AM_Clamp,AM_Clamp>::GetRHI(),
 				};
 
-				PostprocessParameter.SetPS( ShaderRHI, Context, 0, false, Filters );
+				PostprocessParameter.SetPS( ShaderRHI, Context, 0, eFC_0000, Filters );
 			}
 			else
 			{
@@ -1326,7 +1321,7 @@ VARIATION1(0)			VARIATION1(1)			VARIATION1(2)			VARIATION1(3)			VARIATION1(4)
 template< uint32 Quality >
 static void SetMotionBlurShaderNewTempl(const FRenderingCompositePassContext& Context)
 {
-	TShaderMapRef< FPostProcessVS >							VertexShader( Context.GetShaderMap() );
+	TShaderMapRef< FPostProcessVS > VertexShader( Context.GetShaderMap() );
 	TShaderMapRef< FPostProcessMotionBlurNewPS< Quality > >	PixelShader( Context.GetShaderMap() );
 
 	static FGlobalBoundShaderState BoundShaderState;
@@ -1345,8 +1340,6 @@ FRCPassPostProcessMotionBlurNew::FRCPassPostProcessMotionBlurNew(uint32 InQualit
 
 void FRCPassPostProcessMotionBlurNew::Process(FRenderingCompositePassContext& Context)
 {
-	SCOPED_DRAW_EVENT(Context.RHICmdList, MotionBlur);
-
 	const FPooledRenderTargetDesc* InputDesc = GetInputDesc(ePId_Input0);
 
 	if(!InputDesc)
@@ -1367,6 +1360,8 @@ void FRCPassPostProcessMotionBlurNew::Process(FRenderingCompositePassContext& Co
 
 	FIntRect SrcRect = View.ViewRect / ScaleFactor;
 	FIntRect DestRect = SrcRect;
+
+	SCOPED_DRAW_EVENTF(Context.RHICmdList, MotionBlurNew, TEXT("MotionBlur(New) %dx%d"), SrcRect.Width(), SrcRect.Height());
 
 	const FSceneRenderTargetItem& DestRenderTarget = PassOutputs[0].RequestSurface(Context);
 
@@ -1402,16 +1397,18 @@ void FRCPassPostProcessMotionBlurNew::Process(FRenderingCompositePassContext& Co
 
 	TShaderMapRef<FPostProcessVS> VertexShader(Context.GetShaderMap());
 
-	// Draw a quad mapping scene color to the view's render target
-	DrawRectangle(
+	
+	DrawPostProcessPass(
 		Context.RHICmdList,
 		0, 0,
 		SrcRect.Width(), SrcRect.Height(),
-		SrcRect.Min.X, SrcRect.Min.Y, 
+		SrcRect.Min.X, SrcRect.Min.Y,
 		SrcRect.Width(), SrcRect.Height(),
 		SrcRect.Size(),
 		SrcSize,
 		*VertexShader,
+		View.StereoPass,
+		Context.HasHmdMesh(),
 		EDRF_UseTriangleOptimization);
 
 	Context.RHICmdList.CopyToResolveTarget(DestRenderTarget.TargetableTexture, DestRenderTarget.ShaderResourceTexture, false, FResolveParams());

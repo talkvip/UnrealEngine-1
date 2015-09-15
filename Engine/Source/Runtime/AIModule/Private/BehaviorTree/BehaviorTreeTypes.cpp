@@ -124,6 +124,34 @@ void FBehaviorTreeInstance::CleanupNodes(UBehaviorTreeComponent& OwnerComp, UBTC
 	}
 }
 
+bool FBehaviorTreeInstance::HasActiveNode(uint16 TestExecutionIndex) const
+{
+	if (ActiveNode && ActiveNode->GetExecutionIndex() == TestExecutionIndex)
+	{
+		return true;
+	}
+
+	for (int32 Idx = 0; Idx < ParallelTasks.Num(); Idx++)
+	{
+		const FBehaviorTreeParallelTask& ParallelTask = ParallelTasks[Idx];
+		if (ParallelTask.TaskNode && ParallelTask.TaskNode->GetExecutionIndex() == TestExecutionIndex)
+		{
+			return (ParallelTask.Status == EBTTaskStatus::Active);
+		}
+	}
+
+	for (int32 Idx = 0; Idx < ActiveAuxNodes.Num(); Idx++)
+	{
+		if (ActiveAuxNodes[Idx] && ActiveAuxNodes[Idx]->GetExecutionIndex() == TestExecutionIndex)
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
+
 
 //----------------------------------------------------------------------//
 // FBTNodeIndex
@@ -172,11 +200,23 @@ void FBehaviorTreeSearchData::AddUniqueUpdate(const FBehaviorTreeSearchUpdate& U
 			PendingUpdates.RemoveAt(UpdateIndex, 1, false);
 		}
 	}
+	
+	// don't add Remove updates for inactive aux nodes, as they will block valid Add update coming later from the same search
+	// check only aux nodes, it happens due to UBTCompositeNode::NotifyDecoratorsOnActivation
+	if (!bSkipAdding && UpdateInfo.Mode == EBTNodeUpdateMode::Remove && UpdateInfo.AuxNode)
+	{
+		const bool bIsActive = OwnerComp.IsAuxNodeActive(UpdateInfo.AuxNode, UpdateInfo.InstanceIndex);
+		bSkipAdding = !bIsActive;
+	}
 
 	if (!bSkipAdding)
 	{
 		const int32 Idx = PendingUpdates.Add(UpdateInfo);
 		PendingUpdates[Idx].bPostUpdate = (UpdateInfo.Mode == EBTNodeUpdateMode::Add) && (Cast<UBTService>(UpdateInfo.AuxNode) != NULL);
+	}
+	else
+	{
+		UE_VLOG(OwnerComp.GetOwner(), LogBehaviorTree, Verbose, TEXT(">> or not, update skipped"));
 	}
 }
 

@@ -125,6 +125,14 @@ void UArrayProperty::ExportTextItem( FString& ValueStr, const void* PropertyValu
 {
 	checkSlow(Inner);
 
+	if (0 != (PortFlags & PPF_ExportCpp))
+	{
+		FString ExtendedTypeText;
+		FString TypeText = GetCPPType(&ExtendedTypeText, EPropertyExportCPPFlags::CPPF_BlueprintCppBackend);
+		ValueStr += FString::Printf(TEXT("%s%s()"), *TypeText, *ExtendedTypeText);
+		return;
+	}
+
 	FScriptArrayHelper ArrayHelper(this, PropertyValue);
 	FScriptArrayHelper DefaultArrayHelper(this, DefaultValue);
 
@@ -208,11 +216,7 @@ const TCHAR* UArrayProperty::ImportText_Internal( const TCHAR* Buffer, void* Dat
 
 	int32 Index = 0;
 
-	const bool bEmptyArray = *Buffer == TCHAR(')');
-	if (!bEmptyArray)
-	{
-		ArrayHelper.ExpandForIndex(0);
-	}
+	ArrayHelper.ExpandForIndex(0);
 	while ((Buffer != NULL) && (*Buffer != TCHAR(')')))
 	{
 		SkipWhitespace(Buffer);

@@ -166,20 +166,18 @@ struct FAnimMontageInstance
 	UPROPERTY()
 	class UAnimMontage* Montage;
 
-public: 
-	UPROPERTY()
-	float DesiredWeight;
+	// delegates
+	FOnMontageEnded OnMontageEnded;
+	FOnMontageBlendingOutStarted OnMontageBlendingOutStarted;
 
 	UPROPERTY()
-	float Weight;
-
-	UPROPERTY(transient)
-	float BlendTime;
+	bool bPlaying;
 
 	// Blend Time multiplier to allow extending and narrowing blendtimes
 	UPROPERTY(transient)
 	float DefaultBlendTimeMultiplier;
 
+private:
 	// list of next sections per section - index of array is section id
 	UPROPERTY()
 	TArray<int32> NextSections;
@@ -188,15 +186,23 @@ public:
 	UPROPERTY()
 	TArray<int32> PrevSections;
 
-	UPROPERTY()
-	bool bPlaying;
-
-	// delegates
-	FOnMontageEnded OnMontageEnded;
-	FOnMontageBlendingOutStarted OnMontageBlendingOutStarted;
-
 	// reference to AnimInstance
 	TWeakObjectPtr<UAnimInstance> AnimInstance;
+
+	/** Currently Active AnimNotifyState, stored as a copy of the event as we need to
+		call NotifyEnd on the event after a deletion in the editor. After this the event
+		is removed correctly. */
+	UPROPERTY(Transient)
+	TArray<FAnimNotifyEvent> ActiveStateBranchingPoints;
+
+	UPROPERTY()
+	float Position;
+
+	UPROPERTY()
+	float PlayRate;
+
+	UPROPERTY(transient)
+	FAlphaBlend Blend;
 
 	// need to save if it's interrupted or not
 	// this information is crucial for gameplay
@@ -208,20 +214,6 @@ public:
 	// transient NotifyWeight   - Weight for spawned notifies, modified slightly to make sure
 	//                          - we spawn all notifies
 	float NotifyWeight;
-
-	/** Currently Active AnimNotifyState, stored as a copy of the event as we need to
-		call NotifyEnd on the event after a deletion in the editor. After this the event
-		is removed correctly. */
-	UPROPERTY(Transient)
-	TArray<FAnimNotifyEvent> ActiveStateBranchingPoints;
-
-private:
-	UPROPERTY()
-	float Position;
-
-	UPROPERTY()
-	float PlayRate;
-
 public:
 	/** Montage to Montage Synchronization.
 	 *
@@ -242,6 +234,10 @@ public:
 	/** PostUpdate - Sync if updated after Leader. */
 	void MontageSync_PostUpdate();
 
+	/** Get Weight */
+	float GetWeight() const { return Blend.GetBlendedValue(); }
+	float GetDesiredWeight() const { return Blend.GetDesiredValue(); }
+	float GetBlendTime() const { return Blend.GetBlendTime(); }
 private:
 	/** Followers this Montage will synchronize */
 	TArray<struct FAnimMontageInstance*> MontageSyncFollowers;
@@ -257,19 +253,19 @@ private:
 	/** Synchronize ourselves to our leader */
 	void MontageSync_PerformSyncToLeader();
 
+	/** Initialize Blend Setup from Montage */
+	void InitializeBlend(const FAlphaBlend& InAlphaBlend);
+
 public:
 	FAnimMontageInstance()
 		: Montage(NULL)
-		, DesiredWeight(0.f)
-		, Weight(0.f)
-		, BlendTime(0.f)
+		, bPlaying(false)
 		, DefaultBlendTimeMultiplier(1.0f)
-		, bPlaying(false)	
 		, AnimInstance(NULL)
-		, bInterrupted(false)
-		, PreviousWeight(0.f)
 		, Position(0.f)
 		, PlayRate(1.f)
+		, bInterrupted(false)
+		, PreviousWeight(0.f)
 		, MontageSyncLeader(NULL)
 		, MontageSyncUpdateFrameCounter(INDEX_NONE)
 	{
@@ -277,24 +273,21 @@ public:
 
 	FAnimMontageInstance(UAnimInstance * InAnimInstance)
 		: Montage(NULL)
-		, DesiredWeight(0.f)
-		, Weight(0.f)
-		, BlendTime(0.f)
+		, bPlaying(false)
 		, DefaultBlendTimeMultiplier(1.0f)
-		, bPlaying(false)		
 		, AnimInstance(InAnimInstance)
-		, bInterrupted(false)
-		, PreviousWeight(0.f)	
 		, Position(0.f)
 		, PlayRate(1.f)
+		, bInterrupted(false)
+		, PreviousWeight(0.f)	
 		, MontageSyncLeader(NULL)
 		, MontageSyncUpdateFrameCounter(INDEX_NONE)
 	{
 	}
 
-	// montage instance interfaces
+	//~ Begin montage instance Interfaces
 	void Play(float InPlayRate = 1.f);
-	void Stop(float BlendOutDuration, bool bInterrupt=true);
+	void Stop(const FAlphaBlend& InBlendOut, bool bInterrupt=true);
 	void Pause();
 	void Initialize(class UAnimMontage * InMontage);
 
@@ -304,7 +297,7 @@ public:
 
 	bool IsValid() const { return (Montage!=NULL); }
 	bool IsPlaying() const { return IsValid() && bPlaying; }
-	bool IsStopped() const { return DesiredWeight == 0.f; }
+	bool IsStopped() const { return Blend.GetDesiredValue() == 0.f; }
 
 	/** Returns true if this montage is active (valid and not blending out) */
 	bool IsActive() const { return (IsValid() && !IsStopped()); }
@@ -341,7 +334,7 @@ public:
 
 	FName GetCurrentSection() const;
 	FName GetNextSection() const;
-	int32 GetNextSectionID(int32 const & CurrentSectionID) const;
+	ENGINE_API int32 GetNextSectionID(int32 const & CurrentSectionID) const;
 	FName GetSectionNameFromID(int32 const & SectionID) const;
 
 	// reference has to be managed manually
@@ -360,6 +353,11 @@ private:
 	/** Trigger associated events when Montage ticking reaches given FBranchingPointMarker */
 	void BranchingPointEventHandler(const FBranchingPointMarker* BranchingPointMarker);
 	void RefreshNextPrevSections();
+
+public:
+	/** static functions that are used by matinee functionality */
+	static void SetMatineeAnimPositionInner(FName SlotName, USkeletalMeshComponent* SkeletalMeshComponent, UAnimSequence* InAnimSequence, TWeakObjectPtr<UAnimMontage>& CurrentlyPlayingMontage, float InPosition, bool bLooping);
+	static void PreviewMatineeSetAnimPositionInner(FName SlotName, USkeletalMeshComponent* SkeletalMeshComponent, UAnimSequence* InAnimSequence, TWeakObjectPtr<UAnimMontage>& CurrentlyPlayingMontage, float InPosition, bool bLooping, bool bFireNotifies, float DeltaTime);
 };
 
 UCLASS(config=Engine, hidecategories=(UObject, Length), MinimalAPI, BlueprintType)
@@ -367,18 +365,24 @@ class UAnimMontage : public UAnimCompositeBase
 {
 	GENERATED_UCLASS_BODY()
 
-	/** Default blend in time. */
-	UPROPERTY(EditAnywhere, Category=Montage)
-	float BlendInTime;
+	/** Blend in option. */
+	UPROPERTY(EditAnywhere, Category=BlendOption)
+	FAlphaBlend BlendIn;
 
-	/** Default blend out time. */
-	UPROPERTY(EditAnywhere, Category=Montage)
-	float BlendOutTime;
+	UPROPERTY()
+	float BlendInTime_DEPRECATED;
+
+	/** Blend out option. This is only used when it blends out itself. If it's interrupted by other montages, it will use new montage's BlendIn option to blend out. */
+	UPROPERTY(EditAnywhere, Category=BlendOption)
+	FAlphaBlend BlendOut;
+
+	UPROPERTY()
+	float BlendOutTime_DEPRECATED;
 
 	/** Time from Sequence End to trigger blend out.
 	 * <0 means using BlendOutTime, so BlendOut finishes as Montage ends.
 	 * >=0 means using 'SequenceEnd - BlendOutTriggerTime' to trigger blend out. */
-	UPROPERTY(EditAnywhere, Category = Montage)
+	UPROPERTY(EditAnywhere, Category = BlendOption)
 	float BlendOutTriggerTime;
 
 	// composite section. 
@@ -415,7 +419,7 @@ class UAnimMontage : public UAnimCompositeBase
 	ENGINE_API bool IsValidSlot(FName InSlotName) const;
 
 public:
-	// Begin UObject Interface
+	//~ Begin UObject Interface
 	virtual void PostLoad() override;
 
 	// Gets the sequence length of the montage by calculating it from the lengths of the segments in the montage
@@ -424,20 +428,20 @@ public:
 #if WITH_EDITOR
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 #endif // WITH_EDITOR
-	// End UObject Interface
+	//~ End UObject Interface
 
-	// Begin AnimSequenceBase Interface
+	//~ Begin AnimSequenceBase Interface
 	virtual bool IsValidAdditive() const override;
 #if WITH_EDITOR
 	virtual EAnimEventTriggerOffsets::Type CalculateOffsetForNotify(float NotifyDisplayTime) const override;
 #endif // WITH_EDITOR
-	// End AnimSequenceBase Interface
+	//~ End AnimSequenceBase Interface
 
 #if WITH_EDITOR
-	// Begin UAnimationAsset interface
+	//~ Begin UAnimationAsset Interface
 	virtual bool GetAllAnimationSequencesReferred(TArray<UAnimSequence*>& AnimationSequences) override;
 	virtual void ReplaceReferredAnimations(const TMap<UAnimSequence*, UAnimSequence*>& ReplacementMap) override;
-	// End UAnimationAsset interface
+	//~ End UAnimationAsset Interface
 
 	/** Update all linkable elements contained in the montage */
 	ENGINE_API void UpdateLinkableElements();

@@ -59,6 +59,29 @@ namespace ESortedActiveWaveGetType
 	};
 }
 
+/** Simple class that wraps the math involved with interpolating a parameter over time based on audio device update time. */
+class FDynamicParameter
+{
+public:
+	FDynamicParameter(float Value);
+
+	void Set(float Value, float InDuration);
+	void Update(float DeltaTime);
+	float GetValue() const
+	{
+		return CurrValue;
+	}
+
+private:
+	float CurrValue;
+	float StartValue;
+	float DeltaValue;
+	float CurrTimeSec;
+	float DurationSec;
+	float LastTime;
+};
+
+
 /** 
  * Defines the properties of the listener
  */
@@ -212,6 +235,8 @@ public:
 	bool HandleEnableHRTFForAllCommand(const TCHAR* Cmd, FOutputDevice& Ar);
 	bool HandleSoloCommand( const TCHAR* Cmd, FOutputDevice& Ar );
 	bool HandleClearSoloCommand( const TCHAR* Cmd, FOutputDevice& Ar );
+	bool HandlePlayAllPIEAudioCommand( const TCHAR* Cmd, FOutputDevice& Ar );
+	bool HandleAudio3dVisualizeCommand(const TCHAR* Cmd, FOutputDevice& Ar);
 #endif
 
 	/**
@@ -515,6 +540,8 @@ public:
 		return bHRTFEnabledForAll && IsSpatializationPluginEnabled();
 	}
 
+	bool IsAudioDeviceMuted() const;
+
 protected:
 	friend class FSoundSource;
 
@@ -755,8 +782,11 @@ public:
 	/** transient master volume multiplier that can be modified at runtime without affecting user settings automatically reset to 1.0 on level change */
 	float TransientMasterVolume;
 
+	/** Global dynamic pitch scale parameter */
+	FDynamicParameter GlobalPitchScale;
+
 	/** Timestamp of the last update */
-	float LastUpdateTime;
+	double LastUpdateTime;
 
 	/** Next resource ID to assign out to a wave/buffer */
 	int32 NextResourceID;
@@ -817,6 +847,8 @@ public:
 private:
 
 	TArray<struct FActiveSound*> ActiveSounds;
+
+	TMap<UPTRINT, struct FActiveSound*> AudioComponentToActiveSoundMap;
 
 	/** List of passive SoundMixes active last frame */
 	TArray<class USoundMix*> PrevPassiveSoundMixModifiers;

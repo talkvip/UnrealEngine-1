@@ -1,10 +1,10 @@
 // Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
 
-//=============================================================================
+//~=============================================================================
 // PlayerInput
 // Object within PlayerController that manages player input.
 // Only spawned on client.
-//=============================================================================
+//~=============================================================================
 
 #pragma once
 #include "Components/InputComponent.h"
@@ -389,10 +389,10 @@ private:
 
 public:
 	
-	// Begin UObject Interface
+	//~ Begin UObject Interface
 	virtual void PostInitProperties() override;
 	virtual UWorld* GetWorld() const override;
-	// End UObject Interface
+	//~ End UObject Interface
 
 	/** Flushes the current key state. */
 	void FlushPressedKeys();
@@ -445,6 +445,9 @@ public:
 	 * @param YPos - Y position on Canvas. YPos += YL, gives position to draw text for next debug line.
 	 */
 	void DisplayDebug(class UCanvas* Canvas, const FDebugDisplayInfo& DebugDisplay, float& YL, float& YPos);
+
+	/** @return key state of the InKey */
+	FKeyState* GetKeyState(FKey InKey) { return KeyStateMap.Find(InKey); }
 
 	/** @return true if InKey is currently held */
 	bool IsPressed( FKey InKey ) const;

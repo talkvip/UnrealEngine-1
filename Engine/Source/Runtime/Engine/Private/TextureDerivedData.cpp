@@ -142,7 +142,20 @@ static void SerializeForKey(FArchive& Ar, const FTextureBuildSettings& Settings)
 	TempByte = Settings.bReplicateRed; Ar << TempByte;
 	TempByte = Settings.bReplicateAlpha; Ar << TempByte;
 	TempByte = Settings.bDownsampleWithAverage; Ar << TempByte;
-	TempByte = Settings.bSharpenWithoutColorShift; Ar << TempByte;
+	
+	{
+		TempByte = Settings.bSharpenWithoutColorShift;
+
+		if(Settings.bSharpenWithoutColorShift && Settings.MipSharpening != 0.0f)
+		{
+			// bSharpenWithoutColorShift prevented alpha sharpening. This got fixed
+			// Here we update the key to get those cases recooked.
+			TempByte = 2;
+		}
+
+		Ar << TempByte;
+	}
+
 	TempByte = Settings.bBorderColorBlack; Ar << TempByte;
 	TempByte = Settings.bFlipGreenChannel; Ar << TempByte;
 	TempByte = Settings.bApplyKernelToTopMip; Ar << TempByte;
@@ -355,7 +368,7 @@ static void GetTextureBuildSettings(
 	OutBuildSettings.bFlipGreenChannel = Texture.bFlipGreenChannel;
 	OutBuildSettings.CompositeTextureMode = Texture.CompositeTextureMode;
 	OutBuildSettings.CompositePower = Texture.CompositePower;
-	OutBuildSettings.LODBias = UDeviceProfileManager::Get().GetActiveProfile()->GetTextureLODSettings()->CalculateLODBias(Texture.Source.GetSizeX(), Texture.Source.GetSizeY(), Texture.LODGroup, Texture.LODBias, Texture.NumCinematicMipLevels, Texture.MipGenSettings);
+	OutBuildSettings.LODBias = TextureLODSettings.CalculateLODBias(Texture.Source.GetSizeX(), Texture.Source.GetSizeY(), Texture.LODGroup, Texture.LODBias, Texture.NumCinematicMipLevels, Texture.MipGenSettings);
 	OutBuildSettings.bStreamable = !Texture.NeverStream && (Texture.LODGroup != TEXTUREGROUP_UI) && (Cast<const UTexture2D>(&Texture) != NULL);
 	OutBuildSettings.PowerOfTwoMode = Texture.PowerOfTwoMode;
 	OutBuildSettings.PaddingColor = Texture.PaddingColor;
@@ -693,7 +706,7 @@ class FTextureCacheDerivedDataWorker : public FNonAbandonableTask
 		if ( Texture.Source.HasHadBulkDataCleared() )
 		{
 			// don't do any work we can't reload this
-			UE_LOG(LogTexture, Warning, TEXT("Unable to load texture source data could be because it has been cleared. %s"), *Texture.GetName())
+			UE_LOG(LogTexture, Error, TEXT("Unable to load texture source data could be because it has been cleared. %s"), *Texture.GetName())
 			return;
 		}
 
@@ -1647,9 +1660,9 @@ bool UTexture::IsCachedCookedPlatformDataLoaded( const ITargetPlatform* TargetPl
 void UTexture2D::WillNeverCacheCookedPlatformDataAgain()
 {
 	Super::WillNeverCacheCookedPlatformDataAgain();
-#if WITH_EDITORONLY_DATA && 0 // enable this when I feel safe about it
+#if WITH_EDITORONLY_DATA 
 	// "Source" is only in WITH_EDITORONLY_DATA
-	UE_LOG(LogTemp, Warning, TEXT("Cleared source texture data for texture %s"), *GetName());
+	// UE_LOG(LogTemp, Display, TEXT("Cleared source texture data for texture %s"), *GetName());
 	// clear source mips if we are in the editor then we don't have this luxury 
 	check( IsAsyncCacheComplete());
 
@@ -1721,10 +1734,10 @@ void UTexture::FinishCachePlatformData()
 #if DO_CHECK
 			if (!(GetOutermost()->PackageFlags & PKG_FilterEditorOnly))
 			{
-				FString DerivedDataKey;
-				FTextureBuildSettings BuildSettings;
-				GetBuildSettingsForRunningPlatform(*this, BuildSettings);
-				GetTextureDerivedDataKey(*this, BuildSettings, DerivedDataKey);
+			FString DerivedDataKey;
+			FTextureBuildSettings BuildSettings;
+			GetBuildSettingsForRunningPlatform(*this, BuildSettings);
+			GetTextureDerivedDataKey(*this, BuildSettings, DerivedDataKey);
 
 				check(RunningPlatformData->DerivedDataKey == DerivedDataKey);
 			}
@@ -1853,31 +1866,31 @@ void UTexture::SerializeCookedPlatformData(FArchive& Ar)
 			}
 			else
 			{
-				TMap<FString, FTexturePlatformData*> *CookedPlatformDataPtr = GetCookedPlatformData();
+			TMap<FString, FTexturePlatformData*> *CookedPlatformDataPtr = GetCookedPlatformData();
 				if (CookedPlatformDataPtr == NULL)
-					return;
+				return;
+
+			TArray<FName> PlatformFormats;
+
+			Ar.CookingTarget()->GetTextureFormats(this, PlatformFormats);
+			for (int32 FormatIndex = 0; FormatIndex < PlatformFormats.Num(); FormatIndex++)
+			{
+				FString DerivedDataKey;
+				BuildSettings.TextureFormatName = PlatformFormats[FormatIndex];
+				GetTextureDerivedDataKey(*this, BuildSettings, DerivedDataKey);
+
+				FTexturePlatformData *PlatformDataPtr = (*CookedPlatformDataPtr).FindRef(DerivedDataKey);
 				
-				TArray<FName> PlatformFormats;
-
-				Ar.CookingTarget()->GetTextureFormats(this, PlatformFormats);
-				for (int32 FormatIndex = 0; FormatIndex < PlatformFormats.Num(); FormatIndex++)
+				if (PlatformDataPtr == NULL)
 				{
-					FString DerivedDataKey;
-					BuildSettings.TextureFormatName = PlatformFormats[FormatIndex];
-					GetTextureDerivedDataKey(*this, BuildSettings, DerivedDataKey);
-
-					FTexturePlatformData *PlatformDataPtr = (*CookedPlatformDataPtr).FindRef(DerivedDataKey);
-
-					if (PlatformDataPtr == NULL)
-					{
-						PlatformDataPtr = new FTexturePlatformData();
-						PlatformDataPtr->Cache(*this, BuildSettings, ETextureCacheFlags::InlineMips | ETextureCacheFlags::Async);
-
+					PlatformDataPtr = new FTexturePlatformData();
+					PlatformDataPtr->Cache(*this, BuildSettings, ETextureCacheFlags::InlineMips | ETextureCacheFlags::Async);
+					
 						CookedPlatformDataPtr->Add(DerivedDataKey, PlatformDataPtr);
-
-					}
-					PlatformDataToSerialize.Add(PlatformDataPtr);
+					
 				}
+				PlatformDataToSerialize.Add(PlatformDataPtr);
+			}
 			}
 
 			for (int32 i = 0; i < PlatformDataToSerialize.Num(); ++i)

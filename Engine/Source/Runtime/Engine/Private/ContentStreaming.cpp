@@ -1431,7 +1431,7 @@ void IStreamingManager::SetupViewInfos( float DeltaTime )
 			bool bFound = false;
 			for ( int32 PrevView=0; PrevView < GPrevViewLocations.Num(); ++PrevView )
 			{
-				if ( (ViewInfo.ViewOrigin - GPrevViewLocations(PrevView).ViewOrigin).Size() < 100.0f )
+				if ( (ViewInfo.ViewOrigin - GPrevViewLocations(PrevView).ViewOrigin).SizeSquared() < 10000.0f )
 				{
 					bFound = true;
 					break;
@@ -1450,7 +1450,7 @@ void IStreamingManager::SetupViewInfos( float DeltaTime )
 			for ( int32 ViewIndex = 0; ViewIndex < CurrentViewInfos.Num(); ++ViewIndex )
 			{
 				FStreamingViewInfo& ViewInfo = CurrentViewInfos( ViewIndex );
-				if ( (ViewInfo.ViewOrigin - GPrevViewLocations(PrevView).ViewOrigin).Size() < 100.0f )
+				if ( (ViewInfo.ViewOrigin - GPrevViewLocations(PrevView).ViewOrigin).SizeSquared() < 10000.0f )
 				{
 					bFound = true;
 					break;
@@ -2100,6 +2100,7 @@ FStreamingManagerTexture::FStreamingManagerTexture()
 ,	TotalDynamicTextureHeuristicSize(0)
 ,	TotalLastRenderHeuristicSize(0)
 ,	TotalForcedHeuristicSize(0)
+,	MemoryOverBudget(0)
 ,	OriginalTexturePoolSize(0)
 ,	PreviousPoolSizeTimestamp(0.0)
 ,	PreviousPoolSizeSetting(-1)
@@ -2162,7 +2163,7 @@ FStreamingManagerTexture::FStreamingManagerTexture()
 		UE_LOG(LogContentStreaming, Log, TEXT("Textures will NEVER stream out!"));
 	}
 
-	UE_LOG(LogContentStreaming,Log,TEXT("Texture pool size is %fMB"),GTexturePoolSize/1024.f/1024.f);
+	UE_LOG(LogContentStreaming,Log,TEXT("Texture pool size is %.2f MB"),GTexturePoolSize/1024.f/1024.f);
 
 	// Convert from MByte to byte.
 	MinEvictSize *= 1024 * 1024;
@@ -3375,11 +3376,13 @@ void FStreamingManagerTexture::StreamTextures( bool bProcessEverything )
 		AvailableNow = GStreamMemoryTracker.CalcAvailableNow( Stats.ComputeAvailableMemorySize(), MemoryMargin );
 		AvailableLater = GStreamMemoryTracker.CalcAvailableLater( Stats.ComputeAvailableMemorySize(), MemoryMargin );
 
-		STAT( int64 NonStreamingUsage = Stats.AllocatedMemorySize - int64(ThreadStats.TotalResidentSize) - int64(ThreadStats.PendingStreamInSize) - int64(TempMemoryUsed) );
-		STAT( int64 MemoryBudget = Stats.TexturePoolSize - NonStreamingUsage - int64(MemoryMargin) );
-		STAT( int64 MemoryOverBudget = int64(ThreadStats.TotalRequiredSize) - MemoryBudget );
-		SET_MEMORY_STAT( STAT_StreamingOverBudget,	FMath::Max(MemoryOverBudget,0ll) );
-		SET_MEMORY_STAT( STAT_StreamingUnderBudget,	FMath::Max(-MemoryOverBudget,0ll) );
+		STAT( int64 NonStreamingUsage = Stats.AllocatedMemorySize - ThreadStats.TotalResidentSize - int64(ThreadStats.PendingStreamInSize) - TempMemoryUsed );
+		STAT( int64 MemoryBudget = Stats.TexturePoolSize - NonStreamingUsage - MemoryMargin );
+		STAT( int64 LocalMemoryOverBudget = FMath::Max(ThreadStats.TotalRequiredSize - MemoryBudget, 0LL) );
+		STAT( MemoryOverBudget = FMath::Max(LocalMemoryOverBudget, 0LL) );
+
+		SET_MEMORY_STAT( STAT_StreamingOverBudget,	MemoryOverBudget);
+		SET_MEMORY_STAT( STAT_StreamingUnderBudget,	FMath::Max(-LocalMemoryOverBudget,0ll) );
 		SET_MEMORY_STAT( STAT_NonStreamingTexturesSize,	FMath::Max<int64>(NonStreamingUsage, 0) );
 	}
 	else
@@ -3387,6 +3390,7 @@ void FStreamingManagerTexture::StreamTextures( bool bProcessEverything )
 		TempMemoryUsed = ThreadStats.TempStreamingSize;
 		AvailableNow = MAX_int64;
 		AvailableLater = MAX_int64;
+		MemoryOverBudget = 0;
 		SET_MEMORY_STAT( STAT_StreamingOverBudget, 0 );
 		SET_MEMORY_STAT( STAT_StreamingUnderBudget, 0 );
 	}
@@ -3688,20 +3692,20 @@ void FStreamingManagerTexture::UpdateResourceStreaming( float DeltaTime, bool bP
 
 #if STREAMING_LOG_VIEWCHANGES
 	static bool bWasLocationOveridden = false;
-	bool bIsLocationOverriden = false;
+	bool bIsLocationOverridden = false;
 	for ( int32 ViewIndex=0; ViewIndex < CurrentViewInfos.Num(); ++ViewIndex )
 	{
 		FStreamingViewInfo& ViewInfo = CurrentViewInfos( ViewIndex );
 		if ( ViewInfo.bOverrideLocation )
 		{
-			bIsLocationOverriden = true;
+			bIsLocationOverridden = true;
 			break;
 		}
 	}
-	if ( bIsLocationOverriden != bWasLocationOveridden )
+	if ( bIsLocationOverridden != bWasLocationOveridden )
 	{
-		UE_LOG(LogContentStreaming, Log, TEXT("Texture streaming view location is now %s."), bIsLocationOverriden ? TEXT("OVERRIDEN") : TEXT("normal") );
-		bWasLocationOveridden = bIsLocationOverriden;
+		UE_LOG(LogContentStreaming, Log, TEXT("Texture streaming view location is now %s."), bIsLocationOverridden ? TEXT("OVERRIDDEN") : TEXT("normal") );
+		bWasLocationOveridden = bIsLocationOverridden;
 	}
 #endif
 

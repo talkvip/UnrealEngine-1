@@ -7,6 +7,7 @@
 #include "Animation/AnimNode_SequencePlayer.h"
 #include "AnimationRuntime.h"
 #include "Animation/AnimStats.h"
+#include "Animation/BlendProfile.h"
 
 //////////////////////////////////////////////////////////////////////////
 // FAnimationActiveTransitionEntry
@@ -23,6 +24,7 @@ FAnimationActiveTransitionEntry::FAnimationActiveTransitionEntry()
 	, EndNotify(INDEX_NONE)
 	, InterruptNotify(INDEX_NONE)
 	, LogicType(ETransitionLogicType::TLT_StandardBlend)
+	, BlendProfile(nullptr)
 {
 }
 
@@ -37,6 +39,7 @@ FAnimationActiveTransitionEntry::FAnimationActiveTransitionEntry(int32 NextState
 	, EndNotify(ReferenceTransitionInfo.EndNotify)
 	, InterruptNotify(ReferenceTransitionInfo.InterruptNotify)
 	, LogicType(ReferenceTransitionInfo.LogicType)
+	, BlendProfile(ReferenceTransitionInfo.BlendProfile)
 {
 	const float Scaler = 1.0f - ExistingWeightOfNextState;
 	CrossfadeDuration = ReferenceTransitionInfo.CrossfadeDuration * CalculateInverseAlpha(BlendOption, Scaler);
@@ -45,7 +48,6 @@ FAnimationActiveTransitionEntry::FAnimationActiveTransitionEntry(int32 NextState
 	Blend.SetBlendOption(BlendOption);
 	Blend.CustomCurve = ReferenceTransitionInfo.CustomCurve;
 	Blend.SetValueRange(0.0f, 1.0f);
-	Blend.Reset();
 }
 
 float FAnimationActiveTransitionEntry::CalculateInverseAlpha(EAlphaBlendOption BlendMode, float InFraction) const
@@ -83,6 +85,14 @@ void FAnimationActiveTransitionEntry::InitializeCustomGraphLinks(const FAnimatio
 			PoseEvaluators.Add(PoseEvaluator);
 		}
 	}
+
+	// Initialize blend data if necessary
+	if(BlendProfile)
+	{
+		StateBlendData.AddZeroed(2);
+		StateBlendData[0].PerBoneBlendData.AddZeroed(BlendProfile->GetNumBlendEntries());
+		StateBlendData[1].PerBoneBlendData.AddZeroed(BlendProfile->GetNumBlendEntries());
+	}
 }
 
 void FAnimationActiveTransitionEntry::Update(const FAnimationUpdateContext& Context, int32 CurrentStateIndex, bool& bOutFinished)
@@ -94,12 +104,48 @@ void FAnimationActiveTransitionEntry::Update(const FAnimationUpdateContext& Cont
 	{
 		ElapsedTime += Context.GetDeltaTime();
 		Blend.Update(Context.GetDeltaTime());
-		Alpha = FAlphaBlend::AlphaToBlendOption(ElapsedTime / CrossfadeDuration, Blend.BlendOption, Blend.CustomCurve); //Blend.GetBlendedValue();
+
+		float QueryAlpha = 1.0f;
+
+		// If non-zero, calculate the query alpha
+		if (CrossfadeDuration > 0.0f)
+		{
+			QueryAlpha = ElapsedTime / CrossfadeDuration;
+		}
+
+		Alpha = FAlphaBlend::AlphaToBlendOption(QueryAlpha, Blend.BlendOption, Blend.CustomCurve);
 
 		if(Blend.IsComplete())
 		{
 			bActive = false;
 			bOutFinished = true;
+		}
+
+		// Update state blend data (only when we're using per-bone)
+		if(BlendProfile)
+		{
+			for(int32 Idx = 0 ; Idx < 2 ; ++Idx)
+			{
+				bool bForwards = Idx == 0;
+				FBlendSampleData& CurrentData = StateBlendData[Idx];
+
+				CurrentData.TotalWeight = (bForwards) ? Alpha : 1.0f - Alpha;
+
+				for(int32 PerBoneIndex = 0 ; PerBoneIndex < CurrentData.PerBoneBlendData.Num() ; ++PerBoneIndex)
+				{
+					float& BoneBlend = CurrentData.PerBoneBlendData[PerBoneIndex];
+					float WeightScale = BlendProfile->GetEntryBlendScale(PerBoneIndex);
+
+					if(!bForwards)
+					{
+						WeightScale = 1.0f / WeightScale;
+					}
+
+					BoneBlend = CurrentData.TotalWeight * WeightScale;
+				}
+			}
+
+			FBlendSampleData::NormalizeDataWeight(StateBlendData);
 		}
 	}
 }
@@ -159,6 +205,8 @@ FBakedAnimationStateMachine* FAnimNode_StateMachine::GetMachineDescription()
 
 void FAnimNode_StateMachine::Initialize(const FAnimationInitializeContext& Context)
 {
+	FAnimNode_Base::Initialize(Context);
+
 	UAnimBlueprintGeneratedClass* AnimBlueprintClass = Context.GetAnimBlueprintClass();
 	PRIVATE_MachineDescription = AnimBlueprintClass->BakedStateMachines.IsValidIndex(StateMachineIndexInClass) ? &(AnimBlueprintClass->BakedStateMachines[StateMachineIndexInClass]) : NULL;
 
@@ -171,21 +219,44 @@ void FAnimNode_StateMachine::Initialize(const FAnimationInitializeContext& Conte
 		if (Machine->States.Num() > 0)
 		{
 			// Create a pose link for each state we can reach
-			StatePoseLinks.Empty(Machine->States.Num());
+			StatePoseLinks.Reset();
+			StatePoseLinks.Reserve(Machine->States.Num());
 			for (int32 StateIndex = 0; StateIndex < Machine->States.Num(); ++StateIndex)
 			{
+				const FBakedAnimationState& State = Machine->States[StateIndex];
 				FPoseLink* StatePoseLink = new (StatePoseLinks) FPoseLink();
 
 				// because conduits don't contain bound graphs, this link is no longer guaranteed to be valid
-				if (Machine->States[StateIndex].StateRootNodeIndex != INDEX_NONE)
+				if (State.StateRootNodeIndex != INDEX_NONE)
 				{
-					StatePoseLink->LinkID = AnimBlueprintClass->AnimNodeProperties.Num() - 1 - Machine->States[StateIndex].StateRootNodeIndex; //@TODO: Crazysauce
+					StatePoseLink->LinkID = AnimBlueprintClass->AnimNodeProperties.Num() - 1 - State.StateRootNodeIndex; //@TODO: Crazysauce
+				}
+
+				// also initialize transitions
+				if(State.EntryRuleNodeIndex != INDEX_NONE)
+				{
+					if (FAnimNode_TransitionResult* TransitionNode = GetNodeFromPropertyIndex<FAnimNode_TransitionResult>(Context.AnimInstance, AnimBlueprintClass, State.EntryRuleNodeIndex))
+					{
+						TransitionNode->Initialize(Context);
+					}
+				}
+
+				for(int32 TransitionIndex = 0; TransitionIndex < State.Transitions.Num(); ++TransitionIndex)
+				{
+					const FBakedStateExitTransition& TransitionRule = State.Transitions[TransitionIndex];
+					if (TransitionRule.CanTakeDelegateIndex != INDEX_NONE)
+					{
+						if (FAnimNode_TransitionResult* TransitionNode = GetNodeFromPropertyIndex<FAnimNode_TransitionResult>(Context.AnimInstance, AnimBlueprintClass, TransitionRule.CanTakeDelegateIndex))
+						{
+							TransitionNode->Initialize(Context);
+						}
+					}
 				}
 			}
 
 			// Reset transition related variables
-			StatesUpdated.Empty(StatesUpdated.Num());
-			ActiveTransitionArray.Empty(ActiveTransitionArray.Num());
+			StatesUpdated.Reset();
+			ActiveTransitionArray.Reset();
 		
 			// Move to the default state
 			SetState(Context, Machine->InitialState);
@@ -350,7 +421,7 @@ void FAnimNode_StateMachine::Update(const FAnimationUpdateContext& Context)
 		bFirstUpdate = false;
 	}
 
-	StatesUpdated.Empty(StatesUpdated.Num());
+	StatesUpdated.Reset();
 
 	// Tick the individual state/states that are active
 	if (ActiveTransitionArray.Num() > 0)
@@ -637,12 +708,28 @@ void FAnimNode_StateMachine::EvaluateTransitionStandardBlend(FPoseContext& Outpu
 	// Blend it in
 	const ScalarRegister VPreviousWeight(1.0f - Transition.Alpha);
 	const ScalarRegister VWeight(Transition.Alpha);
-	for (FCompactPoseBoneIndex BoneIndex : Output.Pose.ForEachBoneIndex())
-	{
-		Output.Pose[BoneIndex] = PreviouseStateResult.Pose[BoneIndex] * VPreviousWeight;
-		Output.Pose[BoneIndex].AccumulateWithShortestRotation(NextStateResult.Pose[BoneIndex], VWeight);
-	}
 
+	// If we have a blend profile we need to blend per bone
+	if(Transition.BlendProfile)
+	{
+		for(FCompactPoseBoneIndex BoneIndex : Output.Pose.ForEachBoneIndex())
+		{
+			int32 PerBoneIndex = Transition.BlendProfile->GetPerBoneInterpolationIndex(BoneIndex.GetInt(), Output.AnimInstance->RequiredBones);
+
+			// Use defined per-bone scale if the bone has a scale specified in the blend profile
+			ScalarRegister FirstWeight = PerBoneIndex != INDEX_NONE ? ScalarRegister(Transition.StateBlendData[1].PerBoneBlendData[PerBoneIndex]) : ScalarRegister(VPreviousWeight);
+			ScalarRegister SecondWeight = PerBoneIndex != INDEX_NONE ? ScalarRegister(Transition.StateBlendData[0].PerBoneBlendData[PerBoneIndex]) : ScalarRegister(VWeight);
+			Output.Pose[BoneIndex] = PreviouseStateResult.Pose[BoneIndex] * FirstWeight;
+			Output.Pose[BoneIndex].AccumulateWithShortestRotation(NextStateResult.Pose[BoneIndex], SecondWeight);
+		}
+	}
+	else
+		for(FCompactPoseBoneIndex BoneIndex : Output.Pose.ForEachBoneIndex())
+		{
+			Output.Pose[BoneIndex] = PreviouseStateResult.Pose[BoneIndex] * VPreviousWeight;
+			Output.Pose[BoneIndex].AccumulateWithShortestRotation(NextStateResult.Pose[BoneIndex], VWeight);
+		}
+	
 	// blend curve in
 	Output.Curve.Override(PreviouseStateResult.Curve, 1.0-Transition.Alpha);
 	Output.Curve.Accumulate(NextStateResult.Curve, Transition.Alpha);
@@ -888,5 +975,14 @@ bool FAnimNode_StateMachine::IsAConduitState(int32 StateIndex) const
 bool FAnimNode_StateMachine::IsValidTransitionIndex(int32 TransitionIndex) const
 {
 	return PRIVATE_MachineDescription->Transitions.IsValidIndex(TransitionIndex);
+}
+
+FName FAnimNode_StateMachine::GetCurrentStateName() const
+{
+	if(PRIVATE_MachineDescription->States.IsValidIndex(CurrentState))
+	{
+		return GetStateInfo().StateName;
+	}
+	return NAME_None;
 }
 

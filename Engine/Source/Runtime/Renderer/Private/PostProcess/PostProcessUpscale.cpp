@@ -144,7 +144,7 @@ public:
 		FilterTable[0] = TStaticSamplerState<SF_Bilinear,AM_Clamp,AM_Clamp,AM_Clamp>::GetRHI();
 		FilterTable[1] = TStaticSamplerState<SF_Point,AM_Clamp,AM_Clamp,AM_Clamp>::GetRHI();
 			
-		PostprocessParameter.SetPS(ShaderRHI, Context, 0, false, FilterTable);
+		PostprocessParameter.SetPS(ShaderRHI, Context, 0, eFC_0000, FilterTable);
 		DeferredParameters.Set(Context.RHICmdList, ShaderRHI, Context.View);
 
 		{
@@ -261,11 +261,11 @@ void FRCPassPostProcessUpscale::Process(FRenderingCompositePassContext& Context)
 	// with distortion (bTessellatedQuad) we need to clear the background
 	FIntRect ExcludeRect = bTessellatedQuad ? FIntRect() : DestRect;
 
+	Context.SetViewportAndCallRHI(DestRect);
 	if (View.StereoPass == eSSP_FULL || View.StereoPass == eSSP_LEFT_EYE)
 	{
 		Context.RHICmdList.Clear(true, FLinearColor::Black, false, 1.0f, false, 0, ExcludeRect);
 	}
-	Context.SetViewportAndCallRHI(DestRect);
 
 	// set the state
 	Context.RHICmdList.SetBlendState(TStaticBlendState<>::GetRHI());

@@ -332,6 +332,20 @@ bool FPerforceCheckInWorker::Execute(FPerforceSourceControlCommand& InCommand)
 
 				if (InCommand.bCommandSuccessful)
 				{
+					// Remove any deleted files from status cache
+					FPerforceSourceControlModule& PerforceSourceControl = FModuleManager::LoadModuleChecked<FPerforceSourceControlModule>("PerforceSourceControl");
+					FPerforceSourceControlProvider& Provider = PerforceSourceControl.GetProvider();
+
+					TArray<TSharedRef<ISourceControlState, ESPMode::ThreadSafe>> States;
+					Provider.GetState(InCommand.Files, States, EStateCacheUsage::Use);
+					for (const auto& State : States)
+					{
+						if (State->IsDeleted())
+						{
+							Provider.RemoveFileFromCache(State->GetFilename());
+						}
+					}
+
 					StaticCastSharedRef<FCheckIn>(InCommand.Operation)->SetSuccessMessage(ParseSubmitResults(Records));
 
 					for(auto Iter(InCommand.Files.CreateIterator()); Iter; Iter++)
@@ -860,6 +874,7 @@ FName FPerforceUpdateStatusWorker::GetName() const
 
 bool FPerforceUpdateStatusWorker::Execute(FPerforceSourceControlCommand& InCommand)
 {
+#if USE_P4_API
 	FScopedPerforceConnection ScopedConnection(InCommand);
 	if(ScopedConnection.IsValid())
 	{
@@ -944,6 +959,7 @@ bool FPerforceUpdateStatusWorker::Execute(FPerforceSourceControlCommand& InComma
 			ParseDiffResults(Records, OutModifiedFiles);
 		}
 	}
+#endif
 
 	return InCommand.bCommandSuccessful;
 }

@@ -84,7 +84,7 @@ FRenderQueryRHIRef FRenderQueryPool::AllocateQuery()
 	return Queries.Pop(/*bAllowShrinking=*/ false);
 }
 
-void FRenderQueryPool::ReleaseQuery(FRHICommandListImmediate& RHICmdList, FRenderQueryRHIRef &Query)
+void FRenderQueryPool::ReleaseQuery(FRenderQueryRHIRef &Query)
 {
 	if ( IsValidRef(Query) )
 	{
@@ -520,11 +520,7 @@ void FHZBOcclusionTester::InitDynamicRHI()
 {
 	if (GetFeatureLevel() >= ERHIFeatureLevel::SM4)
 	{
-#if PLATFORM_MAC // Workaround radr://16096028 Texture Readback via glReadPixels + PBOs stalls on Nvidia GPUs
-		FPooledRenderTargetDesc Desc( FPooledRenderTargetDesc::Create2DDesc( FIntPoint( SizeX, SizeY ), PF_R8G8B8A8, FClearValueBinding::None, TexCreate_CPUReadback | TexCreate_HideInVisualizeTexture, TexCreate_None, false ) );
-#else
 		FPooledRenderTargetDesc Desc( FPooledRenderTargetDesc::Create2DDesc( FIntPoint( SizeX, SizeY ), PF_B8G8R8A8, FClearValueBinding::None, TexCreate_CPUReadback | TexCreate_HideInVisualizeTexture, TexCreate_None, false ) );
-#endif
 		GRenderTargetPool.FindFreeElement( Desc, ResultsTextureCPU, TEXT("HZBResultsCPU") );
 	}
 }
@@ -728,11 +724,7 @@ void FHZBOcclusionTester::Submit(FRHICommandListImmediate& RHICmdList, const FVi
 
 	TRefCountPtr< IPooledRenderTarget >	ResultsTextureGPU;
 	{
-#if PLATFORM_MAC // Workaround radr://16096028 Texture Readback via glReadPixels + PBOs stalls on Nvidia GPUs
-		FPooledRenderTargetDesc Desc( FPooledRenderTargetDesc::Create2DDesc( FIntPoint( SizeX, SizeY ), PF_R8G8B8A8, FClearValueBinding::None, TexCreate_None, TexCreate_RenderTargetable, false ) );
-#else
 		FPooledRenderTargetDesc Desc( FPooledRenderTargetDesc::Create2DDesc( FIntPoint( SizeX, SizeY ), PF_B8G8R8A8, FClearValueBinding::None, TexCreate_None, TexCreate_RenderTargetable, false ) );
-#endif
 		GRenderTargetPool.FindFreeElement( Desc, ResultsTextureGPU, TEXT("HZBResultsGPU") );
 	}
 
@@ -983,7 +975,6 @@ IMPLEMENT_SHADER_TYPE(template<>,THZBBuildPS<1>,TEXT("HZBOcclusion"),TEXT("HZBBu
 void BuildHZB( FRHICommandListImmediate& RHICmdList, FViewInfo& View )
 {
 	QUICK_SCOPE_CYCLE_COUNTER(STAT_BuildHZB);
-	SCOPED_DRAW_EVENT(RHICmdList, BuildHZB);
 	
 	// View.ViewRect.{Width,Height}() are most likely to be < 2^24, so the float
 	// conversion won't loss any precision (assuming float have 23bits for mantissa)
@@ -1001,13 +992,14 @@ void BuildHZB( FRHICommandListImmediate& RHICmdList, FViewInfo& View )
 	
 	FSceneRenderTargetItem& HZBRenderTarget = View.HZB->GetRenderTargetItem();
 	
-	RHICmdList.SetBlendState(TStaticBlendState<>::GetRHI());
-	RHICmdList.SetRasterizerState(TStaticRasterizerState<>::GetRHI());
-	RHICmdList.SetDepthStencilState(TStaticDepthStencilState< false, CF_Always >::GetRHI());
-	
 	// Mip 0
 	{
+		SCOPED_DRAW_EVENTF(RHICmdList, BuildHZB, TEXT("HZB SetupMip 0 %dx%d"), HZBSize.X, HZBSize.Y);
+
 		SetRenderTarget(RHICmdList, HZBRenderTarget.TargetableTexture, 0, NULL);
+		RHICmdList.SetBlendState(TStaticBlendState<>::GetRHI());
+		RHICmdList.SetRasterizerState(TStaticRasterizerState<>::GetRHI());
+		RHICmdList.SetDepthStencilState(TStaticDepthStencilState< false, CF_Always >::GetRHI());
 
 		TShaderMapRef< FPostProcessVS >	VertexShader(View.ShaderMap);
 		TShaderMapRef< THZBBuildPS<0> >	PixelShader(View.ShaderMap);
@@ -1038,6 +1030,8 @@ void BuildHZB( FRHICommandListImmediate& RHICmdList, FViewInfo& View )
 	FIntPoint SrcSize = HZBSize;
 	FIntPoint DstSize = SrcSize / 2;
 	
+	SCOPED_DRAW_EVENTF(RHICmdList, BuildHZB, TEXT("HZB SetupMips 1..%d %dx%d Mips:%d"), NumMips - 1, DstSize.X, DstSize.Y);
+
 	// Downsampling...
 	for( uint8 MipIndex = 1; MipIndex < NumMips; MipIndex++ )
 	{
@@ -1045,6 +1039,9 @@ void BuildHZB( FRHICommandListImmediate& RHICmdList, FViewInfo& View )
 		DstSize.Y = FMath::Max(DstSize.Y, 1);
 
 		SetRenderTarget(RHICmdList, HZBRenderTarget.TargetableTexture, MipIndex, NULL);
+		RHICmdList.SetBlendState(TStaticBlendState<>::GetRHI());
+		RHICmdList.SetRasterizerState(TStaticRasterizerState<>::GetRHI());
+		RHICmdList.SetDepthStencilState(TStaticDepthStencilState< false, CF_Always >::GetRHI());
 
 		TShaderMapRef< FPostProcessVS >	VertexShader(View.ShaderMap);
 		TShaderMapRef< THZBBuildPS<1> >	PixelShader(View.ShaderMap);
@@ -1082,7 +1079,7 @@ void FDeferredShadingSceneRenderer::BeginOcclusionTests(FRHICommandListImmediate
 	SCOPE_CYCLE_COUNTER(STAT_BeginOcclusionTestsTime);
 	int32 NumBufferedFrames = FOcclusionQueryHelpers::GetNumBufferedFrames();
 	FSceneRenderTargets& SceneContext = FSceneRenderTargets::Get(RHICmdList);
-	const bool bUseDownsampledDepth = IsValidRef(SceneContext.GetSmallDepthSurface()) && SceneContext.UseDownsizedOcclusionQueries();	
+	const bool bUseDownsampledDepth = SceneContext.UseDownsizedOcclusionQueries() && IsValidRef(SceneContext.SmallDepthZ) && IsValidRef(SceneContext.GetSmallDepthSurface());	
 
 	if (bUseDownsampledDepth)
 	{
@@ -1146,7 +1143,7 @@ void FDeferredShadingSceneRenderer::BeginOcclusionTests(FRHICommandListImmediate
 				{
 					//FRenderQueryRHIParamRef Query = QueryIt.Value();
 					//check( Query.GetRefCount() == 1 );
-					ViewState->OcclusionQueryPool.ReleaseQuery(RHICmdList, QueryIt.Value());
+					ViewState->OcclusionQueryPool.ReleaseQuery(QueryIt.Value());
 				}
 				ShadowOcclusionQueryMap.Reset();
 
@@ -1186,7 +1183,7 @@ void FDeferredShadingSceneRenderer::BeginOcclusionTests(FRHICommandListImmediate
 
 									// Draw bounding sphere
 									VertexShader->SetParametersWithBoundingSphere(RHICmdList, View, LightBounds);
-									StencilingGeometry::DrawSphere(RHICmdList);
+									StencilingGeometry::DrawVectorSphere(RHICmdList);
 
 									RHICmdList.EndRenderQuery(ShadowOcclusionQuery);
 								}

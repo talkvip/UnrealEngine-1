@@ -116,6 +116,9 @@ public:
 	/** For functions that have the MD_WorldContext metadata but are safe to be called from contexts that do not have the ability to provide the world context (either through GetWorld() or ShowWorldContextPin class metadata */
 	static const FName MD_CallableWithoutWorldContext;
 
+	/** For functions that should be compiled in development mode only */
+	static const FName MD_DevelopmentOnly;
+
 	/** If true, an unconnected pin will generate a UPROPERTY under the hood to connect as the input, which will be set to the literal value for the pin.  Only valid for reference parameters. */
 	static const FName MD_AutoCreateRefTerm;
 
@@ -380,7 +383,7 @@ public:
 	};
 
 public:
-	// Begin EdGraphSchema Interface
+	//~ Begin EdGraphSchema Interface
 	virtual void GetContextMenuActions(const UEdGraph* CurrentGraph, const UEdGraphNode* InGraphNode, const UEdGraphPin* InGraphPin, class FMenuBuilder* MenuBuilder, bool bIsDebugging) const override;
 	virtual const FPinConnectionResponse CanCreateConnection(const UEdGraphPin* A, const UEdGraphPin* B) const override;
 	virtual bool TryCreateConnection(UEdGraphPin* A, UEdGraphPin* B) const override;
@@ -428,7 +431,7 @@ public:
 	virtual bool IsCacheVisualizationOutOfDate(int32 InVisualizationCacheID) const override;
 	virtual int32 GetCurrentVisualizationCacheID() const override;
 	virtual void ForceVisualizationCacheClear() const override;
-	// End EdGraphSchema Interface
+	//~ End EdGraphSchema Interface
 
 	/**
 	 *
@@ -908,6 +911,12 @@ public:
 
 	/** Get menu for jumping to specific pin links */
 	void GetJumpToConnectionSubMenuActions(class FMenuBuilder& MenuBuilder, class UEdGraphPin* InGraphPin);
+
+	/** Get menu for straightening links to specific nodes*/
+	void GetStraightenConnectionToSubMenuActions( class FMenuBuilder& MenuBuilder, UEdGraphPin* InGraphPin ) const;
+
+	/** Get the destination pin for a straighten operation */
+	static UEdGraphPin* GetAndResetStraightenDestinationPin();
 
 	/** Create menu for variable get/set nodes which refer to a variable which does not exist. */
 	void GetNonExistentVariableMenu(const UEdGraphNode* InGraphNode, UBlueprint* OwnerBlueprint, FMenuBuilder* MenuBuilder) const;

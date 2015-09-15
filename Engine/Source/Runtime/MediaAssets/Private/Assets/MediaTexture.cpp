@@ -182,7 +182,7 @@ void UMediaTexture::PostEditChangeProperty( FPropertyChangedEvent& PropertyChang
 void UMediaTexture::InitializeTrack()
 {
 	// assign new media player asset
-	if (CurrentMediaPlayer != MediaPlayer || !bDelegatesAdded)
+	if ((CurrentMediaPlayer != MediaPlayer) || !bDelegatesAdded)
 	{
 		if (CurrentMediaPlayer != nullptr)
 		{
@@ -194,7 +194,8 @@ void UMediaTexture::InitializeTrack()
 		if (MediaPlayer != nullptr)
 		{
 			MediaPlayer->OnTracksChanged().AddUObject(this, &UMediaTexture::HandleMediaPlayerTracksChanged);
-		}	
+		}
+
 		bDelegatesAdded = true;
 	}
 
@@ -204,8 +205,12 @@ void UMediaTexture::InitializeTrack()
 		VideoTrack->GetStream().RemoveSink(VideoBuffer);
 
 #if WITH_ENGINE
-		VideoTrack->UnbindTexture(Resource->TextureRHI.GetReference());
+		if ((Resource != nullptr) && Resource->TextureRHI.IsValid())
+		{
+			VideoTrack->UnbindTexture(Resource->TextureRHI.GetReference());
+		}
 #endif
+
 		VideoTrack.Reset();
 	}
 
@@ -248,8 +253,12 @@ void UMediaTexture::InitializeTrack()
 
 #if WITH_ENGINE
 		FlushRenderingCommands();
-		IMediaVideoTrack* VideoTrackPtr = static_cast<IMediaVideoTrack*>(VideoTrack.Get());
-		VideoTrackPtr->BindTexture((Resource->TextureRHI.GetReference()));
+
+		if ((Resource != nullptr) && Resource->TextureRHI.IsValid())
+		{
+			IMediaVideoTrack* VideoTrackPtr = static_cast<IMediaVideoTrack*>(VideoTrack.Get());
+			VideoTrackPtr->BindTexture((Resource->TextureRHI.GetReference()));
+		}
 #endif
 	}
 }

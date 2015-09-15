@@ -43,6 +43,8 @@ DEFINE_STAT(STAT_TickUpdateRate);
 DEFINE_STAT(STAT_BlueprintUpdateAnimation);
 DEFINE_STAT(STAT_BlueprintPostEvaluateAnimation);
 DEFINE_STAT(STAT_NativeUpdateAnimation);
+DEFINE_STAT(STAT_Montage_Advance);
+DEFINE_STAT(STAT_Montage_UpdateWeight);
 
 DECLARE_CYCLE_STAT_EXTERN(TEXT("Anim Init Time"), STAT_AnimInitTime, STATGROUP_Anim, );
 DEFINE_STAT(STAT_AnimInitTime);
@@ -79,6 +81,7 @@ UAnimInstance::UAnimInstance(const FObjectInitializer& ObjectInitializer)
 	RootNode = NULL;
 	RootMotionMode = ERootMotionMode::RootMotionFromMontagesOnly;
 	SlotNodeInitializationCounter = INDEX_NONE;
+	SyncGroupWriteIndex = 0;
 }
 
 void UAnimInstance::MakeSequenceTickRecord(FAnimTickRecord& TickRecord, class UAnimSequenceBase* Sequence, bool bLooping, float PlayRate, float FinalBlendWeight, float& CurrentTime) const
@@ -108,7 +111,7 @@ void UAnimInstance::SequenceAdvanceImmediate(UAnimSequenceBase* Sequence, bool b
 	FAnimTickRecord TickRecord;
 	MakeSequenceTickRecord(TickRecord, Sequence, bLooping, PlayRate, /*FinalBlendWeight=*/ 1.0f, CurrentTime);
 
-	FAnimAssetTickContext TickContext(DeltaSeconds, RootMotionMode);
+	FAnimAssetTickContext TickContext(DeltaSeconds, RootMotionMode, true);
 	TickRecord.SourceAsset->TickAssetPlayerInstance(TickRecord, this, TickContext);
 }
 
@@ -117,7 +120,7 @@ void UAnimInstance::BlendSpaceAdvanceImmediate(class UBlendSpaceBase* BlendSpace
 	FAnimTickRecord TickRecord;
 	MakeBlendSpaceTickRecord(TickRecord, BlendSpace, BlendInput, BlendSampleDataCache, BlendFilter, bLooping, PlayRate, /*FinalBlendWeight=*/ 1.0f, CurrentTime);
 	
-	FAnimAssetTickContext TickContext(DeltaSeconds, RootMotionMode);
+	FAnimAssetTickContext TickContext(DeltaSeconds, RootMotionMode, true);
 	TickRecord.SourceAsset->TickAssetPlayerInstance(TickRecord, this, TickContext);
 }
 
@@ -128,6 +131,7 @@ FAnimTickRecord& UAnimInstance::CreateUninitializedTickRecord(int32 GroupIndex, 
 	OutSyncGroupPtr = NULL;
 	if (GroupIndex >= 0)
 	{
+		TArray<FAnimGroupInstance>& SyncGroups = SyncGroupArrays[GetSyncGroupWriteIndex()];
 		while (SyncGroups.Num() <= GroupIndex)
 		{
 			new (SyncGroups) FAnimGroupInstance();
@@ -136,8 +140,44 @@ FAnimTickRecord& UAnimInstance::CreateUninitializedTickRecord(int32 GroupIndex, 
 	}
 
 	// Create the record
-	FAnimTickRecord* TickRecord = new ((OutSyncGroupPtr != NULL) ? OutSyncGroupPtr->ActivePlayers : UngroupedActivePlayers) FAnimTickRecord();
+	FAnimTickRecord* TickRecord = new ((OutSyncGroupPtr != NULL) ? OutSyncGroupPtr->ActivePlayers : UngroupedActivePlayerArrays[GetSyncGroupWriteIndex()]) FAnimTickRecord();
 	return *TickRecord;
+}
+
+void UAnimInstance::InitTickRecord(const TArray<FAnimTickRecord>& TickRecords, FAnimTickRecord &NewTickRecord) const
+{
+	for (const FAnimTickRecord& PrevTickRecord : TickRecords)
+	{
+		if (NewTickRecord.SourceNodeRef == PrevTickRecord.SourceNodeRef)
+		{
+			if (NewTickRecord.SourceAsset == PrevTickRecord.SourceAsset
+#if WITH_EDITOR					
+				&& NewTickRecord.SourceAsset->GetMarkerUpdateCounter() == PrevTickRecord.SourceAsset->GetMarkerUpdateCounter()
+#endif
+				)
+			{
+				NewTickRecord.MarkerTickRecord = PrevTickRecord.MarkerTickRecord;
+			}
+			break;
+		}
+	}
+}
+
+void UAnimInstance::InitTickRecordFromLastFrame(int32 GroupIndex, FAnimTickRecord& NewTickRecord) const
+{
+	if (GroupIndex == INDEX_NONE)
+	{
+		InitTickRecord(UngroupedActivePlayerArrays[GetSyncGroupReadIndex()], NewTickRecord);
+	}
+	else
+	{
+		const TArray<FAnimGroupInstance>& PreviousSyncGroups = SyncGroupArrays[GetSyncGroupReadIndex()];
+		if (PreviousSyncGroups.IsValidIndex(GroupIndex))
+		{
+			const TArray<FAnimTickRecord>& TickRecords = PreviousSyncGroups[GroupIndex].ActivePlayers;
+			InitTickRecord(TickRecords, NewTickRecord);
+		}
+	}
 }
 
 AActor* UAnimInstance::GetOwningActor() const
@@ -252,7 +292,14 @@ void UAnimInstance::UninitializeAnimation()
 {
 	StopAllMontages(0.f);
 
-	USkeletalMeshComponent * SkelMeshComp = GetSkelMeshComponent();
+	for(int32 Index = 0; Index < MontageInstances.Num(); ++Index)
+	{
+		delete MontageInstances[Index];
+	}
+
+	MontageInstances.Empty();
+
+	USkeletalMeshComponent* SkelMeshComp = GetSkelMeshComponent();
 	if (SkelMeshComp)
 	{
 		// Tick currently active AnimNotifyState
@@ -269,12 +316,12 @@ void UAnimInstance::UninitializeAnimation()
 		}
 	}
 
-	ActiveAnimNotifyState.Empty();
-	EventCurves.Empty();
-	MorphTargetCurves.Empty();
-	MaterialParameterCurves.Empty();
-	MaterialParamatersToClear.Empty();
-	AnimNotifies.Empty();
+	ActiveAnimNotifyState.Reset();
+	EventCurves.Reset();
+	MorphTargetCurves.Reset();
+	MaterialParameterCurves.Reset();
+	MaterialParamatersToClear.Reset();
+	AnimNotifies.Reset();
 }
 
 #if WITH_EDITORONLY_DATA
@@ -303,8 +350,23 @@ bool UAnimInstance::UpdateSnapshotAndSkipRemainingUpdate()
 }
 #endif
 
+// update animation node, if you have your own anim instance, you could override this to update extra nodes if you'd like
+void UAnimInstance::UpdateAnimationNode(float DeltaSeconds)
+{
+	// Update the anim graph
+	if(RootNode != NULL)
+	{
+		IncrementGraphTraversalCounter();
+		FAnimationUpdateContext UpdateContext(this, DeltaSeconds);
+		RootNode->Update(UpdateContext);
+	}
+}
+
 void UAnimInstance::UpdateAnimation(float DeltaSeconds)
 {
+	QUICK_SCOPE_CYCLE_COUNTER(STAT_UAnimInstance_UpdateAnimation);
+	FScopeCycleCounterUObject AnimScope(this);
+
 #if WITH_EDITOR
 	if (GIsEditor)
 	{
@@ -332,15 +394,23 @@ void UAnimInstance::UpdateAnimation(float DeltaSeconds)
 	}
 #endif
 
-	AnimNotifies.Empty();
+	TArray<FAnimGroupInstance>& SyncGroups = SyncGroupArrays[GetSyncGroupWriteIndex()];
+	TArray<FAnimTickRecord>& UngroupedActivePlayers = UngroupedActivePlayerArrays[GetSyncGroupWriteIndex()];
 
-	ClearSlotNodeWeights();
+	const TArray<FAnimGroupInstance>& PreviousSyncGroups = SyncGroupArrays[GetSyncGroupReadIndex()];
 
-	// Reset the player tick list (but keep it presized)
-	UngroupedActivePlayers.Empty(UngroupedActivePlayers.Num());
-	for (int32 GroupIndex = 0; GroupIndex < SyncGroups.Num(); ++GroupIndex)
 	{
-		SyncGroups[GroupIndex].Reset();
+		QUICK_SCOPE_CYCLE_COUNTER(STAT_UAnimInstance_UpdateAnimation_MiscClear);
+		AnimNotifies.Reset();
+
+		ClearSlotNodeWeights();
+
+		// Reset the player tick list (but keep it presized)
+		UngroupedActivePlayers.Reset();
+		for (int32 GroupIndex = 0; GroupIndex < SyncGroups.Num(); ++GroupIndex)
+		{
+			SyncGroups[GroupIndex].Reset();
+		}
 	}
 
 	{
@@ -352,71 +422,96 @@ void UAnimInstance::UpdateAnimation(float DeltaSeconds)
 		BlueprintUpdateAnimation(DeltaSeconds);
 	}
 
-	// update weight before all nodes update comes in
 	Montage_UpdateWeight(DeltaSeconds);
 
-	// Update the anim graph
-	if (RootNode != NULL)
-	{
-		IncrementGraphTraversalCounter();
-		FAnimationUpdateContext UpdateContext(this, DeltaSeconds);
-		RootNode->Update(UpdateContext);
-	}
+	// update montage should run in game thread
+	// if we do multi threading, make sure this stays in game thread
+	Montage_Advance(DeltaSeconds);
 
-	// Handle all players inside sync groups
-	for (int32 GroupIndex = 0; GroupIndex < SyncGroups.Num(); ++GroupIndex)
-	{
-		FAnimGroupInstance& SyncGroup = SyncGroups[GroupIndex];
+	// update all nodes
+	UpdateAnimationNode(DeltaSeconds);
 
-		if (SyncGroup.ActivePlayers.Num() > 0)
+	TickSyncGroupWriteIndex();
+
+	{
+		QUICK_SCOPE_CYCLE_COUNTER(STAT_TickAssetPlayerInstances);
+
+		// Handle all players inside sync groups
+		for (int32 GroupIndex = 0; GroupIndex < SyncGroups.Num(); ++GroupIndex)
 		{
-			const int32 GroupLeaderIndex = FMath::Max(SyncGroup.GroupLeaderIndex, 0);
-
-			// Tick the group leader
-			FAnimAssetTickContext TickContext(DeltaSeconds, RootMotionMode);
-			FAnimTickRecord& GroupLeader = SyncGroup.ActivePlayers[GroupLeaderIndex];
-			GroupLeader.SourceAsset->TickAssetPlayerInstance(GroupLeader, this, TickContext);
-			if (RootMotionMode == ERootMotionMode::RootMotionFromEverything && TickContext.RootMotionMovementParams.bHasRootMotion)
+			FAnimGroupInstance& SyncGroup = SyncGroups[GroupIndex];
+    
+			if (SyncGroup.ActivePlayers.Num() > 0)
 			{
-				ExtractedRootMotion.AccumulateWithBlend(TickContext.RootMotionMovementParams.RootMotionTransform, GroupLeader.EffectiveBlendWeight);
-			}
-
-			// Update everything else to follow the leader
-			if (SyncGroup.ActivePlayers.Num() > 1)
-			{
-				TickContext.ConvertToFollower();
-
-				for (int32 TickIndex = 0; TickIndex < SyncGroup.ActivePlayers.Num(); ++TickIndex)
+				static TArray<FName> TempNames;
+				const bool bSyncGroupValidLastFrame = PreviousSyncGroups.IsValidIndex(GroupIndex);
+				const TArray<FName>& PreviousValidMarkers = bSyncGroupValidLastFrame ? PreviousSyncGroups[GroupIndex].ValidMarkers : TempNames;
+				const int32 PreviousGroupLeader = bSyncGroupValidLastFrame ? PreviousSyncGroups[GroupIndex].GroupLeaderIndex : -1;
+				SyncGroup.Finalize(PreviousValidMarkers, PreviousGroupLeader);
+    
+				const bool bOnlyOneAnimationInGroup = SyncGroup.ActivePlayers.Num() == 1;
+				// Tick the group leader
+				FAnimAssetTickContext TickContext(DeltaSeconds, RootMotionMode, bOnlyOneAnimationInGroup, SyncGroup.ValidMarkers);
+				FAnimTickRecord& GroupLeader = SyncGroup.ActivePlayers[SyncGroup.GroupLeaderIndex];
 				{
-					if (TickIndex != GroupLeaderIndex)
+					QUICK_SCOPE_CYCLE_COUNTER(STAT_UAnimInstance_UpdateAnimation_TickAssetPlayerInstance);
+					FScopeCycleCounterUObject Scope(GroupLeader.SourceAsset);
+					GroupLeader.SourceAsset->TickAssetPlayerInstance(GroupLeader, this, TickContext);
+				}
+
+				if (RootMotionMode == ERootMotionMode::RootMotionFromEverything && TickContext.RootMotionMovementParams.bHasRootMotion)
+				{
+					ExtractedRootMotion.AccumulateWithBlend(TickContext.RootMotionMovementParams.RootMotionTransform, GroupLeader.EffectiveBlendWeight);
+				}
+    
+				SyncGroup.MarkerTickContext = TickContext.MarkerTickContext;
+
+				// Update everything else to follow the leader
+				if (SyncGroup.ActivePlayers.Num() > 1)
+				{
+					TickContext.ConvertToFollower();
+    
+					for (int32 TickIndex = 0; TickIndex < SyncGroup.ActivePlayers.Num(); ++TickIndex)
 					{
-						const FAnimTickRecord& AssetPlayer = SyncGroup.ActivePlayers[TickIndex];
-						AssetPlayer.SourceAsset->TickAssetPlayerInstance(AssetPlayer, this, TickContext);
-						if (RootMotionMode == ERootMotionMode::RootMotionFromEverything && TickContext.RootMotionMovementParams.bHasRootMotion)
+						if (TickIndex != SyncGroup.GroupLeaderIndex)
 						{
-							ExtractedRootMotion.AccumulateWithBlend(TickContext.RootMotionMovementParams.RootMotionTransform, AssetPlayer.EffectiveBlendWeight);
+							FAnimTickRecord& AssetPlayer = SyncGroup.ActivePlayers[TickIndex];
+							{
+								QUICK_SCOPE_CYCLE_COUNTER(STAT_UAnimInstance_UpdateAnimation_TickAssetPlayerInstance);
+								FScopeCycleCounterUObject Scope(AssetPlayer.SourceAsset);
+								AssetPlayer.SourceAsset->TickAssetPlayerInstance(AssetPlayer, this, TickContext);
+							}
+							if (RootMotionMode == ERootMotionMode::RootMotionFromEverything && TickContext.RootMotionMovementParams.bHasRootMotion)
+							{
+								ExtractedRootMotion.AccumulateWithBlend(TickContext.RootMotionMovementParams.RootMotionTransform, AssetPlayer.EffectiveBlendWeight);
+							}
 						}
 					}
 				}
 			}
 		}
-	}
 
-	// Handle the remaining ungrouped animation players
-	for (int32 TickIndex = 0; TickIndex < UngroupedActivePlayers.Num(); ++TickIndex)
-	{
-		const FAnimTickRecord& AssetPlayerToTick = UngroupedActivePlayers[TickIndex];
-		FAnimAssetTickContext TickContext(DeltaSeconds, RootMotionMode);
-		AssetPlayerToTick.SourceAsset->TickAssetPlayerInstance(AssetPlayerToTick, this, TickContext);
-		if (RootMotionMode == ERootMotionMode::RootMotionFromEverything && TickContext.RootMotionMovementParams.bHasRootMotion)
+		// Handle the remaining ungrouped animation players
+		for (int32 TickIndex = 0; TickIndex < UngroupedActivePlayers.Num(); ++TickIndex)
 		{
-			ExtractedRootMotion.AccumulateWithBlend(TickContext.RootMotionMovementParams.RootMotionTransform, AssetPlayerToTick.EffectiveBlendWeight);
+			FAnimTickRecord& AssetPlayerToTick = UngroupedActivePlayers[TickIndex];
+			static TArray<FName> TempNames;
+			const TArray<FName>* UniqueNames = AssetPlayerToTick.SourceAsset->GetUniqueMarkerNames();
+			const TArray<FName>& ValidMarkers = UniqueNames ? *UniqueNames : TempNames;
+
+			const bool bOnlyOneAnimationInGroup = true;
+			FAnimAssetTickContext TickContext(DeltaSeconds, RootMotionMode, bOnlyOneAnimationInGroup, ValidMarkers);
+		    {
+			    QUICK_SCOPE_CYCLE_COUNTER(STAT_UAnimInstance_UpdateAnimation_TickAssetPlayerInstance);
+			    FScopeCycleCounterUObject Scope(AssetPlayerToTick.SourceAsset);
+				AssetPlayerToTick.SourceAsset->TickAssetPlayerInstance(AssetPlayerToTick, this, TickContext);
+		    }
+			if (RootMotionMode == ERootMotionMode::RootMotionFromEverything && TickContext.RootMotionMovementParams.bHasRootMotion)
+			{
+				ExtractedRootMotion.AccumulateWithBlend(TickContext.RootMotionMovementParams.RootMotionTransform, AssetPlayerToTick.EffectiveBlendWeight);
+			}
 		}
 	}
-
-	// update montage should run in game thread
-	// if we do multi threading, make sure this stays in game thread
-	Montage_Advance(DeltaSeconds);
 
 	// We may have just partially blended root motion, so make it up to 1 by
 	// blending in identity too
@@ -588,7 +683,7 @@ void UAnimInstance::BindNativeDelegates()
 				FAnimNode_StateMachine* StateMachine = Property->ContainerPtrToValuePtr<FAnimNode_StateMachine>(this);
 				if(StateMachine)
 				{
-					const FBakedAnimationStateMachine* MachineDescription = StateMachine->GetMachineDescription();
+					const FBakedAnimationStateMachine* MachineDescription = AnimBlueprintGeneratedClass->BakedStateMachines.IsValidIndex(StateMachine->StateMachineIndexInClass) ? &(AnimBlueprintGeneratedClass->BakedStateMachines[StateMachine->StateMachineIndexInClass]) : nullptr;
 					if(MachineDescription && MachineName == MachineDescription->MachineName)
 					{
 						// check each state transition for a match
@@ -777,6 +872,9 @@ void UAnimInstance::DisplayDebug(class UCanvas* Canvas, const FDebugDisplayInfo&
 		FIndenter AnimIndent(Indent);
 
 		//Display Sync Groups
+		const TArray<FAnimGroupInstance>& SyncGroups = SyncGroupArrays[GetSyncGroupReadIndex()];
+		const TArray<FAnimTickRecord>& UngroupedActivePlayers = UngroupedActivePlayerArrays[GetSyncGroupReadIndex()];
+
 		Heading = FString::Printf(TEXT("SyncGroups: %i"), SyncGroups.Num());
 		YL = Canvas->DrawText(RenderFont, Heading, Indent, YPos, 1.f, 1.f, RenderInfo);
 		YPos += YL;
@@ -784,7 +882,7 @@ void UAnimInstance::DisplayDebug(class UCanvas* Canvas, const FDebugDisplayInfo&
 		for (int32 GroupIndex = 0; GroupIndex < SyncGroups.Num(); ++GroupIndex)
 		{
 			FIndenter GroupIndent(Indent);
-			FAnimGroupInstance& SyncGroup = SyncGroups[GroupIndex];
+			const FAnimGroupInstance& SyncGroup = SyncGroups[GroupIndex];
 
 			Canvas->SetLinearDrawColor(TextYellow);
 
@@ -794,8 +892,8 @@ void UAnimInstance::DisplayDebug(class UCanvas* Canvas, const FDebugDisplayInfo&
 
 			if (SyncGroup.ActivePlayers.Num() > 0)
 			{
-				const int32 GroupLeaderIndex = FMath::Max(SyncGroup.GroupLeaderIndex, 0);
-				OutputTickRecords(SyncGroup.ActivePlayers, Canvas, Indent, GroupLeaderIndex, TextWhite, ActiveColor, InactiveColor, RenderFont, YPos, RenderInfo, YL, bFullBlendspaceDisplay);
+				check(SyncGroup.GroupLeaderIndex != -1);
+				OutputTickRecords(SyncGroup.ActivePlayers, Canvas, Indent, SyncGroup.GroupLeaderIndex, TextWhite, ActiveColor, InactiveColor, RenderFont, YPos, RenderInfo, YL, bFullBlendspaceDisplay);
 			}
 		}
 
@@ -826,7 +924,7 @@ void UAnimInstance::DisplayDebug(class UCanvas* Canvas, const FDebugDisplayInfo&
 
 			Canvas->SetLinearDrawColor((MontageInstance->IsActive()) ? ActiveColor : TextWhite);
 
-			FString MontageEntry = FString::Printf(TEXT("%i) %s CurrSec: %s NextSec: %s W:%.3f DW:%.3f"), MontageIndex, *MontageInstance->Montage->GetName(), *MontageInstance->GetCurrentSection().ToString(), *MontageInstance->GetNextSection().ToString(), MontageInstance->Weight, MontageInstance->DesiredWeight);
+			FString MontageEntry = FString::Printf(TEXT("%i) %s CurrSec: %s NextSec: %s W:%.3f DW:%.3f"), MontageIndex, *MontageInstance->Montage->GetName(), *MontageInstance->GetCurrentSection().ToString(), *MontageInstance->GetNextSection().ToString(), MontageInstance->GetWeight(), MontageInstance->GetDesiredWeight());
 			YL = Canvas->DrawText(RenderFont, MontageEntry, Indent, YPos, 1.f, 1.f, RenderInfo);
 			YPos += YL;
 		}
@@ -903,7 +1001,7 @@ void UAnimInstance::DisplayDebug(class UCanvas* Canvas, const FDebugDisplayInfo&
 		}
 	}
 
-	if (bShowGraph)
+	if (bShowGraph && RootNode != nullptr)
 	{
 		Canvas->SetLinearDrawColor(TextYellow);
 
@@ -979,7 +1077,7 @@ void UAnimInstance::DisplayDebug(class UCanvas* Canvas, const FDebugDisplayInfo&
 
 void UAnimInstance::RecalcRequiredBones()
 {
-	USkeletalMeshComponent * SkelMeshComp = GetSkelMeshComponent();
+	USkeletalMeshComponent* SkelMeshComp = GetSkelMeshComponent();
 	check( SkelMeshComp )
 
 	if( SkelMeshComp->SkeletalMesh && SkelMeshComp->SkeletalMesh->Skeleton )
@@ -1143,7 +1241,7 @@ void UAnimInstance::AddCurveValue(const USkeleton::AnimCurveUID Uid, float Value
 void UAnimInstance::UpdateCurves(const FBlendedCurve& InCurve)
 {
 	//Track material params we set last time round so we can clear them if they aren't set again.
-	MaterialParamatersToClear.Empty();
+	MaterialParamatersToClear.Reset();
 	for(auto Iter = MaterialParameterCurves.CreateConstIterator(); Iter; ++Iter)
 	{
 		if(Iter.Value() > 0.0f)
@@ -1152,9 +1250,9 @@ void UAnimInstance::UpdateCurves(const FBlendedCurve& InCurve)
 		}
 	}
 
-	EventCurves.Empty();
-	MorphTargetCurves.Empty();
-	MaterialParameterCurves.Empty();
+	EventCurves.Reset();
+	MorphTargetCurves.Reset();
+	MaterialParameterCurves.Reset();
 
 	for(int32 CurveId=0; CurveId<InCurve.UIDList.Num(); ++CurveId)
 	{
@@ -1174,7 +1272,7 @@ void UAnimInstance::UpdateCurves(const FBlendedCurve& InCurve)
 void UAnimInstance::TriggerAnimNotifies(float DeltaSeconds)
 {
 	SCOPE_CYCLE_COUNTER(STAT_AnimTriggerAnimNotifies);
-	USkeletalMeshComponent * SkelMeshComp = GetSkelMeshComponent();
+	USkeletalMeshComponent* SkelMeshComp = GetSkelMeshComponent();
 
 	// Array that will replace the 'ActiveAnimNotifyState' at the end of this function.
 	TArray<FAnimNotifyEvent> NewActiveAnimNotifyState;
@@ -1279,9 +1377,12 @@ void UAnimInstance::AnimNotify_Sound(UAnimNotify* AnimNotify)
 //to debug montage weight
 #define DEBUGMONTAGEWEIGHT 0
 
-void UAnimInstance::GetSlotWeight(FName const & SlotNodeName, float& out_SlotNodeWeight, float& out_SourceWeight) const
+void UAnimInstance::GetSlotWeight(FName const& SlotNodeName, float& out_SlotNodeWeight, float& out_SourceWeight, float& out_TotalNodeWeight) const
 {
-	float NodeTotalWeight = 0.f;
+	// node total weight 
+	float NewSlotNodeWeight = 0.f;
+	// this is required to track, because it will be 1-SourceWeight
+	// if additive, it can be applied more
 	float NonAdditiveTotalWeight = 0.f;
 
 #if DEBUGMONTAGEWEIGHT
@@ -1290,40 +1391,39 @@ void UAnimInstance::GetSlotWeight(FName const & SlotNodeName, float& out_SlotNod
 	// first get all the montage instance weight this slot node has
 	for (int32 Index = 0; Index < MontageInstances.Num(); Index++)
 	{
-		FAnimMontageInstance const * const MontageInstance = MontageInstances[Index];
+		FAnimMontageInstance const* const MontageInstance = MontageInstances[Index];
 		if (MontageInstance && MontageInstance->IsValid() && MontageInstance->Montage->IsValidSlot(SlotNodeName))
 		{
-			NodeTotalWeight += MontageInstance->Weight;
+			NewSlotNodeWeight += MontageInstance->GetWeight();
 
 			if( !MontageInstance->Montage->IsValidAdditiveSlot(SlotNodeName) )
 			{
-				NonAdditiveTotalWeight += MontageInstance->Weight;
+				NonAdditiveTotalWeight += MontageInstance->GetWeight();
 			}
 
 #if DEBUGMONTAGEWEIGHT			
-			TotalDesiredWeight += MontageInstance->DesiredWeight;
+			TotalDesiredWeight += MontageInstance->Blend.GetDesiredValue();
 #endif			
 		}
 	}
 
+	// save the total node weight, it can be more than 1
+	// we need this so that when we eval, we normalized by this weight
+	// calculating there can cause inconsistency if some data changes
+	out_TotalNodeWeight = NewSlotNodeWeight;
+
 	// this can happen when it's blending in OR when newer animation comes in with shorter blendtime
 	// say #1 animation was blending out time with current blendtime 1.0 #2 animation was blending in with 1.0 (old) but got blend out with new blendtime 0.2f
 	// #3 animation was blending in with the new blendtime 0.2f, you'll have sum of #1, 2, 3 exceeds 1.f
-	if (NodeTotalWeight > (1.f + ZERO_ANIMWEIGHT_THRESH))
+	if (NewSlotNodeWeight > (1.f + ZERO_ANIMWEIGHT_THRESH))
 	{
-		// Re-normalize instance weights.
-		for (int32 Index = 0; Index < MontageInstances.Num(); Index++)
-		{
-			FAnimMontageInstance * MontageInstance = MontageInstances[Index];
-			if (MontageInstance && MontageInstance->IsValid() && MontageInstance->Montage->IsValidSlot(SlotNodeName))
-			{
-				MontageInstance->Weight /= NodeTotalWeight;
-			}
-		} 
-
-		// Re-normalize totals
-		NonAdditiveTotalWeight /= NodeTotalWeight;
-		NodeTotalWeight = 1.f;
+		// you don't want to change weight of montage instance since it can play multiple slots
+		// if you change one, it will apply to all slots in that montage
+		// instead we should renormalize when we eval
+		// this should happen in the eval phase
+		NonAdditiveTotalWeight /= NewSlotNodeWeight;
+		// since we normalized, we reset
+		NewSlotNodeWeight = 1.f;
 	}
 #if DEBUGMONTAGEWEIGHT
 	else if (TotalDesiredWeight == 1.f && TotalSum < 1.f - ZERO_ANIMWEIGHT_THRESH)
@@ -1335,16 +1435,23 @@ void UAnimInstance::GetSlotWeight(FName const & SlotNodeName, float& out_SlotNod
 	}
 #endif
 
-	out_SlotNodeWeight = NodeTotalWeight;
+	out_SlotNodeWeight = NewSlotNodeWeight;
 	out_SourceWeight = 1.f - NonAdditiveTotalWeight;
 }
 
-void UAnimInstance::SlotEvaluatePose(FName SlotNodeName, const FCompactPose& SourcePose, const FBlendedCurve& SourceCurve, FCompactPose& BlendedPose, FBlendedCurve& BlendedCurve, float SlotNodeWeight)
+// for now disable becauase it will not work with single node instance
+#if (UE_BUILD_SHIPPING || UE_BUILD_TEST)
+#define DEBUG_MONTAGEINSTANCE_WEIGHT 0
+#else
+#define DEBUG_MONTAGEINSTANCE_WEIGHT 1
+#endif // !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+
+void UAnimInstance::SlotEvaluatePose(FName SlotNodeName, const FCompactPose& SourcePose, const FBlendedCurve& SourceCurve, float InSourceWeight, FCompactPose& BlendedPose, FBlendedCurve& BlendedCurve, float InBlendWeight, float InTotalNodeWeight)
 {
 	//Accessing MontageInstances from this function is not safe (as this can be called during Parallel Anim Evaluation!
 	//Any montage data you need to add should be part of MontageEvaluationData
-
-	if (SlotNodeWeight <= ZERO_ANIMWEIGHT_THRESH)
+	// nothing to blend, just get it out
+	if (InBlendWeight <= ZERO_ANIMWEIGHT_THRESH)
 	{
 		BlendedPose = SourcePose;
 		BlendedCurve = SourceCurve;
@@ -1356,13 +1463,14 @@ void UAnimInstance::SlotEvaluatePose(FName SlotNodeName, const FCompactPose& Sou
 	TArray<FSlotEvaluationPose> NonAdditivePoses;
 
 	// first pass we go through collect weights and valid montages. 
+#if DEBUG_MONTAGEINSTANCE_WEIGHT
 	float TotalWeight = 0.f;
-	float NonAdditiveWeight = 0.f;
+#endif // DEBUG_MONTAGEINSTANCE_WEIGHT
 	for (const FMontageEvaluationState& EvalState : MontageEvaluationData)
 	{
 		if (EvalState.Montage->IsValidSlot(SlotNodeName))
 		{
-			FAnimTrack const * const AnimTrack = EvalState.Montage->GetAnimationData(SlotNodeName);
+			FAnimTrack const* const AnimTrack = EvalState.Montage->GetAnimationData(SlotNodeName);
 
 			// Find out additive type for pose.
 			EAdditiveAnimationType const AdditiveAnimType = AnimTrack->IsAdditive() 
@@ -1385,43 +1493,41 @@ void UAnimInstance::SlotEvaluatePose(FName SlotNodeName, const FCompactPose& Sou
 			EvalState.Montage->EvaluateCurveData(MontageCurve, EvalState.MontagePosition);
 			NewPose.Curve.Combine(MontageCurve);
 
+#if DEBUG_MONTAGEINSTANCE_WEIGHT
 			TotalWeight += EvalState.MontageWeight;
+#endif // DEBUG_MONTAGEINSTANCE_WEIGHT
 			if (AdditiveAnimType == AAT_None)
 			{
-				NonAdditiveWeight += EvalState.MontageWeight;
 				NonAdditivePoses.Add(NewPose);
 			}
 			else
 			{
 				AdditivePoses.Add(NewPose);
 			}
-		
 		}
 	}
 
-	// nothing else to do here, there is no weight
-	if (TotalWeight <= ZERO_ANIMWEIGHT_THRESH)
-	{
-		BlendedPose = SourcePose;
-		BlendedCurve = SourceCurve;
-		return;
-	}
-	// Make sure weights don't exceed 1.f, otherwise re-normalize.
-	else if (TotalWeight > (1.f + ZERO_ANIMWEIGHT_THRESH))
+	// allocate for blending
+	// If source has any weight, add it to the blend array.
+	float const SourceWeight = FMath::Clamp<float>(InSourceWeight, 0.f, 1.f);
+
+#if DEBUG_MONTAGEINSTANCE_WEIGHT
+	ensure (FMath::IsNearlyEqual(InTotalNodeWeight, TotalWeight, KINDA_SMALL_NUMBER));
+#endif // DEBUG_MONTAGEINSTANCE_WEIGHT
+	ensure (InTotalNodeWeight > ZERO_ANIMWEIGHT_THRESH);
+
+	if (InTotalNodeWeight > (1.f + ZERO_ANIMWEIGHT_THRESH))
 	{
 		// Re-normalize additive poses
 		for (int32 Index = 0; Index < AdditivePoses.Num(); Index++)
 		{
-			AdditivePoses[Index].Weight /= TotalWeight;
+			AdditivePoses[Index].Weight /= InTotalNodeWeight;
 		}
 		// Re-normalize non-additive poses
 		for (int32 Index = 0; Index < NonAdditivePoses.Num(); Index++)
 		{
-			NonAdditivePoses[Index].Weight /= TotalWeight;
+			NonAdditivePoses[Index].Weight /= InTotalNodeWeight;
 		}
-		// Re-normalize totals.
-		NonAdditiveWeight /= TotalWeight;
-		TotalWeight = 1.f;
 	}
 
 	// Make sure we have at least one montage here.
@@ -1438,9 +1544,6 @@ void UAnimInstance::SlotEvaluatePose(FName SlotNodeName, const FCompactPose& Sou
 		// Otherwise we need to blend non additive poses together
 		else
 		{
-			// allocate for blending
-			// If source has any weight, add it to the blend array.
-			float const SourceWeight = FMath::Clamp<float>(1.f - NonAdditiveWeight, 0.f, 1.f);
 			int32 const NumPoses = NonAdditivePoses.Num() + ((SourceWeight > ZERO_ANIMWEIGHT_THRESH) ? 1 : 0);
 
 			TArray<const FCompactPose*> BlendingPoses;
@@ -1488,7 +1591,7 @@ void UAnimInstance::SlotEvaluatePose(FName SlotNodeName, const FCompactPose& Sou
 
 void UAnimInstance::ReinitializeSlotNodes()
 {
-	SlotWeightTracker.Empty();
+	SlotWeightTracker.Reset();
 	
 	// Increment counter
 	SlotNodeInitializationCounter++;
@@ -1647,8 +1750,30 @@ float UAnimInstance::GetCurrentStateElapsedTime(int32 MachineIndex)
 	return 0.0f;
 }
 
+FName UAnimInstance::GetCurrentStateName(int32 MachineIndex)
+{
+	if (UAnimBlueprintGeneratedClass* AnimBlueprintClass = Cast<UAnimBlueprintGeneratedClass>((UObject*)GetClass()))
+	{
+		if ((MachineIndex >= 0) && (MachineIndex < AnimBlueprintClass->AnimNodeProperties.Num()))
+		{
+			const int32 InstancePropertyIndex = AnimBlueprintClass->AnimNodeProperties.Num() - 1 - MachineIndex; //@TODO: ANIMREFACTOR: Reverse indexing
+
+			UStructProperty* MachineInstanceProperty = AnimBlueprintClass->AnimNodeProperties[InstancePropertyIndex];
+			checkSlow(MachineInstanceProperty->Struct->IsChildOf(FAnimNode_StateMachine::StaticStruct()));
+
+			FAnimNode_StateMachine* MachineInstance = MachineInstanceProperty->ContainerPtrToValuePtr<FAnimNode_StateMachine>(this);
+
+			return MachineInstance->GetCurrentStateName();
+		}
+	}
+
+	return NAME_None;
+}
+
 void UAnimInstance::Montage_UpdateWeight(float DeltaSeconds)
 {
+	SCOPE_CYCLE_COUNTER(STAT_Montage_UpdateWeight);
+
 	// go through all montage instances, and update them
 	// and make sure their weight is updated properly
 	for (int32 I=0; I<MontageInstances.Num(); ++I)
@@ -1662,6 +1787,8 @@ void UAnimInstance::Montage_UpdateWeight(float DeltaSeconds)
 
 void UAnimInstance::Montage_Advance(float DeltaSeconds)
 {
+	SCOPE_CYCLE_COUNTER(STAT_Montage_Advance);
+
 	// We're about to tick montages, queue their events to they're triggered after batched anim notifies.
 	bQueueMontageEvents = true;
 
@@ -1670,7 +1797,7 @@ void UAnimInstance::Montage_Advance(float DeltaSeconds)
 	for (int32 InstanceIndex = 0; InstanceIndex<MontageInstances.Num(); InstanceIndex++)
 	{
 		// should never be NULL
-		FAnimMontageInstance * MontageInstance = MontageInstances[InstanceIndex];
+		FAnimMontageInstance* MontageInstance = MontageInstances[InstanceIndex];
 		ensure(MontageInstance);
 		if (MontageInstance)
 		{
@@ -1702,11 +1829,11 @@ void UAnimInstance::Montage_Advance(float DeltaSeconds)
 #if DO_CHECK && WITH_EDITORONLY_DATA && 0
 			else
 			{
-				FAnimMontageInstance * AnimMontageInstance = MontageInstances(I);
+				FAnimMontageInstance* AnimMontageInstance = MontageInstances(I);
 				// print blending time and weight and montage name
 				UE_LOG(LogAnimation, Warning, TEXT("%d. Montage (%s), DesiredWeight(%0.2f), CurrentWeight(%0.2f), BlendingTime(%0.2f)"), 
-					I+1, *AnimMontageInstance->Montage->GetName(), AnimMontageInstance->DesiredWeight, AnimMontageInstance->Weight,  
-					AnimMontageInstance->BlendTime );
+					I+1, *AnimMontageInstance->Montage->GetName(), AnimMontageInstance->GetDesiredWeight(), AnimMontageInstance->GetWeight(),  
+					AnimMontageInstance->GetBlendTime() );
 			}
 #endif
 		}
@@ -1761,7 +1888,7 @@ void UAnimInstance::TriggerQueuedMontageEvents()
 		{
 			TriggerMontageBlendingOutEvent(MontageBlendingOutEvent);
 		}
-		QueuedMontageBlendingOutEvents.Empty();
+		QueuedMontageBlendingOutEvents.Reset();
 	}
 
 	if (QueuedMontageEndedEvents.Num() > 0)
@@ -1770,7 +1897,7 @@ void UAnimInstance::TriggerQueuedMontageEvents()
 		{
 			TriggerMontageEndedEvent(MontageEndedEvent);
 		}
-		QueuedMontageEndedEvents.Empty();
+		QueuedMontageEndedEvents.Reset();
 	}
 }
 
@@ -1800,7 +1927,7 @@ float UAnimInstance::PlaySlotAnimation(UAnimSequenceBase* Asset, FName SlotNodeN
 	}
 
 	// now play
-	UAnimMontage * NewMontage = NewObject<UAnimMontage>();
+	UAnimMontage* NewMontage = NewObject<UAnimMontage>();
 	NewMontage->SetSkeleton(AssetSkeleton);
 
 	// add new track
@@ -1822,8 +1949,8 @@ float UAnimInstance::PlaySlotAnimation(UAnimSequenceBase* Asset, FName SlotNodeN
 
 	// add new section
 	NewMontage->CompositeSections.Add(NewSection);
-	NewMontage->BlendInTime = BlendInTime;
-	NewMontage->BlendOutTime = BlendOutTime;
+	NewMontage->BlendIn.SetBlendTime(BlendInTime);
+	NewMontage->BlendOut.SetBlendTime(BlendOutTime);
 	NewMontage->SlotAnimTracks.Add(NewTrack);
 
 	return Montage_Play(NewMontage, InPlayRate);
@@ -1855,7 +1982,7 @@ UAnimMontage* UAnimInstance::PlaySlotAnimationAsDynamicMontage(UAnimSequenceBase
 	}
 
 	// now play
-	UAnimMontage * NewMontage = NewObject<UAnimMontage>();
+	UAnimMontage* NewMontage = NewObject<UAnimMontage>();
 	NewMontage->SetSkeleton(AssetSkeleton);
 
 	// add new track
@@ -1877,8 +2004,8 @@ UAnimMontage* UAnimInstance::PlaySlotAnimationAsDynamicMontage(UAnimSequenceBase
 
 	// add new section
 	NewMontage->CompositeSections.Add(NewSection);
-	NewMontage->BlendInTime = BlendInTime;
-	NewMontage->BlendOutTime = BlendOutTime;
+	NewMontage->BlendIn.SetBlendTime(BlendInTime);
+	NewMontage->BlendOut.SetBlendTime(BlendOutTime);
 	NewMontage->BlendOutTriggerTime = BlendOutTriggerTime;
 	NewMontage->SlotAnimTracks.Add(NewTrack);
 
@@ -1896,21 +2023,21 @@ void UAnimInstance::StopSlotAnimation(float InBlendOutTime, FName SlotNodeName)
 		for (int32 InstanceIndex = 0; InstanceIndex < MontageInstances.Num(); InstanceIndex++)
 		{
 			// check if this is playing
-			FAnimMontageInstance * MontageInstance = MontageInstances[InstanceIndex];
+			FAnimMontageInstance* MontageInstance = MontageInstances[InstanceIndex];
 			// make sure what is active right now is transient that we created by request
 			if (MontageInstance && MontageInstance->IsActive() && MontageInstance->IsPlaying())
 			{
-				UAnimMontage * CurMontage = MontageInstance->Montage;
+				UAnimMontage* CurMontage = MontageInstance->Montage;
 				if (CurMontage && CurMontage->GetOuter() == GetTransientPackage())
 				{
 					// Check each track, in practice there should only be one on these
 					for (int32 SlotTrackIndex = 0; SlotTrackIndex < CurMontage->SlotAnimTracks.Num(); SlotTrackIndex++)
 					{
-						const FSlotAnimationTrack * AnimTrack = &CurMontage->SlotAnimTracks[SlotTrackIndex];
+						const FSlotAnimationTrack* AnimTrack = &CurMontage->SlotAnimTracks[SlotTrackIndex];
 						if (AnimTrack && AnimTrack->SlotName == SlotNodeName)
 						{
 							// Found it
-							MontageInstance->Stop(InBlendOutTime);
+							MontageInstance->Stop(FAlphaBlend(InBlendOutTime));
 							break;
 						}
 					}
@@ -1930,11 +2057,11 @@ bool UAnimInstance::IsPlayingSlotAnimation(UAnimSequenceBase* Asset, FName SlotN
 	for (int32 InstanceIndex = 0; InstanceIndex < MontageInstances.Num(); InstanceIndex++)
 	{
 		// check if this is playing
-		FAnimMontageInstance * MontageInstance = MontageInstances[InstanceIndex];
+		FAnimMontageInstance* MontageInstance = MontageInstances[InstanceIndex];
 		// make sure what is active right now is transient that we created by request
 		if (MontageInstance && MontageInstance->IsActive() && MontageInstance->IsPlaying())
 		{
-			UAnimMontage * CurMontage = MontageInstance->Montage;
+			UAnimMontage* CurMontage = MontageInstance->Montage;
 			if (CurMontage && CurMontage->GetOuter() == GetTransientPackage())
 			{
 				const FAnimTrack* AnimTrack = CurMontage->GetAnimationData(SlotNodeName);
@@ -1951,7 +2078,7 @@ bool UAnimInstance::IsPlayingSlotAnimation(UAnimSequenceBase* Asset, FName SlotN
 }
 
 /** Play a Montage. Returns Length of Montage in seconds. Returns 0.f if failed to play. */
-float UAnimInstance::Montage_Play(UAnimMontage * MontageToPlay, float InPlayRate/*= 1.f*/)
+float UAnimInstance::Montage_Play(UAnimMontage* MontageToPlay, float InPlayRate/*= 1.f*/)
 {
 	if (MontageToPlay && (MontageToPlay->SequenceLength > 0.f) && MontageToPlay->HasValidSlotSetup())
 	{
@@ -1959,7 +2086,7 @@ float UAnimInstance::Montage_Play(UAnimMontage * MontageToPlay, float InPlayRate
 		{
 			// Enforce 'a single montage at once per group' rule
 			FName NewMontageGroupName = MontageToPlay->GetGroupName();
-			StopAllMontagesByGroupName(NewMontageGroupName, MontageToPlay->BlendInTime);
+			StopAllMontagesByGroupName(NewMontageGroupName, MontageToPlay->BlendIn);
 
 			// Enforce 'a single root motion montage at once' rule.
 			if (MontageToPlay->bEnableRootMotionTranslation || MontageToPlay->bEnableRootMotionRotation)
@@ -1967,11 +2094,11 @@ float UAnimInstance::Montage_Play(UAnimMontage * MontageToPlay, float InPlayRate
 				FAnimMontageInstance* ActiveRootMotionMontageInstance = GetRootMotionMontageInstance();
 				if (ActiveRootMotionMontageInstance)
 				{
-					ActiveRootMotionMontageInstance->Stop(MontageToPlay->BlendInTime);
+					ActiveRootMotionMontageInstance->Stop(MontageToPlay->BlendIn);
 				}
 			}
 
-			FAnimMontageInstance * NewInstance = new FAnimMontageInstance(this);
+			FAnimMontageInstance* NewInstance = new FAnimMontageInstance(this);
 			check(NewInstance);
 
 			NewInstance->Initialize(MontageToPlay);
@@ -1999,14 +2126,14 @@ float UAnimInstance::Montage_Play(UAnimMontage * MontageToPlay, float InPlayRate
 	return 0.f;
 }
 
-void UAnimInstance::Montage_Stop(float InBlendOutTime, UAnimMontage * Montage)
+void UAnimInstance::Montage_Stop(float InBlendOutTime, UAnimMontage* Montage)
 {
 	if (Montage)
 	{
-		FAnimMontageInstance * MontageInstance = GetActiveInstanceForMontage(*Montage);
+		FAnimMontageInstance* MontageInstance = GetActiveInstanceForMontage(*Montage);
 		if (MontageInstance)
 		{
-			MontageInstance->Stop(InBlendOutTime);
+			MontageInstance->Stop(FAlphaBlend(Montage->BlendOut, InBlendOutTime));
 		}
 	}
 	else
@@ -2014,20 +2141,20 @@ void UAnimInstance::Montage_Stop(float InBlendOutTime, UAnimMontage * Montage)
 		// If no Montage reference, do it on all active ones.
 		for (int32 InstanceIndex = 0; InstanceIndex < MontageInstances.Num(); InstanceIndex++)
 		{
-			FAnimMontageInstance * MontageInstance = MontageInstances[InstanceIndex];
+			FAnimMontageInstance* MontageInstance = MontageInstances[InstanceIndex];
 			if (MontageInstance && MontageInstance->IsActive())
 			{
-				MontageInstance->Stop(InBlendOutTime);
+				MontageInstance->Stop(FAlphaBlend(MontageInstance->Montage->BlendOut, InBlendOutTime));
 			}
 		}
 	}
 }
 
-void UAnimInstance::Montage_Pause(UAnimMontage * Montage)
+void UAnimInstance::Montage_Pause(UAnimMontage* Montage)
 {
 	if (Montage)
 	{
-		FAnimMontageInstance * MontageInstance = GetActiveInstanceForMontage(*Montage);
+		FAnimMontageInstance* MontageInstance = GetActiveInstanceForMontage(*Montage);
 		if (MontageInstance)
 		{
 			MontageInstance->Pause();
@@ -2038,7 +2165,7 @@ void UAnimInstance::Montage_Pause(UAnimMontage * Montage)
 		// If no Montage reference, do it on all active ones.
 		for (int32 InstanceIndex = 0; InstanceIndex < MontageInstances.Num(); InstanceIndex++)
 		{
-			FAnimMontageInstance * MontageInstance = MontageInstances[InstanceIndex];
+			FAnimMontageInstance* MontageInstance = MontageInstances[InstanceIndex];
 			if (MontageInstance && MontageInstance->IsActive())
 			{
 				MontageInstance->Pause();
@@ -2047,11 +2174,11 @@ void UAnimInstance::Montage_Pause(UAnimMontage * Montage)
 	}
 }
 
-void UAnimInstance::Montage_JumpToSection(FName SectionName, UAnimMontage * Montage)
+void UAnimInstance::Montage_JumpToSection(FName SectionName, UAnimMontage* Montage)
 {
 	if (Montage)
 	{
-		FAnimMontageInstance * MontageInstance = GetActiveInstanceForMontage(*Montage);
+		FAnimMontageInstance* MontageInstance = GetActiveInstanceForMontage(*Montage);
 		if (MontageInstance)
 		{
 			bool const bEndOfSection = (MontageInstance->GetPlayRate() < 0.f);
@@ -2063,7 +2190,7 @@ void UAnimInstance::Montage_JumpToSection(FName SectionName, UAnimMontage * Mont
 		// If no Montage reference, do it on all active ones.
 		for (int32 InstanceIndex = 0; InstanceIndex < MontageInstances.Num(); InstanceIndex++)
 		{
-			FAnimMontageInstance * MontageInstance = MontageInstances[InstanceIndex];
+			FAnimMontageInstance* MontageInstance = MontageInstances[InstanceIndex];
 			if (MontageInstance && MontageInstance->IsActive())
 			{
 				bool const bEndOfSection = (MontageInstance->GetPlayRate() < 0.f);
@@ -2073,11 +2200,11 @@ void UAnimInstance::Montage_JumpToSection(FName SectionName, UAnimMontage * Mont
 	}
 }
 
-void UAnimInstance::Montage_JumpToSectionsEnd(FName SectionName, UAnimMontage * Montage)
+void UAnimInstance::Montage_JumpToSectionsEnd(FName SectionName, UAnimMontage* Montage)
 {
 	if (Montage)
 	{
-		FAnimMontageInstance * MontageInstance = GetActiveInstanceForMontage(*Montage);
+		FAnimMontageInstance* MontageInstance = GetActiveInstanceForMontage(*Montage);
 		if (MontageInstance)
 		{
 			bool const bEndOfSection = (MontageInstance->GetPlayRate() >= 0.f);
@@ -2089,7 +2216,7 @@ void UAnimInstance::Montage_JumpToSectionsEnd(FName SectionName, UAnimMontage * 
 		// If no Montage reference, do it on all active ones.
 		for (int32 InstanceIndex = 0; InstanceIndex < MontageInstances.Num(); InstanceIndex++)
 		{
-			FAnimMontageInstance * MontageInstance = MontageInstances[InstanceIndex];
+			FAnimMontageInstance* MontageInstance = MontageInstances[InstanceIndex];
 			if (MontageInstance && MontageInstance->IsActive())
 			{
 				bool const bEndOfSection = (MontageInstance->GetPlayRate() >= 0.f);
@@ -2099,11 +2226,11 @@ void UAnimInstance::Montage_JumpToSectionsEnd(FName SectionName, UAnimMontage * 
 	}
 }
 
-void UAnimInstance::Montage_SetNextSection(FName SectionNameToChange, FName NextSection, UAnimMontage * Montage)
+void UAnimInstance::Montage_SetNextSection(FName SectionNameToChange, FName NextSection, UAnimMontage* Montage)
 {
 	if (Montage)
 	{
-		FAnimMontageInstance * MontageInstance = GetActiveInstanceForMontage(*Montage);
+		FAnimMontageInstance* MontageInstance = GetActiveInstanceForMontage(*Montage);
 		if (MontageInstance)
 		{
 			MontageInstance->SetNextSectionName(SectionNameToChange, NextSection);
@@ -2116,7 +2243,7 @@ void UAnimInstance::Montage_SetNextSection(FName SectionNameToChange, FName Next
 		// If no Montage reference, do it on all active ones.
 		for (int32 InstanceIndex = 0; InstanceIndex < MontageInstances.Num(); InstanceIndex++)
 		{
-			FAnimMontageInstance * MontageInstance = MontageInstances[InstanceIndex];
+			FAnimMontageInstance* MontageInstance = MontageInstances[InstanceIndex];
 			if (MontageInstance && MontageInstance->IsActive())
 			{
 				MontageInstance->SetNextSectionName(SectionNameToChange, NextSection);
@@ -2131,11 +2258,11 @@ void UAnimInstance::Montage_SetNextSection(FName SectionNameToChange, FName Next
 	}
 }
 
-void UAnimInstance::Montage_SetPlayRate(UAnimMontage * Montage, float NewPlayRate)
+void UAnimInstance::Montage_SetPlayRate(UAnimMontage* Montage, float NewPlayRate)
 {
 	if (Montage)
 	{
-		FAnimMontageInstance * MontageInstance = GetActiveInstanceForMontage(*Montage);
+		FAnimMontageInstance* MontageInstance = GetActiveInstanceForMontage(*Montage);
 		if (MontageInstance)
 		{
 			MontageInstance->SetPlayRate(NewPlayRate);
@@ -2146,7 +2273,7 @@ void UAnimInstance::Montage_SetPlayRate(UAnimMontage * Montage, float NewPlayRat
 		// If no Montage reference, do it on all active ones.
 		for (int32 InstanceIndex = 0; InstanceIndex < MontageInstances.Num(); InstanceIndex++)
 		{
-			FAnimMontageInstance * MontageInstance = MontageInstances[InstanceIndex];
+			FAnimMontageInstance* MontageInstance = MontageInstances[InstanceIndex];
 			if (MontageInstance && MontageInstance->IsActive())
 			{
 				MontageInstance->SetPlayRate(NewPlayRate);
@@ -2155,11 +2282,11 @@ void UAnimInstance::Montage_SetPlayRate(UAnimMontage * Montage, float NewPlayRat
 	}
 }
 
-bool UAnimInstance::Montage_IsActive(UAnimMontage * Montage)
+bool UAnimInstance::Montage_IsActive(UAnimMontage* Montage)
 {
 	if (Montage)
 	{
-		FAnimMontageInstance * MontageInstance = GetActiveInstanceForMontage(*Montage);
+		FAnimMontageInstance* MontageInstance = GetActiveInstanceForMontage(*Montage);
 		if (MontageInstance)
 		{
 			return true;
@@ -2170,7 +2297,7 @@ bool UAnimInstance::Montage_IsActive(UAnimMontage * Montage)
 		// If no Montage reference, return true if there is any active montage.
 		for (int32 InstanceIndex = 0; InstanceIndex < MontageInstances.Num(); InstanceIndex++)
 		{
-			FAnimMontageInstance * MontageInstance = MontageInstances[InstanceIndex];
+			FAnimMontageInstance* MontageInstance = MontageInstances[InstanceIndex];
 			if (MontageInstance && MontageInstance->IsActive())
 			{
 				return true;
@@ -2181,11 +2308,11 @@ bool UAnimInstance::Montage_IsActive(UAnimMontage * Montage)
 	return false;
 }
 
-bool UAnimInstance::Montage_IsPlaying(UAnimMontage * Montage)
+bool UAnimInstance::Montage_IsPlaying(UAnimMontage* Montage)
 {
 	if (Montage)
 	{
-		FAnimMontageInstance * MontageInstance = GetActiveInstanceForMontage(*Montage);
+		FAnimMontageInstance* MontageInstance = GetActiveInstanceForMontage(*Montage);
 		if (MontageInstance)
 		{
 			return MontageInstance->IsPlaying();
@@ -2196,7 +2323,7 @@ bool UAnimInstance::Montage_IsPlaying(UAnimMontage * Montage)
 		// If no Montage reference, return true if there is any active playing montage.
 		for (int32 InstanceIndex = 0; InstanceIndex < MontageInstances.Num(); InstanceIndex++)
 		{
-			FAnimMontageInstance * MontageInstance = MontageInstances[InstanceIndex];
+			FAnimMontageInstance* MontageInstance = MontageInstances[InstanceIndex];
 			if (MontageInstance && MontageInstance->IsActive() && MontageInstance->IsPlaying())
 			{
 				return true;
@@ -2211,7 +2338,7 @@ FName UAnimInstance::Montage_GetCurrentSection(UAnimMontage* Montage)
 {
 	if (Montage)
 	{
-		FAnimMontageInstance * MontageInstance = GetActiveInstanceForMontage(*Montage);
+		FAnimMontageInstance* MontageInstance = GetActiveInstanceForMontage(*Montage);
 		if (MontageInstance)
 		{
 			return MontageInstance->GetCurrentSection();
@@ -2222,7 +2349,7 @@ FName UAnimInstance::Montage_GetCurrentSection(UAnimMontage* Montage)
 		// If no Montage reference, get first active one.
 		for (int32 InstanceIndex = 0; InstanceIndex < MontageInstances.Num(); InstanceIndex++)
 		{
-			FAnimMontageInstance * MontageInstance = MontageInstances[InstanceIndex];
+			FAnimMontageInstance* MontageInstance = MontageInstances[InstanceIndex];
 			if (MontageInstance && MontageInstance->IsActive())
 			{
 				return MontageInstance->GetCurrentSection();
@@ -2237,7 +2364,7 @@ void UAnimInstance::Montage_SetEndDelegate(FOnMontageEnded & InOnMontageEnded, U
 {
 	if (Montage)
 	{
-		FAnimMontageInstance * MontageInstance = GetActiveInstanceForMontage(*Montage);
+		FAnimMontageInstance* MontageInstance = GetActiveInstanceForMontage(*Montage);
 		if (MontageInstance)
 		{
 			MontageInstance->OnMontageEnded = InOnMontageEnded;
@@ -2248,7 +2375,7 @@ void UAnimInstance::Montage_SetEndDelegate(FOnMontageEnded & InOnMontageEnded, U
 		// If no Montage reference, do it on all active ones.
 		for (int32 InstanceIndex = 0; InstanceIndex < MontageInstances.Num(); InstanceIndex++)
 		{
-			FAnimMontageInstance * MontageInstance = MontageInstances[InstanceIndex];
+			FAnimMontageInstance* MontageInstance = MontageInstances[InstanceIndex];
 			if (MontageInstance && MontageInstance->IsActive())
 			{
 				MontageInstance->OnMontageEnded = InOnMontageEnded;
@@ -2261,7 +2388,7 @@ void UAnimInstance::Montage_SetBlendingOutDelegate(FOnMontageBlendingOutStarted 
 {
 	if (Montage)
 	{
-		FAnimMontageInstance * MontageInstance = GetActiveInstanceForMontage(*Montage);
+		FAnimMontageInstance* MontageInstance = GetActiveInstanceForMontage(*Montage);
 		if (MontageInstance)
 		{
 			MontageInstance->OnMontageBlendingOutStarted = InOnMontageBlendingOut;
@@ -2272,7 +2399,7 @@ void UAnimInstance::Montage_SetBlendingOutDelegate(FOnMontageBlendingOutStarted 
 		// If no Montage reference, do it on all active ones.
 		for (int32 InstanceIndex = 0; InstanceIndex < MontageInstances.Num(); InstanceIndex++)
 		{
-			FAnimMontageInstance * MontageInstance = MontageInstances[InstanceIndex];
+			FAnimMontageInstance* MontageInstance = MontageInstances[InstanceIndex];
 			if (MontageInstance && MontageInstance->IsActive())
 			{
 				MontageInstance->OnMontageBlendingOutStarted = InOnMontageBlendingOut;
@@ -2281,11 +2408,11 @@ void UAnimInstance::Montage_SetBlendingOutDelegate(FOnMontageBlendingOutStarted 
 	}
 }
 
-FOnMontageBlendingOutStarted * UAnimInstance::Montage_GetBlendingOutDelegate(UAnimMontage * Montage)
+FOnMontageBlendingOutStarted* UAnimInstance::Montage_GetBlendingOutDelegate(UAnimMontage* Montage)
 {
 	if (Montage)
 	{
-		FAnimMontageInstance * MontageInstance = GetActiveInstanceForMontage(*Montage);
+		FAnimMontageInstance* MontageInstance = GetActiveInstanceForMontage(*Montage);
 		if (MontageInstance)
 		{
 			return &MontageInstance->OnMontageBlendingOutStarted;
@@ -2296,7 +2423,7 @@ FOnMontageBlendingOutStarted * UAnimInstance::Montage_GetBlendingOutDelegate(UAn
 		// If no Montage reference, use first active one found.
 		for (int32 InstanceIndex = 0; InstanceIndex < MontageInstances.Num(); InstanceIndex++)
 		{
-			FAnimMontageInstance * MontageInstance = MontageInstances[InstanceIndex];
+			FAnimMontageInstance* MontageInstance = MontageInstances[InstanceIndex];
 			if (MontageInstance && MontageInstance->IsActive())
 			{
 				return &MontageInstance->OnMontageBlendingOutStarted;
@@ -2311,7 +2438,7 @@ void UAnimInstance::Montage_SetPosition(UAnimMontage* Montage, float NewPosition
 {
 	if (Montage)
 	{
-		FAnimMontageInstance * MontageInstance = GetActiveInstanceForMontage(*Montage);
+		FAnimMontageInstance* MontageInstance = GetActiveInstanceForMontage(*Montage);
 		if (MontageInstance)
 		{
 			MontageInstance->SetPosition(NewPosition);
@@ -2322,7 +2449,7 @@ void UAnimInstance::Montage_SetPosition(UAnimMontage* Montage, float NewPosition
 		// If no Montage reference, do it on all active ones.
 		for (int32 InstanceIndex = 0; InstanceIndex < MontageInstances.Num(); InstanceIndex++)
 		{
-			FAnimMontageInstance * MontageInstance = MontageInstances[InstanceIndex];
+			FAnimMontageInstance* MontageInstance = MontageInstances[InstanceIndex];
 			if (MontageInstance && MontageInstance->IsActive())
 			{
 				MontageInstance->SetPosition(NewPosition);
@@ -2335,7 +2462,7 @@ float UAnimInstance::Montage_GetPosition(UAnimMontage* Montage)
 {
 	if (Montage)
 	{
-		FAnimMontageInstance * MontageInstance = GetActiveInstanceForMontage(*Montage);
+		FAnimMontageInstance* MontageInstance = GetActiveInstanceForMontage(*Montage);
 		if (MontageInstance)
 		{
 			return MontageInstance->GetPosition();
@@ -2346,7 +2473,7 @@ float UAnimInstance::Montage_GetPosition(UAnimMontage* Montage)
 		// If no Montage reference, use first active one found.
 		for (int32 InstanceIndex = 0; InstanceIndex < MontageInstances.Num(); InstanceIndex++)
 		{
-			FAnimMontageInstance * MontageInstance = MontageInstances[InstanceIndex];
+			FAnimMontageInstance* MontageInstance = MontageInstances[InstanceIndex];
 			if (MontageInstance && MontageInstance->IsActive())
 			{
 				return MontageInstance->GetPosition();
@@ -2361,7 +2488,7 @@ bool UAnimInstance::Montage_GetIsStopped(UAnimMontage* Montage)
 {
 	if (Montage)
 	{
-		FAnimMontageInstance * MontageInstance = GetActiveInstanceForMontage(*Montage);
+		FAnimMontageInstance* MontageInstance = GetActiveInstanceForMontage(*Montage);
 		return (!MontageInstance); // Not active == Stopped.
 	}
 	return true;
@@ -2371,10 +2498,10 @@ float UAnimInstance::Montage_GetBlendTime(UAnimMontage* Montage)
 {
 	if (Montage)
 	{
-		FAnimMontageInstance * MontageInstance = GetActiveInstanceForMontage(*Montage);
+		FAnimMontageInstance* MontageInstance = GetActiveInstanceForMontage(*Montage);
 		if (MontageInstance)
 		{
-			return MontageInstance->BlendTime;
+			return MontageInstance->GetBlendTime();
 		}
 	}
 	else
@@ -2382,10 +2509,10 @@ float UAnimInstance::Montage_GetBlendTime(UAnimMontage* Montage)
 		// If no Montage reference, use first active one found.
 		for (int32 InstanceIndex = 0; InstanceIndex < MontageInstances.Num(); InstanceIndex++)
 		{
-			FAnimMontageInstance * MontageInstance = MontageInstances[InstanceIndex];
+			FAnimMontageInstance* MontageInstance = MontageInstances[InstanceIndex];
 			if (MontageInstance && MontageInstance->IsActive())
 			{
-				return MontageInstance->BlendTime;
+				return MontageInstance->GetBlendTime();
 			}
 		}
 	}
@@ -2397,7 +2524,7 @@ float UAnimInstance::Montage_GetPlayRate(UAnimMontage* Montage)
 {
 	if (Montage)
 	{
-		FAnimMontageInstance * MontageInstance = GetActiveInstanceForMontage(*Montage);
+		FAnimMontageInstance* MontageInstance = GetActiveInstanceForMontage(*Montage);
 		if (MontageInstance)
 		{
 			return MontageInstance->GetPlayRate();
@@ -2408,7 +2535,7 @@ float UAnimInstance::Montage_GetPlayRate(UAnimMontage* Montage)
 		// If no Montage reference, use first active one found.
 		for (int32 InstanceIndex = 0; InstanceIndex < MontageInstances.Num(); InstanceIndex++)
 		{
-			FAnimMontageInstance * MontageInstance = MontageInstances[InstanceIndex];
+			FAnimMontageInstance* MontageInstance = MontageInstances[InstanceIndex];
 			if (MontageInstance && MontageInstance->IsActive())
 			{
 				return MontageInstance->GetPlayRate();
@@ -2419,14 +2546,14 @@ float UAnimInstance::Montage_GetPlayRate(UAnimMontage* Montage)
 	return 0.f;
 }
 
-int32 UAnimInstance::Montage_GetNextSectionID(UAnimMontage const * const Montage, int32 const & CurrentSectionID) const
+int32 UAnimInstance::Montage_GetNextSectionID(UAnimMontage const* const Montage, int32 const & CurrentSectionID) const
 {
 	if (Montage)
 	{
-		FAnimMontageInstance * MontageInstance = GetActiveInstanceForMontage(*Montage);
+		FAnimMontageInstance* MontageInstance = GetActiveInstanceForMontage(*Montage);
 		if (MontageInstance)
 		{
-			return (CurrentSectionID < MontageInstance->NextSections.Num()) ? MontageInstance->NextSections[CurrentSectionID] : INDEX_NONE;
+			return MontageInstance->GetNextSectionID(CurrentSectionID);
 		}
 	}
 	else
@@ -2434,10 +2561,10 @@ int32 UAnimInstance::Montage_GetNextSectionID(UAnimMontage const * const Montage
 		// If no Montage reference, use first active one found.
 		for (int32 InstanceIndex = 0; InstanceIndex < MontageInstances.Num(); InstanceIndex++)
 		{
-			FAnimMontageInstance * MontageInstance = MontageInstances[InstanceIndex];
+			FAnimMontageInstance* MontageInstance = MontageInstances[InstanceIndex];
 			if (MontageInstance && MontageInstance->IsActive())
 			{
-				return (CurrentSectionID < MontageInstance->NextSections.Num()) ? MontageInstance->NextSections[CurrentSectionID] : INDEX_NONE;
+				return MontageInstance->GetNextSectionID(CurrentSectionID);
 			}
 		}
 	}
@@ -2445,13 +2572,13 @@ int32 UAnimInstance::Montage_GetNextSectionID(UAnimMontage const * const Montage
 	return INDEX_NONE;
 }
 
-UAnimMontage * UAnimInstance::GetCurrentActiveMontage()
+UAnimMontage* UAnimInstance::GetCurrentActiveMontage()
 {
 	// Start from end, as most recent instances are added at the end of the queue.
 	int32 const NumInstances = MontageInstances.Num();
 	for (int32 InstanceIndex = NumInstances - 1; InstanceIndex >= 0; InstanceIndex--)
 	{
-		FAnimMontageInstance * MontageInstance = MontageInstances[InstanceIndex];
+		FAnimMontageInstance* MontageInstance = MontageInstances[InstanceIndex];
 		if (MontageInstance && MontageInstance->IsActive())
 		{
 			return MontageInstance->Montage;
@@ -2467,7 +2594,7 @@ FAnimMontageInstance* UAnimInstance::GetActiveMontageInstance()
 	int32 const NumInstances = MontageInstances.Num();
 	for (int32 InstanceIndex = NumInstances - 1; InstanceIndex >= 0; InstanceIndex--)
 	{
-		FAnimMontageInstance * MontageInstance = MontageInstances[InstanceIndex];
+		FAnimMontageInstance* MontageInstance = MontageInstances[InstanceIndex];
 		if (MontageInstance && MontageInstance->IsActive())
 		{
 			return MontageInstance;
@@ -2481,25 +2608,25 @@ void UAnimInstance::StopAllMontages(float BlendOut)
 {
 	for (int32 Index = MontageInstances.Num() - 1; Index >= 0; Index--)
 	{
-		MontageInstances[Index]->Stop(BlendOut, true);
+		MontageInstances[Index]->Stop(FAlphaBlend(BlendOut), true);
 	}
 }
 
-void UAnimInstance::StopAllMontagesByGroupName(FName InGroupName, float BlendOutTime)
+void UAnimInstance::StopAllMontagesByGroupName(FName InGroupName, const FAlphaBlend& BlendOut)
 {
 	for (int32 InstanceIndex = MontageInstances.Num() - 1; InstanceIndex >= 0; InstanceIndex--)
 	{
-		FAnimMontageInstance * MontageInstance = MontageInstances[InstanceIndex];
+		FAnimMontageInstance* MontageInstance = MontageInstances[InstanceIndex];
 		if (MontageInstance && MontageInstance->IsActive() && MontageInstance->Montage && (MontageInstance->Montage->GetGroupName() == InGroupName))
 		{
-			MontageInstances[InstanceIndex]->Stop(BlendOutTime, true);
+			MontageInstances[InstanceIndex]->Stop(BlendOut, true);
 		}
 	}
 }
 
 void UAnimInstance::OnMontageInstanceStopped(FAnimMontageInstance & StoppedMontageInstance)
 {
-	UAnimMontage * MontageStopped = StoppedMontageInstance.Montage;
+	UAnimMontage* MontageStopped = StoppedMontageInstance.Montage;
 	ensure(MontageStopped != NULL);
 
 	// Remove instance for Active List.
@@ -2516,13 +2643,13 @@ void UAnimInstance::OnMontageInstanceStopped(FAnimMontageInstance & StoppedMonta
 	}
 }
 
-FAnimMontageInstance * UAnimInstance::GetActiveInstanceForMontage(UAnimMontage const & Montage) const
+FAnimMontageInstance* UAnimInstance::GetActiveInstanceForMontage(UAnimMontage const & Montage) const
 {
-	FAnimMontageInstance * const * FoundInstancePtr = ActiveMontagesMap.Find(&Montage);
+	FAnimMontageInstance* const* FoundInstancePtr = ActiveMontagesMap.Find(&Montage);
 	return FoundInstancePtr ? *FoundInstancePtr : NULL;
 }
 
-FAnimMontageInstance * UAnimInstance::GetRootMotionMontageInstance() const
+FAnimMontageInstance* UAnimInstance::GetRootMotionMontageInstance() const
 {
 	return RootMotionMontageInstance;
 }
@@ -2547,7 +2674,7 @@ FRootMotionMovementParams UAnimInstance::ConsumeExtractedRootMotion(float Alpha)
 
 void UAnimInstance::SetMorphTarget(FName MorphTargetName, float Value)
 {
-	USkeletalMeshComponent * Component = GetOwningComponent();
+	USkeletalMeshComponent* Component = GetOwningComponent();
 	if (Component)
 	{
 		Component->SetMorphTarget(MorphTargetName, Value);
@@ -2556,7 +2683,7 @@ void UAnimInstance::SetMorphTarget(FName MorphTargetName, float Value)
 
 void UAnimInstance::ClearMorphTargets()
 {
-	USkeletalMeshComponent * Component = GetOwningComponent();
+	USkeletalMeshComponent* Component = GetOwningComponent();
 	if (Component)
 	{
 		Component->ClearMorphTargets();
@@ -2615,14 +2742,59 @@ void UAnimInstance::UnlockAIResources(bool bUnlockMovement, bool UnlockAILogic)
 	UE_LOG(LogAnimation, Error, TEXT("%s: UnlockAIResources is no longer supported. Please use UnlockAIResourcesWithAnimation instead."), *GetName());
 }
 
+bool UAnimInstance::GetTimeToClosestMarker(FName SyncGroup, FName MarkerName, float& OutMarkerTime) const
+{
+	const int32 SyncGroupIndex = GetSyncGroupIndexFromName(SyncGroup);
+	const TArray<FAnimGroupInstance>& SyncGroups = SyncGroupArrays[GetSyncGroupReadIndex()];
+
+	if (SyncGroups.IsValidIndex(SyncGroupIndex))
+	{
+		const FAnimGroupInstance& SyncGroupInstance = SyncGroups[SyncGroupIndex];
+		if (SyncGroupInstance.ActivePlayers.IsValidIndex(SyncGroupInstance.GroupLeaderIndex))
+		{
+			const FMarkerSyncAnimPosition& EndPosition = SyncGroupInstance.MarkerTickContext.GetMarkerSyncEndPosition();
+			const FAnimTickRecord& Leader = SyncGroupInstance.ActivePlayers[SyncGroupInstance.GroupLeaderIndex];
+			if (EndPosition.PreviousMarkerName == MarkerName)
+			{
+				OutMarkerTime = Leader.MarkerTickRecord.PreviousMarker.TimeToMarker;
+				return true;
+			}
+			else if (EndPosition.NextMarkerName == MarkerName)
+			{
+				OutMarkerTime = Leader.MarkerTickRecord.NextMarker.TimeToMarker;
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+bool UAnimInstance::HasMarkerBeenHitThisFrame(FName SyncGroup, FName MarkerName) const
+{
+	const int32 SyncGroupIndex = GetSyncGroupIndexFromName(SyncGroup);
+	const TArray<FAnimGroupInstance>& SyncGroups = SyncGroupArrays[GetSyncGroupReadIndex()];
+
+	if (SyncGroups.IsValidIndex(SyncGroupIndex))
+	{
+		const FAnimGroupInstance& SyncGroupInstance = SyncGroups[SyncGroupIndex];
+		return SyncGroupInstance.MarkerTickContext.MarkersPassedThisTick.ContainsByPredicate([&MarkerName](const FPassedMarker& PassedMarker) -> bool
+		{
+			return PassedMarker.PassedMarkerName == MarkerName;
+		});
+	}
+	return false;
+}
+
 void UAnimInstance::UpdateMontageEvaluationData()
 {
-	MontageEvaluationData.Empty(MontageInstances.Num());
+	MontageEvaluationData.Reset(MontageInstances.Num());
 	for (FAnimMontageInstance* MontageInstance : MontageInstances)
 	{
-		if (MontageInstance->Montage && MontageInstance->Weight > ZERO_ANIMWEIGHT_THRESH)
+		if (MontageInstance->Montage && MontageInstance->GetWeight() > ZERO_ANIMWEIGHT_THRESH)
 		{
-			MontageEvaluationData.Add(FMontageEvaluationState(MontageInstance->Montage, MontageInstance->Weight, MontageInstance->GetPosition()));
+			UE_LOG(LogAnimation, Verbose, TEXT("UpdateMontageEvaluationData : AnimMontage: %s,  (DesiredWeight:%0.2f, Weight:%0.2f)"),
+						*MontageInstance->Montage->GetName(), MontageInstance->GetDesiredWeight(), MontageInstance->GetWeight());
+			MontageEvaluationData.Add(FMontageEvaluationState(MontageInstance->Montage, MontageInstance->GetWeight(), MontageInstance->GetPosition()));
 		}
 	}
 }
@@ -2680,7 +2852,7 @@ float UAnimInstance::GetInstanceAssetPlayerTimeFromEndFraction(int32 AssetPlayer
 		}
 	}
 
-	return 0.0f;
+	return 1.0f;
 }
 
 float UAnimInstance::GetInstanceAssetPlayerTimeFromEnd(int32 AssetPlayerIndex)
@@ -2694,7 +2866,7 @@ float UAnimInstance::GetInstanceAssetPlayerTimeFromEnd(int32 AssetPlayerIndex)
 		}
 	}
 
-	return 0.0f;
+	return MAX_flt;
 }
 
 float UAnimInstance::GetInstanceStateWeight(int32 MachineIndex, int32 StateIndex)
@@ -2759,7 +2931,7 @@ float UAnimInstance::GetRelevantAnimTimeRemaining(int32 MachineIndex, int32 Stat
 		}
 	}
 
-	return 0.0f;
+	return MAX_flt;
 }
 
 float UAnimInstance::GetRelevantAnimTimeRemainingFraction(int32 MachineIndex, int32 StateIndex)
@@ -2776,7 +2948,7 @@ float UAnimInstance::GetRelevantAnimTimeRemainingFraction(int32 MachineIndex, in
 		}
 	}
 
-	return 0.0f;
+	return 1.0f;
 }
 
 float UAnimInstance::GetRelevantAnimLength(int32 MachineIndex, int32 StateIndex)
@@ -2828,6 +3000,33 @@ FAnimNode_StateMachine* UAnimInstance::GetStateMachineInstance(int32 MachineInde
 			checkSlow(MachineInstanceProperty->Struct->IsChildOf(FAnimNode_StateMachine::StaticStruct()));
 
 			return MachineInstanceProperty->ContainerPtrToValuePtr<FAnimNode_StateMachine>(this);
+		}
+	}
+
+	return nullptr;
+}
+
+const FBakedAnimationStateMachine* UAnimInstance::GetStateMachineInstanceDesc(FName MachineName)
+{
+	if(UAnimBlueprintGeneratedClass* AnimBlueprintClass = Cast<UAnimBlueprintGeneratedClass>((UObject*)GetClass()))
+	{
+		for(int32 MachineIndex = 0; MachineIndex < AnimBlueprintClass->AnimNodeProperties.Num(); MachineIndex++)
+		{
+			UStructProperty* Property = AnimBlueprintClass->AnimNodeProperties[AnimBlueprintClass->AnimNodeProperties.Num() - 1 - MachineIndex];
+			if(Property && Property->Struct == FAnimNode_StateMachine::StaticStruct())
+			{
+				FAnimNode_StateMachine* StateMachine = Property->ContainerPtrToValuePtr<FAnimNode_StateMachine>(this);
+				if(StateMachine)
+				{
+					if(const FBakedAnimationStateMachine* MachineDescription = GetMachineDescription(AnimBlueprintClass, StateMachine))
+					{
+						if(MachineDescription->MachineName == MachineName)
+						{
+							return MachineDescription;
+						}
+					}
+				}
+			}
 		}
 	}
 
@@ -2888,6 +3087,46 @@ NodeType* UAnimInstance::GetNodeFromIndex(int32 NodeIdx)
 	return NodePtr;
 }
 
+const FBakedAnimationStateMachine* UAnimInstance::GetMachineDescription(UAnimBlueprintGeneratedClass* AnimBlueprintClass, FAnimNode_StateMachine* MachineInstance)
+{
+	return AnimBlueprintClass->BakedStateMachines.IsValidIndex(MachineInstance->StateMachineIndexInClass) ? &(AnimBlueprintClass->BakedStateMachines[MachineInstance->StateMachineIndexInClass]) : nullptr;
+}
+
+int32 UAnimInstance::GetInstanceAssetPlayerIndex(FName MachineName, FName StateName, FName AssetName)
+{
+	if(UAnimBlueprintGeneratedClass* AnimBlueprintClass = Cast<UAnimBlueprintGeneratedClass>((UObject*)GetClass()))
+	{
+		if(const FBakedAnimationStateMachine* MachineDescription = GetStateMachineInstanceDesc(MachineName))
+		{
+			for(int32 StateIndex = 0; StateIndex < MachineDescription->States.Num(); StateIndex++)
+			{
+				const FBakedAnimationState& State = MachineDescription->States[StateIndex];
+				if(State.StateName == StateName)
+				{
+					for(int32 PlayerIndex = 0; PlayerIndex < State.PlayerNodeIndices.Num(); PlayerIndex++)
+					{
+						checkSlow(State.PlayerNodeIndices[PlayerIndex] < AnimBlueprintClass->AnimNodeProperties.Num());
+						UStructProperty* AssetPlayerProperty = AnimBlueprintClass->AnimNodeProperties[AnimBlueprintClass->AnimNodeProperties.Num() - 1 - State.PlayerNodeIndices[PlayerIndex]];
+						if(AssetPlayerProperty && AssetPlayerProperty->Struct->IsChildOf(FAnimNode_AssetPlayerBase::StaticStruct()))
+						{
+							FAnimNode_AssetPlayerBase* AssetPlayer = AssetPlayerProperty->ContainerPtrToValuePtr<FAnimNode_AssetPlayerBase>(this);
+							if(AssetPlayer)
+							{
+								if(AssetName == NAME_None || AssetPlayer->GetAnimAsset()->GetFName() == AssetName)
+								{
+									return State.PlayerNodeIndices[PlayerIndex];
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return INDEX_NONE;
+}
+
 FAnimNode_AssetPlayerBase* UAnimInstance::GetRelevantAssetPlayerFromState(int32 MachineIndex, int32 StateIndex)
 {
 	FAnimNode_AssetPlayerBase* ResultPlayer = nullptr;
@@ -2908,6 +3147,16 @@ FAnimNode_AssetPlayerBase* UAnimInstance::GetRelevantAssetPlayerFromState(int32 
 		}
 	}
 	return ResultPlayer;
+}
+
+int32 UAnimInstance::GetSyncGroupIndexFromName(FName SyncGroupName) const
+{
+
+	if (UAnimBlueprintGeneratedClass* AnimBlueprintClass = Cast<UAnimBlueprintGeneratedClass>(GetClass()))
+	{
+		return AnimBlueprintClass->GetSyncGroupIndex(SyncGroupName);
+	}
+	return INDEX_NONE;
 }
 
 bool UAnimInstance::IsRunningParallelEvaluation() const

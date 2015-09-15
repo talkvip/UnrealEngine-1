@@ -42,6 +42,10 @@ bool UK2Node_FunctionTerminator::CanCreateUserDefinedPin(const FEdGraphPinType& 
 		OutErrorMessage = LOCTEXT("MultipleExecPinError", "Cannot support more exec pins!");
 		return false;
 	}
+	else if (!bIsEditable)
+	{
+		OutErrorMessage = LOCTEXT("NotEditableError", "Cannot edit this node!");
+	}
 
 	return bIsEditable;
 }
@@ -59,6 +63,21 @@ bool UK2Node_FunctionTerminator::HasExternalDependencies(TArray<class UStruct*>*
 
 	const bool bSuperResult = Super::HasExternalDependencies(OptionalOutput);
 	return bSuperResult || bResult;
+}
+
+void UK2Node_FunctionTerminator::PromoteFromInterfaceOverride(bool bIsPrimaryTerminator)
+{
+	// Remove the signature class, that is not relevant.
+	SignatureClass = nullptr;
+	for (const UEdGraphPin* Pin : Pins)
+	{
+		if (Pin->PinType.PinCategory != UEdGraphSchema_K2::PC_Exec)
+		{
+			CreateUserDefinedPin(Pin->PinName, Pin->PinType, (Pin->Direction == EGPD_Input)? EGPD_Output : EGPD_Input, false);
+		}
+	}
+	const UEdGraphSchema_K2* Schema = GetDefault<UEdGraphSchema_K2>();
+	Schema->ReconstructNode(*this, true);
 }
 
 #undef LOCTEXT_NAMESPACE

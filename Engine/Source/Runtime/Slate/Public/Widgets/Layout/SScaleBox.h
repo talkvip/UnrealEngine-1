@@ -90,6 +90,13 @@ public:
 
 	SLATE_END_ARGS()
 
+	/** Constructor */
+	SScaleBox()
+	{
+		bCanTick = false;
+		bCanSupportFocus = false;
+	}
+
 	void Construct(const FArguments& InArgs);
 	
 	// SWidget interface
@@ -115,6 +122,9 @@ public:
 	/** See UserSpecifiedScale argument */
 	void SetUserSpecifiedScale(float InUserSpecifiedScale);
 	
+protected:
+	virtual float GetRelativeLayoutScale(const FSlotBase& Child) const override;
+
 private:
 	/** The allowed direction of stretching of the content */
 	TAttribute<EStretchDirection::Type> StretchDirection;

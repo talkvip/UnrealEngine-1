@@ -58,7 +58,7 @@ namespace UnrealBuildTool
         {
             string NDKPath = Environment.GetEnvironmentVariable("NDKROOT");
             {
-                var configCacheIni = new ConfigCacheIni("Engine", null);
+                var configCacheIni = ConfigCacheIni.CreateConfigCacheIni(UnrealTargetPlatform.Unknown, "Engine", (DirectoryReference)null);
                 var AndroidEnv = new Dictionary<string, string>();
 
                 Dictionary<string, string> EnvVarNames = new Dictionary<string,string> { 
@@ -92,22 +92,24 @@ namespace UnrealBuildTool
                     if (File.Exists(BashProfilePath))
                     {
                         string[] BashProfileContents = File.ReadAllLines(BashProfilePath);
-                        foreach (string Line in BashProfileContents)
-                        {
-                            foreach (var kvp in EnvVarNames)
-                            {
-                                if (AndroidEnv.ContainsKey(kvp.Key))
-                                {
-                                    continue;
-                                }
 
-                                if (Line.StartsWith("export " + kvp.Key + "="))
-                                {
-                                    string PathVar = Line.Split('=')[1].Replace("\"", "");
-                                    AndroidEnv.Add(kvp.Key, PathVar);
-                                }
-                            }
-                        }
+						// Walk backwards so we keep the last export setting instead of the first
+						for (int LineIndex = BashProfileContents.Length - 1; LineIndex >= 0; --LineIndex)
+						{
+							foreach (var kvp in EnvVarNames)
+							{
+								if (AndroidEnv.ContainsKey(kvp.Key))
+								{
+									continue;
+								}
+
+								if (BashProfileContents[LineIndex].StartsWith("export " + kvp.Key + "="))
+								{
+									string PathVar = BashProfileContents[LineIndex].Split('=')[1].Replace("\"", "");
+									AndroidEnv.Add(kvp.Key, PathVar);
+								}
+							}
+						}
                     }
                 }
 
@@ -163,10 +165,8 @@ namespace UnrealBuildTool
 			{
 				bool bRegisterBuildPlatform = true;
 
-				string EngineSourcePath = Path.Combine(ProjectFileGenerator.EngineRelativePath, "Source");
-				string AndroidTargetPlatformFile = Path.Combine(EngineSourcePath, "Developer", "Android", "AndroidTargetPlatform", "AndroidTargetPlatform.Build.cs");
-
-				if (File.Exists(AndroidTargetPlatformFile) == false)
+				FileReference AndroidTargetPlatformFile = FileReference.Combine(UnrealBuildTool.EngineSourceDirectory, "Developer", "Android", "AndroidTargetPlatform", "AndroidTargetPlatform.Build.cs");
+				if (AndroidTargetPlatformFile.Exists() == false)
 				{
 					bRegisterBuildPlatform = false;
 				}
@@ -248,7 +248,7 @@ namespace UnrealBuildTool
 			BuildConfiguration.bUseSharedPCHs = false;
 		}
 			
-		public override bool HasDefaultBuildConfig(UnrealTargetPlatform Platform, string ProjectPath)
+		public override bool HasDefaultBuildConfig(UnrealTargetPlatform Platform, DirectoryReference ProjectPath)
 		{
 			string[] BoolKeys = new string[] {
 				"bBuildForArmV7", "bBuildForArm64", "bBuildForX86", "bBuildForX8664", 
@@ -296,55 +296,58 @@ namespace UnrealBuildTool
 		{
 		}
 
-		public override void ModifyNewlyLoadedModule(UEBuildModule InModule, TargetInfo Target)
+		public override void ModifyModuleRules(string ModuleName, ModuleRules Rules, TargetInfo Target)
 		{
 			if ((Target.Platform == UnrealTargetPlatform.Win32) || (Target.Platform == UnrealTargetPlatform.Win64) || (Target.Platform == UnrealTargetPlatform.Mac))
 			{
 				bool bBuildShaderFormats = UEBuildConfiguration.bForceBuildShaderFormats;
 				if (!UEBuildConfiguration.bBuildRequiresCookedData)
 				{
-					if (InModule.ToString() == "Engine")
+					if (ModuleName == "Engine")
 					{
 						if (UEBuildConfiguration.bBuildDeveloperTools)
 						{
-							InModule.AddPlatformSpecificDynamicallyLoadedModule("AndroidTargetPlatform");
-							InModule.AddPlatformSpecificDynamicallyLoadedModule("Android_PVRTCTargetPlatform");
-							InModule.AddPlatformSpecificDynamicallyLoadedModule("Android_ATCTargetPlatform");
-							InModule.AddPlatformSpecificDynamicallyLoadedModule("Android_DXTTargetPlatform");
-							InModule.AddPlatformSpecificDynamicallyLoadedModule("Android_ETC1TargetPlatform");
-							InModule.AddPlatformSpecificDynamicallyLoadedModule("Android_ETC2TargetPlatform");
-							InModule.AddPlatformSpecificDynamicallyLoadedModule("Android_ASTCTargetPlatform");
+							Rules.PlatformSpecificDynamicallyLoadedModuleNames.Add("AndroidTargetPlatform");
+							Rules.PlatformSpecificDynamicallyLoadedModuleNames.Add("Android_PVRTCTargetPlatform");
+							Rules.PlatformSpecificDynamicallyLoadedModuleNames.Add("Android_ATCTargetPlatform");
+							Rules.PlatformSpecificDynamicallyLoadedModuleNames.Add("Android_DXTTargetPlatform");
+							Rules.PlatformSpecificDynamicallyLoadedModuleNames.Add("Android_ETC1TargetPlatform");
+							Rules.PlatformSpecificDynamicallyLoadedModuleNames.Add("Android_ETC2TargetPlatform");
+							Rules.PlatformSpecificDynamicallyLoadedModuleNames.Add("Android_ASTCTargetPlatform");
                         }
 					}
-					else if (InModule.ToString() == "TargetPlatform")
+					else if (ModuleName == "TargetPlatform")
 					{
 						bBuildShaderFormats = true;
-						InModule.AddDynamicallyLoadedModule("TextureFormatPVR");
-						InModule.AddDynamicallyLoadedModule("TextureFormatDXT");
-						InModule.AddDynamicallyLoadedModule("TextureFormatASTC");
-						InModule.AddPlatformSpecificDynamicallyLoadedModule("TextureFormatAndroid");    // ATITC, ETC1 and ETC2
+						Rules.DynamicallyLoadedModuleNames.Add("TextureFormatPVR");
+						Rules.DynamicallyLoadedModuleNames.Add("TextureFormatDXT");
+						Rules.DynamicallyLoadedModuleNames.Add("TextureFormatASTC");
+						Rules.PlatformSpecificDynamicallyLoadedModuleNames.Add("TextureFormatAndroid");    // ATITC, ETC1 and ETC2
 						if (UEBuildConfiguration.bBuildDeveloperTools)
 						{
-							//InModule.AddDynamicallyLoadedModule("AudioFormatADPCM");	//@todo android: android audio
+							//Rules.DynamicallyLoadedModuleNames.Add("AudioFormatADPCM");	//@todo android: android audio
 						}
 					}
 				}
 
 				// allow standalone tools to use targetplatform modules, without needing Engine
-				if (UEBuildConfiguration.bForceBuildTargetPlatforms)
+				if(ModuleName == "TargetPlatform")
 				{
-					InModule.AddPlatformSpecificDynamicallyLoadedModule("AndroidTargetPlatform");
-					InModule.AddPlatformSpecificDynamicallyLoadedModule("Android_PVRTCTargetPlatform");
-					InModule.AddPlatformSpecificDynamicallyLoadedModule("Android_ATCTargetPlatform");
-					InModule.AddPlatformSpecificDynamicallyLoadedModule("Android_DXTTargetPlatform");
-					InModule.AddPlatformSpecificDynamicallyLoadedModule("Android_ETC1TargetPlatform");
-					InModule.AddPlatformSpecificDynamicallyLoadedModule("Android_ETC2TargetPlatform");
-					InModule.AddPlatformSpecificDynamicallyLoadedModule("Android_ASTCTargetPlatform");
-                }
-
-				if (bBuildShaderFormats)
-				{
-					//InModule.AddDynamicallyLoadedModule("ShaderFormatAndroid");		//@todo android: ShaderFormatAndroid
+				    if (UEBuildConfiguration.bForceBuildTargetPlatforms)
+				    {
+					    Rules.PlatformSpecificDynamicallyLoadedModuleNames.Add("AndroidTargetPlatform");
+					    Rules.PlatformSpecificDynamicallyLoadedModuleNames.Add("Android_PVRTCTargetPlatform");
+					    Rules.PlatformSpecificDynamicallyLoadedModuleNames.Add("Android_ATCTargetPlatform");
+					    Rules.PlatformSpecificDynamicallyLoadedModuleNames.Add("Android_DXTTargetPlatform");
+					    Rules.PlatformSpecificDynamicallyLoadedModuleNames.Add("Android_ETC1TargetPlatform");
+					    Rules.PlatformSpecificDynamicallyLoadedModuleNames.Add("Android_ETC2TargetPlatform");
+					    Rules.PlatformSpecificDynamicallyLoadedModuleNames.Add("Android_ASTCTargetPlatform");
+                    }
+    
+				    if (bBuildShaderFormats)
+				    {
+					    //Rules.DynamicallyLoadedModuleNames.Add("ShaderFormatAndroid");		//@todo android: ShaderFormatAndroid
+				    }
 				}
 			}
 		}
@@ -362,14 +365,18 @@ namespace UnrealBuildTool
 			NDKPath = NDKPath.Replace("\"", "");
 
 			string GccVersion = "4.6";
-			if (Directory.Exists(Path.Combine(NDKPath, @"sources/cxx-stl/gnu-libstdc++/4.9")))
-			{
-				GccVersion = "4.9";
-			}
-			else if (Directory.Exists(Path.Combine(NDKPath, @"sources/cxx-stl/gnu-libstdc++/4.8")))
+			int NDKVersionInt = AndroidToolChain.GetNdkApiLevelInt();
+			if (Directory.Exists(Path.Combine(NDKPath, @"sources/cxx-stl/gnu-libstdc++/4.8")))
 			{
 				GccVersion = "4.8";
 			}
+			// only use 4.9 if NDK version > 19
+			if (NDKVersionInt > 19 && Directory.Exists(Path.Combine(NDKPath, @"sources/cxx-stl/gnu-libstdc++/4.9")))
+			{
+				GccVersion = "4.9";
+			}
+
+			Log.TraceInformation("NDK version: {0}, GccVersion: {1}", NDKVersionInt.ToString(), GccVersion);
 
 			InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("PLATFORM_DESKTOP=0");
 			InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("PLATFORM_CAN_SUPPORT_EDITORONLY_DATA=0");
@@ -450,18 +457,18 @@ namespace UnrealBuildTool
 			};
 		}
 
-		public override List<string> FinalizeBinaryPaths(string BinaryName)
+		public override List<FileReference> FinalizeBinaryPaths(FileReference BinaryName)
 		{
 			var Architectures = AndroidToolChain.GetAllArchitectures();
 			var GPUArchitectures = AndroidToolChain.GetAllGPUArchitectures();
 
 			// make multiple output binaries
-			List<string> AllBinaries = new List<string>();
+			List<FileReference> AllBinaries = new List<FileReference>();
 			foreach (string Architecture in Architectures)
 			{
 				foreach (string GPUArchitecture in GPUArchitectures)
 				{
-					AllBinaries.Add(AndroidToolChain.InlineArchName(BinaryName, Architecture, GPUArchitecture));
+					AllBinaries.Add(new FileReference(AndroidToolChain.InlineArchName(BinaryName.FullName, Architecture, GPUArchitecture)));
 				}
 			}
 

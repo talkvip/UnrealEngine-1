@@ -241,7 +241,7 @@ public:
 	 * This should generally be true for all objects, and let the renderer make decisions about whether to render objects in the depth only pass.
 	 * @todo - if any rendering features rely on a complete depth only pass, this variable needs to go away.
 	 */
-	UPROPERTY()
+	UPROPERTY(EditAnywhere, AdvancedDisplay, BlueprintReadOnly, Category=Rendering)
 	uint32 bUseAsOccluder:1;
 
 	/** If this is True, this component can be selected in the editor. */
@@ -1062,13 +1062,13 @@ public:
 	virtual const bool ShouldGenerateAutoLOD() const;
 #endif
 
-	// Begin UActorComponent Interface
+	//~ Begin UActorComponent Interface
 	virtual void InvalidateLightingCacheDetailed(bool bInvalidateBuildEnqueuedLighting, bool bTranslationOnly) override;
 	virtual bool IsEditorOnly() const override;
 	virtual bool ShouldCreatePhysicsState() const override;
 	virtual bool HasValidPhysicsState() const override;
 	virtual class FActorComponentInstanceData* GetComponentInstanceData() const override;
-	// End UActorComponent Interface
+	//~ End UActorComponent Interface
 
 	/** @return true if the owner is selected and this component is selectable */
 	virtual bool ShouldRenderSelected() const;
@@ -1334,7 +1334,7 @@ protected:
 	/** Give the static mesh component recreate render state context access to Create/DestroyRenderState_Concurrent(). */
 	friend class FStaticMeshComponentRecreateRenderStateContext;
 
-	// Begin USceneComponent Interface
+	//~ Begin USceneComponent Interface
 	virtual void OnUpdateTransform(bool bSkipPhysicsMove, ETeleportType Teleport = ETeleportType::None) override;
 
 	/** Event called when AttachParent changes, to allow the scene to update its attachment state. */
@@ -1358,7 +1358,7 @@ public:
 	// End USceneComponentInterface
 
 
-	// Begin UActorComponent Interface
+	//~ Begin UActorComponent Interface
 protected:
 	virtual void CreateRenderState_Concurrent() override;
 	virtual void SendRenderTransform_Concurrent() override;
@@ -1371,7 +1371,7 @@ protected:
 	/**
 	 * Called to get the Component To World Transform from the Root BodyInstance
 	 * This needs to be virtual since SkeletalMeshComponent Root has to undo its own transform
-	 * Without this, the root LocalToAtom is overriden by physics simulation, causing kinematic velocity to 
+	 * Without this, the root LocalToAtom is overridden by physics simulation, causing kinematic velocity to 
 	 * accelerate simulation
 	 *
 	 * @param : UseBI - root body instsance
@@ -1383,7 +1383,7 @@ public:
 #if WITH_EDITOR
 	virtual void CheckForErrors() override;
 #endif // WITH_EDITOR	
-	// End UActorComponent Interface
+	//~ End UActorComponent Interface
 
 protected:
 	/** Internal function that updates physics objects to match the component collision settings. */
@@ -1396,7 +1396,7 @@ protected:
 	void EnsurePhysicsStateCreated();
 public:
 
-	// Begin UObject interface.
+	//~ Begin UObject Interface.
 	virtual void Serialize(FArchive& Ar) override;
 #if WITH_EDITOR
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
@@ -1428,7 +1428,7 @@ public:
 	virtual bool IsReadyForFinishDestroy() override;
 	virtual bool NeedsLoadForClient() const override;
 	virtual bool NeedsLoadForServer() const override;
-	// End UObject interface.
+	//~ End UObject Interface.
 
 	//Begin USceneComponent Interface
 
@@ -1738,7 +1738,7 @@ public:
 	virtual bool SweepComponent(FHitResult& OutHit, const FVector Start, const FVector End, const FCollisionShape &CollisionShape, bool bTraceComplex=false);
 	
 	/** 
-	 *  Test the collision of the supplied component at the supplied location/rotation, and determine if it overlaps this component
+	 *  Test the collision of the supplied component at the supplied location/rotation, and determine if it overlaps this component.
 	 *  @note This overload taking rotation as a FQuat is slightly faster than the version using FRotator.
 	 *  @note This simply calls the virtual ComponentOverlapComponentImpl() which can be overridden to implement custom behavior.
 	 *  @param  PrimComp        Component to use geometry from to test against this component. Transform of this component is ignored.
@@ -1758,7 +1758,7 @@ protected:
 public:
 	
 	/** 
-	 *  Test the collision of the supplied Sphere at the supplied location, and determine if it overlaps this component
+	 *  Test the collision of the supplied shape at the supplied location, and determine if it overlaps this component.
 	 *
 	 *  @param  Pos             Location to place PrimComp geometry at 
 	 *	@param	Rot				Rotation of PrimComp geometry
@@ -1817,10 +1817,10 @@ public:
 		SetCanEverAffectNavigation(false);
 	}
 
-	// Begin INavRelevantInterface Interface
+	//~ Begin INavRelevantInterface Interface
 	virtual FBox GetNavigationBounds() const override;
 	virtual bool IsNavigationRelevant() const override;
-	// End INavRelevantInterface Interface
+	//~ End INavRelevantInterface Interface
 
 	FORCEINLINE EHasCustomNavigableGeometry::Type HasCustomNavigableGeometry() const { return bHasCustomNavigableGeometry; }
 

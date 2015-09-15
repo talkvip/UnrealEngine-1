@@ -46,12 +46,12 @@ class ONLINESUBSYSTEMUTILS_API APartyBeaconHost : public AOnlineBeaconHostObject
 {
 	GENERATED_UCLASS_BODY()
 
-	// Begin AActor Interface
+	//~ Begin AActor Interface
 	virtual void Tick(float DeltaTime) override;
-	// End AActor Interface
+	//~ End AActor Interface
 
-	// Begin AOnlineBeaconHostObject Interface 
-	// End AOnlineBeaconHost Interface 
+	//~ Begin AOnlineBeaconHostObject Interface 
+	//~ End AOnlineBeaconHost Interface 
 
 	/**
 	 * Initialize the party host beacon
@@ -301,6 +301,9 @@ protected:
 	/** Delegate fired when asking the beacon owner if this reservation is legit */
 	FOnValidatePlayers ValidatePlayers;
 
+	/** Disable the timeouts below */
+	UPROPERTY(Config)
+	bool bNoTimeouts;
 	/** Seconds that can elapse before a reservation is removed due to player not being registered with the session */
 	UPROPERTY(Transient, Config)
 	float SessionTimeoutSecs;

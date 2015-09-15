@@ -458,6 +458,10 @@ struct ENGINE_API FNavAgentProperties : public FMovementProperties
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category=MovementProperties)
 	float NavWalkingSearchHeightScale;
 
+	/** Type of navigation data used by agent, null means "any" */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = MovementProperties)
+	TSubclassOf<ANavigationData> PreferredNavData;
+
 	FNavAgentProperties(float Radius = -1.f, float Height = -1.f)
 		: AgentRadius(Radius), AgentHeight(Height), AgentStepHeight(-1), NavWalkingSearchHeightScale(0.5f)
 	{
@@ -472,8 +476,11 @@ struct ENGINE_API FNavAgentProperties : public FMovementProperties
 	{
 		return FGenericPlatformMath::Abs(AgentRadius - Other.AgentRadius) < Precision &&
 			FGenericPlatformMath::Abs(AgentHeight - Other.AgentHeight) < Precision &&
-			FGenericPlatformMath::Abs(AgentStepHeight - Other.AgentStepHeight) < Precision;
+			FGenericPlatformMath::Abs(AgentStepHeight - Other.AgentStepHeight) < Precision &&
+			IsNavDataMatching(Other);
 	}
+
+	bool IsNavDataMatching(const FNavAgentProperties& Other) const;
 
 	bool operator==(const FNavAgentProperties& Other) const
 	{

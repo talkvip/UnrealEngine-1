@@ -96,6 +96,10 @@ namespace ESlateBrushImageType
 	};
 }
 
+namespace SlateBrushDefs
+{
+	static const float DefaultImageSize = 32.0f;
+}
 
 /**
  * An brush which contains information about how to draw a Slate element
@@ -144,7 +148,7 @@ public:
 	 * Default constructor.
 	 */
 	FSlateBrush()
-		: ImageSize(32.0f, 32.0f)
+		: ImageSize(SlateBrushDefs::DefaultImageSize, SlateBrushDefs::DefaultImageSize)
 		, DrawAs(ESlateBrushDrawType::Image)
 		, Margin(0.0f)
 		, Tint_DEPRECATED(FLinearColor::White)
@@ -293,7 +297,7 @@ protected:
 	/**
 	 * The image to render for this brush, can be a UTexture2D or Material.
 	 */
-	UPROPERTY(EditAnywhere, Category=Brush, meta=( DisplayThumbnail="true", DisplayName="Image", AllowedClasses="Texture2D,MaterialInterface" ))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category=Brush, meta=( DisplayThumbnail="true", DisplayName="Image", AllowedClasses="Texture2D,MaterialInterface" ))
 	UObject* ResourceObject;
 
 	/** The name of the rendering resource to use */

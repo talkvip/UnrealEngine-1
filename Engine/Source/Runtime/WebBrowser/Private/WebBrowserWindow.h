@@ -19,6 +19,7 @@
 #undef OVERRIDE // cef headers provide their own OVERRIDE macro
 #include "include/internal/cef_ptr.h"
 #include "include/cef_render_handler.h"
+#include "include/cef_jsdialog_handler.h"
 #pragma pop_macro("OVERRIDE")
 
 #if PLATFORM_WINDOWS
@@ -28,7 +29,7 @@
 /**
  * Helper for containing items required for CEF browser window creation.
  */
-struct  FWebBrowserWindowInfo
+struct FWebBrowserWindowInfo
 {
 	FWebBrowserWindowInfo(CefRefPtr<CefBrowser> InBrowser, CefRefPtr<FWebBrowserHandler> InHandler) 
 		: Browser(InBrowser)
@@ -48,36 +49,23 @@ class FWebBrowserWindow
 	// Allow the Handler to access functions only it needs
 	friend class FWebBrowserHandler;
 
-public:
+	// The WebBrowserSingleton should be the only one creating instances of this class
+	friend class FWebBrowserSingleton;
+
+private:
 	/**
 	 * Creates and initializes a new instance.
 	 * 
-	 * @param InViewportSize Initial size of the browser window.
-	 * @param InInitialURL The Initial URL that will be loaded.
+	 * @param InBrowser The CefBrowser object representing this browser window.
+	 * @param InUrl The Initial URL that will be loaded.
 	 * @param InContentsToLoad Optional string to load as a web page.
 	 * @param InShowErrorMessage Whether to show an error message in case of loading errors.
 	 */
-	FWebBrowserWindow(FIntPoint ViewportSize, FString URL, TOptional<FString> ContentsToLoad, bool ShowErrorMessage, bool bThumbMouseButtonNavigation, bool bUseTransparency);
-
-	/** Virtual Destructor. */
-	virtual ~FWebBrowserWindow();
+	FWebBrowserWindow(CefRefPtr<CefBrowser> InBrowser, FString InUrl, TOptional<FString> InContentsToLoad, bool ShowErrorMessage, bool bThumbMouseButtonNavigation, bool bUseTransparency);
 
 public:
-
-	/**
-	* Set the CEF Handler receiving browser callbacks for this window.
-	*
-	* @param InHandler Pointer to the handler for this window.
-	*/
-	void SetHandler(CefRefPtr<FWebBrowserHandler> InHandler);
-
-	/**
-	 * Called to pass reference to the underlying CefBrowser as this is not created at the same time
-	 * as the FWebBrowserWindow.
-	 *
-	 * @param Browser The CefBrowser for this window.
-	 */
-	void BindCefBrowser(CefRefPtr<CefBrowser> Browser);
+	/** Virtual Destructor. */
+	virtual ~FWebBrowserWindow();
 
 	bool IsShowingErrorMessages() { return ShowErrorMessage; }
 	bool IsThumbMouseButtonNavigationEnabled() { return bThumbMouseButtonNavigation; }
@@ -191,6 +179,16 @@ public:
 		return DismissPopupEvent;
 	}
 
+	virtual FOnShowDialog& OnShowDialog() override
+	{
+		return ShowDialogDelegate;
+	}
+
+	virtual FOnDismissAllDialogs& OnDismissAllDialogs() override
+	{
+		return DismissAllDialogsDelegate;
+	}
+
 private:
 
 	/**
@@ -287,6 +285,21 @@ private:
 	 * Called when browser reports a key event that was not handled by it
 	 */
 	bool OnUnhandledKeyEvent(const CefKeyEvent& CefEvent);
+
+	/**
+	 * Handle showing javascript dialogs
+	 */
+	bool OnJSDialog(CefJSDialogHandler::JSDialogType DialogType, const CefString& MessageText, const CefString& DefaultPromptText, CefRefPtr<CefJSDialogCallback> Callback, bool& OutSuppressMessage);
+
+	/**
+	 * Handle showing unload confirmation dialogs
+	 */
+	bool OnBeforeUnloadDialog(const CefString& MessageText, bool IsReload, CefRefPtr<CefJSDialogCallback> Callback);
+
+	/**
+	 * Notify when any and all pending dialogs should be canceled
+	 */
+	void OnResetDialogState();
 
 
 	/** Specifies if window creation functionality is available. 
@@ -392,9 +405,6 @@ private:
 	/** Interface to the texture we are rendering to. */
 	FSlateUpdatableTexture* UpdatableTextures[2];
 
-	/** Pointer to the CEF Handler for this window. */
-	CefRefPtr<FWebBrowserHandler> Handler;
-
 	/** Pointer to the CEF Browser for this window. */
 	CefRefPtr<CefBrowser> InternalCefBrowser;
 
@@ -452,17 +462,23 @@ private:
 	/** Delegate for notifying that a popup window is attempting to open. */
 	FOnBeforePopupDelegate BeforePopupDelegate;
 	
-	/** Delegate for handaling requests to create new windows. */
+	/** Delegate for handling requests to create new windows. */
 	FOnCreateWindow CreateWindowDelegate;
 
-	/** Delegate for handaling requests to close new windows that were created. */
+	/** Delegate for handling requests to close new windows that were created. */
 	FOnCloseWindow CloseWindowDelegate;
 
-	/** Delegate for handaling requests to show the popup menu. */
+	/** Delegate for handling requests to show the popup menu. */
 	FOnShowPopup ShowPopupEvent;
 
-	/** Delegate for hanaling requests to dismiss the current popup menu. */
+	/** Delegate for handling requests to dismiss the current popup menu. */
 	FOnDismissPopup DismissPopupEvent;
+
+	/** Delegate for showing dialogs. */
+	FOnShowDialog ShowDialogDelegate;
+
+	/** Delegate for dismissing all dialogs. */
+	FOnDismissAllDialogs DismissAllDialogsDelegate;
 
 	/** Tracks the current mouse cursor */
 	EMouseCursor::Type Cursor;

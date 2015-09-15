@@ -12,6 +12,12 @@ class FViewport;
 class FCommonViewportClient;
 class FCanvas;
 
+#if PLATFORM_COMPILER_HAS_VARIADIC_TEMPLATES
+class FTypeContainer;
+class IMessageRpcClient;
+class IPortalRpcLocator;
+class IPortalServiceLocator;
+#endif
 
 /**
  * Enumerates types of fully loaded packages.
@@ -799,7 +805,7 @@ public:
 
 	/** @todo document */
 	UPROPERTY(globalconfig)
-	FStringAssetReference WireframeMaterialName;
+	FString WireframeMaterialName;
 
 #if WITH_EDITORONLY_DATA
 	/** A translucent material used to render things in geometry mode. */
@@ -825,7 +831,7 @@ public:
 
 	/** @todo document */
 	UPROPERTY(globalconfig)
-	FStringAssetReference LevelColorationLitMaterialName;
+	FString LevelColorationLitMaterialName;
 
 	/** Material used for visualizing level membership in unlit view port modes. */
 	UPROPERTY()
@@ -833,7 +839,7 @@ public:
 
 	/** @todo document */
 	UPROPERTY(globalconfig)
-	FStringAssetReference LevelColorationUnlitMaterialName;
+	FString LevelColorationUnlitMaterialName;
 
 	/** Material used for visualizing lighting only w/ lightmap texel density. */
 	UPROPERTY()
@@ -841,7 +847,7 @@ public:
 
 	/** @todo document */
 	UPROPERTY(globalconfig)
-	FStringAssetReference LightingTexelDensityName;
+	FString LightingTexelDensityName;
 
 	/** Material used for visualizing level membership in lit view port modes. Uses shading to show axis directions. */
 	UPROPERTY()
@@ -849,7 +855,7 @@ public:
 
 	/** @todo document */
 	UPROPERTY(globalconfig)
-	FStringAssetReference ShadedLevelColorationLitMaterialName;
+	FString ShadedLevelColorationLitMaterialName;
 
 	/** Material used for visualizing level membership in unlit view port modes.  Uses shading to show axis directions. */
 	UPROPERTY()
@@ -857,7 +863,7 @@ public:
 
 	/** @todo document */
 	UPROPERTY(globalconfig)
-	FStringAssetReference ShadedLevelColorationUnlitMaterialName;
+	FString ShadedLevelColorationUnlitMaterialName;
 
 	/** Material used to indicate that the associated BSP surface should be removed. */
 	UPROPERTY()
@@ -873,7 +879,7 @@ public:
 
 	/** @todo document */
 	UPROPERTY(globalconfig)
-	FStringAssetReference VertexColorMaterialName;
+	FString VertexColorMaterialName;
 
 	/** Material for visualizing vertex colors on meshes in the scene (color only, no alpha) */
 	UPROPERTY()
@@ -881,7 +887,7 @@ public:
 
 	/** @todo document */
 	UPROPERTY(globalconfig)
-	FStringAssetReference VertexColorViewModeMaterialName_ColorOnly;
+	FString VertexColorViewModeMaterialName_ColorOnly;
 
 	/** Material for visualizing vertex colors on meshes in the scene (alpha channel as color) */
 	UPROPERTY()
@@ -889,7 +895,7 @@ public:
 
 	/** @todo document */
 	UPROPERTY(globalconfig)
-	FStringAssetReference VertexColorViewModeMaterialName_AlphaAsColor;
+	FString VertexColorViewModeMaterialName_AlphaAsColor;
 
 	/** Material for visualizing vertex colors on meshes in the scene (red only) */
 	UPROPERTY()
@@ -897,7 +903,7 @@ public:
 
 	/** @todo document */
 	UPROPERTY(globalconfig)
-	FStringAssetReference VertexColorViewModeMaterialName_RedOnly;
+	FString VertexColorViewModeMaterialName_RedOnly;
 
 	/** Material for visualizing vertex colors on meshes in the scene (green only) */
 	UPROPERTY()
@@ -905,7 +911,7 @@ public:
 
 	/** @todo document */
 	UPROPERTY(globalconfig)
-	FStringAssetReference VertexColorViewModeMaterialName_GreenOnly;
+	FString VertexColorViewModeMaterialName_GreenOnly;
 
 	/** Material for visualizing vertex colors on meshes in the scene (blue only) */
 	UPROPERTY()
@@ -913,7 +919,7 @@ public:
 
 	/** @todo document */
 	UPROPERTY(globalconfig)
-	FStringAssetReference VertexColorViewModeMaterialName_BlueOnly;
+	FString VertexColorViewModeMaterialName_BlueOnly;
 
 #if WITH_EDITORONLY_DATA
 	/** Material used to render bone weights on skeletal meshes */
@@ -981,6 +987,10 @@ public:
 	/** The colors used to render stationary light overlap. */
 	UPROPERTY(globalconfig)
 	TArray<FLinearColor> StationaryLightOverlapColors;
+
+	/** The colors used to render LOD coloration. */
+	UPROPERTY(globalconfig)
+	TArray<FLinearColor> LODColorationColors;
 
 	/**
 	* Complexity limits for the various complexity view mode combinations.
@@ -1144,6 +1154,10 @@ public:
 	UPROPERTY(EditAnywhere, config, Category=Blueprints)
 	uint32 bCanBlueprintsTickByDefault:1;
 
+	/** Controls whether anim blueprint nodes that access member variables of their class directly should use the optimized path that avoids a thunk to the Blueprint VM */
+	UPROPERTY(EditAnywhere, config, Category="Anim Blueprints")
+	uint32 bOptimizeAnimBlueprintMemberVariableAccess:1;
+
 	/** @todo document */
 	UPROPERTY(config)
 	uint32 bEnableEditorPSysRealtimeLOD:1;
@@ -1158,9 +1172,9 @@ public:
 	/** Whether to use a fixed framerate. */
 	UPROPERTY(config, EditAnywhere, Category = Framerate)
 	uint32 bUseFixedFrameRate : 1;
-
+	
 	/** The fixed framerate to use. */
-	UPROPERTY(config, EditAnywhere, Category = Framerate, meta = (EditCondition = "bUseFixedFrameRate"))
+	UPROPERTY(config, EditAnywhere, Category = Framerate, meta=(EditCondition="bUseFixedFrameRate"))
 	float FixedFrameRate;
 
 	/** Range of framerates in which smoothing will kick in */
@@ -1345,7 +1359,7 @@ private:
 	UPROPERTY(transient)
 	FLinearColor SelectedMaterialColorOverride;
 
-	/** Whether or not selection color is being overriden */
+	/** Whether or not selection color is being overridden */
 	UPROPERTY(transient)
 	bool bIsOverridingSelectedColor;
 public:
@@ -1416,11 +1430,11 @@ public:
 	UPROPERTY(transient)
 	float SelectionHighlightIntensityBillboards;
 
-	/** Delegate handling when streaming pause begins. Set initially in FStreamingPauseRenderingModule::StartupModule() but can then be overriden by games. */
+	/** Delegate handling when streaming pause begins. Set initially in FStreamingPauseRenderingModule::StartupModule() but can then be overridden by games. */
 	void RegisterBeginStreamingPauseRenderingDelegate( FBeginStreamingPauseDelegate* InDelegate );
 	FBeginStreamingPauseDelegate* BeginStreamingPauseDelegate;
 
-	/** Delegate handling when streaming pause ends. Set initially in FStreamingPauseRenderingModule::StartupModule() but can then be overriden by games. */
+	/** Delegate handling when streaming pause ends. Set initially in FStreamingPauseRenderingModule::StartupModule() but can then be overridden by games. */
 	void RegisterEndStreamingPauseRenderingDelegate( FEndStreamingPauseDelegate* InDelegate );
 	FEndStreamingPauseDelegate* EndStreamingPauseDelegate;
 
@@ -1499,6 +1513,9 @@ public:
 
 	/** Reference to the HMD device that is attached, if any */
 	TSharedPtr< class IHeadMountedDisplay, ESPMode::ThreadSafe > HMDDevice;
+
+	/** Extensions that can modify view parameters on the render thread. */
+	TArray<TSharedPtr<class ISceneViewExtension, ESPMode::ThreadSafe> > ViewExtensions;
 
 	/** Reference to the Motion Control devices that are attached, if any */
 	TArray < class IMotionController*> MotionControllerDevices;
@@ -1588,6 +1605,48 @@ public:
 	/** Called by internal engine systems after a level actor has been requested to be renamed */
 	void BroadcastLevelComponentRequestRename(const UActorComponent* InComponent) { LevelComponentRequestRenameEvent.Broadcast(InComponent); }
 
+	/** Editor-only event triggered when a HLOD Actor is moved between clusters */
+	DECLARE_EVENT_TwoParams(UEngine, FHLODActorMovedEvent, const AActor*, const AActor*);
+	FHLODActorMovedEvent& OnHLODActorMoved() { return HLODActorMovedEvent; }
+
+	/** Called by internal engine systems after a HLOD Actor is moved between clusters */
+	void BroadcastHLODActorMoved(const AActor* InActor, const AActor* ParentActor ) { HLODActorMovedEvent.Broadcast(InActor, ParentActor); }
+
+	/** Editor-only event triggered when a HLOD Actor's mesh is build */
+	DECLARE_EVENT_OneParam(UEngine, FHLODMeshBuildEvent, const class ALODActor*);
+	FHLODMeshBuildEvent& OnHLODMeshBuild() { return HLODMeshBuildEvent; }
+
+	/** Called by internal engine systems after a HLOD Actor's mesh is build */
+	void BroadcastHLODMeshBuild(const class ALODActor* InActor) { HLODMeshBuildEvent.Broadcast(InActor); }
+
+	/** Editor-only event triggered when a HLOD Actor is added to a cluster */
+	DECLARE_EVENT_TwoParams(UEngine, FHLODActorAddedEvent, const AActor*, const AActor*);
+	FHLODActorAddedEvent& OnHLODActorAdded() { return HLODActorAddedEvent; }
+
+	/** Called by internal engine systems after a HLOD Actor is added to a cluster */
+	void BroadcastHLODActorAdded(const AActor* InActor, const AActor* ParentActor) { HLODActorAddedEvent.Broadcast(InActor, ParentActor); }
+
+	/** Editor-only event triggered when a HLOD Actor is marked dirty */
+	DECLARE_EVENT_OneParam(UEngine, FHLODActorMarkedDirtyEvent, class ALODActor*);
+	FHLODActorMarkedDirtyEvent& OnHLODActorMarkedDirty() { return HLODActorMarkedDirtyEvent; }
+
+	/** Called by internal engine systems after a HLOD Actor is marked dirty */
+	void BroadcastHLODActorMarkedDirty(class ALODActor* InActor) { HLODActorMarkedDirtyEvent.Broadcast(InActor); }
+
+	/** Editor-only event triggered when a HLOD Actor is marked dirty */
+	DECLARE_EVENT(UEngine, FHLODDrawDistanceChangedEvent);
+	FHLODDrawDistanceChangedEvent& OnHLODDrawDistanceChanged() { return HLODDrawDistanceChangedEvent; }
+
+	/** Called by internal engine systems after a HLOD Actor is marked dirty */
+	void BroadcastHLODDrawDistanceChanged() { HLODDrawDistanceChangedEvent.Broadcast(); }
+
+	/** Editor-only event triggered when a HLOD level is added or removed */
+	DECLARE_EVENT(UEngine, FHLODLevelsArrayChangedEvent);
+	FHLODLevelsArrayChangedEvent& OnHLODLevelsArrayChanged() { return HLODLevelsArrayChangedEvent; }
+
+	/** Called by internal engine systems after a HLOD Actor is marked dirty */
+	void BroadcastHLODLevelsArrayChanged() { HLODLevelsArrayChangedEvent.Broadcast(); }
+
 #endif // #if WITH_EDITOR
 
 	/** Event triggered after a server travel failure of any kind has occurred */
@@ -1606,11 +1665,11 @@ public:
 		NetworkFailureEvent.Broadcast(World, NetDriver, FailureType, ErrorString);
 	}
 
-	// Begin UObject interface.
+	//~ Begin UObject Interface.
 	virtual void FinishDestroy() override;
 	virtual void Serialize(FArchive& Ar) override;
 	static void AddReferencedObjects(UObject* InThis, FReferenceCollector& Collector);
-	// End UObject interface.
+	//~ End UObject Interface.
 
 	/** Initialize the game engine. */
 	virtual void Init(IEngineLoop* InEngineLoop);
@@ -1622,9 +1681,9 @@ public:
 	/** Called at startup, in the middle of FEngineLoop::Init.	 */
 	void ParseCommandline();
 
-	// Begin FExec Interface
+	//~ Begin FExec Interface
 	virtual bool Exec( UWorld* InWorld, const TCHAR* Cmd, FOutputDevice& Out=*GLog ) override;
-	// End FExec Interface
+	//~ End FExec Interface
 
 	/** 
 	 * Exec command handlers
@@ -1640,6 +1699,9 @@ public:
 	bool HandleCeCommand( UWorld* InWorld, const TCHAR* Cmd, FOutputDevice& Ar );
 	bool HandleDumpTicksCommand( UWorld* InWorld, const TCHAR* Cmd, FOutputDevice& Ar );
 	bool HandleGammaCommand( const TCHAR* Cmd, FOutputDevice& Ar );
+
+	bool HandleRecordAnimationCommand(UWorld* InWorld, const TCHAR* InStr, FOutputDevice& Ar);
+	bool HandleStopRecordAnimationCommand(UWorld* InWorld, const TCHAR* InStr, FOutputDevice& Ar);
 
 	// Only compile in when STATS is set
 #if STATS
@@ -1762,6 +1824,11 @@ public:
 	 * Updates the values used to calculate the average game/render/gpu/total time
 	 */
 	void SetAverageUnitTimes(float FrameTime, float RenderThreadTime, float GameThreadTime, float GPUFrameTime);
+
+	/**
+	 * Returns the display color for a given frame time (based on t.TargetFrameTimeThreshold and t.UnacceptableFrameTimeThreshold)
+	 */
+	FColor GetFrameTimeDisplayColor(float FrameTimeMS) const;
 
 	/**
 	 * @return true to throttle CPU usage based on current state (usually editor minimized or not in foreground)
@@ -2113,6 +2180,33 @@ public:
 
 	virtual void RemapGamepadControllerIdForPIE(class UGameViewportClient* InGameViewport, int32 &ControllerId) { }
 
+#if PLATFORM_COMPILER_HAS_VARIADIC_TEMPLATES
+	/**
+	 * Get a locator for Portal services.
+	 *
+	 * @return The service locator.
+	 */
+	TSharedRef<IPortalServiceLocator> GetServiceLocator()
+	{
+		return ServiceLocator.ToSharedRef();
+	}
+
+protected:
+
+	/** Portal RPC client. */
+	TSharedPtr<IMessageRpcClient> PortalRpcClient;
+
+	/** Portal RPC server locator. */
+	TSharedPtr<IPortalRpcLocator> PortalRpcLocator;
+
+	/** Holds a type container for service dependencies. */
+	TSharedPtr<FTypeContainer> ServiceDependencies;
+
+	/** Holds registered service instances. */
+	TSharedPtr<IPortalServiceLocator> ServiceLocator;
+#endif
+
+
 public:
 
 	/**
@@ -2199,26 +2293,20 @@ protected:
 	 */
 	virtual bool InitializeHMDDevice();
 
-	/**
-	 *	Detects and initializes any motion controller devices
-	 *
-	 *	@return true if there are any initialized motion controllers, false otherwise
-	 */
 	virtual bool InitializeMotionControllers();
 
-	/**
-	 *	Record EngineAnalytics information for attached HMD devices
-	 */
+	/**	Record EngineAnalytics information for attached HMD devices. */
 	virtual void RecordHMDAnalytics();
 
-	/**
-	 * Loads all Engine object references from their corresponding config entries.
-	 */
+	/** Loads all Engine object references from their corresponding config entries. */
 	virtual void InitializeObjectReferences();
 
-	/** 
-	 * Initializes the running average delta to some good initial framerate 
-	 */
+#if PLATFORM_COMPILER_HAS_VARIADIC_TEMPLATES
+	/** Initialize Portal services. */
+	virtual void InitializePortalServices();
+#endif
+
+	/** Initializes the running average delta to some good initial framerate. */
 	virtual void InitializeRunningAverageDeltaTime();
 
 	float RunningAverageDeltaTime;
@@ -2258,6 +2346,24 @@ private:
 
 	/** Broadcasts after an actor has been moved, rotated or scaled */
 	FOnActorMovedEvent		OnActorMovedEvent;
+
+	/** Broadcasts after an HLOD actor has been moved between clusters */	
+	FHLODActorMovedEvent HLODActorMovedEvent;
+
+	/** Broadcasts after an HLOD actor's mesh is build*/
+	FHLODMeshBuildEvent HLODMeshBuildEvent;
+	
+	/** Broadcasts after an HLOD actor has added to a cluster */
+	FHLODActorAddedEvent HLODActorAddedEvent;
+
+	/** Broadcasts after an HLOD actor has been marked dirty */
+	FHLODActorMarkedDirtyEvent HLODActorMarkedDirtyEvent;
+
+	/** Broadcasts after a Draw distance value (World settings) is changed */
+	FHLODDrawDistanceChangedEvent HLODDrawDistanceChangedEvent;
+
+	/** Broadcasts after the HLOD levels array is changed */
+	FHLODLevelsArrayChangedEvent HLODLevelsArrayChangedEvent;
 
 #endif // #if WITH_EDITOR
 
@@ -2419,7 +2525,7 @@ public:
 	/** Browse to a specified URL, relative to the current one. */
 	virtual EBrowseReturnVal::Type Browse( FWorldContext& WorldContext, FURL URL, FString& Error );
 
-	void TickWorldTravel(FWorldContext& WorldContext, float DeltaSeconds);
+	virtual void TickWorldTravel(FWorldContext& WorldContext, float DeltaSeconds);
 
 	void BrowseToDefaultMap( FWorldContext& WorldContext );
 
@@ -2599,7 +2705,7 @@ protected:
 
 public:
 
-	// Public interface for async map change functions
+	//~ Begin Public Interface for async map change functions
 
 	bool CommitMapChange(UWorld* InWorld) { return CommitMapChange(GetWorldContextFromWorldChecked(InWorld)); }
 	bool IsReadyForMapChange(UWorld* InWorld) { return IsReadyForMapChange(GetWorldContextFromWorldChecked(InWorld)); }

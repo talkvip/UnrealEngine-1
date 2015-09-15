@@ -2,11 +2,12 @@
 
 #pragma once
 
-#include "Editor/Sequencer/Public/MovieSceneTrackEditor.h"
+#include "PropertyTrackEditor.h"
+#include "MovieSceneMarginTrack.h"
 
-class IPropertyHandle;
+class UMovieSceneTrack;
 
-class FMarginTrackEditor : public FMovieSceneTrackEditor
+class FMarginTrackEditor : public FPropertyTrackEditor<UMovieSceneMarginTrack, FMarginKey>
 {
 public:
 	/**
@@ -14,8 +15,9 @@ public:
 	 *
 	 * @param InSequencer	The sequencer instance to be used by this tool
 	 */
-	FMarginTrackEditor( TSharedRef<ISequencer> InSequencer );
-	~FMarginTrackEditor();
+	FMarginTrackEditor( TSharedRef<ISequencer> InSequencer )
+		: FPropertyTrackEditor<UMovieSceneMarginTrack, FMarginKey>( InSequencer, "Margin" )
+	{ }
 
 	/**
 	 * Creates an instance of this class.  Called by a sequencer 
@@ -26,20 +28,11 @@ public:
 	static TSharedRef<FMovieSceneTrackEditor> CreateTrackEditor( TSharedRef<ISequencer> OwningSequencer );
 
 	/** FMovieSceneTrackEditor Interface */
-	virtual bool SupportsType( TSubclassOf<UMovieSceneTrack> Type ) const override;
 	virtual TSharedRef<ISequencerSection> MakeSectionInterface( UMovieSceneSection& SectionObject, UMovieSceneTrack* Track ) override;
 
-private:
-	/**
-	 * Called by the details panel when an animatable property changes
-	 *
-	 * @param InObjectsThatChanged	List of objects that changed
-	 * @param PropertyValue			Handle to the property value which changed
-	 */
-	void OnMarginChanged( const class FPropertyChangedParams& PropertyChangedParams );
-
-	/** Called After OnMarginChanged if we actually can key the margin */
-	void OnKeyMargin( float KeyTime, const class FPropertyChangedParams* PropertyChangedParams );
+protected:
+	/** FPropertyTrackEditor Interface */
+	virtual bool TryGenerateKeyFromPropertyChanged( const FPropertyChangedParams& PropertyChangedParams, FMarginKey& OutKey ) override;
 };
 
 

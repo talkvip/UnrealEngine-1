@@ -6,7 +6,7 @@
 =============================================================================*/
 
 #include "OnlineSubsystemUtilsPrivatePCH.h"
-
+#include "OnlineSessionClient.h"
 #include "Engine/GameInstance.h"
 
 UOnlineSessionClient::UOnlineSessionClient(const FObjectInitializer& ObjectInitializer)
@@ -312,5 +312,23 @@ void UOnlineSessionClient::OnEndSessionComplete(FName SessionName, bool bWasSucc
 	if (SessionInterface.IsValid())
 	{
 		SessionInterface->ClearOnEndSessionCompleteDelegate_Handle(EndSessionCompleteHandle);
+	}
+}
+
+void UOnlineSessionClient::SetInviteFlags(UWorld* World, const FJoinabilitySettings& Settings)
+{
+	IOnlineSessionPtr SessionInt = Online::GetSessionInterface(World);
+	if (SessionInt.IsValid())
+	{
+		FOnlineSessionSettings* GameSettings = SessionInt->GetSessionSettings(Settings.SessionName);
+		if (GameSettings != NULL)
+		{
+			GameSettings->bShouldAdvertise = Settings.bPublicSearchable;
+			GameSettings->bAllowInvites = Settings.bAllowInvites;
+			GameSettings->bAllowJoinViaPresence = Settings.bJoinViaPresence && !Settings.bJoinViaPresenceFriendsOnly;
+			GameSettings->bAllowJoinViaPresenceFriendsOnly = Settings.bJoinViaPresenceFriendsOnly;
+			GameSettings->NumPublicConnections = Settings.MaxPlayers;
+			SessionInt->UpdateSession(Settings.SessionName, *GameSettings, false);
+		}
 	}
 }

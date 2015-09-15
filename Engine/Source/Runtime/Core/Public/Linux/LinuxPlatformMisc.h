@@ -25,6 +25,9 @@ struct CORE_API FLinuxPlatformMisc : public FGenericPlatformMisc
 	static class GenericApplication* CreateApplication();
 	static void GetEnvironmentVariable(const TCHAR* VariableName, TCHAR* Result, int32 ResultLength);
 	static void SetEnvironmentVar(const TCHAR* VariableName, const TCHAR* Value);
+	static TArray<uint8> GetMacAddress();
+	static bool IsRunningOnBattery();
+
 #if !UE_BUILD_SHIPPING
 	static bool IsDebuggerPresent();
 	FORCEINLINE static void DebugBreak()
@@ -67,6 +70,7 @@ struct CORE_API FLinuxPlatformMisc : public FGenericPlatformMisc
 	static void LowLevelOutputDebugString(const TCHAR *Message);
 	static bool ControlScreensaver(EScreenSaverAction Action);
 
+	static const TCHAR* GetSystemErrorMessage(TCHAR* OutBuffer, int32 BufferCount, int32 Error);
 	static void ClipboardCopy(const TCHAR* Str);
 	static void ClipboardPaste(class FString& Dest);
 
@@ -83,6 +87,24 @@ struct CORE_API FLinuxPlatformMisc : public FGenericPlatformMisc
 	FORCEINLINE static void MemoryBarrier()
 	{
 		__sync_synchronize();
+	}
+
+	FORCEINLINE static void PrefetchBlock(const void* InPtr, int32 NumBytes = 1)
+	{
+		extern size_t GCacheLineSize;
+
+		const char* Ptr = static_cast<const char*>(InPtr);
+		const size_t CacheLineSize = GCacheLineSize;
+		for (size_t BytesPrefetched = 0; BytesPrefetched < NumBytes; BytesPrefetched += CacheLineSize)
+		{
+			__builtin_prefetch(Ptr);
+			Ptr += CacheLineSize;
+		}
+	}
+
+	FORCEINLINE static void Prefetch(void const* Ptr, int32 Offset = 0)
+	{
+		__builtin_prefetch(static_cast<char const*>(Ptr) + Offset);
 	}
 
 	static int32 NumberOfCores();

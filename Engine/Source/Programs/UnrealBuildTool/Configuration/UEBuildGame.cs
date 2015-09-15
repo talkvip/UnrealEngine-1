@@ -5,14 +5,20 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Runtime.Serialization;
 
 namespace UnrealBuildTool
 {
 	[Serializable]
 	public class UEBuildGame : UEBuildTarget
 	{
-		public UEBuildGame(TargetDescriptor InDesc, TargetRules InRulesObject, string InTargetCsFilename)
-			: base(InDesc, InRulesObject, "UE4", InTargetCsFilename)
+		public UEBuildGame(SerializationInfo Info, StreamingContext Context)
+			: base(Info, Context)
+		{
+		}
+
+		public UEBuildGame(TargetDescriptor InDesc, TargetRules InRulesObject, RulesAssembly InRulesAssembly, FileReference InTargetCsFilename)
+			: base(InDesc, InRulesObject, InRulesAssembly, "UE4", InTargetCsFilename)
 		{
 			if (ShouldCompileMonolithic())
 			{
@@ -22,7 +28,7 @@ namespace UnrealBuildTool
 					// We want the output to go into the <GAME>\Binaries folder
 					if (!InRulesObject.bOutputToEngineBinaries)
 					{
-						OutputPaths = OutputPaths.Select(Path => Path.Replace("Engine\\Binaries", InDesc.TargetName + "\\Binaries")).ToList();
+						OutputPaths = OutputPaths.Select(Path => new FileReference(Path.FullName.Replace("Engine\\Binaries", InDesc.TargetName + "\\Binaries"))).ToList();
 					}
 				}
 			}

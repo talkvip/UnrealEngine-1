@@ -46,7 +46,7 @@ struct FMaterialInputInfo
 		}
 		else if( Material->IsUIMaterial() )
 		{
-			return Property == MP_EmissiveColor || Property == MP_Opacity || Property == MP_OpacityMask;
+			return Property == MP_EmissiveColor || Property == MP_Opacity || Property == MP_OpacityMask || Property == MP_WorldPositionOffset;
 		}
 		else
 		{
@@ -168,4 +168,6 @@ private:
 
 	FText GetEmissivePinName() const;
 	FText GetBaseColorPinName() const;
+	FText GetMetallicPinName() const;
+	FText GetCustomDataPinName( uint32 Index ) const;
 };

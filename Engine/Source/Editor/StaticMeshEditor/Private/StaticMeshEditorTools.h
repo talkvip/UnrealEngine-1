@@ -34,12 +34,6 @@ public:
 
 	/** Applies level of detail changes to the static mesh */
 	void ApplyChanges();
-
-	/** Reimports the current static mesh */
-	FReply Reimport();
-
-	/** Whether the user should reimport based on the changes */
-	bool CanReimport() const;
 private:
 	/** Level of detail settings for the details panel */
 	TSharedPtr<FLevelOfDetailSettingsLayout> LevelOfDetailSettings;
@@ -140,6 +134,7 @@ private:
 	ECheckBoxState ShouldUseMikkTSpace() const;
 	ECheckBoxState ShouldRemoveDegenerates() const;
 	ECheckBoxState ShouldBuildAdjacencyBuffer() const;
+	ECheckBoxState ShouldBuildReversedIndexBuffer() const;
 	ECheckBoxState ShouldUseFullPrecisionUVs() const;
 	ECheckBoxState ShouldGenerateLightmapUVs() const;
 	ECheckBoxState ShouldGenerateDistanceFieldAsIfTwoSided() const;
@@ -156,6 +151,7 @@ private:
 	void OnUseMikkTSpaceChanged(ECheckBoxState NewState);
 	void OnRemoveDegeneratesChanged(ECheckBoxState NewState);
 	void OnBuildAdjacencyBufferChanged(ECheckBoxState NewState);
+	void OnBuildReversedIndexBufferChanged(ECheckBoxState NewState);
 	void OnUseFullPrecisionUVsChanged(ECheckBoxState NewState);
 	void OnGenerateLightmapUVsChanged(ECheckBoxState NewState);
 	void OnGenerateDistanceFieldAsIfTwoSidedChanged(ECheckBoxState NewState);
@@ -248,8 +244,10 @@ private:
 	void OnSectionCastShadowChanged(ECheckBoxState NewState, int32 SectionIndex);
 	ECheckBoxState DoesSectionCollide(int32 SectionIndex) const;
 	void OnSectionCollisionChanged(ECheckBoxState NewState, int32 SectionIndex);
-	ECheckBoxState IsSectionSelected(int32 SectionIndex) const;
-	void OnSectionSelectedChanged(ECheckBoxState NewState, int32 SectionIndex);
+	ECheckBoxState IsSectionHighlighted(int32 SectionIndex) const;
+	void OnSectionHighlightedChanged(ECheckBoxState NewState, int32 SectionIndex);
+	ECheckBoxState IsSectionIsolatedEnabled(int32 SectionIndex) const;
+	void OnSectionIsolatedChanged(ECheckBoxState NewState, int32 SectionIndex);
 	void CallPostEditChange(UProperty* PropertyChanged=nullptr);
 	
 	IStaticMeshEditor& StaticMeshEditor;

@@ -21,6 +21,7 @@
 
 DEFINE_LOG_CATEGORY(LogAudio);
 
+DEFINE_LOG_CATEGORY(LogAudioDebug);
 
 /** Audio stats */
 
@@ -174,9 +175,10 @@ FString FSoundSource::Describe(bool bUseLongName)
 	AActor* SoundOwner = NULL;
 	
 	// TODO - Audio Threading. This won't work cross thread.
-	if (WaveInstance->ActiveSound && WaveInstance->ActiveSound->AudioComponent.IsValid())
+	UAudioComponent* AudioComponent = (WaveInstance->ActiveSound ? WaveInstance->ActiveSound->GetAudioComponent() : nullptr);
+	if (AudioComponent)
 	{
-		SoundOwner = WaveInstance->ActiveSound->AudioComponent->GetOwner();
+		SoundOwner = AudioComponent->GetOwner();
 	}
 
 	return FString::Printf(TEXT("Wave: %s, Volume: %6.2f, Owner: %s"), 
@@ -388,6 +390,8 @@ FWaveInstance::FWaveInstance( FActiveSound* InActiveSound )
 ,	Pitch( 0.0f )
 ,	Velocity( FVector::ZeroVector )
 ,	Location( FVector::ZeroVector )
+,	OmniRadius(0.0f)
+,	StereoSpread(0.0f)
 ,	UserIndex( 0 )
 {
 	TypeHash = ++TypeHashCounter;
@@ -456,6 +460,11 @@ void FWaveInstance::AddReferencedObjects( FReferenceCollector& Collector )
 float FWaveInstance::GetActualVolume() const
 {
 	return Volume * VolumeMultiplier;
+}
+
+float FWaveInstance::GetVolumeWeightedPriority() const
+{
+	return GetActualVolume() * VolumeWeightedPriorityScale;
 }
 
 bool FWaveInstance::IsStreaming() const

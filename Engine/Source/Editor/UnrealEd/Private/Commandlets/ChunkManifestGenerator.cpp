@@ -310,10 +310,9 @@ bool FChunkManifestGenerator::LoadAssetRegistry(const FString& SandboxPath, cons
 		FArchive* AssetRegistryReader = &FileContents;
 
 		TMap<FName, FAssetData*> SavedAssetRegistryData;
-		TArray<FDependsNode*> DependencyData;
 		if (AssetRegistryReader)
 		{
-			AssetRegistry.LoadRegistryData(*AssetRegistryReader, SavedAssetRegistryData, DependencyData);
+			AssetRegistry.LoadRegistryData(*AssetRegistryReader, SavedAssetRegistryData);
 		}
 		for (auto& LoadedAssetData : AssetRegistryData)
 		{
@@ -375,7 +374,7 @@ void FChunkManifestGenerator::BuildChunkManifest(const TArray<FName>& CookedPack
 	// initialize LargestChunkId, FoundIDList, PackageChunkIDMap, AssetRegistryData
 
 	// Calculate the largest chunk id used by the registry to get the indices for the default chunks
-	AssetRegistry.GetAllAssets(AssetRegistryData);
+	AssetRegistry.GetAllAssets(AssetRegistryData, true);
 	int32 LargestChunkID = -1;
 
 	for (int32 Index = 0; Index < AssetRegistryData.Num(); ++Index)
@@ -504,7 +503,7 @@ void FChunkManifestGenerator::AddAssetToFileOrderRecursive(FAssetData* InAsset, 
 		OutEncounteredNames.Add(InAsset->PackageName);
 
 		TArray<FName> Dependencies;
-		AssetRegistry.GetDependencies(InAsset->PackageName, Dependencies);
+		AssetRegistry.GetDependencies(InAsset->PackageName, Dependencies, EAssetRegistryDependencyType::Hard);
 
 		for (auto DependencyName : Dependencies)
 		{
@@ -557,8 +556,8 @@ bool FChunkManifestGenerator::SaveAssetRegistry(const FString& SandboxPath, cons
 			if (ContainsMap(AssetData.PackageName))
 			{
 				MapList.Add(AssetData.PackageName);
+			}
 		}
-	}
 	}
 
 	AssetRegistry.SaveRegistryData(SerializedAssetRegistry, GeneratedAssetRegistryData, &MapList);
@@ -603,10 +602,33 @@ inline void ConvertFilenameToPakFormat(FString& InOutPath)
 	}
 }
 
+void InsertIntoOrder(const TMap<FName, FAssetData*>& InAssets, TMap<FAssetData*, int32>& InOrder, FName InPackageName, int32 InOrderIndex)
+{
+	if (InAssets.Contains(InPackageName))
+	{
+		InOrder.Add(InAssets[InPackageName], InOrderIndex);
+	}
+}
+
 FString FChunkManifestGenerator::CreateCookerFileOrderString(const TMap<FName, FAssetData*>& InAssetData, const TArray<FName>& InMaps)
 {
 	FString FileOrderString;
+	TArray<FAssetData*> TopLevelMapNodes;
 	TArray<FAssetData*> TopLevelNodes;
+	TMap<FAssetData*, int32> PreferredMapOrders;
+
+#if 0
+	// TODO: PreferredMapOrders should be filled out with the maps in the order we wish them to be pak'd.
+	int32 Order = 0;
+	static const TCHAR* MapOrderList[] = 
+	{
+	};
+
+	for (int32 i = 0; i < ARRAY_COUNT(MapOrderList); ++i)
+	{
+		InsertIntoOrder(InAssetData, PreferredMapOrders, FName(MapOrderList[i]), i);
+	}
+#endif
 
 	for (auto Asset : InAssetData)
 	{
@@ -633,18 +655,32 @@ FString FChunkManifestGenerator::CreateCookerFileOrderString(const TMap<FName, F
 		{
 			if (bIsMap)
 			{
-				TopLevelNodes.Insert(Asset.Value, 0);
+				TopLevelMapNodes.Add(Asset.Value);
 			}
 			else
 			{
-				TopLevelNodes.Insert(Asset.Value, TopLevelNodes.Num());
+				TopLevelNodes.Add(Asset.Value);
 			}
 		}
 	}
 
+	TopLevelMapNodes.Sort([&PreferredMapOrders](const FAssetData& A, const FAssetData& B)
+	{
+		auto OrderA = PreferredMapOrders.Find(&A);
+		auto OrderB = PreferredMapOrders.Find(&B);
+		auto IndexA = OrderA ? *OrderA : INT_MAX;
+		auto IndexB = OrderB ? *OrderB : INT_MAX;
+		return IndexA < IndexB;
+	});
+
 	TArray<FName> FileOrder;
 	TArray<FName> EncounteredNames;
 	for (auto Asset : TopLevelNodes)
+	{
+		AddAssetToFileOrderRecursive(Asset, FileOrder, EncounteredNames, InAssetData, InMaps);
+	}
+
+	for (auto Asset : TopLevelMapNodes)
 	{
 		AddAssetToFileOrderRecursive(Asset, FileOrder, EncounteredNames, InAssetData, InMaps);
 	}
@@ -746,12 +782,17 @@ bool FChunkManifestGenerator::SaveCookedPackageAssetRegistry( const FString& San
 
 			FString PlatformSandboxPath = SandboxPath.Replace(TEXT("[Platform]"), *Platform->PlatformName());
 			
-			FDateTime TimeStamp = IFileManager::Get().GetTimeStamp( *PlatformSandboxPath );
+			FPackageName::FindPackageFileWithoutExtension(PlatformSandboxPath, PlatformSandboxPath);
 
-			Json->WriteValue( "SourcePackageName", PackageName.ToString() );
-			Json->WriteValue( "CookedPackageName", PlatformSandboxPath );
-			Json->WriteValue( "CookedPackageTimeStamp", TimeStamp.ToString() );
+			FDateTime TimeStamp = IFileManager::Get().GetTimeStamp( *PlatformSandboxPath );
+			int64 FileSize = IFileManager::Get().FileSize(*PlatformSandboxPath);
+
+			Json->WriteValue( TEXT("SourcePackageName"), PackageName.ToString() );
+			Json->WriteValue( TEXT("CookedPackageName"), PlatformSandboxPath );
+			Json->WriteValue( TEXT("CookedPackageTimeStamp"), TimeStamp.ToString() );
+			Json->WriteValue( TEXT("FileSize"), FString::Printf(TEXT("%lld"), FileSize) );
 			
+
 			Json->WriteArrayStart("AssetData");
 			for (const auto& AssetData : AssetRegistryData)
 			{	// Add only assets that have actually been cooked and belong to any chunk
@@ -1245,3 +1286,5 @@ FString FChunkManifestGenerator::GetShortestReferenceChain(FName PackageName, in
 
 	return StringChain;
 }
+
+#undef LOCTEXT_NAMESPACE

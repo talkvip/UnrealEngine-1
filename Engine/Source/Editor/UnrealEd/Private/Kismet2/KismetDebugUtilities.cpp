@@ -681,7 +681,11 @@ void FKismetDebugUtilities::GetValidBreakpointLocations(const UK2Node_MacroInsta
 	bool bIsMacroPure = false;
 	UK2Node_Tunnel* MacroEntryNode = NULL;
 	UK2Node_Tunnel* MacroResultNode = NULL;
-	FKismetEditorUtilities::GetInformationOnMacro(MacroInstanceNode->GetMacroGraph(), MacroEntryNode, MacroResultNode, bIsMacroPure);
+	UEdGraph* InstanceNodeMacroGraph = MacroInstanceNode->GetMacroGraph();
+	if (ensure(InstanceNodeMacroGraph != nullptr))
+	{
+		FKismetEditorUtilities::GetInformationOnMacro(InstanceNodeMacroGraph, MacroEntryNode, MacroResultNode, bIsMacroPure);
+	}
 	if (!bIsMacroPure && MacroEntryNode)
 	{
 		// Get the execute pin outputs on the entry node
@@ -941,7 +945,8 @@ FKismetDebugUtilities::EWatchTextResult FKismetDebugUtilities::GetWatchText(FStr
 			UFunction* OuterFunction = Cast<UFunction>(Property->GetOuter());
 			if(!PropertyBase && OuterFunction)
 			{
-				if(UBlueprintGeneratedClass* BPGC = Cast<UBlueprintGeneratedClass>(Blueprint->GeneratedClass))
+				UBlueprintGeneratedClass* BPGC = Cast<UBlueprintGeneratedClass>(Blueprint->GeneratedClass);
+				if (BPGC && ActiveObject->IsA(BPGC))
 				{
 					PropertyBase = BPGC->GetPersistentUberGraphFrame(ActiveObject, OuterFunction);
 				}

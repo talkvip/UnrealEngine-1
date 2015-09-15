@@ -398,13 +398,15 @@ void FProfilerManager::SessionManager_OnCanSelectSession( const ISessionInfoPtr&
 
 void FProfilerManager::SessionManager_OnSelectedSessionChanged( const ISessionInfoPtr& InActiveSession )
 {
-	SessionManager_OnInstanceSelectionChanged();
+	SessionManager_OnInstanceSelectionChanged(nullptr, false);
 }
 
-void FProfilerManager::SessionManager_OnInstanceSelectionChanged()
+void FProfilerManager::SessionManager_OnInstanceSelectionChanged(const TSharedPtr<ISessionInstanceInfo>& /*Instance*/, bool /*Selected*/)
 {
 	const ISessionInfoPtr& SelectedSession = SessionManager->GetSelectedSession();
-	const bool SessionIsValid = SelectedSession.IsValid() && (SelectedSession->GetSessionOwner() == FPlatformProcess::UserName(true));
+	const bool SessionIsValid = SelectedSession.IsValid()
+		&& (SelectedSession->GetSessionOwner() == FPlatformProcess::UserName(true))
+		&& (SessionManager->GetSelectedInstances().Num() > 0);
 
 	if( ActiveSession != SelectedSession || FProfilerManager::GetSettings().bSingleInstanceMode )
 	{
@@ -427,7 +429,7 @@ void FProfilerManager::SessionManager_OnInstanceSelectionChanged()
 	if( ActiveSession.IsValid() )
 	{
 		// Track all selected session instances.
-		SessionManager->GetSelectedInstances( SelectedSessionInstances );
+		SelectedSessionInstances = SessionManager->GetSelectedInstances();
 		const int32 NumSelectedInstances = SelectedSessionInstances.Num();
 		const int32 NumInstances = FMath::Min( NumSelectedInstances, FProfilerManager::GetSettings().bSingleInstanceMode ? 1 : NumSelectedInstances );
 

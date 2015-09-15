@@ -20,6 +20,7 @@ namespace UnrealBuildTool
 	/// <summary>
 	/// Holds information about the current engine version
 	/// </summary>
+	[Serializable]
 	public class BuildVersion
 	{
 		public int MajorVersion;
@@ -28,6 +29,61 @@ namespace UnrealBuildTool
 		public int Changelist;
 		public int IsLicenseeVersion;
 		public string BranchName;
+
+		/// <summary>
+		/// Try to read the Build/Build.version file from disk
+		/// </summary>
+		/// <param name="Version">The version information</param>
+		/// <returns>True if the version was read sucessfully, false otherwise</returns>
+		public static bool TryRead(string FileName, out BuildVersion Version)
+		{
+			JsonObject Object;
+			if(!JsonObject.TryRead(FileName, out Object))
+			{
+				Version = null;
+				return false;
+			}
+			return TryParse(Object, out Version);
+		}
+
+		/// <summary>
+		/// Parses a build version from a JsonObject
+		/// </summary>
+		/// <param name="Object">The object to read from</param>
+		/// <param name="Version">The resulting version field</param>
+		/// <returns>True if the build version could be read, false otherwise</returns>
+		public static bool TryParse(JsonObject Object, out BuildVersion Version)
+		{
+			BuildVersion NewVersion = new BuildVersion();
+			if(!Object.TryGetIntegerField("MajorVersion", out NewVersion.MajorVersion) || !Object.TryGetIntegerField("MinorVersion", out NewVersion.MinorVersion) || !Object.TryGetIntegerField("PatchVersion", out NewVersion.PatchVersion))
+			{
+				Version = null;
+				return false;
+			}
+
+			Object.TryGetIntegerField("Changelist", out NewVersion.Changelist);
+			Object.TryGetIntegerField("IsLicenseeVersion", out NewVersion.IsLicenseeVersion);
+			Object.TryGetStringField("BranchName", out NewVersion.BranchName);
+
+			Version = NewVersion;
+			return true;
+		}
+
+		/// <summary>
+		/// Exports this object as Json
+		/// </summary>
+		/// <param name="Object">The object to read from</param>
+		/// <param name="Version">The resulting version field</param>
+		/// <returns>True if the build version could be read, false otherwise</returns>
+		public void Write(JsonWriter Writer)
+		{
+			Writer.WriteValue("MajorVersion", MajorVersion);
+			Writer.WriteValue("MinorVersion", MinorVersion);
+			Writer.WriteValue("PatchVersion", PatchVersion);
+			Writer.WriteValue("Changelist", Changelist);
+			Writer.WriteValue("IsLicenseeVersion", IsLicenseeVersion);
+			Writer.WriteValue("BranchName", BranchName);
+		}
 	}
 
 	/// 
@@ -822,39 +878,6 @@ namespace UnrealBuildTool
 		}
 
 		/// <summary>
-		/// Try to read the Build/Build.version file from disk
-		/// </summary>
-		/// <param name="Version">The version information</param>
-		/// <returns>True if the version was read sucessfully, false otherwise</returns>
-		public static bool TryReadBuildVersion(string FileName, out BuildVersion Version)
-		{
-			JsonObject Object;
-			try
-			{
-				Object = JsonObject.FromFile(FileName);
-			}
-			catch(Exception)
-			{
-				Version = null;
-				return false;
-			}
-
-			BuildVersion NewVersion = new BuildVersion();
-			if(!Object.TryGetIntegerField("MajorVersion", out NewVersion.MajorVersion) || !Object.TryGetIntegerField("MinorVersion", out NewVersion.MinorVersion) || !Object.TryGetIntegerField("PatchVersion", out NewVersion.PatchVersion))
-			{
-				Version = null;
-				return false;
-			}
-
-			Object.TryGetIntegerField("Changelist", out NewVersion.Changelist);
-			Object.TryGetIntegerField("IsLicenseeVersion", out NewVersion.IsLicenseeVersion);
-			Object.TryGetStringField("BranchName", out NewVersion.BranchName);
-
-			Version = NewVersion;
-			return true;
-		}
-
-		/// <summary>
 		/// Checks if given type implements given interface.
 		/// </summary>
 		/// <typeparam name="InterfaceType">Interface to check.</typeparam>
@@ -868,19 +891,19 @@ namespace UnrealBuildTool
 		/// <summary>
 		/// Returns the User Settings Directory path. This matches FPlatformProcess::UserSettingsDir()
 		/// </summary>
-		public static string GetUserSettingDirectory()
+		public static DirectoryReference GetUserSettingDirectory()
 		{
 			if (BuildHostPlatform.Current.Platform == UnrealTargetPlatform.Mac)
 			{
-				return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Personal), "Library", "Application Support", "Epic");
+				return new DirectoryReference(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Personal), "Library", "Application Support", "Epic"));
 			}
 			else if (Environment.OSVersion.Platform == PlatformID.Unix)
 			{
-				return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Epic");
+				return new DirectoryReference(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Epic"));
 			}
 			else
 			{
-				return Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+				return new DirectoryReference(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
 			}
 		}
 
@@ -977,7 +1000,7 @@ namespace UnrealBuildTool
         /// <summary>
         /// When true, verbose loggin is enabled.
         /// </summary>
-        private static bool bLogVerbose = false;
+        private static LogEventType LogLevel = LogEventType.Log;
         /// <summary>
         /// When true, warnings and errors will have a WARNING: or ERROR: prexifx, respectively.
         /// </summary>
@@ -998,7 +1021,7 @@ namespace UnrealBuildTool
         /// <summary>
         /// Expose the log level. This is a hack for ProcessResult.LogOutput, which wants to bypass our normal formatting scheme.
         /// </summary>
-        public static bool bIsVerbose { get { return bLogVerbose; } }
+        public static bool bIsVerbose { get { return LogLevel >= LogEventType.Verbose; } }
 
 		/// <summary>
 		/// A collection of strings that have been already written once
@@ -1021,9 +1044,9 @@ namespace UnrealBuildTool
         /// but then read the config and command line later, which could change this value.
         /// </summary>
         /// <param name="bLogVerbose">Whether to log verbose logs.</param>
-        public static void SetVerboseLogging(bool bLogVerbose)
+        public static void SetLoggingLevel(LogEventType InLogLevel)
         {
-            Log.bLogVerbose = bLogVerbose;
+            Log.LogLevel = InLogLevel;
         }
 
         /// <summary>
@@ -1034,11 +1057,11 @@ namespace UnrealBuildTool
         /// <param name="bLogSeverity">If true, warnings and errors will have a WARNING: and ERROR: prefix to them. </param>
         /// <param name="bLogSources">If true, logs will have the originating method name prepended to them.</param>
         /// <param name="TraceListeners">Collection of trace listeners to attach to the Trace.Listeners, in addition to the Default listener. The existing listeners (except the Default listener) are cleared first.</param>
-        public static void InitLogging(bool bLogTimestamps, bool bLogVerbose, bool bLogSeverity, bool bLogSources, bool bColorConsoleOutput, IEnumerable<TraceListener> TraceListeners)
+        public static void InitLogging(bool bLogTimestamps, LogEventType InLogLevel, bool bLogSeverity, bool bLogSources, bool bColorConsoleOutput, IEnumerable<TraceListener> TraceListeners)
         {
             bIsInitialized = true;
             Timer = (bLogTimestamps && Timer == null) ? Stopwatch.StartNew() : null;
-            Log.bLogVerbose = bLogVerbose;
+            Log.LogLevel = InLogLevel;
             Log.bLogSeverity = bLogSeverity;
             Log.bLogSources = bLogSources;
             Log.bColorConsoleOutput = bColorConsoleOutput;
@@ -1082,7 +1105,23 @@ namespace UnrealBuildTool
         /// <returns></returns>
         private static string GetSeverityPrefix(LogEventType Severity)
         {
-            return Severity <= LogEventType.Error ? "ERROR: " : Severity == LogEventType.Warning ? "WARNING: " : "";
+			switch (Severity)
+			{
+				case LogEventType.Fatal:
+					return "FATAL: ";
+				case LogEventType.Error:
+					return "ERROR: ";
+				case LogEventType.Warning:
+					return "WARNING: ";
+				case LogEventType.Console:
+					return "";
+				case LogEventType.Verbose:
+					return "VERBOSE: ";
+				case LogEventType.VeryVerbose:
+					return "VVERBOSE: ";
+				default:
+					return " ";
+			}
         }
 
 		/// <summary>
@@ -1112,8 +1151,7 @@ namespace UnrealBuildTool
                     bLogSources ? string.Format("{0}: ", string.IsNullOrEmpty(CustomSource) ? GetSource(StackFramesToSkip) : CustomSource) : "",
                     bLogSeverity ? GetSeverityPrefix(Verbosity) : "",
                     // If there are no extra args, don't try to format the string, in case it has any format control characters in it (our LOCTEXT strings tend to).
-                    Args.Length > 0 ? string.Format(Format, Args) : Format,
-					GetMessageCode(Verbosity).ToString("X3"));
+                    Args.Length > 0 ? string.Format(Format, Args) : Format);
         }
 
         /// <summary>
@@ -1145,7 +1183,7 @@ namespace UnrealBuildTool
 				WriteOnceSet.Add(Formatted);
 			}
 
-			if (Verbosity < LogEventType.Verbose || bLogVerbose)
+			if (Verbosity <= LogLevel)
             {
                 // Do console color highlighting here.
                 ConsoleColor DefaultColor = ConsoleColor.Gray;
@@ -1176,7 +1214,7 @@ namespace UnrealBuildTool
 						{
 						    foreach (TraceListener l in Trace.Listeners) 
 						    {
-								if (Verbosity != LogEventType.Log || (l as ConsoleTraceListener) == null || bLogVerbose)
+								if (Verbosity != LogEventType.Log || (l as ConsoleTraceListener) == null || LogLevel >= LogEventType.Verbose)
 								{
 									l.WriteLine(FormatMessage(StackFramesToSkip + 1, CustomSource, Verbosity, Format, Args));
 								}

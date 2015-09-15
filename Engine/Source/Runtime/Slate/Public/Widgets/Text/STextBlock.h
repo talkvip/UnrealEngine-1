@@ -99,6 +99,13 @@ public:
 
 	SLATE_END_ARGS()
 
+	/** Constructor */
+	STextBlock()
+	{
+		bCanTick = false;
+		bCanSupportFocus = false;
+	}
+
 	/**
 	 * Construct this widget
 	 *
@@ -125,6 +132,13 @@ public:
 	void SetText( const FString& InText );
 	void SetText( const TAttribute< FText >& InText );
 	void SetText( const FText& InText );
+
+	/**
+	* Sets the highlight text for this text block 
+	*
+	* @param	InText	The new text to highlight
+	*/
+	void SetHighlightText(TAttribute<FText> InText);
 
 	/**
 	 * Sets the font used to draw the text

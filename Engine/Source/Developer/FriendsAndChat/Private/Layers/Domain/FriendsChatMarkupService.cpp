@@ -4,6 +4,7 @@
 #include "FriendsChatMarkupService.h"
 #include "IChatCommunicationService.h"
 #include "FriendsNavigationService.h"
+#include "GameAndPartyService.h"
 #include "FriendViewModel.h"
 #include "FriendListViewModel.h"
 #include "IFriendItem.h"
@@ -20,22 +21,27 @@ struct FProcessedInput
 		: ChatChannel(EChatMessageType::Invalid)
 		, NeedsTip(false)
 		, FoundMatch(false)
+		, HasFriendToken(false)
 	{}
 
 	EChatMessageType::Type ChatChannel;
 	FString Message;
-	bool NeedsTip;
+	bool NeedsTip; // The input will only be executed when we no longer require a tip
 	bool FoundMatch;
+	bool HasFriendToken; // If we have tried to narrow the search by entering a user name
 	TArray<TSharedPtr<FFriendViewModel> > ValidFriends;
 	TArray<TSharedPtr<FFriendViewModel> > MatchedFriends;
+	TArray<TSharedPtr<IChatTip> > ValidCustomTips;
 
 	void Clear()
 	{
 		ValidFriends.Empty();
 		MatchedFriends.Empty();
+		ValidCustomTips.Empty();
 		NeedsTip = false;
 		FoundMatch = false;
 		ChatChannel = EChatMessageType::Invalid;
+		HasFriendToken = false;
 	}
 };
 
@@ -65,6 +71,11 @@ public:
 	{
 		MarkupService->SetValidatedText(EChatMessageType::ShortcutString(ChatChannel));
 		return FReply::Handled();
+	}
+
+	virtual void ExecuteCommand() override
+	{
+		// Do Nothing
 	}
 
 	FChatTip(const TSharedRef<FFriendsChatMarkupService>& InMarkupService, EChatMessageType::Type InChatChannel)
@@ -103,6 +114,11 @@ public:
 		return FReply::Handled();
 	}
 
+	virtual void ExecuteCommand() override
+	{
+		// Do Nothing
+	}
+
 	FFriendChatTip(const TSharedRef<FFriendsChatMarkupService>& InMarkupService, TSharedRef<FFriendViewModel> InFriendItem)
 		: MarkupService(InMarkupService)
 		, FriendItem(InFriendItem)
@@ -113,6 +129,100 @@ public:
 private:
 	TSharedRef<FFriendsChatMarkupService> MarkupService;
 	TSharedRef<FFriendViewModel> FriendItem;
+};
+
+class FCustomActionChatTip : public IChatTip
+{
+public:
+	virtual FText GetTipText() override
+	{
+		return FText::FromString(CustomSlashCommand->GetCommandToken());
+	}
+
+	virtual bool IsValidForType(EChatMessageType::Type ChatChannel) override
+	{
+		return true;
+	}
+
+	virtual bool IsEnabled() override
+	{
+		return CustomSlashCommand->IsEnabled();
+	}
+
+	virtual FReply ExecuteTip() override
+	{
+		MarkupService->SetValidatedText(CustomSlashCommand->GetCommandToken());
+		return FReply::Handled();
+	}
+
+	virtual void ExecuteCommand() override
+	{
+		CustomSlashCommand->ExecuteCommand();
+	}
+
+	bool IsEnabled(const FString& NavigationToken)
+	{
+		if(CustomSlashCommand->GetCommandToken().ToUpper().Contains(NavigationToken.ToUpper()))
+		{
+			return CustomSlashCommand->IsEnabled();
+		}
+		return false;
+	}
+
+	bool CanExecute(const FString& NavigationToken)
+	{
+		return NavigationToken.ToUpper() == CustomSlashCommand->GetCommandToken().ToUpper();
+	}
+
+	FCustomActionChatTip(const TSharedRef<FFriendsChatMarkupService>& InMarkupService, TSharedRef<ICustomSlashCommand> InCustomSlashCommand)
+		: MarkupService(InMarkupService)
+		, CustomSlashCommand(InCustomSlashCommand)
+		{}
+
+	virtual ~FCustomActionChatTip(){}
+
+private:
+	TSharedRef<FFriendsChatMarkupService> MarkupService;
+	TSharedRef<ICustomSlashCommand> CustomSlashCommand;
+};
+
+class FNavigateToWhisperChatTip : public IChatTip
+{
+public:
+	virtual FText GetTipText() override
+	{
+		return LOCTEXT("NavigateToWhisperTip", "Navigate to the Whisper tab");
+	}
+
+	virtual bool IsValidForType(EChatMessageType::Type ChatChannel) override
+	{
+		return true;
+	}
+
+	virtual bool IsEnabled() override
+	{
+		return true;
+	}
+
+	virtual FReply ExecuteTip() override
+	{
+		MarkupService->NavigateToChannel(EChatMessageType::Whisper);
+		return FReply::Handled();
+	}
+
+	virtual void ExecuteCommand() override
+	{
+		// Do Nothing
+	}
+
+	FNavigateToWhisperChatTip(const TSharedRef<FFriendsChatMarkupService>& InMarkupService)
+	: MarkupService(InMarkupService)
+	{}
+
+	virtual ~FNavigateToWhisperChatTip(){}
+
+private:
+	TSharedRef<FFriendsChatMarkupService> MarkupService;
 };
 
 class FInvalidChatTip : public IChatTip
@@ -142,6 +252,11 @@ public:
 		return FReply::Handled();
 	}
 
+	virtual void ExecuteCommand() override
+	{
+		// Do Nothing
+	}
+
 	FInvalidChatTip(FText InInvalidReason)
 	 : InvalidReason(InInvalidReason)
 	{}
@@ -162,6 +277,16 @@ class FFriendsChatMarkupServiceImpl
 {
 public:
 
+	virtual void AddCustomSlashMarkupCommand(TArray<TSharedRef<ICustomSlashCommand> >& InCustomSlashCommands) override
+	{
+		CustomSlashCommands = InCustomSlashCommands;
+		CustomChatTips.Empty();
+		for(const auto& ChatCommand : CustomSlashCommands)
+		{
+			CustomChatTips.Add(MakeShareable(new FCustomActionChatTip(SharedThis(this), ChatCommand)));
+		}
+	}
+
 	virtual void CloseChatTips() override
 	{
 		ForceDisplayToolTips = false;
@@ -177,11 +302,45 @@ public:
 			{
 				if(ValidatedInput->Message.IsEmpty())
 				{
-					NavigationService->ChangeChatChannel(EChatMessageType::Global);
+					NavigationService->ChangeViewChannel(EChatMessageType::Global);
 				}
 				else
 				{
 					CommunicationService->SendRoomMessage(FString(), ProcessedInput->Message);
+					OnMessageCommitted().Broadcast();
+				}
+			}
+			else if (ValidatedInput->ChatChannel == EChatMessageType::Party)
+			{
+				if(ValidatedInput->Message.IsEmpty())
+				{
+					NavigationService->ChangeViewChannel(EChatMessageType::Party);
+				}
+				else
+				{
+					if(GamePartyService->CombineGameAndPartyChat() && GamePartyService->IsInGameSession())
+					{
+						OnSendNetworkMessageEvent().Broadcast(ProcessedInput->Message);
+						OnMessageCommitted().Broadcast();
+					}
+					else
+					{
+						FChatRoomId PartyChatRoomId = GamePartyService->GetPartyChatRoomId();
+						CommunicationService->SendRoomMessage(PartyChatRoomId, ProcessedInput->Message);
+						OnMessageCommitted().Broadcast();
+					}
+				}
+			}
+			else if (ValidatedInput->ChatChannel == EChatMessageType::Game)
+			{
+				if(ValidatedInput->Message.IsEmpty())
+				{
+					NavigationService->ChangeViewChannel(EChatMessageType::Game);
+				}
+				else
+				{
+					OnSendNetworkMessageEvent().Broadcast(ProcessedInput->Message);
+					OnMessageCommitted().Broadcast();
 				}
 			}
 			else if (ValidatedInput->ChatChannel == EChatMessageType::Whisper)
@@ -192,35 +351,25 @@ public:
 					{
 						// Sending the selected outgoing friend
 						NavigationService->SetOutgoingChatFriend(ProcessedInput->ValidFriends[0]->GetFriendItem());
-						NavigationService->ChangeChatChannel(EChatMessageType::Whisper);
 					}
 					else
 					{
 						CommunicationService->SendPrivateMessage(ProcessedInput->ValidFriends[0]->GetFriendItem(), FText::FromString(ProcessedInput->Message));
-						NavigationService->ChangeViewChannel(EChatMessageType::Whisper);
+						OnMessageCommitted().Broadcast();
 					}
 				}
 				else
 				{
 					// Change outgoing chat channel to last chat friend
-					NavigationService->ChangeChatChannel(EChatMessageType::Whisper);
+					NavigationService->ChangeViewChannel(EChatMessageType::Whisper);
 				}
 			}
-			else if (ValidatedInput->ChatChannel == EChatMessageType::Custom)
+			else if(ValidatedInput->ChatChannel == EChatMessageType::Custom)
 			{
-				NavigationService->ChangeChatChannel(EChatMessageType::Custom);
-			}
-			else if (ValidatedInput->ChatChannel == EChatMessageType::Empty)
-			{
-				NavigationService->ChangeChatChannel(EChatMessageType::Empty);
-			}
-			else if(ValidatedInput->ChatChannel == EChatMessageType::Invalid)
-			{
-				// Handle bad text
-			}
-			else
-			{
-				NavigationService->ChangeChatChannel(ValidatedInput->ChatChannel);
+				if(ValidatedInput->ValidCustomTips.Num() && ValidatedInput->ValidCustomTips[0].IsValid())
+				{
+					ValidatedInput->ValidCustomTips[0]->ExecuteCommand();
+				}
 			}
 			return true;
 		}
@@ -310,6 +459,14 @@ public:
 		ProcessedInput->MatchedFriends.Empty();
 	}
 
+
+	virtual void NavigateToChannel(EChatMessageType::Type ChatChannel) override
+	{
+		NavigationService->ChangeViewChannel(EChatMessageType::Whisper);
+		SetValidatedText(TEXT(""));
+		ProcessedInput->Clear();
+	}
+
 	virtual FReply HandleChatKeyEntry(const FKeyEvent& KeyEvent) override
 	{
 		FReply Reply = FReply::Unhandled();
@@ -331,6 +488,10 @@ public:
 			SetNextCommand();
 			Reply = FReply::Handled();
 		}
+		else if(KeyEvent.GetKey() == EKeys::Escape)
+		{
+			ForceDisplayToolTips = false;
+		}
 		return Reply;
 	}
 
@@ -344,16 +505,44 @@ public:
 		return SelectedChatTip;
 	}
 
+	virtual EChatMessageType::Type GetMarkupChannel() const override
+	{
+		if(ProcessedInput.IsValid())
+		{
+			return ProcessedInput->ChatChannel;
+		}
+		return EChatMessageType::Invalid;
+	}
+
+
 	DECLARE_DERIVED_EVENT(FFriendsChatMarkupServiceImpl, FFriendsChatMarkupService::FChatInputUpdated, FChatInputUpdated);
 	virtual FChatInputUpdated& OnInputUpdated() override
 	{
 		return ChatInputUpdatedEvent;
 	}
 
+	DECLARE_DERIVED_EVENT(FFriendsChatMarkupServiceImpl, FFriendsChatMarkupService::FChatTipSelected, FChatTipSelected);
+	virtual FChatTipSelected& OnChatTipSelected() override
+	{
+		return ChatTipSelectedEvent;
+	}
+
 	DECLARE_DERIVED_EVENT(FFriendsChatMarkupServiceImpl, FFriendsChatMarkupService::FValidatedChatReadyEvent, FValidatedChatReadyEvent);
 	virtual FValidatedChatReadyEvent& OnValidateInputReady() override
 	{
 		return ValidatedChatReadyEvent;
+	}
+
+	DECLARE_DERIVED_EVENT(FFriendsChatMarkupServiceImpl, FFriendsChatMarkupService::FChatMessageCommitted, FChatMessageCommitted)
+	virtual FChatMessageCommitted& OnMessageCommitted() override
+	{
+		return ChatMessageCommittedEvent;
+	}
+
+	DECLARE_DERIVED_EVENT(FFriendsChatMarkupServiceImpl, FFriendsChatMarkupService::FSendNetworkMessageEvent, FSendNetworkMessageEvent)
+	virtual FSendNetworkMessageEvent& OnSendNetworkMessageEvent() override
+	{
+		return SendNetworkMessageEvent;
 	}
 
 private:
@@ -364,6 +553,11 @@ private:
 		ChatTipArray.Empty();
 		if(ProcessedInput->ChatChannel == EChatMessageType::Whisper)
 		{
+			if(!ProcessedInput->HasFriendToken)
+			{
+				ChatTipArray.Add(NavigateToWhisperTip.ToSharedRef());
+			}
+
 			if(ProcessedInput->ValidFriends.Num())
 			{
 				for(const auto& Friend : ProcessedInput->ValidFriends)
@@ -376,13 +570,58 @@ private:
 				ChatTipArray.Add(MakeShareable(new FInvalidChatTip(LOCTEXT("InvalidChatTip_NoFriends", "No matching friends currently online"))));
 			}
 		}
+		else if(ProcessedInput->ChatChannel == EChatMessageType::Custom)
+		{
+			for(const auto& SlashCommand : ProcessedInput->ValidCustomTips)
+			{
+				if(SlashCommand->IsEnabled())
+				{
+					ChatTipArray.Add(SlashCommand.ToSharedRef());
+				}
+			}
+		}
 		else if(ProcessedInput->ChatChannel != EChatMessageType::Invalid)
 		{
+			bool bAddedPartyChat = false;
 			for(const auto& ChatTip : CommmonChatTips)
 			{
 				if(ProcessedInput->ChatChannel == EChatMessageType::Empty || ChatTip->IsValidForType(ProcessedInput->ChatChannel))
 				{
-					ChatTipArray.Add(ChatTip); 
+					if(ChatTip->IsValidForType(EChatMessageType::Party))
+					{
+						if(GamePartyService->IsInPartyChat())
+						{
+							ChatTipArray.Add(ChatTip);
+							bAddedPartyChat = true;
+						}
+						else if(GamePartyService->CombineGameAndPartyChat() && !bAddedPartyChat && GamePartyService->IsInGameSession())
+						{
+							ChatTipArray.Add(ChatTip);
+							bAddedPartyChat = true;
+						}
+					}
+					else if(ChatTip->IsValidForType(EChatMessageType::Game))
+					{
+						if(GamePartyService->IsInGameSession())
+						{
+							ChatTipArray.Add(ChatTip);
+						}
+					}
+					else
+					{
+						ChatTipArray.Add(ChatTip); 
+					}
+				}
+			}
+
+			if(ProcessedInput->ChatChannel == EChatMessageType::Empty)
+			{
+				for(const auto& ChatTip : CustomChatTips)
+				{
+					if(ChatTip->IsEnabled())
+					{
+						ChatTipArray.Add(ChatTip); 
+					}
 				}
 			}
 		}
@@ -399,19 +638,6 @@ private:
 		OnInputUpdated().Broadcast();
 	}
 
-	void GenerateDefaultTips()
-	{
-		SelectedChatTip.Reset();
-		ChatTipArray.Empty();
-		for(const auto& ChatTip : CommmonChatTips)
-		{
-			ChatTipArray.Add(ChatTip); 
-		}
-		SelectedChatTip = ChatTipArray[0];
-		SelectedChatIndex = 0;
-		OnInputUpdated().Broadcast();
-	}
-
 	void SetNextCommand()
 	{
 		if(SelectedChatTip.IsValid() && ChatTipArray.Num() > 0)
@@ -422,6 +648,7 @@ private:
 				SelectedChatIndex = 0;
 			}
 			SelectedChatTip = ChatTipArray[SelectedChatIndex];
+			OnChatTipSelected().Broadcast(SelectedChatTip.ToSharedRef());
 		}
 	}
 
@@ -435,6 +662,7 @@ private:
 				SelectedChatIndex = ChatTipArray.Num() -1;
 			}
 			SelectedChatTip = ChatTipArray[SelectedChatIndex];
+			OnChatTipSelected().Broadcast(SelectedChatTip.ToSharedRef());
 		}
 	}
 
@@ -484,6 +712,8 @@ private:
 				{
 					if(!Remainder.IsEmpty())
 					{
+						// Mark that we have a friend token so we don't display the navigation tip
+						ProcessedInput->HasFriendToken = true;
 						FString PotentialName = Remainder.Left(25).Replace(TEXT(" "), TEXT(""));
 
 						for(const auto& Friend : GetFriendViewModels())
@@ -501,16 +731,57 @@ private:
 					}
 					else
 					{
+						ProcessedInput->HasFriendToken = false;
 						for(const auto& Friend : GetFriendViewModels())
 						{
 							ProcessedInput->ValidFriends.Add(Friend);
 						}
 					}
 				}
+				else if (ChatType == EChatMessageType::Party)
+				{
+					if(GamePartyService->IsInPartyChat() || (GamePartyService->CombineGameAndPartyChat() && GamePartyService->IsInGameSession()))
+					{
+						ProcessedInput->NeedsTip = false;
+						ProcessedInput->Message = InInputText.RightChop(NavigationToken.Len() + 1);
+					}
+					else
+					{
+						ProcessedInput->ChatChannel = EChatMessageType::Invalid;
+					}
+				}
+				else if (ChatType == EChatMessageType::Game)
+				{
+					if(!GamePartyService->CombineGameAndPartyChat() && GamePartyService->IsInGameSession())
+					{
+						ProcessedInput->NeedsTip = false;
+						ProcessedInput->Message = InInputText.RightChop(NavigationToken.Len() + 1);
+					}
+					else
+					{
+						ProcessedInput->ChatChannel = EChatMessageType::Invalid;
+					}
+				}
 				else if(ChatType != EChatMessageType::Empty)
 				{
 					ProcessedInput->NeedsTip = false;
 					ProcessedInput->Message = InInputText.RightChop(NavigationToken.Len() + 1);
+				}
+			}
+			else
+			{
+				ProcessedInput->ValidCustomTips.Empty();
+				for (const auto& CustomChatTip : CustomChatTips)
+				{
+					if(CustomChatTip->IsEnabled(NavigationToken))
+					{
+						ProcessedInput->ChatChannel = EChatMessageType::Custom;
+						ProcessedInput->ValidCustomTips.Add(CustomChatTip);
+					}
+					if(CustomChatTip->CanExecute(NavigationToken))
+					{
+						ProcessedInput->NeedsTip = false;
+					}
 				}
 			}
 			return ProcessedInput;
@@ -557,7 +828,8 @@ private:
 		FriendsList->GetFriendList(AllFriendViewModels);
 		for(const auto& Friend : AllFriendViewModels)
 		{
-			if(Friend->GetOnlineStatus() == EOnlinePresenceState::Online)
+			const EOnlinePresenceState::Type PresenceState = Friend->GetOnlineStatus();
+			if(PresenceState == EOnlinePresenceState::Online || PresenceState == EOnlinePresenceState::Away || PresenceState == EOnlinePresenceState::ExtendedAway)
 			{
 				FriendViewModels.Add(Friend);
 			}
@@ -582,22 +854,30 @@ private:
 
 	void Initialize()
 	{
-		CommmonChatTips.Add(MakeShareable(new FChatTip(SharedThis(this), EChatMessageType::Team)));
+		CommmonChatTips.Add(MakeShareable(new FChatTip(SharedThis(this), EChatMessageType::Global)));
 		CommmonChatTips.Add(MakeShareable(new FChatTip(SharedThis(this), EChatMessageType::Party)));
 		CommmonChatTips.Add(MakeShareable(new FChatTip(SharedThis(this), EChatMessageType::Whisper)));
-		CommmonChatTips.Add(MakeShareable(new FChatTip(SharedThis(this), EChatMessageType::Clan)));
-		CommmonChatTips.Add(MakeShareable(new FChatTip(SharedThis(this), EChatMessageType::Global)));
+
+		if(!GamePartyService->CombineGameAndPartyChat())
+		{
+			CommmonChatTips.Add(MakeShareable(new FChatTip(SharedThis(this), EChatMessageType::Game)));
+		}
+
+		NavigateToWhisperTip = MakeShareable(new FNavigateToWhisperChatTip(SharedThis(this)));
+
 		ProcessedInput = MakeShareable(new FProcessedInput());
 	}
 
 	FFriendsChatMarkupServiceImpl(
 			const TSharedRef<IChatCommunicationService >& InCommunicationService,
 			const TSharedRef<FFriendsNavigationService>& InNavigationService,
-			const TSharedRef<IFriendListFactory>& InFriendsListFactory
+			const TSharedRef<IFriendListFactory>& InFriendsListFactory,
+			const TSharedRef<FGameAndPartyService>& InGamePartyService
 			)
 		: CommunicationService(InCommunicationService)
 		, NavigationService(InNavigationService)
 		, FriendsListFactory(InFriendsListFactory)
+		, GamePartyService(InGamePartyService)
 		, InputText()
 		, ForceDisplayToolTips(false)
 		{}
@@ -606,11 +886,18 @@ private:
 	TSharedRef<IChatCommunicationService > CommunicationService;
 	TSharedRef<FFriendsNavigationService > NavigationService;
 	TSharedRef<IFriendListFactory> FriendsListFactory;
+	TSharedRef<FGameAndPartyService> GamePartyService;
+	TArray<TSharedRef<ICustomSlashCommand> > CustomSlashCommands;
 	TSharedPtr<IFriendList> FriendsList;
 	TArray< TSharedPtr<FFriendViewModel > > FriendViewModels;
 	TArray<TSharedRef<IChatTip> > CommmonChatTips;
+	TSharedPtr<IChatTip> NavigateToWhisperTip;
+	TArray<TSharedRef<FCustomActionChatTip> > CustomChatTips;
 	FChatInputUpdated ChatInputUpdatedEvent;
+	FChatTipSelected ChatTipSelectedEvent;
 	FValidatedChatReadyEvent ValidatedChatReadyEvent;
+	FChatMessageCommitted ChatMessageCommittedEvent;
+	FSendNetworkMessageEvent SendNetworkMessageEvent;
 	FString InputText;
 	bool ForceDisplayToolTips;
 	TSharedPtr<FFriendViewModel> SelectedFriendViewModel;
@@ -636,7 +923,7 @@ public:
 	virtual TSharedRef<FFriendsChatMarkupService> Create() override
 	{
 		TSharedRef<FFriendsChatMarkupServiceImpl> Service = MakeShareable(
-			new FFriendsChatMarkupServiceImpl(CommunicationService, NavigationService,FriendsListFactory));
+			new FFriendsChatMarkupServiceImpl(CommunicationService, NavigationService,FriendsListFactory,GamePartyService));
 		Service->Initialize();
 		return Service;
 	}
@@ -648,11 +935,13 @@ private:
 	FFriendsChatMarkupServiceFactoryImpl(
 		const TSharedRef<IChatCommunicationService >& InCommunicationService,
 		const TSharedRef<FFriendsNavigationService>& InNavigationService,
-		const TSharedRef<IFriendListFactory>& InFriendsListFactory
+		const TSharedRef<IFriendListFactory>& InFriendsListFactory,
+		const TSharedRef<FGameAndPartyService>& InGamePartyService
 		)
 		: CommunicationService(InCommunicationService)
 		, NavigationService(InNavigationService)
 		, FriendsListFactory(InFriendsListFactory)
+		, GamePartyService(InGamePartyService)
 	{ }
 
 private:
@@ -660,6 +949,7 @@ private:
 	TSharedRef<IChatCommunicationService > CommunicationService;
 	TSharedRef<FFriendsNavigationService> NavigationService;
 	TSharedRef<IFriendListFactory> FriendsListFactory;
+	TSharedRef<FGameAndPartyService> GamePartyService;
 
 	friend FFriendsChatMarkupServiceFactoryFactory;
 };
@@ -667,9 +957,10 @@ private:
 TSharedRef< IFriendsChatMarkupServiceFactory > FFriendsChatMarkupServiceFactoryFactory::Create(
 	const TSharedRef<IChatCommunicationService >& CommunicationService,
 	const TSharedRef<FFriendsNavigationService>& NavigationService,
-	const TSharedRef<IFriendListFactory>& FriendsListFactory)
+	const TSharedRef<IFriendListFactory>& FriendsListFactory,
+	const TSharedRef<FGameAndPartyService>& GamePartyService)
 {
-	TSharedRef< FFriendsChatMarkupServiceFactoryImpl > Service = MakeShareable(new FFriendsChatMarkupServiceFactoryImpl(CommunicationService, NavigationService, FriendsListFactory));
+	TSharedRef< FFriendsChatMarkupServiceFactoryImpl > Service = MakeShareable(new FFriendsChatMarkupServiceFactoryImpl(CommunicationService, NavigationService, FriendsListFactory, GamePartyService));
 	return Service;
 }
 #undef LOCTEXT_NAMESPACE

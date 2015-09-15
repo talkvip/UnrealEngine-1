@@ -19,7 +19,7 @@ namespace UnrealBuildTool
 		
 		FileItem[] LinkAllFiles(LinkEnvironment LinkEnvironment, bool bBuildImportLibraryOnly);
 		
-		void CompileCSharpProject(CSharpEnvironment CompileEnvironment, string ProjectFileName, string DestinationFile);
+		void CompileCSharpProject(CSharpEnvironment CompileEnvironment, FileReference ProjectFileName, FileReference DestinationFile);
 		
 		/** Converts the passed in path from UBT host to compiler native format. */
 		String ConvertPath(String OriginalPath);
@@ -38,7 +38,9 @@ namespace UnrealBuildTool
 
 		void SetUpGlobalEnvironment();
 
-		void AddFilesToReceipt(TargetReceipt Receipt, UEBuildBinary Binary);
+		void ModifyBuildProducts(UEBuildBinary Binary, Dictionary<FileReference, BuildProductType> BuildProducts);
+
+		bool ShouldAddDebugFileToReceipt(FileReference OutputFile, BuildProductType OutputType);
 
 		void SetupBundleDependencies(List<UEBuildBinary> Binaries, string GameName);
 
@@ -98,7 +100,7 @@ namespace UnrealBuildTool
 		}
 
 
-		public virtual void CompileCSharpProject(CSharpEnvironment CompileEnvironment, string ProjectFileName, string DestinationFile)
+		public virtual void CompileCSharpProject(CSharpEnvironment CompileEnvironment, FileReference ProjectFileName, FileReference DestinationFile)
 		{
 		}
 
@@ -108,26 +110,23 @@ namespace UnrealBuildTool
 		/// <param name="LinkEnvironment"></param>
 		/// <param name="OutputFile"></param>
 		/// <returns></returns>
-		public static string GetResponseFileName( LinkEnvironment LinkEnvironment, FileItem OutputFile )
+		public static FileReference GetResponseFileName( LinkEnvironment LinkEnvironment, FileItem OutputFile )
 		{
 			// Construct a relative path for the intermediate response file
-			string ResponseFileName = Path.Combine( LinkEnvironment.Config.IntermediateDirectory, Path.GetFileName( OutputFile.AbsolutePath ) + ".response" );
+			FileReference ResponseFileName = FileReference.Combine( LinkEnvironment.Config.IntermediateDirectory, Path.GetFileName( OutputFile.AbsolutePath ) + ".response" );
 			if (UnrealBuildTool.HasUProjectFile())
 			{
 				// If this is the uproject being built, redirect the intermediate
-				if (Utils.IsFileUnderDirectory( OutputFile.AbsolutePath, UnrealBuildTool.GetUProjectPath() ))
+				if (OutputFile.Reference.IsUnderDirectory( UnrealBuildTool.GetUProjectPath() ))
 				{
-					ResponseFileName = Path.Combine(
+					ResponseFileName = FileReference.Combine(
 						UnrealBuildTool.GetUProjectPath(), 
 						BuildConfiguration.PlatformIntermediateFolder,
-						Path.GetFileNameWithoutExtension(UnrealBuildTool.GetUProjectFile()),
+						UnrealBuildTool.GetUProjectFile().GetFileNameWithoutExtension(),
 						LinkEnvironment.Config.Target.Configuration.ToString(),
 						Path.GetFileName(OutputFile.AbsolutePath) + ".response");
 				}
 			}
-			// Convert the relative path to an absolute path
-			ResponseFileName = Path.GetFullPath( ResponseFileName );
-
 			return ResponseFileName;
 		}
 
@@ -172,8 +171,18 @@ namespace UnrealBuildTool
 		{
 		}
 
-		public virtual void AddFilesToReceipt(TargetReceipt Receipt, UEBuildBinary Binary)
+		public virtual void ModifyBuildProducts(UEBuildBinary Binary, Dictionary<FileReference, BuildProductType> BuildProducts)
 		{
+		}
+
+		/// <summary>
+		/// Adds a build product and its associated debug file to a receipt.
+		/// </summary>
+		/// <param name="OutputFile">Build product to add</param>
+		/// <param name="DebugExtension">Extension for the matching debug file (may be null).</param>
+		public virtual bool ShouldAddDebugFileToReceipt(FileReference OutputFile, BuildProductType OutputType)
+		{
+			return true;
 		}
 
 		protected void AddPrerequisiteSourceFile( UEBuildTarget Target, IUEBuildPlatform BuildPlatform, CPPEnvironment CompileEnvironment, FileItem SourceFile, List<FileItem> PrerequisiteItems )

@@ -20,6 +20,9 @@ ABrush::FOnBrushRegistered ABrush::OnBrushRegistered;
 
 /** An array to keep track of all the levels that need rebuilding. This is checked via NeedsRebuild() in the editor tick and triggers a csg rebuild. */
 TArray< TWeakObjectPtr< ULevel > > ABrush::LevelsToRebuild;
+
+/** Whether BSP regeneration should be suppressed or not */
+bool ABrush::bSuppressBSPRegeneration = false;
 #endif
 
 ABrush::ABrush(const FObjectInitializer& ObjectInitializer)
@@ -52,6 +55,18 @@ void ABrush::PostEditMove(bool bFinished)
 	Super::PostEditMove(bFinished);
 }
 
+void ABrush::PostEditChangeChainProperty(FPropertyChangedChainEvent& PropertyChangedEvent)
+{
+	// Prior to reregistering the BrushComponent (done in the Super), request an update to the Body Setup to take into account any change
+	// in the mirroring of the Actor. This will actually be updated when the component is reregistered.
+	if (BrushComponent && PropertyChangedEvent.Property && PropertyChangedEvent.Property->GetName() == TEXT("RelativeScale3D"))
+	{
+		BrushComponent->RequestUpdateBrushCollision();
+	}
+
+	Super::PostEditChangeChainProperty(PropertyChangedEvent);
+}
+
 void ABrush::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 {
 	if(Brush)
@@ -59,11 +74,10 @@ void ABrush::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 		Brush->BuildBound();
 	}
 
-	if(IsStaticBrush() && PropertyChangedEvent.ChangeType != EPropertyChangeType::Interactive && GUndo)
+	if(!bSuppressBSPRegeneration && IsStaticBrush() && PropertyChangedEvent.ChangeType != EPropertyChangeType::Interactive && GUndo)
 	{
 		// BSP can only be rebuilt during a transaction
 		GEditor->RebuildAlteredBSP();
-
 	}
 
 	bool bIsBuilderBrush = FActorEditorUtils::IsABuilderBrush( this );

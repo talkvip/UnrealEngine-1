@@ -129,6 +129,11 @@ public:
 	 * Sets a delegate to call when the property value changes
 	 */
 	void SetOnPropertyValueChanged( const FSimpleDelegate& InOnPropertyValueChanged );
+	
+	/**
+	 * Sets a delegate to call when the propery value of a child changes
+	 */
+	void SetOnChildPropertyValueChanged( const FSimpleDelegate& InOnChildPropertyValueChanged );
 
 	/**
 	 * Sets a delegate to call when children of the property node must be rebuilt
@@ -283,7 +288,7 @@ public:
 	/**
 	 * @return true if the property node is valid
 	 */
-	bool HasValidProperty() const;
+	bool HasValidPropertyNode() const;
 
 	/**
 	 * @return The display name of the property
@@ -316,8 +321,6 @@ protected:
 	/** Property node used to access UProperty and address of object to change */
 	TWeakPtr<FPropertyNode> PropertyNode;
 	TWeakPtr<IPropertyUtilities> PropertyUtilities;
-	/** This delegate is executed when the property value changed.  The property node is registed with this callback and we store it so we can remove it later */
-	FSimpleDelegate PropertyValueChangedDelegate;
 	/** Notify hook to call when properties change */
 	FNotifyHook* NotifyHook;
 	/** Set true if a change was made with bFinished=false */
@@ -372,6 +375,7 @@ public:
 	virtual TSharedRef<SWidget> CreatePropertyValueWidget( bool bDisplayDefaultPropertyButtons = true ) const override;
 	virtual bool IsEditConst() const override;
 	virtual void SetOnPropertyValueChanged( const FSimpleDelegate& InOnPropertyValueChanged ) override;
+	virtual void SetOnChildPropertyValueChanged( const FSimpleDelegate& InOnPropertyValueChanged ) override;
 	virtual int32 GetIndexInArray() const override;
 	virtual FPropertyAccess::Result GetValueAsFormattedString( FString& OutValue ) const override;
 	virtual FPropertyAccess::Result GetValueAsDisplayString( FString& OutValue ) const override;
@@ -406,6 +410,7 @@ public:
 	virtual FPropertyAccess::Result SetObjectValueFromSelection() override;
 	virtual void NotifyPreChange() override;
 	virtual void NotifyPostChange() override;
+	virtual void NotifyFinishedChangingProperties() override;
 	virtual void AddRestriction( TSharedRef<const FPropertyRestriction> Restriction )override;
 	virtual bool IsRestricted(const FString& Value) const override;
 	virtual bool IsRestricted(const FString& Value, TArray<FText>& OutReasons) const override;

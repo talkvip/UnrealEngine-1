@@ -159,8 +159,8 @@ void UGameplayStatics::SetGlobalTimeDilation(UObject* WorldContextObject, float 
 
 bool UGameplayStatics::SetGamePaused(UObject* WorldContextObject, bool bPaused)
 {
-	UWorld* const World = GEngine->GetWorldFromContextObject( WorldContextObject );
-	APlayerController* const PC = World ? World->GetFirstPlayerController() : nullptr;
+	UGameInstance* const GameInstance = GetGameInstance( WorldContextObject );
+	APlayerController* const PC = GameInstance ? GameInstance->GetFirstLocalPlayerController() : nullptr;
 	return PC ? PC->SetPause(bPaused) : false;
 }
 
@@ -303,7 +303,7 @@ void UGameplayStatics::ApplyDamage(AActor* DamagedActor, float BaseDamage, ACont
 	}
 }
 
-bool UGameplayStatics::CanSpawnObjectOfClass(TSubclassOf<UObject> ObjectClass)
+bool UGameplayStatics::CanSpawnObjectOfClass(TSubclassOf<UObject> ObjectClass, bool bAllowAbstract)
 {
 	bool bBlueprintType = true;
 #if WITH_EDITOR
@@ -347,7 +347,8 @@ bool UGameplayStatics::CanSpawnObjectOfClass(TSubclassOf<UObject> ObjectClass)
 	return (nullptr != *ObjectClass)
 		&& bBlueprintType
 		&& !bForbiddenSpawn
-		&& !ObjectClass->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated | CLASS_NewerVersionExists)
+		&& (bAllowAbstract || !ObjectClass->HasAnyClassFlags(CLASS_Abstract))
+		&& !ObjectClass->HasAnyClassFlags(CLASS_Deprecated | CLASS_NewerVersionExists)
 		&& !ObjectClass->IsChildOf(AActor::StaticClass())
 		&& !ObjectClass->IsChildOf(UActorComponent::StaticClass());
 }
@@ -760,6 +761,26 @@ bool UGameplayStatics::AreAnyListenersWithinRange(UObject* WorldContextObject, F
 
 	return false;
 }
+
+void UGameplayStatics::SetGlobalPitchModulation(UObject* WorldContextObject, float PitchModulation, float TimeSec)
+{
+	if (!GEngine || !GEngine->UseSound())
+	{
+		return;
+	}
+
+	UWorld* ThisWorld = GEngine->GetWorldFromContextObject(WorldContextObject);
+	if (!ThisWorld || !ThisWorld->bAllowAudioPlayback || ThisWorld->GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+
+	if (FAudioDevice* AudioDevice = ThisWorld->GetAudioDevice())
+	{
+		AudioDevice->GlobalPitchScale.Set(PitchModulation, TimeSec);
+	}
+}
+
 
 void UGameplayStatics::PlaySound2D(UObject* WorldContextObject, class USoundBase* Sound, float VolumeMultiplier, float PitchMultiplier, float StartTime)
 {
@@ -1241,7 +1262,7 @@ bool UGameplayStatics::SaveGameToSlot(USaveGame* SaveGameObject, const FString& 
 		// Write out engine and UE4 version information
 		int32 PackageFileUE4Version = GPackageFileUE4Version;
 		MemoryWriter << PackageFileUE4Version;
-		FEngineVersion SavedEngineVersion = GEngineVersion;
+		FEngineVersion SavedEngineVersion = FEngineVersion::Current();
 		MemoryWriter << SavedEngineVersion;
 
 		// Write the class name so we know what class to load to
@@ -1312,7 +1333,7 @@ USaveGame* UGameplayStatics::LoadGameFromSlot(const FString& SlotName, const int
 				// you don't want to delete it, try uncommenting these lines and changing them to use the version 
 				// information from your previous build. Then load and resave your savegame file.
 				//MemoryReader.SetUE4Ver(MyPreviousUE4Version);				// @see GPackageFileUE4Version
-				//MemoryReader.SetEngineVer(MyPreviousEngineVersion);		// @see GEngineVersion
+				//MemoryReader.SetEngineVer(MyPreviousEngineVersion);		// @see FEngineVersion::Current()
 			}
 			else
 			{

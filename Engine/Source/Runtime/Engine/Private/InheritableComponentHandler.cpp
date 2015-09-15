@@ -125,13 +125,13 @@ void UInheritableComponentHandler::ValidateTemplates()
 				}
 				else
 				{
-					UE_LOG(LogBlueprint, Log, TEXT("ValidateTemplates '%s': overriden template is unnecessary - component '%s' from '%s'"),
+					UE_LOG(LogBlueprint, Log, TEXT("ValidateTemplates '%s': overridden template is unnecessary - component '%s' from '%s'"),
 						*GetPathNameSafe(this), *VarName.ToString(), *GetPathNameSafe(ComponentKey.GetComponentOwner()));
 				}
 			}
 			else
 			{
-				UE_LOG(LogBlueprint, Warning, TEXT("ValidateTemplates '%s': overriden template is invalid - component '%s' from '%s'"),
+				UE_LOG(LogBlueprint, Warning, TEXT("ValidateTemplates '%s': overridden template is invalid - component '%s' from '%s'"),
 					*GetPathNameSafe(this), *VarName.ToString(), *GetPathNameSafe(ComponentKey.GetComponentOwner()));
 			}
 		}
@@ -347,11 +347,11 @@ const FComponentOverrideRecord* UInheritableComponentHandler::FindRecord(const F
 
 // FComponentOverrideRecord
 
-FComponentKey::FComponentKey(USCS_Node* SCSNode) : OwnerClass(nullptr)
+FComponentKey::FComponentKey(const USCS_Node* SCSNode) : OwnerClass(nullptr)
 {
 	if (SCSNode)
 	{
-		USimpleConstructionScript* ParentSCS = SCSNode->GetSCS();
+		const USimpleConstructionScript* ParentSCS = SCSNode->GetSCS();
 		OwnerClass      = ParentSCS ? Cast<UBlueprintGeneratedClass>(ParentSCS->GetOwnerClass()) : nullptr;
 		AssociatedGuid  = SCSNode->VariableGuid;
 		SCSVariableName = SCSNode->GetVariableName();

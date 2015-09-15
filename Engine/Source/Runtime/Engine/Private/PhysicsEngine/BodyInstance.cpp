@@ -1672,7 +1672,7 @@ FVector GetInitialLinearVelocity(const AActor* OwningActor, bool& bComponentAwak
 	{
 		InitialLinVel = OwningActor->GetVelocity();
 
-		if (InitialLinVel.Size() > KINDA_SMALL_NUMBER)
+		if (InitialLinVel.SizeSquared() > FMath::Square(KINDA_SMALL_NUMBER))
 		{
 			bComponentAwake = true;
 		}
@@ -2019,8 +2019,9 @@ namespace EScaleMode
 }
 
 //computes the relative scaling vectors based on scale mode used
-void ComputeScalingVectors(EScaleMode::Type ScaleMode, const FVector& NewScale3D, FVector& OutScale3D, FVector& OutScale3DAbs)
+void ComputeScalingVectors(EScaleMode::Type ScaleMode, const FVector& InScale3D, FVector& OutScale3D, FVector& OutScale3DAbs)
 {
+	const FVector NewScale3D = InScale3D.IsNearlyZero() ? FVector(KINDA_SMALL_NUMBER) : InScale3D;	//min scale
 	const FVector NewScale3DAbs = NewScale3D.GetAbs();
 	switch (ScaleMode)
 	{
@@ -2315,7 +2316,7 @@ bool FBodyInstance::UpdateBodyScale(const FVector& InScale3D)
 			}
 			else if (bInvalid)
 			{
-				FMessageLog("PIE").Warning(FText::Format(LOCTEXT("PhysicsInvalidScale", "Scale ''{0}'' is not valid on object '{1}'."), FText::FromString(AdjustedScale3D.ToString()), FText::FromString(GetBodyDebugName())));
+				UE_LOG(LogPhysics, Warning, TEXT("Scale '%s' is not valid on object '%s'."), *AdjustedScale3D.ToString(), *GetBodyDebugName());
 			}
 		}
 	});
@@ -2608,6 +2609,10 @@ void FBodyInstance::SetBodyTransform(const FTransform& NewTransform, ETeleportTy
 				// Otherwise, set global pose
 				else
 				{
+					if (!IsRigidBodyNonKinematic_AssumesLocked(PRigidDynamic))  // check if kinematic  (checks the physx bit for this)
+					{
+						PRigidDynamic->setKinematicTarget(PNewPose);  // physx doesn't clear target on setGlobalPose, so overwrite any previous attempt to set this that wasn't yet resolved
+					}
 					PRigidDynamic->setGlobalPose(PNewPose);
 				}
 			}
@@ -4431,7 +4436,7 @@ void FBodyInstance::ApplyMaterialToShape_AssumesLocked(PxShape* PShape, PxMateri
 		}
 		else
 		{
-			UE_LOG(LogPhysics, Warning, TEXT("FBodyInstance::ApplyMaterialToShape_AssumesLocked : PComplexMats is empty - falling back on simple physical material."));
+			UE_LOG(LogPhysics, Verbose, TEXT("FBodyInstance::ApplyMaterialToShape_AssumesLocked : PComplexMats is empty - falling back on simple physical material."));
 			PShape->setMaterials(&PSimpleMat, 1);
 		}
 

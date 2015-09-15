@@ -35,6 +35,8 @@ DEFINE_STAT(STAT_NumActiveKinematicBodies);
 DEFINE_STAT(STAT_NumMobileBodies);
 DEFINE_STAT(STAT_NumStaticBodies);
 DEFINE_STAT(STAT_NumShapes);
+DEFINE_STAT(STAT_NumCloths);
+DEFINE_STAT(STAT_NumClothVerts);
 
 DEFINE_STAT(STAT_NumBroadphaseAddsAsync);
 DEFINE_STAT(STAT_NumBroadphaseRemovesAsync);
@@ -85,6 +87,12 @@ static TAutoConsoleVariable<int32> CVarAPEXSortDynamicChunksByBenefit(
 	1,
 	TEXT("True if APEX should sort dynamic chunks by benefit."),
 	ECVF_Default);
+
+static TAutoConsoleVariable<int32> CVarUseUnifiedHeightfield(
+	TEXT("p.bUseUnifiedHeightfield"),
+	1,
+	TEXT("Whether to use the PhysX unified heightfield. This feature of PhysX makes landscape collision consistent with triangle meshes but the thickness parameter is not supported for unified heightfields. 1 enables and 0 disables. Default: 1"),
+	ECVF_ReadOnly);
 
 
 
@@ -202,15 +210,12 @@ void UWorld::FinishPhysicsSim()
 	PhysScene->EndFrame(LineBatcher);
 }
 
-void UWorld::StartClothSim()
+void UWorld::StartClothAndAsyncSim()
 {
-	FPhysScene* PhysScene = GetPhysicsScene();
-	if (PhysScene == NULL)
+	if (FPhysScene* PhysScene = GetPhysicsScene())
 	{
-		return;
+		PhysScene->StartAsync();
 	}
-
-	PhysScene->StartCloth();
 }
 
 // the physics tick functions
@@ -273,15 +278,15 @@ FString FEndPhysicsTickFunction::DiagnosticMessage()
 	return TEXT("FEndPhysicsTickFunction");
 }
 
-void FStartClothSimulationFunction::ExecuteTick(float DeltaTime, enum ELevelTick TickType, ENamedThreads::Type CurrentThread, const FGraphEventRef& MyCompletionGraphEvent)
+void FStartClothAndAsyncSimulationFunction::ExecuteTick(float DeltaTime, enum ELevelTick TickType, ENamedThreads::Type CurrentThread, const FGraphEventRef& MyCompletionGraphEvent)
 {
 	QUICK_SCOPE_CYCLE_COUNTER(FStartClothSimulationFunction_ExecuteTick);
 
 	check(Target);
-	Target->StartClothSim();
+	Target->StartClothAndAsyncSim();
 }
 
-FString FStartClothSimulationFunction::DiagnosticMessage()
+FString FStartClothAndAsyncSimulationFunction::DiagnosticMessage()
 {
 	return TEXT("FStartClothSimulationFunction");
 }
@@ -362,10 +367,18 @@ void InitGamePhys()
 	PxInitVehicleSDK(*GPhysXSDK);
 #endif
 
-	//Turn on PhysX 3.3 unified height field collision detection. 
-	//This approach shares the collision detection code between meshes and height fields such that height fields behave identically to the equivalent terrain created as a mesh. 
-	//This approach facilitates mixing the use of height fields and meshes in the application with no tangible difference in collision behavior between the two approaches
-	PxRegisterUnifiedHeightFields(*GPhysXSDK);
+	if (CVarUseUnifiedHeightfield.GetValueOnGameThread())
+	{
+		//Turn on PhysX 3.3 unified height field collision detection. 
+		//This approach shares the collision detection code between meshes and height fields such that height fields behave identically to the equivalent terrain created as a mesh. 
+		//This approach facilitates mixing the use of height fields and meshes in the application with no tangible difference in collision behavior between the two approaches except that 
+		//heightfield thickness is not supported for unified heightfields.
+		PxRegisterUnifiedHeightFields(*GPhysXSDK);
+	}
+	else
+	{
+		PxRegisterHeightFields(*GPhysXSDK);
+	}
 
 	if( FParse::Param( FCommandLine::Get(), TEXT( "PVD" ) ) )
 	{

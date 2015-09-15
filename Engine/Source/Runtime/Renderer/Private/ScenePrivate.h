@@ -42,9 +42,6 @@ bool IsMobileHDR32bpp();
 /** True if the mobile renderer is emulating HDR with mosaic. */
 bool IsMobileHDRMosaic();
 
-/** True if device has some way to fetch depth in a fragment shader. */
-bool DeviceSupportsShaderDepthFetch();
-
 class FOcclusionQueryHelpers
 {
 public:
@@ -163,6 +160,20 @@ public:
 		PendingOcclusionQuery.AddZeroed(FOcclusionQueryHelpers::MaxBufferedOcclusionFrames);
 	}
 
+	FORCEINLINE FPrimitiveOcclusionHistory()
+		: HZBTestIndex(0)
+		, HZBTestFrameNumber(~0u)
+		, LastVisibleTime(0.0f)
+		, LastConsideredTime(0.0f)
+		, LastPixelsPercentage(0.0f)
+		, bGroupedQuery(false)
+		, CustomIndex(0)
+	{
+		PendingOcclusionQuery.Empty(FOcclusionQueryHelpers::MaxBufferedOcclusionFrames);
+		PendingOcclusionQuery.AddZeroed(FOcclusionQueryHelpers::MaxBufferedOcclusionFrames);
+	}
+
+
 	/** Destructor. Note that the query should have been released already. */
 	~FPrimitiveOcclusionHistory()
 	{
@@ -174,7 +185,7 @@ public:
 	{
 		for (int32 QueryIndex = 0; QueryIndex < NumBufferedFrames; QueryIndex++)
 		{
-			Pool.ReleaseQuery(RHICmdList, PendingOcclusionQuery[QueryIndex]);
+			Pool.ReleaseQuery(PendingOcclusionQuery[QueryIndex]);
 		}
 	}
 
@@ -248,7 +259,7 @@ public:
 	FRenderQueryRHIRef AllocateQuery();
 
 	/** De-reference an render query, returning it to the pool instead of deleting it when the refcount reaches 0. */
-	void ReleaseQuery(FRHICommandListImmediate& RHICmdList, FRenderQueryRHIRef &Query);
+	void ReleaseQuery(FRenderQueryRHIRef &Query);
 
 private:
 	/** Container for available render queries. */
@@ -529,9 +540,10 @@ public:
 	FGlobalDistanceFieldClipmapState GlobalDistanceFieldClipmapState[GMaxGlobalDistanceFieldClipmaps];
 	int32 GlobalDistanceFieldUpdateIndex;
 
-	// Is DOFHistoryRT set from Bokeh DOF?
-	bool bBokehDOFHistory;
-	bool bBokehDOFHistory2;
+	// Is DOFHistoryRT set from DepthOfField?
+	bool bDOFHistory;
+	// Is DOFHistoryRT2 set from DepthOfField?
+	bool bDOFHistory2;
 
 	FTemporalLODState TemporalLODState;
 
@@ -767,45 +779,58 @@ public:
 	}
 
 	// Note: OnStartPostProcessing() needs to be called each frame for each view
-	virtual UMaterialInstanceDynamic* GetReusableMID(class UMaterialInterface* InParentMaterial) override
+	virtual UMaterialInstanceDynamic* GetReusableMID(class UMaterialInterface* InSource) override
 	{		
 		check(IsInGameThread());
-		check(InParentMaterial);
+		check(InSource);
 
-		auto ParentAsMaterialInstance = Cast<UMaterialInstanceDynamic>(InParentMaterial);
+		// 0 or MID (MaterialInstanceDynamic) pointer
+		auto InputAsMID = Cast<UMaterialInstanceDynamic>(InSource);
 
 		// fixup MID parents as this is not allowed, take the next MIC or Material.
-		UMaterialInterface* ParentMaterial = ParentAsMaterialInstance ? ParentAsMaterialInstance->Parent : InParentMaterial;
+		UMaterialInterface* ParentOfTheNewMID = InputAsMID ? InputAsMID->Parent : InSource;
 
 		// this is not allowed and would cause an error later in the code
-		check(!ParentMaterial->IsA(UMaterialInstanceDynamic::StaticClass()));
+		check(!ParentOfTheNewMID->IsA(UMaterialInstanceDynamic::StaticClass()));
+
+		UMaterialInstanceDynamic* NewMID = 0;
 
 		if(MIDUsedCount < (uint32)MIDPool.Num())
 		{
-			UMaterialInstanceDynamic* MID = MIDPool[MIDUsedCount];
+			NewMID = MIDPool[MIDUsedCount];
 
-			if(MID->Parent != ParentMaterial)
+			if(NewMID->Parent != ParentOfTheNewMID)
 			{
 				// create a new one
 				// garbage collector will remove the old one
 				// this should not happen too often
-				MID = UMaterialInstanceDynamic::Create(ParentMaterial, 0);
-				MIDPool[MIDUsedCount] = MID;
+				NewMID = UMaterialInstanceDynamic::Create(ParentOfTheNewMID, 0);
+				MIDPool[MIDUsedCount] = NewMID;
 			}
+
+			// reusing an existing object means we need to clear out the Vector and Scalar parameters
+			NewMID->ClearParameterValues();
 		}
 		else
 		{
-			UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(ParentMaterial, 0);
-			check(MID);
+			NewMID = UMaterialInstanceDynamic::Create(ParentOfTheNewMID, 0);
+			check(NewMID);
 
-			MIDPool.Add(MID);
+			MIDPool.Add(NewMID);
 		}
 
-		UMaterialInstanceDynamic* Ret = MIDPool[MIDUsedCount++];
+		if(InputAsMID)
+		{
+			auto ParentAsMI = Cast<UMaterialInstance>(InputAsMID->Parent);
+			if(ParentAsMI)
+			{
+				// parent is an MID so we need to copy the MID Vector and Scalar parameters over
+				NewMID->CopyInterpParameters(ParentAsMI);
+			}
+		}
 
-		check(Ret->GetRenderProxy(false));
-
-		return Ret;
+		check(NewMID->GetRenderProxy(false));
+		return NewMID;
 	}
 
 	virtual FTemporalLODState& GetTemporalLODState() override
@@ -1116,13 +1141,36 @@ public:
 	FIndirectLightingCacheAllocation* Allocation;
 };
 
+/** Information about the primitives that are attached together. */
+class FAttachmentGroupSceneInfo
+{
+public:
+
+	/** The parent primitive, which is the root of the attachment tree. */
+	FPrimitiveSceneInfo* ParentSceneInfo;
+
+	/** The primitives in the attachment group. */
+	TArray<FPrimitiveSceneInfo*> Primitives;
+
+	FAttachmentGroupSceneInfo() :
+		ParentSceneInfo(nullptr)
+	{}
+};
+
+struct FILCUpdatePrimTaskData
+{
+	FGraphEventRef TaskRef;
+	TMap<FIntVector, FBlockUpdateInfo> OutBlocksToUpdate;
+	TArray<FIndirectLightingCacheAllocation*> OutTransitionsOverTimeToUpdate;
+};
+
 /** 
  * Implements a volume texture atlas for caching indirect lighting on a per-object basis.
  * The indirect lighting is interpolated from Lightmass SH volume lighting samples.
  */
 class FIndirectLightingCache : public FRenderResource
 {
-public:
+public:	
 
 	/** true for the editor case where we want a better preview for object that have no valid lightmaps */
 	FIndirectLightingCache(ERHIFeatureLevel::Type InFeatureLevel);
@@ -1137,10 +1185,16 @@ public:
 	/** Releases the indirect lighting allocation for the given primitive. */
 	void ReleasePrimitive(FPrimitiveComponentId PrimitiveId);
 
-	FIndirectLightingCacheAllocation* FindPrimitiveAllocation(FPrimitiveComponentId PrimitiveId);
+	FIndirectLightingCacheAllocation* FindPrimitiveAllocation(FPrimitiveComponentId PrimitiveId);	
 
-	/** Updates indirect lighting in the cache based on visibility. */
+	/** Updates indirect lighting in the cache based on visibility syncronously. */
 	void UpdateCache(FScene* Scene, FSceneRenderer& Renderer, bool bAllowUnbuiltPreview);
+
+	/** Starts a task to update the cache primitives.  Results and task ref returned in the FILCUpdatePrimTaskData structure */
+	void StartUpdateCachePrimitivesTask(FScene* Scene, FSceneRenderer& Renderer, bool bAllowUnbuiltPreview, FILCUpdatePrimTaskData& OutTaskData);
+
+	/** Wait on a previously started task and complete any block updates and debug draw */
+	void FinalizeCacheUpdates(FScene* Scene, FSceneRenderer& Renderer, FILCUpdatePrimTaskData& TaskData);
 
 	/** Force all primitive allocations to be re-interpolated. */
 	void SetLightingCacheDirty();
@@ -1151,6 +1205,14 @@ public:
 	FSceneRenderTargetItem& GetTexture2() { return Texture2->GetRenderTargetItem(); }
 
 private:
+	/** Internal helper to determine if indirect lighting is enabled at all */
+	bool IndirectLightingAllowed(FScene* Scene, FSceneRenderer& Renderer) const;
+
+	/** Internal helper to perform the work of updating the cache primitives.  Can be done on any thread as a task */
+	void UpdateCachePrimitivesInternal(FScene* Scene, FSceneRenderer& Renderer, bool bAllowUnbuiltPreview, TMap<FIntVector, FBlockUpdateInfo>& OutBlocksToUpdate, TArray<FIndirectLightingCacheAllocation*>& OutTransitionsOverTimeToUpdate);
+
+	/** Internal helper to perform blockupdates and transition updates on the results of UpdateCachePrimitivesInternal.  Must be on render thread. */
+	void FinalizeUpdateInternal_RenderThread(FScene* Scene, FSceneRenderer& Renderer, TMap<FIntVector, FBlockUpdateInfo>& BlocksToUpdate, const TArray<FIndirectLightingCacheAllocation*>& TransitionsOverTimeToUpdate);
 
 	/** Internal helper which adds an entry to the update lists for this allocation, if needed (due to movement, etc). */
 	void UpdateCacheAllocation(
@@ -1160,19 +1222,19 @@ private:
 		bool bUnbuiltPreview,
 		FIndirectLightingCacheAllocation*& Allocation, 
 		TMap<FIntVector, FBlockUpdateInfo>& BlocksToUpdate,
-		TArray<FIndirectLightingCacheAllocation*>& TransitionsOverTimeToUpdate);
+		TArray<FIndirectLightingCacheAllocation*>& TransitionsOverTimeToUpdate);	
 
 	/** 
 	 * Creates a new allocation if needed, caches the result in PrimitiveSceneInfo->IndirectLightingCacheAllocation, 
 	 * And adds an entry to the update lists when an update is needed. 
 	 */
 	void UpdateCachePrimitive(
-		FScene* Scene, 
+		const TMap<FPrimitiveComponentId, FAttachmentGroupSceneInfo>& AttachmentGroups,
 		FPrimitiveSceneInfo* PrimitiveSceneInfo,
 		bool bAllowUnbuiltPreview, 
 		bool bOpaqueRelevance, 
 		TMap<FIntVector, FBlockUpdateInfo>& BlocksToUpdate, 
-		TArray<FIndirectLightingCacheAllocation*>& TransitionsOverTimeToUpdate);
+		TArray<FIndirectLightingCacheAllocation*>& TransitionsOverTimeToUpdate);	
 
 	/** Updates the contents of the volume texture blocks in BlocksToUpdate. */
 	void UpdateBlocks(FScene* Scene, FViewInfo* DebugDrawingView, TMap<FIntVector, FBlockUpdateInfo>& BlocksToUpdate);
@@ -1181,7 +1243,7 @@ private:
 	void UpdateTransitionsOverTime(const TArray<FIndirectLightingCacheAllocation*>& TransitionsOverTimeToUpdate, float DeltaWorldTime) const;
 
 	/** Creates an allocation to be used outside the indirect lighting cache and a block to be used internally. */
-	FIndirectLightingCacheAllocation* CreateAllocation(int32 BlockSize, const FBoxSphereBounds& Bounds, bool bPointSample, bool bUnbuiltPreview);
+	FIndirectLightingCacheAllocation* CreateAllocation(int32 BlockSize, const FBoxSphereBounds& Bounds, bool bPointSample, bool bUnbuiltPreview);	
 
 	/** Block accessors. */
 	FIndirectLightingCacheBlock& FindBlock(FIntVector TexelMin);
@@ -1256,6 +1318,8 @@ private:
 
 	/** Tracks primitive allocations by component, so that they persist across re-registers. */
 	TMap<FPrimitiveComponentId, FIndirectLightingCacheAllocation*> PrimitiveAllocations;
+
+	friend class FUpdateCachePrimitivesTask;
 };
 
 /**
@@ -1306,22 +1370,6 @@ namespace EOcclusionFlags
 	};
 };
 
-/** Information about the primitives that are attached together. */
-class FAttachmentGroupSceneInfo
-{
-public:
-
-	/** The parent primitive, which is the root of the attachment tree. */
-	FPrimitiveSceneInfo* ParentSceneInfo;
-
-	/** The primitives in the attachment group. */
-	TArray<FPrimitiveSceneInfo*> Primitives;
-
-	FAttachmentGroupSceneInfo() :
-		ParentSceneInfo(nullptr)
-	{}
-};
-
 class FLODSceneTree
 {
 public:
@@ -1370,7 +1418,7 @@ public:
 	void UpdateNodeSceneInfo(FPrimitiveComponentId NodeId, FPrimitiveSceneInfo* SceneInfo);
 	void PopulateHiddenFlags(FViewInfo& View, FSceneBitArray& HiddenFlags);
 
-	bool IsActive() { return SceneNodes.Num() > 0; }
+	bool IsActive() { return (SceneNodes.Num() > 0) && (IConsoleManager::Get().FindConsoleVariable(TEXT("r.HLODEnabled"))->GetInt() == 1); }
 
 private:
 	/** Scene this Tree belong to */

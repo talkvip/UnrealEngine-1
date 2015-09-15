@@ -340,6 +340,9 @@ class GAMEPLAYABILITIES_API UAbilitySystemComponent : public UGameplayTasksCompo
 	/** Returns current stack count of an already applied GE, but given the ability spec handle that was granted by the GE */
 	int32 GetCurrentStackCount(FGameplayAbilitySpecHandle Handle) const;
 
+	/** Returns debug string describing active gameplay effect */
+	FString GetActiveGEDebugString(FActiveGameplayEffectHandle Handle) const;
+
 	/** Gets the GE Handle of the GE that granted the passed in Ability */
 	FActiveGameplayEffectHandle FindActiveGameplayEffectHandle(FGameplayAbilitySpecHandle Handle) const;
 
@@ -382,11 +385,19 @@ class GAMEPLAYABILITIES_API UAbilitySystemComponent : public UGameplayTasksCompo
 
 	void OnGameplayEffectAppliedToSelf(UAbilitySystemComponent* Source, const FGameplayEffectSpec& SpecApplied, FActiveGameplayEffectHandle ActiveHandle);
 
+	void OnPeriodicGameplayEffectExecuteOnTarget(UAbilitySystemComponent* Target, const FGameplayEffectSpec& SpecExecuted, FActiveGameplayEffectHandle ActiveHandle);
+
+	void OnPeriodicGameplayEffectExecuteOnSelf(UAbilitySystemComponent* Source, const FGameplayEffectSpec& SpecExecuted, FActiveGameplayEffectHandle ActiveHandle);
+
 	DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnGameplayEffectAppliedDelegate, UAbilitySystemComponent*, const FGameplayEffectSpec&, FActiveGameplayEffectHandle);
 
 	FOnGameplayEffectAppliedDelegate OnGameplayEffectAppliedDelegateToSelf;
 
 	FOnGameplayEffectAppliedDelegate OnGameplayEffectAppliedDelegateToTarget;
+
+	FOnGameplayEffectAppliedDelegate OnPeriodicGameplayEffectExecuteDelegateOnSelf;
+
+	FOnGameplayEffectAppliedDelegate OnPeriodicGameplayEffectExecuteDelegateOnTarget;
 
 	// --------------------------------------------
 	// Tags
@@ -447,6 +458,8 @@ class GAMEPLAYABILITIES_API UAbilitySystemComponent : public UGameplayTasksCompo
 	FOnActiveGameplayEffectRemoved* OnGameplayEffectRemovedDelegate(FActiveGameplayEffectHandle Handle);
 	FOnActiveGameplayEffectRemoved& OnAnyGameplayEffectRemovedDelegate();
 
+	FOnActiveGameplayEffectStackChange* OnGameplayEffectStackChangeDelegate(FActiveGameplayEffectHandle Handle);
+
 	UFUNCTION(BlueprintCallable, Category = GameplayEffects, meta=(DisplayName = "ApplyGameplayEffectToTarget"))
 	FActiveGameplayEffectHandle BP_ApplyGameplayEffectToTarget(TSubclassOf<UGameplayEffect> GameplayEffectClass, UAbilitySystemComponent *Target, float Level, FGameplayEffectContextHandle Context);
 
@@ -494,13 +507,22 @@ class GAMEPLAYABILITIES_API UAbilitySystemComponent : public UGameplayTasksCompo
 
 	void ModifyActiveEffectStartTime(FActiveGameplayEffectHandle Handle, float StartTimeDiff);
 
+	/** Removes all active effects that contain any of the tags in Tags */
 	UFUNCTION(BlueprintCallable, Category = GameplayEffects)
 	void RemoveActiveEffectsWithTags(FGameplayTagContainer Tags);
+
+	/** Removes all active effects with captured source tags that contain any of the tags in Tags */
+	UFUNCTION(BlueprintCallable, Category = GameplayEffects)
+	void RemoveActiveEffectsWithSourceTags(FGameplayTagContainer Tags);
+
+	/** Removes all active effects that apply any of the tags in Tags */
+	UFUNCTION(BlueprintCallable, Category = GameplayEffects)
+	void RemoveActiveEffectsWithAppliedTags(FGameplayTagContainer Tags);
 
 	/** Removes all active effects that match given query. StacksToRemove=-1 will remove all stacks. */
 	DEPRECATED(4.9, "FActiveGameplayEffectQuery is deprecated, use version that takes FGameplayEffectQuery")
 	void RemoveActiveEffects(const FActiveGameplayEffectQuery Query, int32 StacksToRemove=-1);
-	void RemoveActiveEffects(const FGameplayEffectQuery Query, int32 StacksToRemove = -1);
+	void RemoveActiveEffects(const FGameplayEffectQuery& Query, int32 StacksToRemove = -1);
 
 	void OnRestackGameplayEffects();	
 	
@@ -637,6 +659,9 @@ class GAMEPLAYABILITIES_API UAbilitySystemComponent : public UGameplayTasksCompo
 	/** Cancels all abilities regardless of tags. Will not cancel the ignore instance */
 	void CancelAllAbilities(UGameplayAbility* Ignore=nullptr);
 
+	/** Cancels all abilities and kills any remaining instanced abilities */
+	virtual void DestroyActiveState();
+
 	// ----------------------------------------------------------------------------------------------------------------
 	/** 
 	 * Called from ability activation or native code, will apply the correct ability blocking tags and cancel existing abilities. Subclasses can override the behavior 
@@ -677,6 +702,9 @@ class GAMEPLAYABILITIES_API UAbilitySystemComponent : public UGameplayTasksCompo
 
 	/** Returns an ability spec from a handle. If modifying call MarkAbilitySpecDirty */
 	FGameplayAbilitySpec* FindAbilitySpecFromInputID(int32 InputID);
+
+	/** Retrieves the EffectContext of the GameplayEffect of the active GameplayEffect. */
+	FGameplayEffectContextHandle GetEffectContextFromActiveGEHandle(FActiveGameplayEffectHandle Handle);
 
 	/** Call to mark that an ability spec has been modified */
 	void MarkAbilitySpecDirty(FGameplayAbilitySpec& Spec);
@@ -828,6 +856,9 @@ public:
 
 	/** Executes a gameplay event. Returns the number of successful ability activations triggered by the event */
 	virtual int32 HandleGameplayEvent(FGameplayTag EventTag, const FGameplayEventData* Payload);
+
+	/** Generic callbacks for gameplay events. See UAbilityTask_WaitGameplayEvent */
+	TMap<FGameplayTag, FGameplayEventMulticastDelegate> GenericGameplayEventCallbacks;
 
 	virtual void NotifyAbilityCommit(UGameplayAbility* Ability);
 	virtual void NotifyAbilityActivated(const FGameplayAbilitySpecHandle Handle, UGameplayAbility* Ability);
@@ -1108,6 +1139,7 @@ protected:
 	// ---------------------------------------------
 
 	virtual void OnRegister() override;
+	virtual void OnUnregister() override;
 
 	const UAttributeSet*	GetAttributeSubobject(const TSubclassOf<UAttributeSet> AttributeClass) const;
 	const UAttributeSet*	GetAttributeSubobjectChecked(const TSubclassOf<UAttributeSet> AttributeClass) const;

@@ -19,10 +19,6 @@ typedef uint16 FBoneIndexType;
 
 #include "ReferenceSkeleton.h"
 
-// Define that controls showing chart of distance factors for skel meshes during entire run of the game on exit.
-#define CHART_DISTANCE_FACTORS 0
-
-
 class FRawStaticIndexBuffer16or32Interface;
 class FPrimitiveDrawInterface;
 
@@ -1746,7 +1742,7 @@ public:
 	virtual HHitProxy* CreateHitProxies(UPrimitiveComponent* Component, TArray<TRefCountPtr<HHitProxy> >& OutHitProxies) override;
 #endif
 	virtual void GetDynamicMeshElements(const TArray<const FSceneView*>& Views, const FSceneViewFamily& ViewFamily, uint32 VisibilityMap, FMeshElementCollector& Collector) const override;
-	virtual FPrimitiveViewRelevance GetViewRelevance(const FSceneView* View) override;
+	virtual FPrimitiveViewRelevance GetViewRelevance(const FSceneView* View) const override;
 	virtual bool CanBeOccluded() const override;
 	
 	/**

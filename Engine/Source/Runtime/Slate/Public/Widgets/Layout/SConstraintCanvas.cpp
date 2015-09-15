@@ -12,6 +12,8 @@
 SConstraintCanvas::SConstraintCanvas()
 : Children()
 {
+	bCanTick = false;
+	bCanSupportFocus = false;
 }
 
 void SConstraintCanvas::Construct( const SConstraintCanvas::FArguments& InArgs )
@@ -23,13 +25,19 @@ void SConstraintCanvas::Construct( const SConstraintCanvas::FArguments& InArgs )
 	}
 }
 
-void SConstraintCanvas::ClearChildren( )
+void SConstraintCanvas::ClearChildren()
 {
-	Children.Empty();
+	if ( Children.Num() )
+	{
+		Invalidate(EInvalidateWidget::Layout);
+		Children.Empty();
+	}
 }
 
 int32 SConstraintCanvas::RemoveSlot( const TSharedRef<SWidget>& SlotWidget )
 {
+	Invalidate(EInvalidateWidget::Layout);
+
 	for (int32 SlotIdx = 0; SlotIdx < Children.Num(); ++SlotIdx)
 	{
 		if (SlotWidget == Children[SlotIdx].GetWidget())
@@ -66,7 +74,9 @@ void SConstraintCanvas::OnArrangeChildren( const FGeometry& AllottedGeometry, FA
 	if (Children.Num() > 0)
 	{
 		// Sort the children based on zorder.
-		TArray< FChildZOrder > SlotOrder;
+		TArray< FChildZOrder, TInlineAllocator<64> > SlotOrder;
+		SlotOrder.Reserve(Children.Num());
+
 		for ( int32 ChildIndex = 0; ChildIndex < Children.Num(); ++ChildIndex )
 		{
 			const SConstraintCanvas::FSlot& CurChild = Children[ChildIndex];
@@ -155,6 +165,8 @@ void SConstraintCanvas::OnArrangeChildren( const FGeometry& AllottedGeometry, FA
 
 int32 SConstraintCanvas::OnPaint( const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyClippingRect, FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled ) const
 {
+	//FPlatformMisc::BeginNamedEvent(FColor::Orange, "SConstraintCanvas");
+
 	FArrangedChildren ArrangedChildren(EVisibility::Visible);
 	ArrangeChildren(AllottedGeometry, ArrangedChildren);
 
@@ -177,6 +189,8 @@ int32 SConstraintCanvas::OnPaint( const FPaintArgs& Args, const FGeometry& Allot
 		}
 	}
 
+	//FPlatformMisc::EndNamedEvent();
+
 	return MaxLayerId;
 }
 
@@ -189,9 +203,10 @@ FVector2D SConstraintCanvas::ComputeDesiredSize( float ) const
 	{
 		const SConstraintCanvas::FSlot& CurChild = Children[ChildIndex];
 		const TSharedRef<SWidget>& Widget = CurChild.GetWidget();
+		const EVisibility ChildVisibilty = Widget->GetVisibility();
 
 		// As long as the widgets are not collapsed, they should contribute to the desired size.
-		if ( Widget->GetVisibility() != EVisibility::Collapsed )
+		if ( ChildVisibilty != EVisibility::Collapsed )
 		{
 			const FMargin Offset = CurChild.OffsetAttr.Get();
 			const FVector2D Alignment = CurChild.AlignmentAttr.Get();

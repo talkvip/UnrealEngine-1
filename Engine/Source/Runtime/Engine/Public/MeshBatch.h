@@ -71,16 +71,20 @@ struct FMeshBatch
 	/** LOD index of the mesh, used for fading LOD transitions. */
 	int8 LODIndex;
 
+	/** Conceptual LOD index used for the LOD Coloration visualization. */
+	int8 VisualizeLODIndex;
+
 	uint32 UseDynamicData : 1;
 	uint32 ReverseCulling : 1;
 	uint32 bDisableBackfaceCulling : 1;
-	uint32 CastShadow : 1;
+	uint32 CastShadow : 1;				// Wheter it can be used in shadow renderpasses.
+	uint32 bUseForMaterial : 1;	// Whether it can be used in renderpasses requiring material outputs.
+	uint32 bUseAsOccluder : 1;			// Whether it can be used in renderpasses only depending on the raw geometry (i.e. Depth Prepass).
 	uint32 bWireframe : 1;
 	// e.g. PT_TriangleList(default), PT_LineList, ..
 	uint32 Type : PT_NumBits;
 	// e.g. SDPG_World (default), SDPG_Foreground
 	uint32 DepthPriorityGroup : SDPG_NumBits;
-	uint32 bUseAsOccluder : 1;
 
 	/** Whether view mode overrides can be applied to this mesh eg unlit, wireframe. */
 	uint32 bCanApplyViewModeOverrides : 1;
@@ -194,14 +198,16 @@ struct FMeshBatch
 	FMeshBatch()
 	:	DynamicVertexStride(0)
 	,	LODIndex(INDEX_NONE)
+	,	VisualizeLODIndex(INDEX_NONE)
 	,	UseDynamicData(false)
 	,	ReverseCulling(false)
 	,	bDisableBackfaceCulling(false)
 	,	CastShadow(true)
+	,   bUseForMaterial(true)
+	,	bUseAsOccluder(true)
 	,	bWireframe(false)
 	,	Type(PT_TriangleList)
 	,	DepthPriorityGroup(SDPG_World)
-	,	bUseAsOccluder(true)
 	,	bCanApplyViewModeOverrides(false)
 	,	bUseWireframeSelectionColoring(false)
 	,	bUseSelectionOutline(true)

@@ -143,6 +143,7 @@ public:
 	virtual void PostLoad() override;
 	virtual void PostEditMove(bool bFinished) override;
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
+	virtual void PostEditChangeChainProperty(FPropertyChangedChainEvent& PropertyChangedEvent) override;
 #endif // WITH_EDITOR
 
 	virtual bool Modify(bool bAlwaysMarkDirty = false) override;
@@ -173,6 +174,8 @@ public:
 	virtual void InitPosRotScale();
 	virtual void CopyPosRotScaleFrom( ABrush* Other );
 
+	static void SetSuppressBSPRegeneration(bool bSuppress) { bSuppressBSPRegeneration = bSuppress; }
+
 private:
 
 	/** An array to keep track of all the levels that need rebuilding. This is checked via NeedsRebuild() in the editor tick and triggers a csg rebuild. */
@@ -180,6 +183,9 @@ private:
 
 	/** Delegate called when PostRegisterAllComponents is called for a Brush */
 	static FOnBrushRegistered OnBrushRegistered;
+
+	/** Global bool to suppress automatic BSP regeneration */
+	static bool bSuppressBSPRegeneration;
 
 public:
 

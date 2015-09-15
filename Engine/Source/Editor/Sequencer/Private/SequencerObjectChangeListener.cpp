@@ -24,13 +24,31 @@ FSequencerObjectChangeListener::~FSequencerObjectChangeListener()
 	GEditor->OnActorMoved().RemoveAll( this );
 }
 
-void FSequencerObjectChangeListener::OnPropertyChanged(const TArray<UObject*>& ChangedObjects, const IPropertyHandle& PropertyHandle, bool bRequireAutoKey) const
+void FSequencerObjectChangeListener::OnPropertyChanged(const TArray<UObject*>& ChangedObjects, const IPropertyHandle& PropertyHandle) const
 {
-	BroadcastPropertyChanged(FKeyPropertyParams(ChangedObjects, PropertyHandle), bRequireAutoKey);
+	BroadcastPropertyChanged(FKeyPropertyParams(ChangedObjects, PropertyHandle));
 }
 
-void FSequencerObjectChangeListener::BroadcastPropertyChanged( FKeyPropertyParams KeyPropertyParams, bool bRequireAutoKey ) const
+void FSequencerObjectChangeListener::BroadcastPropertyChanged( FKeyPropertyParams KeyPropertyParams ) const
 {
+	// Filter out objects that actually have the property path that will be keyable. 
+	// Otherwise, this might try to key objects that don't have the requested property.
+	// For example, a property changed for the FieldOfView property will be sent for 
+	// both the CameraActor and the CameraComponent.
+	TArray<UObject*> KeyableObjects;
+	for (auto ObjectToKey : KeyPropertyParams.ObjectsToKey)
+	{
+		if (CanKeyProperty(FCanKeyPropertyParams(ObjectToKey->GetClass(), KeyPropertyParams.PropertyPath)))
+		{
+			KeyableObjects.Add(ObjectToKey);
+		}
+	}
+
+	if (!KeyableObjects.Num())
+	{
+		return;
+	}
+
 	const UStructProperty* StructProperty = Cast<const UStructProperty>(KeyPropertyParams.PropertyPath.Last());
 	const UStructProperty* ParentStructProperty = nullptr;
 	if (KeyPropertyParams.PropertyPath.Num() > 1)
@@ -39,8 +57,11 @@ void FSequencerObjectChangeListener::BroadcastPropertyChanged( FKeyPropertyParam
 	}
 
 	FPropertyChangedParams Params;
-	Params.bRequireAutoKey = bRequireAutoKey;
-	Params.ObjectsThatChanged = KeyPropertyParams.ObjectsToKey;
+	Params.KeyParams.bCreateHandleIfMissing = KeyPropertyParams.KeyParams.bCreateHandleIfMissing;
+	Params.KeyParams.bCreateTrackIfMissing = KeyPropertyParams.KeyParams.bCreateTrackIfMissing;
+	Params.KeyParams.bAddKeyEvenIfUnchanged = KeyPropertyParams.KeyParams.bAddKeyEvenIfUnchanged;
+	Params.KeyParams.bAutoKeying = Sequencer.Pin()->GetAutoKeyEnabled();
+	Params.ObjectsThatChanged = KeyableObjects;
 	Params.StructPropertyNameToKey = NAME_None;
 
 	bool bFoundAndBroadcastedDelegate = false;
@@ -52,10 +73,7 @@ void FSequencerObjectChangeListener::BroadcastPropertyChanged( FKeyPropertyParam
 		FOnAnimatablePropertyChanged Delegate = ClassToPropertyChangedMap.FindRef(ParentStructProperty->Struct->GetFName());
 		if (Delegate.IsBound())
 		{
-			if (!bRequireAutoKey)
-			{
-				Params.StructPropertyNameToKey = KeyPropertyParams.PropertyPath.Last()->GetFName();
-			}
+			Params.StructPropertyNameToKey = KeyPropertyParams.PropertyPath.Last()->GetFName();
 			bFoundAndBroadcastedDelegate = true;
 			Delegate.Broadcast(Params);
 		}
@@ -93,12 +111,21 @@ FOnPropagateObjectChanges& FSequencerObjectChangeListener::GetOnPropagateObjectC
 	return OnPropagateObjectChanges;
 }
 
-bool FSequencerObjectChangeListener::FindPropertySetter( const UClass& ObjectClass, const FName PropertyTypeName, const FString& PropertyVarName ) const
+bool FSequencerObjectChangeListener::FindPropertySetter( const UClass& ObjectClass, const FName PropertyTypeName, const FString& InPropertyVarName, const UStructProperty* StructProperty ) const
 {
 	bool bFound = ClassToPropertyChangedMap.Contains( PropertyTypeName );
 
 	if( bFound )
 	{
+		FString PropertyVarName = InPropertyVarName;
+
+		// If this is a bool property, strip off the 'b' so that the "Set" functions to be 
+		// found are, for example, "SetHidden" instead of "SetbHidden"
+		if (PropertyTypeName == "BoolProperty")
+		{
+			PropertyVarName.RemoveFromStart("b", ESearchCase::CaseSensitive);
+		}
+
 		static const FString Set(TEXT("Set"));
 
 		const FString FunctionString = Set + PropertyVarName;
@@ -107,14 +134,31 @@ bool FSequencerObjectChangeListener::FindPropertySetter( const UClass& ObjectCla
 
 		static const FName DeprecatedFunctionName(TEXT("DeprecatedFunction"));
 		UFunction* Function = ObjectClass.FindFunctionByName(FunctionName);
+		bool bFoundValidFunction = false;
 		if( Function && !Function->HasMetaData(DeprecatedFunctionName) )
 		{
-			bFound = true;
+			bFoundValidFunction = true;
+		}
+
+		bool bFoundValidInterp = false;
+		if (StructProperty != 0)
+		{
+			if (StructProperty->HasAnyPropertyFlags(CPF_Interp))
+			{
+				bFoundValidInterp = true;
+			}
 		}
 		else
 		{
-			bFound = false;
+			UProperty* Property = ObjectClass.FindPropertyByName(FName(*InPropertyVarName));
+			if (Property && Property->HasAnyPropertyFlags(CPF_Interp))
+			{
+				bFoundValidInterp = true;
+			}
 		}
+		
+		// Valid either if a setter function is foud or a property with the Interp keyword is found.
+		bFound = bFoundValidFunction || bFoundValidInterp;
 	}
 
 	return bFound;
@@ -134,13 +178,13 @@ bool FSequencerObjectChangeListener::CanKeyProperty(FCanKeyPropertyParams CanKey
 	bool bFound = false;
 	if ( StructProperty )
 	{
-		bFound = FindPropertySetter(*CanKeyPropertyParams.ObjectClass, StructProperty->Struct->GetFName(), StructProperty->GetName() );
+		bFound = FindPropertySetter(*CanKeyPropertyParams.ObjectClass, StructProperty->Struct->GetFName(), StructProperty->GetName(), StructProperty );
 	}
 	
 	if( !bFound && ParentStructProperty )
 	{
 		// If the property parent is a struct, see if this property parent can be keyed.
-		bFound = FindPropertySetter(*CanKeyPropertyParams.ObjectClass, ParentStructProperty->Struct->GetFName(), ParentStructProperty->GetName());
+		bFound = FindPropertySetter(*CanKeyPropertyParams.ObjectClass, ParentStructProperty->Struct->GetFName(), ParentStructProperty->GetName(), ParentStructProperty );
 	}
 
 	if( !bFound )
@@ -154,14 +198,13 @@ bool FSequencerObjectChangeListener::CanKeyProperty(FCanKeyPropertyParams CanKey
 
 void FSequencerObjectChangeListener::KeyProperty(FKeyPropertyParams KeyPropertyParams) const
 {
-	const bool bRequireAutoKey = false;
-	BroadcastPropertyChanged(KeyPropertyParams, bRequireAutoKey);
+	BroadcastPropertyChanged(KeyPropertyParams);
 }
 
 void FSequencerObjectChangeListener::OnObjectPreEditChange( UObject* Object, const FEditPropertyChain& PropertyChain )
 {
-	// We only care if we are in auto-key mode and not attempting to change properties of a CDO (which cannot be animated)
-	if( Sequencer.IsValid() && Sequencer.Pin()->GetAutoKeyEnabled() && !Object->HasAnyFlags(RF_ClassDefaultObject) && PropertyChain.GetActiveMemberNode() )
+	// We only care if we are not attempting to change properties of a CDO (which cannot be animated)
+	if( Sequencer.IsValid() && !Object->HasAnyFlags(RF_ClassDefaultObject) && PropertyChain.GetActiveMemberNode() )
 	{
 		// Register with the property editor module that we'd like to know about animated float properties that change
 		FPropertyEditorModule& PropertyEditor = FModuleManager::Get().LoadModuleChecked<FPropertyEditorModule>( "PropertyEditor" );
@@ -177,7 +220,7 @@ void FSequencerObjectChangeListener::OnObjectPreEditChange( UObject* Object, con
 				
 				ActivePropertyChangeListeners.Add( Object, PropertyChangeListener );
 
-				PropertyChangeListener->GetOnPropertyChangedDelegate().AddRaw( this, &FSequencerObjectChangeListener::OnPropertyChanged, true );
+				PropertyChangeListener->GetOnPropertyChangedDelegate().AddRaw( this, &FSequencerObjectChangeListener::OnPropertyChanged );
 
 				FPropertyListenerSettings Settings;
 				// Ignore array and object properties
@@ -202,8 +245,8 @@ void FSequencerObjectChangeListener::OnObjectPostEditChange( UObject* Object, FP
 
 		bool bShouldPropagateChanges = bIsObjectValid;
 
-		// We only care if we are in auto-key mode and not attempting to change properties of a CDO (which cannot be animated)
-		if( Sequencer.IsValid() && Sequencer.Pin()->GetAutoKeyEnabled() && bIsObjectValid && !Object->HasAnyFlags(RF_ClassDefaultObject) )
+		// We only care if we are not attempting to change properties of a CDO (which cannot be animated)
+		if( Sequencer.IsValid() && bIsObjectValid && !Object->HasAnyFlags(RF_ClassDefaultObject) )
 		{
 			TSharedPtr< IPropertyChangeListener > Listener;
 			ActivePropertyChangeListeners.RemoveAndCopyValue( Object, Listener );
@@ -263,7 +306,7 @@ void FSequencerObjectChangeListener::TriggerAllPropertiesChanged(UObject* Object
 
 				PropertyChangeListener = PropertyEditor.CreatePropertyChangeListener();
 				
-				PropertyChangeListener->GetOnPropertyChangedDelegate().AddRaw( this, &FSequencerObjectChangeListener::OnPropertyChanged, false );
+				PropertyChangeListener->GetOnPropertyChangedDelegate().AddRaw( this, &FSequencerObjectChangeListener::OnPropertyChanged );
 
 				FPropertyListenerSettings Settings;
 				// Ignore array and object properties

@@ -10,6 +10,7 @@
 #include "MovieSceneSection.h"
 #include "MovieSceneSequence.h"
 #include "MovieSceneTrack.h"
+#include "MovieSceneTrackEditor.h"
 #include "CommonMovieSceneTools.h"
 #include "IKeyArea.h"
 #include "GroupedKeyArea.h"
@@ -248,7 +249,7 @@ TSharedRef<FSectionCategoryNode> FSequencerDisplayNode::AddCategoryNode( FName C
 	return CategoryNode.ToSharedRef();
 }
 
-TSharedRef<FTrackNode> FSequencerDisplayNode::AddSectionAreaNode( FName SectionName, UMovieSceneTrack& AssociatedTrack )
+TSharedRef<FTrackNode> FSequencerDisplayNode::AddSectionAreaNode( FName SectionName, UMovieSceneTrack& AssociatedTrack, FMovieSceneTrackEditor& AssociatedEditor )
 {
 	TSharedPtr<FTrackNode> SectionNode;
 
@@ -265,7 +266,7 @@ TSharedRef<FTrackNode> FSequencerDisplayNode::AddSectionAreaNode( FName SectionN
 	if( !SectionNode.IsValid() )
 	{
 		// No existing node found make a new one
-		SectionNode = MakeShareable( new FTrackNode( SectionName, AssociatedTrack, SharedThis( this ), ParentTree ) );
+		SectionNode = MakeShareable( new FTrackNode( SectionName, AssociatedTrack, AssociatedEditor, SharedThis( this ), ParentTree ) );
 		ChildNodes.Add( SectionNode.ToSharedRef() );
 	}
 
@@ -497,9 +498,10 @@ void FSectionKeyAreaNode::AddKeyArea( TSharedRef< IKeyArea> KeyArea )
 	KeyAreas.Add( KeyArea );
 }
 
-FTrackNode::FTrackNode( FName NodeName, UMovieSceneTrack& InAssociatedType, TSharedPtr<FSequencerDisplayNode> InParentNode, FSequencerNodeTree& InParentTree )
+FTrackNode::FTrackNode( FName NodeName, UMovieSceneTrack& InAssociatedType, FMovieSceneTrackEditor& InAssociatedEditor, TSharedPtr<FSequencerDisplayNode> InParentNode, FSequencerNodeTree& InParentTree )
 	: FSequencerDisplayNode( NodeName, InParentNode, InParentTree )
 	, AssociatedType( &InAssociatedType )
+	, AssociatedEditor( InAssociatedEditor )
 {
 }
 
@@ -516,7 +518,7 @@ FNodePadding FTrackNode::GetNodePadding() const
 FText FTrackNode::GetDisplayName() const
 {
 	// @todo Sequencer - IS there a better way to get the section interface name for the animation outliner?
-	return Sections.Num() > 0 ? Sections[0]->GetDisplayName() : FText::FromName(NodeName);
+	return TopLevelKeyNode.IsValid() && Sections.Num() > 0 ? Sections[0]->GetDisplayName() : FText::FromName(NodeName);
 }
 
 void FTrackNode::SetSectionAsKeyArea( TSharedRef<IKeyArea>& KeyArea )
@@ -532,13 +534,23 @@ void FTrackNode::SetSectionAsKeyArea( TSharedRef<IKeyArea>& KeyArea )
 
 bool FTrackNode::GetShotFilteredVisibilityToCache() const
 {
+	if (AssociatedType->HasShowableData() == false)
+	{
+		return false;
+	}
+
+	if ( Sections.Num() == 0 )
+	{
+		return AssociatedType->IsVisibleWhenEmpty();
+	}
+
 	// if no child sections are visible, neither is the entire section
 	bool bAnySectionsVisible = false;
 	for (int32 i = 0; i < Sections.Num() && !bAnySectionsVisible; ++i)
 	{
 		bAnySectionsVisible = GetSequencer().IsSectionVisible(Sections[i]->GetSectionObject());
 	}
-	return AssociatedType->HasShowableData() && bAnySectionsVisible;
+	return bAnySectionsVisible;
 }
 
 void FTrackNode::GetChildKeyAreaNodesRecursively(TArray< TSharedRef<class FSectionKeyAreaNode> >& OutNodes) const
@@ -563,6 +575,21 @@ TSharedRef<SWidget> FTrackNode::GenerateEditWidgetForOutliner()
 			{
 				return KeyAreas[0]->CreateKeyEditor(&GetSequencer());
 			}
+		}
+	}
+	else
+	{
+		FGuid ObjectBinding;
+		TSharedPtr<FSequencerDisplayNode> ParentNode = GetParent();
+		if ( ParentNode.IsValid() && ParentNode->GetType() == ESequencerNode::Object )
+		{
+			ObjectBinding = StaticCastSharedPtr<FObjectBindingNode>(ParentNode)->GetObjectBinding();
+		}
+
+		TSharedPtr<SWidget> EditWidget = AssociatedEditor.BuildOutlinerEditWidget( ObjectBinding, AssociatedType.Get() );
+		if ( EditWidget.IsValid() )
+		{
+			return EditWidget.ToSharedRef();
 		}
 	}
 	return FSequencerDisplayNode::GenerateEditWidgetForOutliner();
@@ -666,7 +693,7 @@ TSharedRef<SWidget> FObjectBindingNode::GenerateEditWidgetForOutliner()
 	[
 		SNew(SComboButton)
 		.ButtonStyle(FEditorStyle::Get(), "FlatButton.Light")
-		.OnGetMenuContent(this, &FObjectBindingNode::OnGetAddPropertyTrackMenuContent)
+		.OnGetMenuContent(this, &FObjectBindingNode::OnGetAddTrackMenuContent)
 		.ContentPadding(FMargin(2, 0))
 		.ButtonContent()
 		[
@@ -707,7 +734,7 @@ TSharedPtr<SWidget> FObjectBindingNode::OnSummonContextMenu(const FGeometry& MyG
 	const bool bShouldCloseWindowAfterMenuSelection = true;
 	FMenuBuilder MenuBuilder(bShouldCloseWindowAfterMenuSelection, NULL);
 
-	GetSequencer().BuildObjectBindingContextMenu(MenuBuilder, ObjectBinding, ObjectClass);
+	GetSequencer().BuildObjectBindingContextMenu(MenuBuilder, ObjectBinding, ObjectClass, this);
 
 	return MenuBuilder.MakeWidget();
 }
@@ -717,24 +744,28 @@ void GetKeyablePropertyPaths(UClass* Class, UStruct* PropertySource, TArray<UPro
 	for (TFieldIterator<UProperty> PropertyIterator(PropertySource); PropertyIterator; ++PropertyIterator)
 	{
 		UProperty* Property = *PropertyIterator;
-		PropertyPath.Add(Property);
-		if (Sequencer.CanKeyProperty(FCanKeyPropertyParams(Class, PropertyPath)))
+
+		if (Property && !Property->HasAnyPropertyFlags(CPF_Deprecated))
 		{
-			KeyablePropertyPaths.Add(PropertyPath);
-		}
-		else
-		{
-			UStructProperty* StructProperty = Cast<UStructProperty>(Property);
-			if (StructProperty != nullptr)
+			PropertyPath.Add(Property);
+			if (Sequencer.CanKeyProperty(FCanKeyPropertyParams(Class, PropertyPath)))
 			{
-				GetKeyablePropertyPaths(Class, StructProperty->Struct, PropertyPath, Sequencer, KeyablePropertyPaths);
+				KeyablePropertyPaths.Add(PropertyPath);
 			}
+			else
+			{
+				UStructProperty* StructProperty = Cast<UStructProperty>(Property);
+				if (StructProperty != nullptr)
+				{
+					GetKeyablePropertyPaths(Class, StructProperty->Struct, PropertyPath, Sequencer, KeyablePropertyPaths);
+				}
+			}
+			PropertyPath.RemoveAt(PropertyPath.Num() - 1);
 		}
-		PropertyPath.RemoveAt(PropertyPath.Num() - 1);
 	}
 }
 
-TSharedRef<SWidget> FObjectBindingNode::OnGetAddPropertyTrackMenuContent()
+TSharedRef<SWidget> FObjectBindingNode::OnGetAddTrackMenuContent()
 {
 	TArray<TArray<UProperty*>> KeyablePropertyPaths;
 	FSequencer& Sequencer = GetSequencer();
@@ -750,7 +781,7 @@ TSharedRef<SWidget> FObjectBindingNode::OnGetAddPropertyTrackMenuContent()
 	{
 		for (int32 IndexToCheck = 0; IndexToCheck < A.Num() && IndexToCheck < B.Num(); IndexToCheck++)
 		{
-			int32 CompareResult = A[IndexToCheck]->GetName().Compare(B[IndexToCheck]->GetName());
+			int32 CompareResult = A[IndexToCheck]->GetDisplayNameText().ToString().Compare(B[IndexToCheck]->GetDisplayNameText().ToString());
 			if (CompareResult != 0)
 			{
 				return CompareResult < 0;
@@ -764,22 +795,91 @@ TSharedRef<SWidget> FObjectBindingNode::OnGetAddPropertyTrackMenuContent()
 	TSharedRef<FUICommandList> CommandList(new FUICommandList);
 	FMenuBuilder AddTrackMenuBuilder(true, nullptr, SequencerModule.GetMenuExtensibilityManager()->GetAllExtenders(CommandList, TArrayBuilder<UObject*>().Add(BoundObject)));
 
+	const UClass* ObjectClass = GetClassForObjectBinding();
+	AddTrackMenuBuilder.BeginSection( NAME_None, LOCTEXT("TracksMenuHeader" , "Tracks"));
+	GetSequencer().BuildObjectBindingTrackMenu(AddTrackMenuBuilder, ObjectBinding, ObjectClass);
+	AddTrackMenuBuilder.EndSection();
+
 	AddTrackMenuBuilder.BeginSection( SequencerMenuExtensionPoints::AddTrackMenu_PropertiesSection, LOCTEXT("PropertiesMenuHeader" , "Properties"));
 	{
+		// Gather list of property path chains, ie:
+		//   [Aspect Ratio]
+		//   [Postprocess Settings] [ColorGamma]
+		//   [Postprocess Settings] [Gain]
+		//   [Focal Length]
+		TArray< TArray<FString> > PropertyChainPaths;
 		for ( TArray<UProperty*>& KeyablePropertyPath : KeyablePropertyPaths )
 		{
-			FUIAction AddTrackMenuAction( FExecuteAction::CreateSP( this, &FObjectBindingNode::AddTrackForProperty, KeyablePropertyPath ) );
 			TArray<FString> PropertyNames;
 			for ( UProperty* Property : KeyablePropertyPath )
 			{
-				PropertyNames.Add( Property->GetName() );
+				PropertyNames.Add( Property->GetDisplayNameText().ToString() );
 			}
-			AddTrackMenuBuilder.AddMenuEntry( FText::FromString( FString::Join( PropertyNames, TEXT( "." ) ) ), FText(), FSlateIcon(), AddTrackMenuAction );
+
+			PropertyChainPaths.Add(PropertyNames);
+		}
+
+		//@todo this currently only supports two level deep property chains. it should be arbitrary.
+		for (int32 PropertyPathIndex = 0; PropertyPathIndex < PropertyChainPaths.Num(); ++PropertyPathIndex )
+		{ 
+			TArray<TArray<FString> > SubPropertyChainPaths;
+			TArray<TArray<UProperty*> > SubKeyablePropertyPaths;
+
+			TArray<FString> PropertyChainPath = PropertyChainPaths[PropertyPathIndex];
+			SubPropertyChainPaths.Add(PropertyChainPath);
+			SubKeyablePropertyPaths.Add(KeyablePropertyPaths[PropertyPathIndex]);
+
+			// Look for the next chain that is not the same length
+			int32 NextPropertyPathIndex = PropertyPathIndex + 1; 
+			for (; NextPropertyPathIndex < PropertyChainPaths.Num(); ++NextPropertyPathIndex)
+			{
+				if (PropertyChainPaths[PropertyPathIndex].Num() != PropertyChainPaths[NextPropertyPathIndex].Num())
+				{
+					break;
+				}
+
+				TArray<FString> NextPropertyChainPath = PropertyChainPaths[NextPropertyPathIndex];
+				SubPropertyChainPaths.Add(NextPropertyChainPath);
+				SubKeyablePropertyPaths.Add(KeyablePropertyPaths[NextPropertyPathIndex]);
+			}
+			
+			// Don't use a submenu if there's only one menu item
+			if (PropertyChainPaths[PropertyPathIndex].Num() > 1 && SubPropertyChainPaths.Num() > 1)
+			{
+				// Strip off the first member of the chain since it's the submenu title
+				for (int32 SubPropertyChainIndex = 0; SubPropertyChainIndex < SubPropertyChainPaths.Num(); ++SubPropertyChainIndex)
+				{
+					SubPropertyChainPaths[SubPropertyChainIndex].RemoveAt(0);
+				}
+
+				int32 ChainLength = PropertyChainPaths[PropertyPathIndex].Num();
+				const FText& ParentDisplayName = FText::FromString(PropertyChainPaths[PropertyPathIndex][0]);
+				AddTrackMenuBuilder.AddSubMenu(
+					ParentDisplayName, 
+					FText::GetEmpty(), 
+					FNewMenuDelegate::CreateSP(this, &FObjectBindingNode::AddPropertyMenuItems, SubPropertyChainPaths, SubKeyablePropertyPaths) 
+					);
+			}
+			else
+			{
+				AddPropertyMenuItems(AddTrackMenuBuilder, SubPropertyChainPaths, SubKeyablePropertyPaths);
+			}
+
+			PropertyPathIndex = NextPropertyPathIndex;
 		}
 	}
 	AddTrackMenuBuilder.EndSection();
 
 	return AddTrackMenuBuilder.MakeWidget();
+}
+
+void FObjectBindingNode::AddPropertyMenuItems(FMenuBuilder& AddTrackMenuBuilder, TArray<TArray<FString> > PropertyChainPaths, TArray<TArray<UProperty*> > KeyablePropertyPaths)
+{
+	for (int32 PropertyPathIndex = 0; PropertyPathIndex < PropertyChainPaths.Num(); ++PropertyPathIndex)
+	{
+		FUIAction AddTrackMenuAction( FExecuteAction::CreateSP( this, &FObjectBindingNode::AddTrackForProperty, KeyablePropertyPaths[PropertyPathIndex] ) );
+		AddTrackMenuBuilder.AddMenuEntry( FText::FromString( FString::Join( PropertyChainPaths[PropertyPathIndex], TEXT( "." ) ) ), FText(), FSlateIcon(), AddTrackMenuAction );
+	}
 }
 
 void FObjectBindingNode::AddTrackForProperty(TArray<UProperty*> PropertyPath)
@@ -795,7 +895,13 @@ void FObjectBindingNode::AddTrackForProperty(TArray<UProperty*> PropertyPath)
 			KeyableBoundObjects.Add(BoundObject);
 		}
 	}
-	Sequencer.KeyProperty(FKeyPropertyParams(KeyableBoundObjects, PropertyPath));
+
+	FKeyPropertyParams KeyPropertyParams(KeyableBoundObjects, PropertyPath);
+	KeyPropertyParams.KeyParams.bCreateTrackIfMissing = true;
+	KeyPropertyParams.KeyParams.bCreateHandleIfMissing = false;
+	KeyPropertyParams.KeyParams.bAddKeyEvenIfUnchanged = false;
+
+	Sequencer.KeyProperty(KeyPropertyParams);
 }
 
 float FSectionCategoryNode::GetNodeHeight() const 

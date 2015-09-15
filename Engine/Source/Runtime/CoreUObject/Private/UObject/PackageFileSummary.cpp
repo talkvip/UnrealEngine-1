@@ -8,6 +8,26 @@ FPackageFileSummary::FPackageFileSummary()
 	FMemory::Memzero( this, sizeof(*this) );
 }
 
+/** Converts file version to custom version system version */
+static ECustomVersionSerializationFormat::Type GetCustomVersionFormatForArchive(int32 LegacyFileVersion)
+{
+	ECustomVersionSerializationFormat::Type CustomVersionFormat = ECustomVersionSerializationFormat::Unknown;
+	if (LegacyFileVersion == -2)
+	{
+		CustomVersionFormat = ECustomVersionSerializationFormat::Enums;
+	}
+	else if (LegacyFileVersion < -2 && LegacyFileVersion >= -5)
+	{
+		CustomVersionFormat = ECustomVersionSerializationFormat::Guids;
+	}
+	else if (LegacyFileVersion < -5)
+	{
+		CustomVersionFormat = ECustomVersionSerializationFormat::Optimized;
+	}
+	check(CustomVersionFormat != ECustomVersionSerializationFormat::Unknown);
+	return CustomVersionFormat;
+}
+
 FArchive& operator<<( FArchive& Ar, FPackageFileSummary& Sum )
 {
 	bool bCanStartSerializing = true;
@@ -50,13 +70,14 @@ FArchive& operator<<( FArchive& Ar, FPackageFileSummary& Sum )
 		 *
 		 * Lower 16 bits stores the UE3 engine version
 		 * Upper 16 bits stores the UE4/licensee version
-		 * For newer packages this is -5
+		 * For newer packages this is -6
 		 *		-2 indicates presence of enum-based custom versions
 		 *		-3 indicates guid-based custom versions
 		 *		-4 indicates removal of the UE3 version. Packages saved with this ID cannot be loaded in older engine versions 
-		 *      -5 indicates the replacement of writing out the "UE3 version" so older versions of engine can gracefully fail to open newer packages
+		 *		-5 indicates the replacement of writing out the "UE3 version" so older versions of engine can gracefully fail to open newer packages
+		 *		-6 indicates optimizations to how custom versions are being serialized
 		 */
-		int32 LegacyFileVersion = -5;
+		int32 LegacyFileVersion = -6;
 		Ar << LegacyFileVersion;
 
 		if (Ar.IsLoading())
@@ -73,7 +94,7 @@ FArchive& operator<<( FArchive& Ar, FPackageFileSummary& Sum )
 
 				if (LegacyFileVersion <= -2)
 				{
-					Sum.CustomVersionContainer.Serialize(Ar, (LegacyFileVersion == -2) ? ECustomVersionSerializationFormat::Enums : ECustomVersionSerializationFormat::Guids);
+					Sum.CustomVersionContainer.Serialize(Ar, GetCustomVersionFormatForArchive(LegacyFileVersion));
 				}
 
 				if (!Sum.FileVersionUE4 && !Sum.FileVersionLicenseeUE4)
@@ -168,7 +189,7 @@ FArchive& operator<<( FArchive& Ar, FPackageFileSummary& Sum )
 
 		if( Sum.GetFileVersionUE4() >= VER_UE4_ENGINE_VERSION_OBJECT )
 		{
-			if(Ar.IsCooking() || (Ar.IsSaving() && !GEngineVersion.HasChangelist()))
+			if(Ar.IsCooking() || (Ar.IsSaving() && !FEngineVersion::Current().HasChangelist()))
 			{
 				FEngineVersion EmptyEngineVersion;
 				Ar << EmptyEngineVersion;
@@ -191,7 +212,7 @@ FArchive& operator<<( FArchive& Ar, FPackageFileSummary& Sum )
 
 		if (Sum.GetFileVersionUE4() >= VER_UE4_PACKAGE_SUMMARY_HAS_COMPATIBLE_ENGINE_VERSION )
 		{
-			if(Ar.IsCooking() || (Ar.IsSaving() && !GEngineVersion.HasChangelist()))
+			if(Ar.IsCooking() || (Ar.IsSaving() && !FEngineVersion::Current().HasChangelist()))
 			{
 				FEngineVersion EmptyEngineVersion;
 				Ar << EmptyEngineVersion;

@@ -34,7 +34,7 @@ struct FWeightedBlendable
 	GENERATED_USTRUCT_BODY()
 
 	/** 0:no effect .. 1:full effect */
-	UPROPERTY(interp, BlueprintReadWrite, Category=FWeightedBlendable, meta=(UIMin = "0.0", UIMax = "1.0", Delta = "0.01"))
+	UPROPERTY(interp, BlueprintReadWrite, Category=FWeightedBlendable, meta=(ClampMin = "0.0", ClampMax = "1.0", Delta = "0.01"))
 	float Weight;
 
 	/** should be of the IBlendableInterface* type but UProperties cannot express that */
@@ -147,9 +147,6 @@ struct FPostProcessSettings
 
 	UPROPERTY(BlueprintReadWrite, Category=Overrides, meta=(PinHiddenByDefault))
 	uint32 bOverride_SceneFringeIntensity:1;
-
-	UPROPERTY(BlueprintReadWrite, Category=Overrides, meta=(PinHiddenByDefault))
-	uint32 bOverride_SceneFringeSaturation:1;
 
 	UPROPERTY(BlueprintReadWrite, Category=Overrides, meta=(PinHiddenByDefault))
 	uint32 bOverride_AmbientCubemapTint:1;
@@ -407,6 +404,9 @@ struct FPostProcessSettings
 	uint32 bOverride_DepthOfFieldSkyFocusDistance:1;
 
 	UPROPERTY(BlueprintReadWrite, Category=Overrides, meta=(PinHiddenByDefault))
+	uint32 bOverride_DepthOfFieldVignetteSize:1;
+
+	UPROPERTY(BlueprintReadWrite, Category=Overrides, meta=(PinHiddenByDefault))
 	uint32 bOverride_MotionBlurAmount:1;
 
 	UPROPERTY(BlueprintReadWrite, Category=Overrides, meta=(PinHiddenByDefault))
@@ -497,19 +497,15 @@ struct FPostProcessSettings
 	UPROPERTY(interp, BlueprintReadWrite, Category=SceneColor, meta=(UIMin = "0.0", UIMax = "5.0", editcondition = "bOverride_SceneFringeIntensity", DisplayName = "Fringe Intensity"))
 	float SceneFringeIntensity;
 
-	/** 0..1, Scene chromatic aberration / color fringe (camera imperfection) to simulate an artifact that happens in real-world lens, mostly visible in the image corners. */
-	UPROPERTY(interp, BlueprintReadWrite, Category=SceneColor, AdvancedDisplay, meta=(ClampMin = "0.0", UIMax = "1.0", editcondition = "bOverride_SceneFringeSaturation", DisplayName = "Fringe Saturation"))
-	float SceneFringeSaturation;
-
 	/** Multiplier for all bloom contributions >=0: off, 1(default), >1 brighter */
 	UPROPERTY(interp, BlueprintReadWrite, Category=Bloom, meta=(ClampMin = "0.0", UIMax = "8.0", editcondition = "bOverride_BloomIntensity", DisplayName = "Intensity"))
 	float BloomIntensity;
 
 	/**
 	 * minimum brightness the bloom starts having effect
-	 * -1:all pixels affect bloom equally (dream effect), 0:all pixels affect bloom brights more, 1(default), >1 brighter
+	 * -1:all pixels affect bloom equally (physically correct, faster as a threshold pass is omitted), 0:all pixels affect bloom brights more, 1(default), >1 brighter
 	 */
-	UPROPERTY(interp, BlueprintReadWrite, Category=Bloom, AdvancedDisplay, meta=(ClampMin = "-1.0", UIMin = "0.0", UIMax = "8.0", editcondition = "bOverride_BloomThreshold", DisplayName = "Threshold"))
+	UPROPERTY(interp, BlueprintReadWrite, Category=Bloom, AdvancedDisplay, meta=(ClampMin = "-1.0", UIMax = "8.0", editcondition = "bOverride_BloomThreshold", DisplayName = "Threshold"))
 	float BloomThreshold;
 
 	/**
@@ -892,7 +888,11 @@ struct FPostProcessSettings
 	/** Artificial distance to allow the skybox to be in focus (e.g. 200000), <=0 to switch the feature off, only for GaussianDOF, can cost performance */
 	UPROPERTY(interp, BlueprintReadWrite, Category=DepthOfField, AdvancedDisplay, meta=(ClampMin = "0.0", ClampMax = "200000.0", editcondition = "bOverride_DepthOfFieldSkyFocusDistance", DisplayName = "Sky Distance"))
 	float DepthOfFieldSkyFocusDistance;
-	
+
+	/** Artificial circular mask to (near) blur content outside the radius, only for GaussianDOF, diameter in percent of screen width, costs performance if the mask is used, keep Feather can Radius on default to keep it off */
+	UPROPERTY(interp, BlueprintReadWrite, Category=DepthOfField, AdvancedDisplay, meta=(UIMin = "0.0", UIMax = "100.0", editcondition = "bOverride_DepthOfFieldVignetteSize", DisplayName = "Vignette Size"))
+	float DepthOfFieldVignetteSize;
+
 	/** Strength of motion blur, 0:off, should be renamed to intensity */
 	UPROPERTY(interp, BlueprintReadWrite, Category=MotionBlur, meta=(ClampMin = "0.0", ClampMax = "1.0", editcondition = "bOverride_MotionBlurAmount", DisplayName = "Amount"))
 	float MotionBlurAmount;
@@ -1037,7 +1037,6 @@ struct FPostProcessSettings
 
 		SceneColorTint = FLinearColor(1, 1, 1);
 		SceneFringeIntensity = 0.0f;
-		SceneFringeSaturation = 0.5f;
 		// next value might get overwritten by r.DefaultFeature.Bloom
 		BloomIntensity = 1.0f;
 		BloomThreshold = 1.0f;
@@ -1124,6 +1123,8 @@ struct FPostProcessSettings
 		DepthOfFieldColorThreshold = 1.0f;
 		DepthOfFieldSizeThreshold = 0.08f;
 		DepthOfFieldSkyFocusDistance = 0.0f;
+		// 200 should be enough even for extreme aspect ratios to give the default no effect
+		DepthOfFieldVignetteSize = 200.0f;
 		LensFlareTints[0] = FLinearColor(1.0f, 0.8f, 0.4f, 0.6f);
 		LensFlareTints[1] = FLinearColor(1.0f, 1.0f, 0.6f, 0.53f);
 		LensFlareTints[2] = FLinearColor(0.8f, 0.8f, 1.0f, 0.46f);

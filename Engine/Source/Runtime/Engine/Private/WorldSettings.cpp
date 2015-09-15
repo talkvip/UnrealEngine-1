@@ -16,6 +16,10 @@
 
 #define LOCTEXT_NAMESPACE "ErrorChecking"
 
+#if WITH_EDITOR
+#include "Editor.h"
+#endif 
+
 AWorldSettings::AWorldSettings(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer.DoNotCreateDefaultSubobject(TEXT("Sprite")))
 {
@@ -39,6 +43,7 @@ AWorldSettings::AWorldSettings(const FObjectInitializer& ObjectInitializer)
 
  	FHierarchicalSimplification LODBaseSetup;
 	HierarchicalLODSetup.Add(LODBaseSetup);
+	NumHLODLevels = HierarchicalLODSetup.Num();
 #endif
 
 	KillZ = -HALF_WORLD_MAX1;
@@ -116,6 +121,11 @@ float AWorldSettings::GetGravityZ() const
 	}
 
 	return WorldGravityZ;
+}
+
+void AWorldSettings::OnRep_WorldGravityZ()
+{
+	bWorldGravitySet = true;
 }
 
 float AWorldSettings::FixupDeltaSeconds(float DeltaSeconds, float RealDeltaSeconds)
@@ -293,6 +303,17 @@ void AWorldSettings::PostEditChangeProperty(FPropertyChangedEvent& PropertyChang
 		if (GIsEditor)
 		{
 			GEngine->DeferredCommands.AddUnique(TEXT("UpdateLandscapeSetup"));
+		}
+
+		if (PropertyThatChanged->GetName() == TEXT("DrawDistance"))
+		{
+			GEditor->BroadcastHLODDrawDistanceChanged();
+		}
+
+		if (PropertyThatChanged->GetName() == TEXT("HierarchicalLODSetup"))
+		{
+			GEditor->BroadcastHLODLevelsArrayChanged();
+			NumHLODLevels = HierarchicalLODSetup.Num();			
 		}
 	}
 

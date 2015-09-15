@@ -598,20 +598,20 @@ FString UObject::GetDetailedInfo() const
 }
 
 #if WITH_ENGINE
-bool bGetWorldOverriden = false;
+bool bGetWorldOverridden = false;
 
 class UWorld* UObject::GetWorld() const
 {
-	bGetWorldOverriden = false;
+	bGetWorldOverridden = false;
 	return NULL;
 }
 
 class UWorld* UObject::GetWorldChecked(bool& bSupported) const
 {
-	bGetWorldOverriden = true;
+	bGetWorldOverridden = true;
 	UWorld* World = GetWorld();
 
-	if (!bGetWorldOverriden)
+	if (!bGetWorldOverridden)
 	{
 #if DO_CHECK
 		static TSet<UClass*> ReportedClasses;
@@ -634,15 +634,15 @@ class UWorld* UObject::GetWorldChecked(bool& bSupported) const
 #endif
 	}
 
-	bSupported = bGetWorldOverriden;
+	bSupported = bGetWorldOverridden;
 	return World;
 }
 
 bool UObject::ImplementsGetWorld() const
 {
-	bGetWorldOverriden = true;
+	bGetWorldOverridden = true;
 	GetWorld();
-	return bGetWorldOverriden;
+	return bGetWorldOverridden;
 }
 #endif
 
@@ -894,12 +894,6 @@ void UObject::Serialize( FArchive& Ar )
 		if ( !Ar.IsIgnoringClassRef() )
 		{
 			Ar << ObjClass;
-		}
-		//@todo UE4 - This seems to be required and it should not be. Seems to be related to the texture streamer.
-		FLinkerLoad* LinkerLoad = GetLinker();
-		if (LinkerLoad)
-		{
-			LinkerLoad->Serialize(Ar);
 		}
 	}
 	// Special support for supporting undo/redo of renaming and changing Archetype.
@@ -1936,8 +1930,18 @@ void UObject::UpdateSinglePropertyInConfigFile(const UProperty* InProperty, cons
 		NewFile.GetKeys(Keys);
 
 		const FString SectionName = Keys[0];
-		const FString PropertyName = InProperty->GetFName().ToString();
-		NewFile.UpdateSinglePropertyInSection(*InConfigIniName, *PropertyName, *SectionName);
+		FString PropertyKey = InProperty->GetFName().ToString();
+
+#if WITH_EDITOR
+		static FName ConsoleVariableFName(TEXT("ConsoleVariable"));
+		FString CVarName = InProperty->GetMetaData(ConsoleVariableFName);
+		if (!CVarName.IsEmpty())
+		{
+			PropertyKey = CVarName;
+		}
+#endif // #if WITH_EDITOR
+
+		NewFile.UpdateSinglePropertyInSection(*InConfigIniName, *PropertyKey, *SectionName);
 
 		// reload the file, so that it refresh the cache internally.
 		FString FinalIniFileName;
@@ -3586,7 +3590,10 @@ void PreInitUObject()
 void InitUObject()
 {
 	// Initialize redirects map
-	FLinkerLoad::CreateActiveRedirectsMap(GEngineIni);
+	for (const auto& It : *GConfig)
+	{
+		FLinkerLoad::CreateActiveRedirectsMap(It.Key);
+	}
 
 	FCoreDelegates::OnShutdownAfterError.AddStatic(StaticShutdownAfterError);
 	FCoreDelegates::OnExit.AddStatic(StaticExit);
@@ -3611,9 +3618,10 @@ void InitUObject()
 		FCoreUObjectDelegates::StringAssetReferenceSaving.BindRaw(&GRedirectCollector, &FRedirectCollector::OnStringAssetReferenceSaved);
 	}
 
-	// this is a hack to the cooker insight into the startup packages
+	// If the cooker is running or we want to fixup string referenced assets, hook up callbacks for string asset references
 	if (CommandLine.Contains(TEXT("cookcommandlet")) || 
-		  CommandLine.Contains(TEXT("run=cook")) )
+		  CommandLine.Contains(TEXT("run=cook")) ||
+		  CommandLine.Contains(TEXT("FixupStringAssetReferences")) )
 	{
 		FCoreUObjectDelegates::StringAssetReferenceLoaded.BindRaw(&GRedirectCollector, &FRedirectCollector::OnStringAssetReferenceLoaded);
 		FCoreUObjectDelegates::StringAssetReferenceSaving.BindRaw(&GRedirectCollector, &FRedirectCollector::OnStringAssetReferenceSaved);
@@ -3645,6 +3653,10 @@ void StaticUObjectInit()
 
 	UE_LOG(LogInit, Log, TEXT("Object subsystem initialized") );
 }
+
+// Internal cleanup functions
+void CleanupGCArrayPools();
+void CleanupLinkerAnnotations();
 
 //
 // Shut down the object manager.
@@ -3737,6 +3749,8 @@ void StaticExit()
 	// Empty arrays to prevent falsely-reported memory leaks.
 	FUObjectThreadContext::Get().ObjLoaded.Empty();
 	FDeferredMessageLog::Cleanup();
+	CleanupGCArrayPools();
+	CleanupLinkerAnnotations();
 
 	UE_LOG(LogExit, Log, TEXT("Object subsystem successfully closed.") );
 }
@@ -3777,7 +3791,7 @@ void MarkObjectsToDisregardForGC()
 	}
 
 	UE_LOG(LogObj, Log, TEXT("%i objects as part of root set at end of initial load."), NumAlwaysLoadedObjects);
-	if (GetUObjectArray().DisregardForGCEnabled())
+	if (GUObjectArray.DisregardForGCEnabled())
 	{
 		UE_LOG(LogObj, Log, TEXT("%i objects are not in the root set, but can never be destroyed because they are in the DisregardForGC set."), NumAlwaysLoadedObjects - NumRootObjects);
 	}

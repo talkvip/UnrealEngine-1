@@ -2,7 +2,15 @@
 
 #pragma once
 
+#include "UniquePtr.h"
+#include "ISequencerEditTool.h"
+#include "SequencerCommonHelpers.h"
+
+
+class IDetailsView;
 class SSequencerTreeView;
+struct FSectionHandle;
+
 
 namespace SequencerLayoutConstants
 {
@@ -17,6 +25,7 @@ namespace SequencerLayoutConstants
 	/** Height of each category node */
 	const float CategoryNodeHeight = 15.0f;
 }
+
 
 /**
  * The kind of breadcrumbs that sequencer uses
@@ -42,10 +51,14 @@ struct FSequencerBreadcrumb
 		: BreadcrumbType(FSequencerBreadcrumb::ShotType) {}
 };
 
+
 /**
  * Main sequencer UI widget
  */
-class SSequencer : public SCompoundWidget, public FGCObject
+class SSequencer
+	: public SCompoundWidget
+	, public FGCObject
+	, public FNotifyHook
 {
 public:
 	DECLARE_DELEGATE_OneParam( FOnToggleBoolOption, bool )
@@ -75,6 +88,8 @@ public:
 
 	void Construct( const FArguments& InArgs, TSharedRef< class FSequencer > InSequencer );
 
+	void BindCommands(TSharedRef<FUICommandList> SequencerCommandBindings);
+	
 	~SSequencer();
 	
 	virtual void AddReferencedObjects( FReferenceCollector& Collector )
@@ -113,12 +128,46 @@ public:
 	bool UserIsSelecting() { return bUserIsSelecting; }
 
 	/** Called when the save button is clicked */
-	FReply OnSaveMovieSceneClicked();
+	void OnSaveMovieSceneClicked();
+
+	/** Called when the add object button is clicked */
+	void OnAddObjectClicked();
 
 	/** Access the tree view for this sequencer */
 	TSharedPtr<SSequencerTreeView> GetTreeView() const;
 
+	/** Access the currently active edit tool */
+	ISequencerEditTool& GetEditTool() const { return *EditTool; }
+
+	/** Generate a helper structure that can be used to transform between phsyical space and virtual space in the track area */
+	FVirtualTrackArea GetVirtualTrackArea() const;
+
+	/** Get an array of section handles for the given set of movie scene sections */
+	TArray<FSectionHandle> GetSectionHandles(const TSet<TWeakObjectPtr<UMovieSceneSection>>& DesiredSections) const;
+
+public:
+
+	// FNotifyHook overrides
+
+	void NotifyPostChange(const FPropertyChangedEvent& PropertyChangedEvent, class FEditPropertyChain* PropertyThatChanged);
+
 private:
+	
+	/** Handles checking whether the details view is enabled. */
+	bool HandleDetailsViewEnabled() const;
+
+	/** Handles determining the visibility of the details view. */
+	EVisibility HandleDetailsViewVisibility() const;
+
+	/** Handles key selection changes. */
+	void HandleKeySelectionChanged();
+
+	/** Handles section selection changes. */
+	void HandleSectionSelectionChanged();
+
+	/** Check whether the specified edit tool is enabled */
+	bool IsEditToolEnabled(FName InIdentifier);
+
 	/** Empty active timer to ensure Slate ticks during Sequencer playback */
 	EActiveTimerReturnType EnsureSlateTickDuringPlayback(double InCurrentTime, float InDeltaTime);	
 
@@ -127,6 +176,9 @@ private:
 
 	/** Makes the add menu for the toolbar. */
 	TSharedRef<SWidget> MakeAddMenu();
+
+	/** Makes the general menu for the toolbar. */
+	TSharedRef<SWidget> MakeGeneralMenu();
 
 	/** Makes the snapping menu for the toolbar. */
 	TSharedRef<SWidget> MakeSnapMenu();
@@ -176,6 +228,9 @@ private:
 
 	/** Get the visibility of the track area */
 	EVisibility GetTrackAreaVisibility() const;
+
+	/** Get the lock in/out to start/end range value */
+	bool GetLockInOutToStartEndRange() const;
 
 	/** SWidget interface */
 	/** @todo Sequencer Basic drag and drop support.  Doesn't belong here most likely */
@@ -251,6 +306,9 @@ private:
 
 private:
 
+	/** Holds the details view. */
+	TSharedPtr<IDetailsView> DetailsView;
+
 	/** Section area widget */
 	TSharedPtr<class SSequencerTrackArea> TrackArea;
 	/** Outliner widget */
@@ -273,6 +331,9 @@ private:
 	bool bIsActiveTimerRegistered;
 	/** Whether the user is selecting. Ignore selection changes from the level when the user is selecting. */
 	bool bUserIsSelecting;
+	/** The current edit tool */
+	TUniquePtr<ISequencerEditTool> EditTool;
 
 	FOnGetAddMenuContent OnGetAddMenuContent;
+
 };

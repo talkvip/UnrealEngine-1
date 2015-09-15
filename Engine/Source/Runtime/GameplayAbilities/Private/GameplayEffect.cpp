@@ -92,6 +92,15 @@ void UGameplayEffect::PostLoad()
 	ClearTagsContainer.RemoveAllTags();
 
 	UpdateInheritedTagProperties();
+
+	for (FGameplayAbilitySpecDef& Def : GrantedAbilities)
+	{
+		if (Def.Level != INDEX_NONE)
+		{
+			Def.LevelScalableFloat.SetValue(Def.Level);
+			Def.Level = INDEX_NONE;
+		}
+	}
 }
 
 void UGameplayEffect::PostInitProperties()
@@ -224,7 +233,7 @@ bool FGameplayEffectModifierMagnitude::CanCalculateMagnitude(const FGameplayEffe
 	return InRelevantSpec.HasValidCapturedAttributes(ReqCaptureDefs);
 }
 
-bool FGameplayEffectModifierMagnitude::AttemptCalculateMagnitude(const FGameplayEffectSpec& InRelevantSpec, OUT float& OutCalculatedMagnitude) const
+bool FGameplayEffectModifierMagnitude::AttemptCalculateMagnitude(const FGameplayEffectSpec& InRelevantSpec, OUT float& OutCalculatedMagnitude, bool WarnIfSetByCallerFail, float DefaultSetbyCaller) const
 {
 	const bool bCanCalc = CanCalculateMagnitude(InRelevantSpec);
 	if (bCanCalc)
@@ -250,7 +259,7 @@ bool FGameplayEffectModifierMagnitude::AttemptCalculateMagnitude(const FGameplay
 			break;
 
 			case EGameplayEffectMagnitudeCalculation::SetByCaller:
-				OutCalculatedMagnitude = InRelevantSpec.GetSetByCallerMagnitude(SetByCallerMagnitude.DataName);
+				OutCalculatedMagnitude = InRelevantSpec.GetSetByCallerMagnitude(SetByCallerMagnitude.DataName, WarnIfSetByCallerFail, DefaultSetbyCaller);
 				break;
 			default:
 				ABILITY_LOG(Error, TEXT("Unknown MagnitudeCalculationType %d in AttemptCalculateMagnitude"), (int32)MagnitudeCalculationType);
@@ -530,12 +539,24 @@ FGameplayEffectSpecForRPC::FGameplayEffectSpecForRPC()
 
 FGameplayEffectSpecForRPC::FGameplayEffectSpecForRPC(const FGameplayEffectSpec& InSpec)
 	: Def(InSpec.Def)
-	, ModifiedAttributes(MoveTemp(InSpec.ModifiedAttributes))
+	, ModifiedAttributes()
 	, EffectContext(InSpec.GetEffectContext())
 	, AggregatedSourceTags(*InSpec.CapturedSourceTags.GetAggregatedTags())
 	, AggregatedTargetTags(*InSpec.CapturedTargetTags.GetAggregatedTags())
 	, Level(InSpec.GetLevel())
 {
+	
+	// Only copy attributes that are in the gameplay cue info
+	for (int32 i = InSpec.ModifiedAttributes.Num() - 1; i >= 0; i--)
+	{
+		for (FGameplayEffectCue CueInfo : Def->GameplayCues)
+		{
+			if (CueInfo.MagnitudeAttribute == InSpec.ModifiedAttributes[i].Attribute)
+			{
+				ModifiedAttributes.Add(InSpec.ModifiedAttributes[i]);
+			}
+		}
+	}
 }
 
 void FGameplayEffectSpec::SetupAttributeCaptureDefinitions()
@@ -628,7 +649,10 @@ bool FGameplayEffectSpec::AttemptCalculateDurationFromDef(OUT float& OutDefDurat
 	}
 	else
 	{
-		bCalculatedDuration = Def->DurationMagnitude.AttemptCalculateMagnitude(*this, OutDefDuration);
+		// The last parameters (false, 1.f) are so that if SetByCaller hasn't been set yet, we don't warn and default
+		// to 1.f. This is so that the rest of the system doesn't treat the effect as an instant effect. 1.f is arbitrary
+		// and this makes it illegal to SetByCaller something into an instant effect.
+		bCalculatedDuration = Def->DurationMagnitude.AttemptCalculateMagnitude(*this, OutDefDuration, false, 1.f);
 	}
 
 	return bCalculatedDuration;
@@ -763,28 +787,6 @@ FGameplayEffectModifiedAttribute* FGameplayEffectSpec::AddModifiedAttribute(cons
 	return &ModifiedAttributes[ModifiedAttributes.Add(NewAttribute)];
 }
 
-void FGameplayEffectSpec::PruneModifiedAttributes()
-{
-	TSet<FGameplayAttribute> ImportantAttributes;
-
-	for (FGameplayEffectCue CueInfo : Def->GameplayCues)
-	{
-		if (CueInfo.MagnitudeAttribute.IsValid())
-		{
-			ImportantAttributes.Add(CueInfo.MagnitudeAttribute);
-		}
-	}
-
-	// Remove all unimportant attributes
-	for (int32 i = ModifiedAttributes.Num() - 1; i >= 0; i--)
-	{
-		if (!ImportantAttributes.Contains(ModifiedAttributes[i].Attribute))
-		{
-			ModifiedAttributes.RemoveAtSwap(i);
-		}
-	}
-}
-
 void FGameplayEffectSpec::SetContext(FGameplayEffectContextHandle NewEffectContext)
 {
 	bool bWasAlreadyInit = EffectContext.IsValid();
@@ -820,15 +822,15 @@ void FGameplayEffectSpec::SetSetByCallerMagnitude(FName DataName, float Magnitud
 	SetByCallerMagnitudes.Add(DataName) = Magnitude;
 }
 
-float FGameplayEffectSpec::GetSetByCallerMagnitude(FName DataName) const
+float FGameplayEffectSpec::GetSetByCallerMagnitude(FName DataName, bool WarnIfNotFound, float DefaultIfNotFound) const
 {
-	float Magnitude = 0.f;
+	float Magnitude = DefaultIfNotFound;
 	const float* Ptr = SetByCallerMagnitudes.Find(DataName);
 	if (Ptr)
 	{
 		Magnitude = *Ptr;
 	}
-	else
+	else if (WarnIfNotFound)
 	{
 		ABILITY_LOG(Error, TEXT("FGameplayEffectSpec::GetMagnitude called for Data %s on Def %s when magnitude had not yet been set by caller."), *DataName.ToString(), *Def->GetName());
 	}
@@ -1423,9 +1425,6 @@ void FActiveGameplayEffectsContainer::ExecuteActiveEffectsFrom(FGameplayEffectSp
 	//	Invoke GameplayCue events
 	// ------------------------------------------------------
 	
-	// Prune the modified attributes before we replicate
-	SpecToUse.PruneModifiedAttributes();
-
 	// If there are no modifiers or we don't require modifier success to trigger, we apply the GameplayCue. 
 	bool InvokeGameplayCueExecute = (SpecToUse.Modifiers.Num() == 0) || !Spec.Def->bRequireModifierSuccessToTriggerCues;
 
@@ -1483,6 +1482,14 @@ void FActiveGameplayEffectsContainer::ExecutePeriodicGameplayEffect(FActiveGamep
 
 		// Execute
 		ExecuteActiveEffectsFrom(ActiveEffect->Spec);
+
+		// Invoke Delegates for periodic effects being executed
+		UAbilitySystemComponent* SourceASC = ActiveEffect->Spec.GetContext().GetInstigatorAbilitySystemComponent();
+		Owner->OnPeriodicGameplayEffectExecuteOnSelf(SourceASC, ActiveEffect->Spec, Handle);
+		if (SourceASC)
+		{
+			SourceASC->OnPeriodicGameplayEffectExecuteOnTarget(Owner, ActiveEffect->Spec, Handle);
+		}
 	}
 
 }
@@ -1535,7 +1542,6 @@ FAggregatorRef& FActiveGameplayEffectsContainer::FindOrCreateAttributeAggregator
 
 void FActiveGameplayEffectsContainer::OnAttributeAggregatorDirty(FAggregator* Aggregator, FGameplayAttribute Attribute)
 {
-	ABILITY_LOG_SCOPE(TEXT("FActiveGameplayEffectsContainer::OnAttributeAggregatorDirty"));
 	check(AttributeAggregatorMap.FindChecked(Attribute).Get() == Aggregator);
 
 	// Our Aggregator has changed, we need to reevaluate this aggregator and update the current value of the attribute.
@@ -1578,7 +1584,7 @@ void FActiveGameplayEffectsContainer::OnAttributeAggregatorDirty(FAggregator* Ag
 
 		EvaluationParameters.IncludePredictiveMods = true;
 	}
-	
+
 	float NewValue = Aggregator->Evaluate(EvaluationParameters);
 
 	if (EvaluationParameters.IncludePredictiveMods)
@@ -1630,12 +1636,14 @@ void FActiveGameplayEffectsContainer::OnMagnitudeDependencyChange(FActiveGamepla
 	}
 }
 
-void FActiveGameplayEffectsContainer::OnStackCountChange(FActiveGameplayEffect& ActiveEffect)
+void FActiveGameplayEffectsContainer::OnStackCountChange(FActiveGameplayEffect& ActiveEffect, int32 OldStackCount)
 {
 	MarkItemDirty(ActiveEffect);
 	UpdateAllAggregatorModMagnitudes(ActiveEffect);
 	Owner->NotifyTagMap_StackCountChange(ActiveEffect.Spec.Def->InheritableOwnedTagsContainer.CombinedTags);
 	Owner->NotifyTagMap_StackCountChange(ActiveEffect.Spec.DynamicGrantedTags);
+
+	ActiveEffect.OnStackChangeDelegate.Broadcast(ActiveEffect.Handle, ActiveEffect.Spec.StackCount, OldStackCount);
 }
 
 void FActiveGameplayEffectsContainer::UpdateAllAggregatorModMagnitudes(FActiveGameplayEffect& ActiveEffect)
@@ -1744,21 +1752,6 @@ bool FActiveGameplayEffectsContainer::HandleActiveGameplayEffectStackOverflow(co
 	}
 
 	return bAllowOverflowApplication;
-}
-
-void FActiveGameplayEffectsContainer::ApplyStackingLogicPostApplyAsSource(UAbilitySystemComponent* Target, const FGameplayEffectSpec& SpecApplied, FActiveGameplayEffectHandle ActiveHandle)
-{
-	if (SpecApplied.Def->StackingType == EGameplayEffectStackingType::AggregateBySource)
-	{
-		TArray<FActiveGameplayEffectHandle>& ActiveHandles = SourceStackingMap.FindOrAdd(SpecApplied.Def);
-
-		// This is probably wrong!
-		if (ActiveHandles.Num() == SpecApplied.Def->StackLimitCount)
-		{
-			// We are at the limit, so replace one based on policy
-			// For now, just always remove the oldest one applied
-		}
-	}
 }
 
 void FActiveGameplayEffectsContainer::SetBaseAttributeValueFromReplication(FGameplayAttribute Attribute, float ServerValue)
@@ -1930,8 +1923,6 @@ bool FActiveGameplayEffectsContainer::InternalExecuteMod(FGameplayEffectSpec& Sp
 
 	if (AttributeSet)
 	{
-		ABILITY_LOG_SCOPE(TEXT("Executing Attribute Mod %s"), *ModEvalData.ToSimpleString());
-
 		FGameplayEffectModCallbackData ExecuteData(Spec, ModEvalData, *Owner);
 
 		/**
@@ -2031,6 +2022,7 @@ FActiveGameplayEffect* FActiveGameplayEffectsContainer::ApplyGameplayEffectSpec(
 
 	bool bSetDuration = true;
 	bool bSetPeriod = true;
+	int32 StartingStackCount = 0;
 
 	// Check if there's an active GE this application should stack upon
 	if (ExistingStackableGE)
@@ -2042,6 +2034,7 @@ FActiveGameplayEffect* FActiveGameplayEffectsContainer::ApplyGameplayEffectSpec(
 		}
 
 		FGameplayEffectSpec& ExistingSpec = ExistingStackableGE->Spec;
+		StartingStackCount = ExistingSpec.StackCount;
 		
 		// How to apply multiple stacks at once? What if we trigger an overflow which can reject the application?
 		// We still want to apply the stacks that didnt push us over, but we also want to call HandleActiveGameplayEffectStackOverflow.
@@ -2095,9 +2088,7 @@ FActiveGameplayEffect* FActiveGameplayEffectsContainer::ApplyGameplayEffectSpec(
 		}
 		else
 		{
-			ExistingStackableGE->StartServerWorldTime = GetServerWorldTime();
-			ExistingStackableGE->CachedStartServerWorldTime = ExistingStackableGE->StartServerWorldTime;
-			ExistingStackableGE->StartWorldTime = GetWorldTime();
+			RestartActiveGameplayEffectDuration(*ExistingStackableGE);
 		}
 
 		// Make sure the GE actually wants to reset its period
@@ -2151,6 +2142,10 @@ FActiveGameplayEffect* FActiveGameplayEffectsContainer::ApplyGameplayEffectSpec(
 	FGameplayEffectSpec& AppliedEffectSpec = AppliedActiveGE->Spec;
 	UAbilitySystemGlobals::Get().GlobalPreGameplayEffectSpecApply(AppliedEffectSpec, Owner);
 
+	// Make sure our target's tags are collected, so we can properly filter infinite effects
+	AppliedEffectSpec.CapturedTargetTags.GetActorTags().RemoveAllTags();
+	Owner->GetOwnedGameplayTags(AppliedEffectSpec.CapturedTargetTags.GetActorTags());
+
 	// Calc all of our modifier magnitudes now. Some may need to update later based on attributes changing, etc, but those should
 	// be done through delegate callbacks.
 	AppliedEffectSpec.CaptureAttributeDataFromTarget(Owner);
@@ -2187,9 +2182,6 @@ FActiveGameplayEffect* FActiveGameplayEffectsContainer::ApplyGameplayEffectSpec(
 				}
 				ModifiedAttribute->TotalMagnitude += Magnitude;
 			}
-
-			// Prune list since ModifiedAttributes have only been built to
-			AppliedEffectSpec.PruneModifiedAttributes();
 		}
 	}
 
@@ -2269,7 +2261,7 @@ FActiveGameplayEffect* FActiveGameplayEffectsContainer::ApplyGameplayEffectSpec(
 	// as a result of stacking. In reality it could in complicated cases with differing sets of dynamically-granted tags.
 	if (ExistingStackableGE)
 	{
-		OnStackCountChange(*ExistingStackableGE);
+		OnStackCountChange(*ExistingStackableGE, StartingStackCount);
 	}
 	else
 	{
@@ -2342,6 +2334,21 @@ void FActiveGameplayEffectsContainer::AddActiveGameplayEffectGrantedTagsAndModif
 	ApplicationImmunityGameplayTagCountContainer.UpdateTagCount(Effect.Spec.Def->GrantedApplicationImmunityTags.RequireTags, 1);
 	ApplicationImmunityGameplayTagCountContainer.UpdateTagCount(Effect.Spec.Def->GrantedApplicationImmunityTags.IgnoreTags, 1);
 
+	// Grant abilities
+	if (IsNetAuthority())
+	{
+		for (FGameplayAbilitySpecDef& AbilitySpecDef : Effect.Spec.GrantedAbilitySpecs)
+		{
+			// Only do this if we haven't assigned the ability yet! This prevents cases where stacking GEs
+			// would regrant the ability every time the stack was applied
+			if (AbilitySpecDef.AssignedHandle.IsValid() == false)
+			{
+				Owner->GiveAbility( FGameplayAbilitySpec(AbilitySpecDef, Effect.Spec.GetLevel(), Effect.Handle) );
+			}
+		}	
+	}
+
+	// Update GameplayCue tags and events
 	for (const FGameplayEffectCue& Cue : Effect.Spec.Def->GameplayCues)
 	{
 		Owner->UpdateTagMap(Cue.GameplayCueTags, 1);
@@ -2401,30 +2408,14 @@ bool FActiveGameplayEffectsContainer::InternalRemoveActiveGameplayEffect(int32 I
 		if (StacksToRemove > 0 && Effect.Spec.StackCount > StacksToRemove)
 		{
 			// This won't be a full remove, only a change in StackCount.
+			int32 StartingStackCount = Effect.Spec.StackCount;
 			Effect.Spec.StackCount -= StacksToRemove;
-			OnStackCountChange(Effect);
+			OnStackCountChange(Effect, StartingStackCount);
 			return false;
 		}
 
 		// Mark the effect as pending removal
 		Effect.IsPendingRemove = true;
-
-		// Remove Granted Abilities
-		for (FGameplayAbilitySpecDef& AbilitySpecDef : Effect.Spec.GrantedAbilitySpecs)
-		{
-			if (AbilitySpecDef.AssignedHandle.IsValid())
-			{
-				switch(AbilitySpecDef.RemovalPolicy)
-				{
-				case EGameplayEffectGrantedAbilityRemovePolicy::CancelAbilityImmediately:
-					Owner->ClearAbility(AbilitySpecDef.AssignedHandle);
-					break;
-				case EGameplayEffectGrantedAbilityRemovePolicy::RemoveAbilityOnEnd:
-					Owner->SetRemoveAbilityOnEnd(AbilitySpecDef.AssignedHandle);
-					break;
-				}
-			}
-		}
 
 		// Invoke Remove GameplayCue event
 		bool ShouldInvokeGameplayCueEvent = true;
@@ -2547,6 +2538,36 @@ void FActiveGameplayEffectsContainer::RemoveActiveGameplayEffectGrantedTagsAndMo
 
 	Owner->UpdateTagMap(Effect.Spec.DynamicGrantedTags, -1);
 
+	// Cancel/remove granted abilities
+	if (IsNetAuthority())
+	{
+		for (const FGameplayAbilitySpecDef& AbilitySpecDef : Effect.Spec.GrantedAbilitySpecs)
+		{
+			if (AbilitySpecDef.AssignedHandle.IsValid())
+			{
+				switch(AbilitySpecDef.RemovalPolicy)
+				{
+				case EGameplayEffectGrantedAbilityRemovePolicy::CancelAbilityImmediately:
+					{
+						Owner->ClearAbility(AbilitySpecDef.AssignedHandle);
+						break;
+					}
+				case EGameplayEffectGrantedAbilityRemovePolicy::RemoveAbilityOnEnd:
+					{
+						Owner->SetRemoveAbilityOnEnd(AbilitySpecDef.AssignedHandle);
+						break;
+					}
+				default:
+					{
+						// Do nothing to granted ability
+						break;
+					}
+				}
+			}
+		}
+	}
+
+	// Update GameplayCue tags and events
 	for (const FGameplayEffectCue& Cue : Effect.Spec.Def->GameplayCues)
 	{
 		if (bInvokeGameplayCueEvents)
@@ -2612,6 +2633,14 @@ void FActiveGameplayEffectsContainer::InternalApplyExpirationEffects(const FGame
 			}
 		}
 	}
+}
+
+void FActiveGameplayEffectsContainer::RestartActiveGameplayEffectDuration(FActiveGameplayEffect& ActiveGameplayEffect)
+{
+	ActiveGameplayEffect.StartServerWorldTime = GetServerWorldTime();
+	ActiveGameplayEffect.CachedStartServerWorldTime = ActiveGameplayEffect.StartServerWorldTime;
+	ActiveGameplayEffect.StartWorldTime = GetWorldTime();
+	MarkItemDirty(ActiveGameplayEffect);
 }
 
 void FActiveGameplayEffectsContainer::OnOwnerTagChange(FGameplayTag TagChange, int32 NewCount)
@@ -2684,21 +2713,24 @@ bool FActiveGameplayEffectsContainer::NetDeltaSerialize(FNetDeltaSerializeInfo& 
 
 		for (const FActiveGameplayEffect& Effect : this)
 		{
-			if (Effect.bIsInhibited == false)
+			if (!DeltaParms.bOutHasMoreUnmapped) // Do not invoke GCs when we have missing information (like AActor*s in EffectContext)
 			{
-				if (Effect.bPendingRepOnActiveGC)
+				if (Effect.bIsInhibited == false)
 				{
-					Owner->InvokeGameplayCueEvent(Effect.Spec, EGameplayCueEvent::OnActive);
-					
+					if (Effect.bPendingRepOnActiveGC)
+					{
+						Owner->InvokeGameplayCueEvent(Effect.Spec, EGameplayCueEvent::OnActive);
+						
+					}
+					if (Effect.bPendingRepWhileActiveGC)
+					{
+						Owner->InvokeGameplayCueEvent(Effect.Spec, EGameplayCueEvent::WhileActive);
+					}
 				}
-				if (Effect.bPendingRepWhileActiveGC)
-				{
-					Owner->InvokeGameplayCueEvent(Effect.Spec, EGameplayCueEvent::WhileActive);
-				}
-			}
 
-			Effect.bPendingRepOnActiveGC = false;
-			Effect.bPendingRepWhileActiveGC = false;
+				Effect.bPendingRepOnActiveGC = false;
+				Effect.bPendingRepWhileActiveGC = false;
+			}
 		}
 	}
 
@@ -2745,7 +2777,40 @@ void FActiveGameplayEffectsContainer::CheckDuration(FActiveGameplayEffectHandle 
 			float Duration = Effect.GetDuration();
 			float CurrentTime = GetWorldTime();
 
+			int32 StacksToRemove = -2;
+			bool RefreshStartTime = false;
+			bool RefreshDurationTimer = false;
+			bool CheckForFinalPeriodicExec = false;
+
 			if (Duration > 0.f && (((Effect.StartWorldTime + Duration) < CurrentTime) || FMath::IsNearlyZero(CurrentTime - Duration - Effect.StartWorldTime, KINDA_SMALL_NUMBER)))
+			{
+				// Figure out what to do based on the expiration policy
+				switch(Effect.Spec.Def->StackExpirationPolicy)
+				{
+				case EGameplayEffectStackingExpirationPolicy::ClearEntireStack:
+					StacksToRemove = -1; // Remove all stacks
+					CheckForFinalPeriodicExec = true;					
+					break;
+
+				case EGameplayEffectStackingExpirationPolicy::RemoveSingleStackAndRefreshDuration:
+					StacksToRemove = 1;
+					CheckForFinalPeriodicExec = (Effect.Spec.StackCount == 1);
+					RefreshStartTime = true;
+					RefreshDurationTimer = true;
+					break;
+				case EGameplayEffectStackingExpirationPolicy::RefreshDuration:
+					RefreshStartTime = true;
+					RefreshDurationTimer = true;
+					break;
+				};					
+			}
+			else
+			{
+				// Effect isn't finished, just refresh its duration timer
+				RefreshDurationTimer = true;
+			}
+
+			if (CheckForFinalPeriodicExec)
 			{
 				// This gameplay effect has hit its duration. Check if it needs to execute one last time before removing it.
 				if (Effect.PeriodHandle.IsValid() && TimerManager.TimerExists(Effect.PeriodHandle))
@@ -2759,10 +2824,19 @@ void FActiveGameplayEffectsContainer::CheckDuration(FActiveGameplayEffectHandle 
 					// Forcibly clear the periodic ticks because this effect is going to be removed
 					TimerManager.ClearTimer(Effect.PeriodHandle);
 				}
-
-				InternalRemoveActiveGameplayEffect(ActiveGEIdx, -1, false);
 			}
-			else
+
+			if (StacksToRemove >= -1)
+			{
+				InternalRemoveActiveGameplayEffect(ActiveGEIdx, StacksToRemove, false);
+			}
+
+			if (RefreshStartTime)
+			{
+				RestartActiveGameplayEffectDuration(Effect);
+			}
+
+			if (RefreshDurationTimer)
 			{
 				// Always reset the timer, since the duration might have been modified
 				FTimerDelegate Delegate = FTimerDelegate::CreateUObject(Owner, &UAbilitySystemComponent::CheckDurationExpired, Effect.Handle);
@@ -2971,7 +3045,7 @@ void FActiveGameplayEffectsContainer::RemoveActiveEffects(const FActiveGameplayE
 		}
 	}
 }
-void FActiveGameplayEffectsContainer::RemoveActiveEffects(const FGameplayEffectQuery Query, int32 StacksToRemove)
+void FActiveGameplayEffectsContainer::RemoveActiveEffects(const FGameplayEffectQuery& Query, int32 StacksToRemove)
 {
 	// Force a lock because the removals could cause other removals earlier in the array, so iterating backwards is not safe all by itself
 	GAMEPLAYEFFECT_SCOPE_LOCK();
@@ -3207,6 +3281,7 @@ FGameplayEffectQuery& FGameplayEffectQuery::operator=(FGameplayEffectQuery&& Oth
 	CustomMatchDelegate_BP = MoveTemp(Other.CustomMatchDelegate_BP);
 	OwningTagQuery = MoveTemp(Other.OwningTagQuery);
 	EffectTagQuery = MoveTemp(Other.EffectTagQuery);
+	SourceTagQuery = MoveTemp(Other.SourceTagQuery);
 	ModifyingAttribute = MoveTemp(Other.ModifyingAttribute);
 	EffectSource = Other.EffectSource;
 	EffectDefinition = Other.EffectDefinition;
@@ -3220,6 +3295,7 @@ FGameplayEffectQuery& FGameplayEffectQuery::operator=(const FGameplayEffectQuery
 	CustomMatchDelegate_BP = Other.CustomMatchDelegate_BP;
 	OwningTagQuery = Other.OwningTagQuery;
 	EffectTagQuery = Other.EffectTagQuery;
+	SourceTagQuery = Other.SourceTagQuery;
 	ModifyingAttribute = Other.ModifyingAttribute;
 	EffectSource = Other.EffectSource;
 	EffectDefinition = Other.EffectDefinition;
@@ -3257,33 +3333,54 @@ bool FGameplayEffectQuery::Matches(const FActiveGameplayEffect& Effect) const
 		}
 	}
 
-	// if it fails to match any of these, fail to match overall (assuming AND relationship)
 	if (OwningTagQuery.IsEmpty() == false)
 	{
-		FGameplayTagContainer const& CombinedTags = Effect.Spec.Def->InheritableOwnedTagsContainer.CombinedTags;
-		if (OwningTagQuery.Matches(CombinedTags) == false)
+		// Combine tags from the definition and the spec into one container to match queries that may span both
+		// static to avoid memory allocations every time we do a query
+		static FGameplayTagContainer TargetTags;
+		TargetTags.RemoveAllTags();
+		if (Effect.Spec.Def->InheritableOwnedTagsContainer.CombinedTags.Num() > 0)
 		{
-			if (OwningTagQuery.Matches(Effect.Spec.DynamicGrantedTags) == false)
-			{
-				if (OwningTagQuery.Matches(Effect.Spec.CapturedSourceTags.GetSpecTags()) == false)
-				{
-					// none of these match, so EffectTagQuery fails to match, so entire query fails to match, we can be done
-					return false;
-				}
-			}
+			TargetTags.AppendTags(Effect.Spec.Def->InheritableOwnedTagsContainer.CombinedTags);
+		}
+		if (Effect.Spec.DynamicGrantedTags.Num() > 0)
+		{
+			TargetTags.AppendTags(Effect.Spec.DynamicGrantedTags);
+		}
+		
+		if (OwningTagQuery.Matches(TargetTags) == false)
+		{
+			return false;
 		}
 	}
 
 	if (EffectTagQuery.IsEmpty() == false)
 	{
-		FGameplayTagContainer const& CombinedTags = Effect.Spec.Def->InheritableOwnedTagsContainer.CombinedTags;
-		if (OwningTagQuery.Matches(CombinedTags) == false)
+		// Combine tags from the definition and the spec into one container to match queries that may span both
+		// static to avoid memory allocations every time we do a query
+		static FGameplayTagContainer GETags;
+		GETags.RemoveAllTags();
+		if (Effect.Spec.Def->InheritableGameplayEffectTags.CombinedTags.Num() > 0)
 		{
-			if (OwningTagQuery.Matches(Effect.Spec.DynamicAssetTags) == false)
-			{
-				// none of these match, so EffectTagQuery fails to match, so entire query fails to match, we can be done
-				return false;
-			}
+			GETags.AppendTags(Effect.Spec.Def->InheritableGameplayEffectTags.CombinedTags);
+		}
+		if (Effect.Spec.DynamicAssetTags.Num() > 0)
+		{
+			GETags.AppendTags(Effect.Spec.DynamicAssetTags);
+		}
+
+		if (EffectTagQuery.Matches(GETags) == false)
+		{
+			return false;
+		}
+	}
+
+	if (SourceTagQuery.IsEmpty() == false)
+	{
+		FGameplayTagContainer const& SourceTags = Effect.Spec.CapturedSourceTags.GetSpecTags();
+		if (SourceTagQuery.Matches(SourceTags) == false)
+		{
+			return false;
 		}
 	}
 
@@ -3376,6 +3473,30 @@ FGameplayEffectQuery FGameplayEffectQuery::MakeQuery_MatchNoEffectTags(const FGa
 {
 	FGameplayEffectQuery OutQuery;
 	OutQuery.EffectTagQuery = FGameplayTagQuery::MakeQuery_MatchNoTags(InTags);
+	return OutQuery;
+}
+
+// static
+FGameplayEffectQuery FGameplayEffectQuery::MakeQuery_MatchAnySourceTags(const FGameplayTagContainer& InTags)
+{
+	FGameplayEffectQuery OutQuery;
+	OutQuery.SourceTagQuery = FGameplayTagQuery::MakeQuery_MatchAnyTags(InTags);
+	return OutQuery;
+}
+
+// static
+FGameplayEffectQuery FGameplayEffectQuery::MakeQuery_MatchAllSourceTags(const FGameplayTagContainer& InTags)
+{
+	FGameplayEffectQuery OutQuery;
+	OutQuery.SourceTagQuery = FGameplayTagQuery::MakeQuery_MatchAllTags(InTags);
+	return OutQuery;
+}
+
+// static
+FGameplayEffectQuery FGameplayEffectQuery::MakeQuery_MatchNoSourceTags(const FGameplayTagContainer& InTags)
+{
+	FGameplayEffectQuery OutQuery;
+	OutQuery.SourceTagQuery = FGameplayTagQuery::MakeQuery_MatchNoTags(InTags);
 	return OutQuery;
 }
 

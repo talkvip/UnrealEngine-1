@@ -104,15 +104,15 @@ public:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	/** What we are currently attached to. If valid, RelativeLocation etc. are used relative to this object */
-	UPROPERTY(Replicated)
+	UPROPERTY(ReplicatedUsing=OnRep_AttachParent)
 	class USceneComponent* AttachParent;
 
 	/** List of child SceneComponents that are attached to us. */
-	UPROPERTY(transient)
+	UPROPERTY(Replicated, transient)
 	TArray< USceneComponent* > AttachChildren;
 
 	/** Optional socket name on AttachParent that we are attached to. */
-	UPROPERTY(Replicated)
+	UPROPERTY(ReplicatedUsing=OnRep_AttachSocketName)
 	FName AttachSocketName;
 
 	/** if true, will call GetCustomLocation instead or returning the location part of ComponentToWorld */
@@ -224,8 +224,8 @@ public:
 
 private:
 
-	bool NetUpdateTransform;
-
+	bool bNetUpdateTransform;
+	bool bNetUpdateAttachment;
 	FName NetOldAttachSocketName;
 	USceneComponent *NetOldAttachParent;
 
@@ -233,10 +233,17 @@ private:
 	void OnRep_Transform();
 
 	UFUNCTION()
+	void OnRep_AttachParent();
+
+	UFUNCTION()
+	void OnRep_AttachSocketName();
+
+	UFUNCTION()
 	void OnRep_Visibility(bool OldValue);
 
 	virtual void PreNetReceive() override;
 	virtual void PostNetReceive() override;
+	virtual void PostRepNotifies() override;
 
 public:
 
@@ -516,9 +523,13 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Physics")
 	virtual bool IsAnySimulatingPhysics() const;
 
-	/** Get a pointer to the USceneComponent we are attached to */
+	/** Get the SceneComponent we are attached to. */
 	UFUNCTION(BlueprintCallable, Category="Utilities|Transformation")
-	class USceneComponent* GetAttachParent() const;
+	USceneComponent* GetAttachParent() const;
+
+	/** Get the socket we are attached to. */
+	UFUNCTION(BlueprintCallable, Category="Utilities|Transformation")
+	FName GetAttachSocketName() const;
 
 	/** Gets all parent components up to and including the root component */
 	UFUNCTION(BlueprintCallable, Category="Components")
@@ -540,15 +551,22 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Components")
 	void GetChildrenComponents(bool bIncludeAllDescendants, TArray<USceneComponent*>& Children) const;
 
-	/** 
-	 *   Attach this component to another scene component, optionally at a named socket. It is valid to call this on components whether or not they have been Registered.
-	 *   @param bMaintainWorldTransform	If true, update the relative location/rotation of the component to keep its world position the same
+	/**
+	 * Attach this component to another scene component, optionally at a named socket. It is valid to call this on components whether or not they have been Registered.
+	 * @param  InParent				Parent to attach to.
+	 * @param  InSocketName			Optional socket to attach to on the parent.
+	 * @param  AttachType			How to handle transform when attaching (Keep relative offset, keep world position, etc).
+	 * @param  bWeldSimulatedBodies Whether to weld together simulated physics bodies.
+	 * @return True if attachment is successful (or already attached to requested parent/socket), false if attachment is rejected and there is no change in AttachParent.
 	 */
-	void AttachTo(class USceneComponent* InParent, FName InSocketName = NAME_None, EAttachLocation::Type AttachType = EAttachLocation::KeepRelativeOffset, bool bWeldSimulatedBodies = false);
+	 bool AttachTo(class USceneComponent* InParent, FName InSocketName = NAME_None, EAttachLocation::Type AttachType = EAttachLocation::KeepRelativeOffset, bool bWeldSimulatedBodies = false);
 
 	/**
-	*   Attach this component to another scene component, optionally at a named socket. It is valid to call this on components whether or not they have been Registered.
-	*   @param bMaintainWorldTransform	If true, update the relative location/rotation of the component to keep its world position the same
+	 * Attach this component to another scene component, optionally at a named socket. It is valid to call this on components whether or not they have been Registered.
+	 * @param  InParent				Parent to attach to.
+	 * @param  InSocketName			Optional socket to attach to on the parent.
+	 * @param  AttachType			How to handle transform when attaching (Keep relative offset, keep world position, etc).
+	 * @param  bWeldSimulatedBodies Whether to weld together simulated physics bodies.
 	*/
 	UFUNCTION(BlueprintCallable, Category = "Utilities|Transformation", meta = (DisplayName = "AttachTo", AttachType = "KeepRelativeOffset"))
 	void K2_AttachTo(class USceneComponent* InParent, FName InSocketName = NAME_None, EAttachLocation::Type AttachType = EAttachLocation::KeepRelativeOffset, bool bWeldSimulatedBodies = true);
@@ -660,7 +678,7 @@ public:
 	UPROPERTY(BlueprintAssignable, Category=PhysicsVolume, meta=(DisplayName="Physics Volume Changed"))
 	FPhysicsVolumeChanged PhysicsVolumeChangedDelegate;
 
-	// Begin ActorComponent interface
+	//~ Begin ActorComponent Interface
 	virtual void OnRegister() override;
 	/** Return true if CreateRenderState() should be called */
 	virtual bool ShouldCreateRenderState() const override
@@ -672,12 +690,12 @@ public:
 	virtual void OnComponentDestroyed() override;
 	virtual void ApplyWorldOffset(const FVector& InOffset, bool bWorldShift) override;
 	virtual class FActorComponentInstanceData* GetComponentInstanceData() const override;
-	// End ActorComponent interface
+	//~ End ActorComponent Interface
 
 	// Call UpdateComponentToWorld if bWorldToComponentUpdated is false.
 	void ConditionalUpdateComponentToWorld();
 
-	// Begin UObject Interface
+	//~ Begin UObject Interface
 	virtual void Serialize(FArchive& Ar) override;
 	virtual void PostInterpChange(UProperty* PropertyThatChanged) override;
 	virtual void BeginDestroy() override;
@@ -688,7 +706,7 @@ public:
 	virtual void PostEditChangeChainProperty(FPropertyChangedChainEvent& PropertyChangedEvent) override;
 #endif
 
-	// End UObject Interface
+	//~ End UObject Interface
 protected:
 	/**
 	 * Internal helper, for use from MoveComponent().  Special codepath since the normal setters call MoveComponent.
@@ -704,7 +722,7 @@ protected:
 private:
 
 	void PropagateTransformUpdate(bool bTransformChanged, bool bSkipPhysicsMove = false, ETeleportType Teleport = ETeleportType::None);
-	void UpdateComponentToWorldWithParent(USceneComponent* Parent, bool bSkipPhysicsMove, const FQuat& RelativeRotationQuat, ETeleportType Teleport = ETeleportType::None);
+	void UpdateComponentToWorldWithParent(USceneComponent* Parent, FName SocketName, bool bSkipPhysicsMove, const FQuat& RelativeRotationQuat, ETeleportType Teleport = ETeleportType::None);
 
 
 public:
@@ -900,8 +918,8 @@ protected:
 
 	/** Calculate the new ComponentToWorld transform for this component.
 		Parent is optional and can be used for computing ComponentToWorld based on arbitrary USceneComponent.
-		If Parent is not passed in we use the component's AttachParent*/
-	virtual FTransform CalcNewComponentToWorld(const FTransform& NewRelativeTransform, const USceneComponent* Parent = NULL) const;
+		If Parent is not passed in or is NULL then we use the component's existing AttachParent and AttachSocket */
+	virtual FTransform CalcNewComponentToWorld(const FTransform& NewRelativeTransform, const USceneComponent* Parent = NULL, FName SocketName = NAME_None) const;
 
 	
 public:
@@ -954,10 +972,24 @@ public:
 	/** Returns the form of collision for this component */
 	virtual ECollisionEnabled::Type GetCollisionEnabled() const;
 
-	/** Utility to see if there is any form of collision enabled on this component */
-	bool IsCollisionEnabled() const
+	/** Utility to see if there is any form of collision (query or physics) enabled on this component. */
+	FORCEINLINE_DEBUGGABLE bool IsCollisionEnabled() const
 	{
 		return GetCollisionEnabled() != ECollisionEnabled::NoCollision;
+	}
+
+	/** Utility to see if there is any query collision enabled on this component. */
+	FORCEINLINE_DEBUGGABLE bool IsQueryCollisionEnabled() const
+	{
+		const ECollisionEnabled::Type CollisionSetting = GetCollisionEnabled();
+		return (CollisionSetting == ECollisionEnabled::QueryAndPhysics) || (CollisionSetting == ECollisionEnabled::QueryOnly);
+	}
+
+	/** Utility to see if there is any physics collision enabled on this component. */
+	FORCEINLINE_DEBUGGABLE bool IsPhysicsCollisionEnabled() const
+	{
+		const ECollisionEnabled::Type CollisionSetting = GetCollisionEnabled();
+		return (CollisionSetting == ECollisionEnabled::QueryAndPhysics) || (CollisionSetting == ECollisionEnabled::PhysicsOnly);
 	}
 
 	/** Returns the response that this component has to a specific collision channel. */
@@ -1035,6 +1067,16 @@ protected:
 
 //////////////////////////////////////////////////////////////////////////
 // USceneComponent inlines
+
+FORCEINLINE USceneComponent* USceneComponent::GetAttachParent() const
+{
+	return AttachParent;
+}
+
+FORCEINLINE FName USceneComponent::GetAttachSocketName() const
+{
+	return AttachSocketName;
+}
 
 FORCEINLINE_DEBUGGABLE void USceneComponent::ConditionalUpdateComponentToWorld()
 {

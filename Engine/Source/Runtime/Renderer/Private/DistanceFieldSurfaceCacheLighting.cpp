@@ -632,7 +632,7 @@ public:
 
 	static bool ShouldCache(EShaderPlatform Platform)
 	{
-		return IsFeatureLevelSupported(Platform, ERHIFeatureLevel::SM5) && DoesPlatformSupportDistanceFieldAO(Platform);
+		return IsFeatureLevelSupported(Platform, ERHIFeatureLevel::SM5) && DoesPlatformSupportDistanceFieldAO(Platform) && RHISupportsPixelShaderUAVs(Platform);
 	}
 
 	static void ModifyCompilationEnvironment(EShaderPlatform Platform, FShaderCompilerEnvironment& OutEnvironment)
@@ -2368,7 +2368,7 @@ void RenderIrradianceCacheInterpolation(
 			FRHISetRenderTargetsInfo Info(MRTCount, RenderTargets, DepthView);
 
 			check(RenderTargets[0].Texture->GetClearColor() == FLinearColor::Transparent);
-			check(RenderTargets[1].Texture->GetClearColor() == FLinearColor::Transparent);
+			check(!RenderTargets[1].Texture || RenderTargets[1].Texture->GetClearColor() == FLinearColor::Transparent);
 			Info.bClearColor = true;
 						
 
@@ -2613,11 +2613,17 @@ bool FDeferredShadingSceneRenderer::ShouldPrepareForDistanceFieldAO() const
 
 bool FDeferredShadingSceneRenderer::ShouldPrepareDistanceFields() const
 {
+	if (!ensure(Scene != nullptr))
+	{
+		return false;
+	}
+
 	return SupportsDistanceFieldAO(Scene->GetFeatureLevel(), Scene->GetShaderPlatform())
 		&& (ShouldPrepareForDistanceFieldAO() 
 			|| ShouldPrepareForDistanceFieldShadows() 
-			|| Views[0].bUsesGlobalDistanceField
-			|| Scene->FXSystem->UsesGlobalDistanceField());
+			|| ((Views.Num() > 0) && Views[0].bUsesGlobalDistanceField)
+			|| ((Scene->FXSystem != nullptr) && Scene->FXSystem->UsesGlobalDistanceField())
+		   );
 }
 
 void RenderDistanceFieldAOSurfaceCache(

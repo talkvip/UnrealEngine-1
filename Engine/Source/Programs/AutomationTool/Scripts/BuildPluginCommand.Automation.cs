@@ -25,7 +25,7 @@ class BuildPlugin : BuildCommand
 		}
 
 		// Read the plugin
-		PluginDescriptor Plugin = PluginDescriptor.FromFile(PluginFileName);
+		PluginDescriptor Plugin = PluginDescriptor.FromFile(new FileReference(PluginFileName));
 
 		// Clean the intermediate build directory
 		string IntermediateBuildDirectory = Path.Combine(Path.GetDirectoryName(PluginFileName), "Intermediate", "Build");
@@ -115,7 +115,11 @@ class BuildPlugin : BuildCommand
 		List<BuildProduct> BuildProducts = new List<BuildProduct>();
 		foreach(string ReceiptFileName in ReceiptFileNames)
 		{
-			TargetReceipt Receipt = TargetReceipt.Read(ReceiptFileName);
+			TargetReceipt Receipt;
+			if(!TargetReceipt.TryRead(ReceiptFileName, out Receipt))
+			{
+				throw new AutomationException("Missing or invalid target receipt ({0})", ReceiptFileName);
+			}
 			BuildProducts.AddRange(Receipt.BuildProducts);
 		}
 		return BuildProducts;
@@ -138,7 +142,7 @@ class BuildPlugin : BuildCommand
 
 		// Get the output plugin filename
 		string TargetPluginFileName = CommandUtils.MakeRerootedFilePath(Path.GetFullPath(PluginFileName), Path.GetDirectoryName(Path.GetFullPath(PluginFileName)), PackageDirectory);
-		PluginDescriptor NewDescriptor = PluginDescriptor.FromFile(TargetPluginFileName);
+		PluginDescriptor NewDescriptor = PluginDescriptor.FromFile(new FileReference(TargetPluginFileName));
 		NewDescriptor.bEnabledByDefault = true;
 		NewDescriptor.bInstalled = true;
 		NewDescriptor.Save(TargetPluginFileName);
@@ -152,6 +156,7 @@ class BuildPlugin : BuildCommand
 		FileFilter Filter = new FileFilter();
 		Filter.AddRuleForFile(PluginFileName, PluginDirectory, FileFilterType.Include);
 		Filter.AddRuleForFiles(BuildProducts.Select(x => x.Path), PluginDirectory, FileFilterType.Include);
+		Filter.Include("/Binaries/ThirdParty/...");
 		Filter.Include("/Resources/...");
 		Filter.Include("/Content/...");
 		Filter.Include("/Intermediate/Build/.../Inc/...");
@@ -169,6 +174,6 @@ class BuildPlugin : BuildCommand
 		Filter.ExcludeConfidentialPlatforms();
 
 		// Apply the filter to the plugin directory
-		return new List<string>(Filter.ApplyToDirectory(PluginDirectory, true));
+		return Filter.ApplyToDirectory(PluginDirectory, true);
 	}
 }

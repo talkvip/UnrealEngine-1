@@ -564,6 +564,13 @@ ShaderType* CompileOpenGLShader(const TArray<uint8>& Code)
 				AppendCString(GlslCode, "#define INTERFACE_LOCATION(Pos) \n");
 				AppendCString(GlslCode, "#define INTERFACE_BLOCK(Pos, Interp, Modifiers, Semantic, PreType, PostType) Modifiers Semantic { Interp PreType PostType; }\n");
 			}
+			
+			if(Header.ShaderName.IsEmpty() == false)
+			{
+				AppendCString(GlslCode, "// ");
+				AppendCString(GlslCode, TCHAR_TO_ANSI(Header.ShaderName.GetCharArray().GetData()));
+				AppendCString(GlslCode, "\n");
+			}
 		}
 
 #if PLATFORM_ANDROID 
@@ -714,10 +721,13 @@ ShaderType* CompileOpenGLShader(const TArray<uint8>& Code)
 
 		GLint CompileStatus = GL_TRUE;
 #if PLATFORM_ANDROID
-		// On Android the same shader is compiled with different hacks to find the right one(s) to apply so don't cache unless successful
-		glGetShaderiv(Resource, GL_COMPILE_STATUS, &CompileStatus);
+		// On Android the same shader is compiled with different hacks to find the right one(s) to apply so don't cache unless successful if currently testing them
+		if (FOpenGL::IsCheckingShaderCompilerHacks())
+		{
+			glGetShaderiv(Resource, GL_COMPILE_STATUS, &CompileStatus);
+		}
 #endif
-#if PLATFORM_HTML5
+#if PLATFORM_HTML5 && !UE_BUILD_SHIPPING
 		glGetShaderiv(Resource, GL_COMPILE_STATUS, &CompileStatus);
 		if (CompileStatus == GL_FALSE)
 		{

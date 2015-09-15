@@ -115,7 +115,7 @@ namespace UnrealBuildTool
 
 		public override bool CanUseXGE()
 		{
-			// disabled until XGE crash is fixed - it is still happening as of 2014-09-30
+			// [RCL] 2015-08-04 FIXME: modular (cross-)builds (e.g. editor, UT server) fail with XGE as FixDeps step apparently depends on artifacts (object files) which aren't listed among its prerequisites.
 			return false;
 		}
 
@@ -281,32 +281,33 @@ namespace UnrealBuildTool
          *	This is not required - but allows for hiding details of a
          *	particular platform.
          *	
-         *	@param	InModule		The newly loaded module
-         *	@param	Target			The target being build
-         */
-        public override void ModifyNewlyLoadedModule(UEBuildModule InModule, TargetInfo Target)
+		 *  @param  Name			The name of the module
+		 *	@param	Rules			The module rules
+		 *	@param	Target			The target being build
+		 */
+		public override void ModifyModuleRules(string ModuleName, ModuleRules Rules, TargetInfo Target)
         {
             if ((Target.Platform == UnrealTargetPlatform.Win32) || (Target.Platform == UnrealTargetPlatform.Win64))
             {
                 if (!UEBuildConfiguration.bBuildRequiresCookedData)
                 {
-                    if (InModule.ToString() == "Engine")
+                    if (ModuleName == "Engine")
                     {
                         if (UEBuildConfiguration.bBuildDeveloperTools)
                         {
-                            InModule.AddPlatformSpecificDynamicallyLoadedModule("LinuxTargetPlatform");
-                            InModule.AddPlatformSpecificDynamicallyLoadedModule("LinuxNoEditorTargetPlatform");
-                            InModule.AddPlatformSpecificDynamicallyLoadedModule("LinuxServerTargetPlatform");
+                            Rules.PlatformSpecificDynamicallyLoadedModuleNames.Add("LinuxTargetPlatform");
+                            Rules.PlatformSpecificDynamicallyLoadedModuleNames.Add("LinuxNoEditorTargetPlatform");
+                            Rules.PlatformSpecificDynamicallyLoadedModuleNames.Add("LinuxServerTargetPlatform");
                         }
                     }
                 }
 
                 // allow standalone tools to use targetplatform modules, without needing Engine
-                if (UEBuildConfiguration.bForceBuildTargetPlatforms)
+                if (UEBuildConfiguration.bForceBuildTargetPlatforms && ModuleName == "TargetPlatform")
                 {
-                    InModule.AddPlatformSpecificDynamicallyLoadedModule("LinuxTargetPlatform");
-                    InModule.AddPlatformSpecificDynamicallyLoadedModule("LinuxNoEditorTargetPlatform");
-                    InModule.AddPlatformSpecificDynamicallyLoadedModule("LinuxServerTargetPlatform");
+                    Rules.PlatformSpecificDynamicallyLoadedModuleNames.Add("LinuxTargetPlatform");
+                    Rules.PlatformSpecificDynamicallyLoadedModuleNames.Add("LinuxNoEditorTargetPlatform");
+                    Rules.PlatformSpecificDynamicallyLoadedModuleNames.Add("LinuxServerTargetPlatform");
                 }
             }
             else if (Target.Platform == UnrealTargetPlatform.Linux)
@@ -315,26 +316,29 @@ namespace UnrealBuildTool
 
                 if (!UEBuildConfiguration.bBuildRequiresCookedData)
                 {
-                    if (InModule.ToString() == "TargetPlatform")
+                    if (ModuleName == "TargetPlatform")
                     {
                         bBuildShaderFormats = true;
                     }
                 }
 
                 // allow standalone tools to use target platform modules, without needing Engine
-                if (UEBuildConfiguration.bForceBuildTargetPlatforms)
-                {
-                    InModule.AddDynamicallyLoadedModule("LinuxTargetPlatform");
-                    InModule.AddDynamicallyLoadedModule("LinuxNoEditorTargetPlatform");
-                    InModule.AddDynamicallyLoadedModule("LinuxServerTargetPlatform");
-					InModule.AddDynamicallyLoadedModule("AllDesktopTargetPlatform");
-                }
-
-                if (bBuildShaderFormats)
-                {
-					// InModule.AddDynamicallyLoadedModule("ShaderFormatD3D");
-                    InModule.AddDynamicallyLoadedModule("ShaderFormatOpenGL");
-                }
+				if(ModuleName == "TargetPlatform")
+				{
+                    if (UEBuildConfiguration.bForceBuildTargetPlatforms)
+                    {
+                        Rules.DynamicallyLoadedModuleNames.Add("LinuxTargetPlatform");
+                        Rules.DynamicallyLoadedModuleNames.Add("LinuxNoEditorTargetPlatform");
+                        Rules.DynamicallyLoadedModuleNames.Add("LinuxServerTargetPlatform");
+					    Rules.DynamicallyLoadedModuleNames.Add("AllDesktopTargetPlatform");
+                    }
+    
+                    if (bBuildShaderFormats)
+                    {
+					    // Rules.DynamicallyLoadedModuleNames.Add("ShaderFormatD3D");
+                        Rules.DynamicallyLoadedModuleNames.Add("ShaderFormatOpenGL");
+                    }
+				}
             }
         }
 
@@ -363,6 +367,12 @@ namespace UnrealBuildTool
             {
                 UEBuildConfiguration.bCompileSimplygon = false;
             }
+
+			if (InBuildTarget.TargetType == TargetRules.TargetType.Server)
+			{
+				// Localization shouldn't be needed on servers by default, and ICU is pretty heavy
+				UEBuildConfiguration.bCompileICU = false;
+			}
         }
 
         /**

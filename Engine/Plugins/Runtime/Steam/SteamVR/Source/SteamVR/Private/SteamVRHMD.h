@@ -48,6 +48,7 @@ public:
 	virtual bool DoesSupportPositionalTracking() const override;
 	virtual bool HasValidTrackingPosition() override;
 	virtual void GetPositionalTrackingCameraProperties(FVector& OutOrigin, FQuat& OutOrientation, float& OutHFOV, float& OutVFOV, float& OutCameraDistance, float& OutNearPlane, float& OutFarPlane) const override;
+	virtual void RebaseObjectOrientationAndPosition(FVector& OutPosition, FQuat& OutOrientation) const override;
 
 	virtual void SetInterpupillaryDistance(float NewInterpupillaryDistance) override;
 	virtual float GetInterpupillaryDistance() const override;
@@ -84,8 +85,11 @@ public:
 	virtual void SetBaseOrientation(const FQuat& BaseOrient) override;
 	virtual FQuat GetBaseOrientation() const override;
 
-	virtual bool HasHiddenAreaMask() const override { return HiddenAreaMeshes[0].IsValid() && HiddenAreaMeshes[1].IsValid(); }
-	virtual void DrawHiddenAreaMaskView_RenderThread(FRHICommandList& RHICmdList, const FViewInfo& View) const override;
+	virtual bool HasHiddenAreaMesh() const override { return HiddenAreaMeshes[0].IsValid() && HiddenAreaMeshes[1].IsValid(); }
+	virtual void DrawHiddenAreaMesh_RenderThread(FRHICommandList& RHICmdList, EStereoscopicPass StereoPass) const override;
+
+	virtual bool HasVisibleAreaMesh() const override { return VisibleAreaMeshes[0].IsValid() && VisibleAreaMeshes[1].IsValid(); }
+	virtual void DrawVisibleAreaMesh_RenderThread(FRHICommandList& RHICmdList, EStereoscopicPass StereoPass) const override;
 
 	virtual void DrawDistortionMesh_RenderThread(struct FRenderingCompositePassContext& Context, const FIntPoint& TextureSize) override;
 
@@ -250,6 +254,8 @@ private:
 
 private:
 
+	void SetupOcclusionMeshes();
+
 	bool bHmdEnabled;
 	bool bStereoEnabled;
 	bool bHmdPosTracking;
@@ -297,26 +303,8 @@ private:
 		return FVector(InVector.v[0], InVector.v[1], InVector.v[2]);
 	}
 
-	struct FHiddenAreaMesh
-	{
-		FHiddenAreaMesh();
-		~FHiddenAreaMesh();
-
-		bool IsValid() const
-		{
-			return NumTriangles > 0;
-		}
-
-		void Build(const vr::HiddenAreaMesh_t& Mesh);
-
-		FVector4* pVertices;
-		uint16*   pIndices;
-		unsigned  NumVertices;
-		unsigned  NumIndices;
-		unsigned  NumTriangles;
-	};
-
-	FHiddenAreaMesh HiddenAreaMeshes[2];
+	FHMDViewMesh HiddenAreaMeshes[2];
+	FHMDViewMesh VisibleAreaMeshes[2];
 
 	/** Chaperone Support */
 	struct FChaperoneBounds

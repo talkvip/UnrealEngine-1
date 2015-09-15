@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Diagnostics;
 using System.Linq;
+using System.Runtime.Serialization;
 
 namespace UnrealBuildTool
 {
@@ -26,7 +27,7 @@ namespace UnrealBuildTool
 
 	/** A build action. */
 	[Serializable]
-	public class Action
+	public class Action : ISerializable
 	{
 		///
 		/// Preparation and Assembly (serialized)
@@ -94,18 +95,15 @@ namespace UnrealBuildTool
 		///
 
 		/** Unique action identifier.  Used for displaying helpful info about detected cycles in the graph. */
-		[NonSerialized]
         public int UniqueId;
 
         /** Always-incremented unique id */
         private static int NextUniqueId = 0;
 
 		/** Total number of actions depending on this one. */
-		[NonSerialized]
 		public int NumTotalDependentActions = 0;
 		
 		/** Relative cost of producing items for this action. */
-		[NonSerialized]
 		public long RelativeCost = 0;
 
 
@@ -114,11 +112,9 @@ namespace UnrealBuildTool
 		///
 
 		/** Start time of action, optionally set by executor. */
-		[NonSerialized]
 		public DateTimeOffset StartTime = DateTimeOffset.MinValue;
 		
 		/** End time of action, optionally set by executor. */
-		[NonSerialized]
 		public DateTimeOffset EndTime = DateTimeOffset.MinValue;
 		
 
@@ -131,6 +127,44 @@ namespace UnrealBuildTool
             UniqueId = ++NextUniqueId;
 		}
 
+		public Action( SerializationInfo SerializationInfo, StreamingContext StreamingContext )
+		{
+			ActionType                     = (ActionType)SerializationInfo.GetByte("at");
+			WorkingDirectory               = SerializationInfo.GetString("wd");
+			bPrintDebugInfo                = SerializationInfo.GetBoolean("di");
+			CommandPath                    = SerializationInfo.GetString("cp");
+			CommandArguments               = SerializationInfo.GetString("ca");
+			CommandDescription             = SerializationInfo.GetString("cd");
+			StatusDescription              = SerializationInfo.GetString("sd");
+			bCanExecuteRemotely            = SerializationInfo.GetBoolean("ce");
+			bIsGCCCompiler                 = SerializationInfo.GetBoolean("ig");
+			bIsUsingPCH                    = SerializationInfo.GetBoolean("iu");
+			bShouldDeleteProducedItems     = SerializationInfo.GetBoolean("dp");
+			bShouldOutputStatusDescription = SerializationInfo.GetBoolean("os");
+			bProducesImportLibrary         = SerializationInfo.GetBoolean("il");
+			PrerequisiteItems              = (List<FileItem>)SerializationInfo.GetValue("pr", typeof(List<FileItem>));
+			ProducedItems                  = (List<FileItem>)SerializationInfo.GetValue("pd", typeof(List<FileItem>));
+		}
+
+		/** ISerializable: Called when serialized to report additional properties that should be saved */
+		public void GetObjectData( SerializationInfo SerializationInfo, StreamingContext StreamingContext )
+		{
+			SerializationInfo.AddValue("at", (byte)ActionType);
+			SerializationInfo.AddValue("wd", WorkingDirectory);
+			SerializationInfo.AddValue("di", bPrintDebugInfo);
+			SerializationInfo.AddValue("cp", CommandPath);
+			SerializationInfo.AddValue("ca", CommandArguments);
+			SerializationInfo.AddValue("cd", CommandDescription);
+			SerializationInfo.AddValue("sd", StatusDescription);
+			SerializationInfo.AddValue("ce", bCanExecuteRemotely);
+			SerializationInfo.AddValue("ig", bIsGCCCompiler);
+			SerializationInfo.AddValue("iu", bIsUsingPCH);
+			SerializationInfo.AddValue("dp", bShouldDeleteProducedItems);
+			SerializationInfo.AddValue("os", bShouldOutputStatusDescription);
+			SerializationInfo.AddValue("il", bProducesImportLibrary);
+			SerializationInfo.AddValue("pr", PrerequisiteItems);
+			SerializationInfo.AddValue("pd", ProducedItems);
+		}
 
 		/**
 		 * Compares two actions based on total number of dependent items, descending.
@@ -224,14 +258,14 @@ namespace UnrealBuildTool
 			// For all targets, build a set of all actions that are outdated.
 			var OutdatedActionDictionary = new Dictionary<Action, bool>();
 			var HistoryList = new List<ActionHistory>();
-			var OpenHistoryFiles = new HashSet<string>(StringComparer.InvariantCultureIgnoreCase);
+			var OpenHistoryFiles = new HashSet<FileReference>();
 			TargetToOutdatedPrerequisitesMap = new Dictionary<UEBuildTarget,List<FileItem>>();
 			foreach (var BuildTarget in Targets)	// @todo ubtmake: Optimization: Ideally we don't even need to know about targets for ubtmake -- everything would come from the files
 			{
 				var HistoryFilename = ActionHistory.GeneratePathForTarget(BuildTarget);
 				if (!OpenHistoryFiles.Contains(HistoryFilename))		// @todo ubtmake: Optimization: We should be able to move the command-line outdatedness and build product deletion over to the 'gather' phase, as the command-lines won't change between assembler runs
 				{
-					var History = new ActionHistory(HistoryFilename);
+					var History = new ActionHistory(HistoryFilename.FullName);
 					HistoryList.Add(History);
 					OpenHistoryFiles.Add(HistoryFilename);
 					GatherAllOutdatedActions(BuildTarget, History, ref OutdatedActionDictionary, TargetToOutdatedPrerequisitesMap);
@@ -292,6 +326,11 @@ namespace UnrealBuildTool
 			{
 				if (BuildConfiguration.bAllowXGE || BuildConfiguration.bXGEExport)
 				{
+					Log.TraceInformation("{0} {1} action{2} to XGE", 
+						BuildConfiguration.bXGEExport ? "Exporting" : "Distributing", 
+						ActionsToExecute.Count, 
+						ActionsToExecute.Count == 1 ? "" : "s" );
+
 					XGE.ExecutionResult XGEResult = XGE.ExecutionResult.TasksSucceeded;
 
 					// Batch up XGE execution by actions with the same output event handler.
@@ -391,7 +430,7 @@ namespace UnrealBuildTool
 			else
 			{
 				ExecutorName = "NoActionsToExecute";
-				Log.TraceInformation("Target is up to date.");
+				Log.TraceInformation("Target is up to date");
 			}
 
 			return Result;
@@ -1302,11 +1341,11 @@ namespace UnrealBuildTool
 					// Resolve the included file name to an actual file.
 					var DirectlyIncludedFiles =
 						DirectlyIncludedFilenames
-						.Where(DirectlyIncludedFilename => !string.IsNullOrEmpty(DirectlyIncludedFilename.IncludeResolvedName))
-						.Select(DirectlyIncludedFilename => DirectlyIncludedFilename.IncludeResolvedName)
+						.Where(DirectlyIncludedFilename => (DirectlyIncludedFilename.IncludeResolvedNameIfSuccessful != null))
+						.Select(DirectlyIncludedFilename => DirectlyIncludedFilename.IncludeResolvedNameIfSuccessful)
 						// Skip same include over and over (.inl files)
 						.Distinct()
-						.Select(FileItem.GetItemByFullPath)
+						.Select(FileItem.GetItemByFileReference)
 						.ToList();
 
 					OverriddenPrerequisites[ FileItem ] = DirectlyIncludedFiles;

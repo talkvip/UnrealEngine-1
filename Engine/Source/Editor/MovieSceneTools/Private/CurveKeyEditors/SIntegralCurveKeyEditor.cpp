@@ -23,6 +23,7 @@ void SIntegralCurveKeyEditor::Construct(const FArguments& InArgs)
 		.MinDesiredWidth(60.0f)
 		.Value(this, &SIntegralCurveKeyEditor::OnGetKeyValue)
 		.OnValueChanged(this, &SIntegralCurveKeyEditor::OnValueChanged)
+		.OnValueCommitted(this, &SIntegralCurveKeyEditor::OnValueCommitted)
 		.OnBeginSliderMovement(this, &SIntegralCurveKeyEditor::OnBeginSliderMovement)
 		.OnEndSliderMovement(this, &SIntegralCurveKeyEditor::OnEndSliderMovement)
 	];
@@ -30,7 +31,7 @@ void SIntegralCurveKeyEditor::Construct(const FArguments& InArgs)
 
 void SIntegralCurveKeyEditor::OnBeginSliderMovement()
 {
-	GEditor->BeginTransaction(LOCTEXT("SetIntegralKey", "Set integral key value"));
+	GEditor->BeginTransaction(LOCTEXT("SetIntegralKey", "Set Integral Key Value"));
 	OwningSection->SetFlags(RF_Transactional);
 	OwningSection->Modify();
 }
@@ -68,8 +69,25 @@ void SIntegralCurveKeyEditor::OnValueChanged(int32 Value)
 		}
 	}
 
-	Curve->UpdateOrAddKey(CurrentTime, Value);
+	if (Curve->GetNumKeys() == 0)
+	{
+		Curve->SetDefaultValue(Value);
+	}
+	else
+	{
+		Curve->UpdateOrAddKey(CurrentTime, Value);
+	}
 	Sequencer->UpdateRuntimeInstances();
+}
+
+void SIntegralCurveKeyEditor::OnValueCommitted(int32 Value, ETextCommit::Type CommitInfo)
+{
+	if (CommitInfo == ETextCommit::OnEnter)
+	{
+		const FScopedTransaction Transaction( LOCTEXT("SetIntegralKey", "Set Integral Key Value") );
+
+		OnValueChanged(Value);
+	}
 }
 
 #undef LOCTEXT_NAMESPACE

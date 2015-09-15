@@ -45,26 +45,29 @@ FFriendsAndChatManager::FFriendsAndChatManager()
 
 FFriendsAndChatManager::~FFriendsAndChatManager( )
 {
+	Logout();
 }
 
-void FFriendsAndChatManager::Initialize()
+void FFriendsAndChatManager::Initialize(bool InGame)
 {
 	Analytics = FFriendsAndChatAnalyticsFactory::Create();
 	OSSScheduler = FOSSSchedulerFactory::Create(Analytics);
 	
-	NavigationService = FFriendsNavigationServiceFactory::Create();
 	NotificationService = FChatNotificationServiceFactory::Create();
 
 	FriendsService = FFriendsServiceFactory::Create(OSSScheduler.ToSharedRef(), NotificationService.ToSharedRef());
+
+	NavigationService = FFriendsNavigationServiceFactory::Create(FriendsService.ToSharedRef(), InGame);
+
 	MessageService = FMessageServiceFactory::Create(OSSScheduler.ToSharedRef(), FriendsService.ToSharedRef());
-	GameAndPartyService = FGameAndPartyServiceFactory::Create(OSSScheduler.ToSharedRef(), FriendsService.ToSharedRef(), NotificationService.ToSharedRef(), false);
+	GameAndPartyService = FGameAndPartyServiceFactory::Create(OSSScheduler.ToSharedRef(), FriendsService.ToSharedRef(), NotificationService.ToSharedRef(), InGame);
 	
 	
 	
 	FriendViewModelFactory = FFriendViewModelFactoryFactory::Create(NavigationService.ToSharedRef(), FriendsService.ToSharedRef(), GameAndPartyService.ToSharedRef());
 	FriendsListFactory = FFriendListFactoryFactory::Create(FriendViewModelFactory.ToSharedRef(), FriendsService.ToSharedRef(), GameAndPartyService.ToSharedRef());
 	TSharedRef<IChatCommunicationService> CommunicationService = StaticCastSharedRef<IChatCommunicationService>(MessageService.ToSharedRef());
-	MarkupServiceFactory = FFriendsChatMarkupServiceFactoryFactory::Create(CommunicationService, NavigationService.ToSharedRef(), FriendsListFactory.ToSharedRef());
+	MarkupServiceFactory = FFriendsChatMarkupServiceFactoryFactory::Create(CommunicationService, NavigationService.ToSharedRef(), FriendsListFactory.ToSharedRef(), GameAndPartyService.ToSharedRef());
 }
 
 /* IFriendsAndChatManager interface
@@ -86,6 +89,9 @@ void FFriendsAndChatManager::Logout()
 
 		// Logout OSS
 		OSSScheduler->Logout();
+
+		// Clear the shared chat view model
+		CachedViewModel.Reset();
 	}
 }
 
@@ -94,20 +100,30 @@ void FFriendsAndChatManager::Login(IOnlineSubsystem* InOnlineSub, bool bInIsGame
 	// OSS login
 	OSSScheduler->Login(InOnlineSub, bInIsGame, LocalUserID);
 
-	// Friends Service Login
-	FriendsService->Login();
-	FriendsService->OnAddToast().AddSP(this, &FFriendsAndChatManager::AddFriendsToast);
-
-	// Message Service Login
-	MessageService->Login();
-	MessageService->OnChatPublicRoomJoined().AddSP(this, &FFriendsAndChatManager::OnChatPublicRoomJoined);
-	for (auto RoomName : ChatRoomstoJoin)
+	if (OSSScheduler->IsLoggedIn())
 	{
-		MessageService->JoinPublicRoom(RoomName);
-	}
+		// Friends Service Login
+		FriendsService->Login();
+		if(!FriendsService->OnAddToast().IsBound())
+		{
+			FriendsService->OnAddToast().AddSP(this, &FFriendsAndChatManager::AddFriendsToast);
+		}
 
-	// Game Party Service
-	GameAndPartyService->Login();
+		// Message Service Login
+		MessageService->Login();
+		if(!MessageService->OnChatPublicRoomJoined().IsBound())
+		{
+			MessageService->OnChatPublicRoomJoined().AddSP(this, &FFriendsAndChatManager::OnGlobalChatRoomJoined);
+		}
+
+		for (auto RoomName : ChatRoomstoJoin)
+		{
+			MessageService->JoinPublicRoom(RoomName);
+		}
+
+		// Game Party Service
+		GameAndPartyService->Login();
+	}
 }
 
 bool FFriendsAndChatManager::IsLoggedIn()
@@ -155,7 +171,12 @@ void FFriendsAndChatManager::InsertNetworkChatMessage(const FString& InMessage)
 	MessageService->InsertNetworkMessage(InMessage);
 }
 
-void FFriendsAndChatManager::JoinPublicChatRoom(const FString& RoomName)
+void FFriendsAndChatManager::InsertNetworkAdminMessage(const FString& InMessage)
+{
+	MessageService->InsertAdminMessage(InMessage);
+}
+
+void FFriendsAndChatManager::JoinGlobalChatRoom(const FString& RoomName)
 {
 	if (!RoomName.IsEmpty() && MessageService->IsInGlobalChat() == false)
 	{
@@ -164,7 +185,7 @@ void FFriendsAndChatManager::JoinPublicChatRoom(const FString& RoomName)
 	}
 }
 
-void FFriendsAndChatManager::OnChatPublicRoomJoined(const FString& ChatRoomID)
+void FFriendsAndChatManager::OnGlobalChatRoomJoined(const FString& ChatRoomID)
 {
 }
 
@@ -205,6 +226,10 @@ TSharedPtr< SWidget > FFriendsAndChatManager::GenerateStatusWidget( const FFrien
 {
 	if(ShowStatusOptions)
 	{
+		if (!ClanRepository.IsValid())
+		{
+			ClanRepository = FClanRepositoryFactory::Create();
+		}
 		check(ClanRepository.IsValid());
 
 		TSharedRef<FFriendsViewModel> FriendsViewModel = FFriendsViewModelFactory::Create(FriendsService.ToSharedRef(), GameAndPartyService.ToSharedRef(), MessageService.ToSharedRef(), ClanRepository.ToSharedRef(), FriendsListFactory.ToSharedRef(), NavigationService.ToSharedRef());
@@ -244,7 +269,7 @@ TSharedPtr< SWidget > FFriendsAndChatManager::GenerateChatWidget(const FFriendsA
 		NewFriend = MakeShareable(new FSelectedFriend());
 		NewFriend->DisplayName = FText::FromString(FriendItem->GetName());
 		NewFriend->UserID = FriendItem->GetUniqueID();
-		ViewModel->SetWhisperFriend(NewFriend);
+		ViewModel->SetWhisperFriend(NewFriend, true);
 	}
 
 	ViewModel->RefreshMessages();
@@ -289,7 +314,7 @@ void FFriendsAndChatManager::AddFriendsToast(const FText Message)
 	}
 }
 
-TSharedPtr<FFriendsNavigationService> FFriendsAndChatManager::GetNavigationService()
+TSharedPtr<IFriendsNavigationService> FFriendsAndChatManager::GetNavigationService()
 {
 	return NavigationService;
 }
@@ -309,9 +334,9 @@ TSharedPtr<IGameAndPartyService> FFriendsAndChatManager::GetGameAndPartyService(
 	return GameAndPartyService;
 }
 
-TSharedRef< IChatDisplayService > FFriendsAndChatManager::GenerateChatDisplayService(bool FadeChatList, bool FadeChatEntry, float ListFadeTime, float EntryFadeTime)
+TSharedRef< IChatDisplayService > FFriendsAndChatManager::GenerateChatDisplayService(bool ChatMinimizeEnabled, bool ChatAutoMinimizeEnabled, bool FadeChatList, bool FadeChatEntry, float ListFadeTime, float EntryFadeTime)
 {
-	return FChatDisplayServiceFactory::Create(MessageService.ToSharedRef(), FadeChatList, FadeChatEntry, ListFadeTime, EntryFadeTime);
+	return FChatDisplayServiceFactory::Create(MessageService.ToSharedRef(), ChatMinimizeEnabled, ChatAutoMinimizeEnabled, FadeChatList, FadeChatEntry, ListFadeTime, EntryFadeTime);
 }
 
 TSharedRef< IChatSettingsService > FFriendsAndChatManager::GenerateChatSettingsService()
@@ -319,30 +344,52 @@ TSharedRef< IChatSettingsService > FFriendsAndChatManager::GenerateChatSettingsS
 	return FChatSettingsServiceFactory::Create();
 }
 
-TSharedPtr< SWidget > FFriendsAndChatManager::GenerateChromeWidget(const struct FFriendsAndChatStyle* InStyle, TSharedRef<IChatDisplayService> ChatDisplayService, TSharedRef<IChatSettingsService> InChatSettingsService)
+TSharedPtr< SWidget > FFriendsAndChatManager::GenerateChromeWidget(const struct FFriendsAndChatStyle* InStyle, TSharedRef<IChatDisplayService> ChatDisplayService, TSharedRef<IChatSettingsService> InChatSettingsService, TArray<TSharedRef<ICustomSlashCommand> >* CustomSlashCommands, bool CombineGameAndPartyChat)
 {
 	Style = *InStyle;
-	TSharedPtr<FChatChromeViewModel> ChromeViewModel = FChatChromeViewModelFactory::Create(NavigationService.ToSharedRef(), ChatDisplayService, InChatSettingsService);
+	GameAndPartyService->SetCombineGameAndPartyChat(CombineGameAndPartyChat);
 
-	TSharedRef<FChatViewModel> CustomChatViewModel = FChatViewModelFactory::Create(FriendViewModelFactory.ToSharedRef(), MessageService.ToSharedRef(), NavigationService.ToSharedRef(), MarkupServiceFactory->Create(), ChatDisplayService, FriendsService.ToSharedRef(), GameAndPartyService.ToSharedRef(), EChatViewModelType::Base);
-	CustomChatViewModel->SetChannelFlags(EChatMessageType::Global | EChatMessageType::Whisper | EChatMessageType::Game);
-	CustomChatViewModel->SetOutgoingMessageChannel(EChatMessageType::Global);
+	if(!CachedViewModel.IsValid())
+	{
+		CachedViewModel = FChatChromeViewModelFactory::Create(NavigationService.ToSharedRef(), GameAndPartyService.ToSharedRef(), ChatDisplayService, InChatSettingsService);
 
-	TSharedRef<FChatViewModel> GlobalChatViewModel = FChatViewModelFactory::Create(FriendViewModelFactory.ToSharedRef(), MessageService.ToSharedRef(), NavigationService.ToSharedRef(), MarkupServiceFactory->Create(), ChatDisplayService, FriendsService.ToSharedRef(), GameAndPartyService.ToSharedRef(), EChatViewModelType::Base);
-	GlobalChatViewModel->SetChannelFlags(EChatMessageType::Global);
-	GlobalChatViewModel->SetOutgoingMessageChannel(EChatMessageType::Global);
+		TSharedRef<FChatViewModel> GlobalChatViewModel = FChatViewModelFactory::Create(FriendViewModelFactory.ToSharedRef(), MessageService.ToSharedRef(), NavigationService.ToSharedRef(), MarkupServiceFactory->Create(), ChatDisplayService, FriendsService.ToSharedRef(), GameAndPartyService.ToSharedRef(), EChatViewModelType::Base);
+		GlobalChatViewModel->SetDefaultOutgoingChannel(EChatMessageType::Global);
+		GlobalChatViewModel->SetDefaultChannelFlags(EChatMessageType::Global | EChatMessageType::Party | EChatMessageType::Whisper | EChatMessageType::Game | EChatMessageType::Admin);
 
-	TSharedRef<FChatViewModel> WhisperChatViewModel = FChatViewModelFactory::Create(FriendViewModelFactory.ToSharedRef(), MessageService.ToSharedRef(), NavigationService.ToSharedRef(), MarkupServiceFactory->Create(), ChatDisplayService, FriendsService.ToSharedRef(), GameAndPartyService.ToSharedRef(), EChatViewModelType::Base);
-	WhisperChatViewModel->SetChannelFlags(EChatMessageType::Whisper);
-	WhisperChatViewModel->SetOutgoingMessageChannel(EChatMessageType::Whisper);
+		TSharedRef<FChatViewModel> PartyChatViewModel = FChatViewModelFactory::Create(FriendViewModelFactory.ToSharedRef(), MessageService.ToSharedRef(), NavigationService.ToSharedRef(), MarkupServiceFactory->Create(), ChatDisplayService, FriendsService.ToSharedRef(), GameAndPartyService.ToSharedRef(), EChatViewModelType::Base);
+		PartyChatViewModel->SetDefaultOutgoingChannel(EChatMessageType::Party);
+		PartyChatViewModel->SetDefaultChannelFlags(EChatMessageType::Party | EChatMessageType::Whisper | EChatMessageType::Game| EChatMessageType::Admin);
 
-	ChromeViewModel->AddTab(FChatChromeTabViewModelFactory::Create(CustomChatViewModel));
-	ChromeViewModel->AddTab(FChatChromeTabViewModelFactory::Create(GlobalChatViewModel));
-	ChromeViewModel->AddTab(FChatChromeTabViewModelFactory::Create(WhisperChatViewModel));
+		TSharedRef<FChatViewModel> WhisperChatViewModel = FChatViewModelFactory::Create(FriendViewModelFactory.ToSharedRef(), MessageService.ToSharedRef(), NavigationService.ToSharedRef(), MarkupServiceFactory->Create(), ChatDisplayService, FriendsService.ToSharedRef(), GameAndPartyService.ToSharedRef(), EChatViewModelType::Base);
+		WhisperChatViewModel->SetDefaultOutgoingChannel(EChatMessageType::Whisper);
+		WhisperChatViewModel->SetDefaultChannelFlags(EChatMessageType::Whisper| EChatMessageType::Admin);
 
-	TSharedPtr<SChatChrome> ChatChrome = SNew(SChatChrome, ChromeViewModel.ToSharedRef()).FriendStyle(InStyle);
-	
+		if(CustomSlashCommands!= nullptr)
+		{
+			GlobalChatViewModel->AddCustomSlashCommands(*CustomSlashCommands);
+			PartyChatViewModel->AddCustomSlashCommands(*CustomSlashCommands);
+			WhisperChatViewModel->AddCustomSlashCommands(*CustomSlashCommands);
+		}
+
+		CachedViewModel->AddTab(FChatChromeTabViewModelFactory::Create(GlobalChatViewModel));
+		CachedViewModel->AddTab(FChatChromeTabViewModelFactory::Create(PartyChatViewModel));
+		CachedViewModel->AddTab(FChatChromeTabViewModelFactory::Create(WhisperChatViewModel));
+	}
+	else
+	{
+		// Clone Chrome View Model. Keep messages, but add new style
+		CachedViewModel = CachedViewModel->Clone(ChatDisplayService, InChatSettingsService, CustomSlashCommands);
+	}
+
+	TSharedPtr<SChatChrome> ChatChrome = SNew(SChatChrome, CachedViewModel.ToSharedRef()).FriendStyle(InStyle);
+	ChatChrome->SetVisibility(EVisibility::SelfHitTestInvisible);
 	return ChatChrome;
+}
+
+void FFriendsAndChatManager::OnSendPartyInvitationCompleteInternal(const FUniqueNetId& LocalUserId, const FOnlinePartyId& PartyId, ESendInviteCompleteResult Result, const FUniqueNetId& RecipientId)
+{
+	OnSendPartyInvitationComplete().Broadcast(LocalUserId, PartyId, Result, RecipientId);
 }
 
 #undef LOCTEXT_NAMESPACE

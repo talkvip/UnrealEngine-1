@@ -45,6 +45,12 @@ struct KISMET_API FFindInBlueprintSearchTags
 	static const FText FiB_Description;
 	/** Comment tag */
 	static const FText FiB_Comment;
+	/** Path tag */
+	static const FText FiB_Path;
+	/** Parent Class tag */
+	static const FText FiB_ParentClass;
+	/** Interfaces tag */
+	static const FText FiB_Interfaces;
 
 	/** Pin type tags */
 
@@ -75,10 +81,16 @@ struct FSearchData
 	TWeakObjectPtr<UBlueprint> Blueprint;
 
 	/** The full Blueprint path this search data is associated with */
-	FString BlueprintPath;
+	FName BlueprintPath;
 
 	/** Search data block for the Blueprint */
 	FString Value;
+
+	/** Parent Class */
+	FString ParentClass;
+
+	/** Interfaces implemented by the Blueprint */
+	TArray<FString> Interfaces;
 
 	/** Cached to determine if the Blueprint is seen as no longer valid, allows it to be cleared out next save to disk */
 	bool bMarkedForDeletion;
@@ -95,6 +107,8 @@ struct FSearchData
 		: Blueprint(Other.Blueprint)
 		, BlueprintPath(MoveTemp(Other.BlueprintPath))
 		, Value(MoveTemp(Other.Value))
+		, ParentClass(MoveTemp(Other.ParentClass))
+		, Interfaces(MoveTemp(Other.Interfaces))
 		, bMarkedForDeletion(Other.bMarkedForDeletion)
 	{
 	}
@@ -110,6 +124,8 @@ struct FSearchData
 		BlueprintPath = MoveTemp(RHS.BlueprintPath);
 		Value = MoveTemp(RHS.Value);
 		bMarkedForDeletion = RHS.bMarkedForDeletion;
+		ParentClass = MoveTemp(RHS.ParentClass);
+		Interfaces = MoveTemp(RHS.Interfaces);
 		return *this;
 	}
 
@@ -117,6 +133,8 @@ struct FSearchData
 		: Blueprint(Other.Blueprint)
 		, BlueprintPath(Other.BlueprintPath)
 		, Value(Other.Value)
+		, ParentClass(Other.ParentClass)
+		, Interfaces(Other.Interfaces)
 		, bMarkedForDeletion(Other.bMarkedForDeletion)
 	{
 	}
@@ -132,6 +150,8 @@ struct FSearchData
 		BlueprintPath = RHS.BlueprintPath;
 		Value = RHS.Value;
 		bMarkedForDeletion = RHS.bMarkedForDeletion;
+		ParentClass = RHS.ParentClass;
+		Interfaces = RHS.Interfaces;
 		return *this;
 	}
 
@@ -236,13 +256,13 @@ public:
 	int32 GetCurrentCacheIndex() const;
 
 	/** Returns the name of the current Blueprint being cached */
-	FString GetCurrentCacheBlueprintName() const;
+	FName GetCurrentCacheBlueprintName() const;
 
 	/** Returns the progress complete on the caching */
 	float GetCacheProgress() const;
 
 	/** Returns the list of Blueprint paths that failed to cache */
-	TArray<FString> GetFailedToCachePathList() const { return FailedToCachePaths; }
+	TArray<FName> GetFailedToCachePathList() const { return FailedToCachePaths; }
 
 	/** Returns the number of Blueprints that failed to cache */
 	int32 GetFailedToCacheCount() const { return FailedToCachePaths.Num(); }
@@ -254,7 +274,7 @@ public:
 	 *
 	 * @param InNumberCached		The number of Blueprints cached, to be chopped off the existing array so the rest (if any) can be finished later
 	 */
-	void FinishedCachingBlueprints(int32 InNumberCached, TArray<FString>& InFailedToCacheList);
+	void FinishedCachingBlueprints(int32 InNumberCached, TArray<FName>& InFailedToCacheList);
 
 	/** Returns TRUE if Blueprints are being cached. */
 	bool IsCacheInProgress() const;
@@ -287,6 +307,9 @@ private:
 	/** Callback hook from the Asset Registry when an asset is loaded */
 	void OnAssetLoaded(class UObject* InAsset);
 
+	/** Callback hook from the Hot Reload manager that indicates that a module has been hot-reloaded */
+	void OnHotReload(bool bWasTriggeredAutomatically);
+
 	/** Helper to gathers the Blueprint's search metadata */
 	FString GatherBlueprintSearchMetadata(const UBlueprint* Blueprint);
 
@@ -302,16 +325,14 @@ private:
 	 * @param InSearchData		Data to add to the database
 	 * @return					Index into the SearchArray for looking up the added item
 	 */
-	int32 AddSearchDataToDatabase(FSearchData& InSearchData);
+	int32 AddSearchDataToDatabase(FSearchData InSearchData);
 
 	/** Removes a Blueprint from being managed by the FiB system by passing in the UBlueprint's path */
-	void RemoveBlueprintByPath(FString InPath);
+	void RemoveBlueprintByPath(FName InPath);
 
-	/** Removes a World Blueprint with compound FiB searchable data from being managed by the FiB system by passing in the World's path */
-	void RemoveWorldByPath(FString InPath);
 protected:
 	/** Maps the Blueprint paths to their index in the SearchArray */
-	TMap<FString, int> SearchMap;
+	TMap<FName, int32> SearchMap;
 
 	/** Stores the Blueprint search data and is used to iterate over in small chunks */
 	TArray<FSearchData> SearchArray;
@@ -341,11 +362,14 @@ protected:
 	TWeakPtr<SFindInBlueprints> SourceCachingWidget;
 
 	/** Blueprint paths that have not been cached for searching due to lack of data, this means that they are either older Blueprints, or the DDC cannot find the data */
-	TArray<FString> UncachedBlueprints;
+	TArray<FName> UncachedBlueprints;
 
 	/** List of paths for Blueprints that failed to cache */
-	TArray<FString> FailedToCachePaths;
+	TArray<FName> FailedToCachePaths;
 
 	/** Tickable object that does the caching of uncached Blueprints at a rate of once per tick */
 	class FCacheAllBlueprintsTickableObject* CachingObject;
+
+	/** Mapping between a class name and its UClass instance - used for faster look up in FFindInBlueprintSearchManager::OnAssetAdded */
+	TMap<FName, const UClass*> CachedAssetClasses;
 };

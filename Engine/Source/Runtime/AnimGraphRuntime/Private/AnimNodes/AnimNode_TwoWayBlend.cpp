@@ -8,6 +8,8 @@
 
 void FAnimationNode_TwoWayBlend::Initialize(const FAnimationInitializeContext& Context)
 {
+	FAnimNode_Base::Initialize(Context);
+
 	A.Initialize(Context);
 	B.Initialize(Context);
 }
@@ -20,6 +22,7 @@ void FAnimationNode_TwoWayBlend::CacheBones(const FAnimationCacheBonesContext& C
 
 void FAnimationNode_TwoWayBlend::Update(const FAnimationUpdateContext& Context)
 {
+	QUICK_SCOPE_CYCLE_COUNTER(STAT_FAnimationNode_TwoWayBlend_Update);
 	EvaluateGraphExposedInputs.Execute(Context);
 
 	const float ActualAlpha = AlphaScaleBias.ApplyTo(Alpha);

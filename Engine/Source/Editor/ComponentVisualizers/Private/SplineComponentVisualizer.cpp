@@ -354,9 +354,19 @@ bool FSplineComponentVisualizer::VisProxyHandleClick(FLevelEditorViewportClient*
 		const USplineComponent* SplineComp = CastChecked<const USplineComponent>(VisProxy->Component.Get());
 
 		SplineCompPropName = GetComponentPropertyName(SplineComp);
-		if(SplineCompPropName != NAME_None)
+		if(SplineCompPropName.IsValid())
 		{
+			AActor* OldSplineOwningActor = SplineOwningActor.Get();
 			SplineOwningActor = SplineComp->GetOwner();
+
+			if (OldSplineOwningActor != SplineOwningActor)
+			{
+				// Reset selection state if we are selecting a different actor to the one previously selected
+				ChangeSelectionState(INDEX_NONE, false);
+				SelectedSegmentIndex = INDEX_NONE;
+				SelectedTangentHandle = INDEX_NONE;
+				SelectedTangentHandleType = ESelectedTangentHandle::None;
+			}
 
 			if (VisProxy->IsA(HSplineKeyProxy::StaticGetType()))
 			{
@@ -372,6 +382,12 @@ bool FSplineComponentVisualizer::VisProxyHandleClick(FLevelEditorViewportClient*
 				SelectedSegmentIndex = INDEX_NONE;
 				SelectedTangentHandle = INDEX_NONE;
 				SelectedTangentHandleType = ESelectedTangentHandle::None;
+
+				if (LastKeyIndexSelected == INDEX_NONE)
+				{
+					SplineOwningActor = nullptr;
+					return false;
+				}
 
 				CachedRotation = SplineComp->GetQuaternionAtSplinePoint(LastKeyIndexSelected, ESplineCoordinateSpace::World);
 
@@ -390,6 +406,12 @@ bool FSplineComponentVisualizer::VisProxyHandleClick(FLevelEditorViewportClient*
 				SelectedSegmentIndex = SegmentProxy->SegmentIndex;
 				SelectedTangentHandle = INDEX_NONE;
 				SelectedTangentHandleType = ESelectedTangentHandle::None;
+
+				if (LastKeyIndexSelected == INDEX_NONE)
+				{
+					SplineOwningActor = nullptr;
+					return false;
+				}
 
 				CachedRotation = SplineComp->GetQuaternionAtSplinePoint(LastKeyIndexSelected, ESplineCoordinateSpace::World);
 
@@ -441,7 +463,7 @@ bool FSplineComponentVisualizer::VisProxyHandleClick(FLevelEditorViewportClient*
 		}
 		else
 		{
-			SplineOwningActor = NULL;
+			SplineOwningActor = nullptr;
 		}
 	}
 
@@ -659,7 +681,7 @@ bool FSplineComponentVisualizer::HandleInputKey(FEditorViewportClient* ViewportC
 void FSplineComponentVisualizer::EndEditing()
 {
 	SplineOwningActor = NULL;
-	SplineCompPropName = NAME_None;
+	SplineCompPropName.Clear();
 	ChangeSelectionState(INDEX_NONE, false);
 	SelectedSegmentIndex = INDEX_NONE;
 	SelectedTangentHandle = INDEX_NONE;

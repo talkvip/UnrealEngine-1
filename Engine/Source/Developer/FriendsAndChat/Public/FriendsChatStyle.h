@@ -4,6 +4,12 @@
 
 #include "FriendsChatStyle.generated.h"
 
+// Forward declarations
+namespace EChatMessageType
+{
+	enum Type : uint8;
+}
+
 /**
  * Interface for the services manager.
  */
@@ -39,7 +45,7 @@ struct FRIENDSANDCHAT_API FFriendsChatStyle
 	 */
 	static const FFriendsChatStyle& GetDefault();
 
-	UPROPERTY()
+	UPROPERTY(EditAnywhere, Category = Appearance)
 	FSlateBrush GlobalChatHeaderBrush;
 	FFriendsChatStyle& SetGlobalChatHeaderBrush(const FSlateBrush& Value);
 
@@ -68,7 +74,7 @@ struct FRIENDSANDCHAT_API FFriendsChatStyle
 	FFriendsChatStyle& SetDefaultChatColor(const FLinearColor& InFontColor);
 
 	UPROPERTY(EditAnywhere, Category=Appearance)
-	FLinearColor WhisplerChatColor;
+	FLinearColor WhisperChatColor;
 	FFriendsChatStyle& SetWhisplerChatColor(const FLinearColor& InFontColor);
 
 	UPROPERTY(EditAnywhere, Category = Appearance)
@@ -82,6 +88,26 @@ struct FRIENDSANDCHAT_API FFriendsChatStyle
 	UPROPERTY(EditAnywhere, Category = Appearance)
 	FLinearColor PartyChatColor;
 	FFriendsChatStyle& SetPartyChatColor(const FLinearColor& InFontColor);
+
+	UPROPERTY(EditAnywhere, Category=Appearance)
+	FLinearColor AdminChatColor;
+	FFriendsChatStyle& SetAdminChatColor(const FLinearColor& InFontColor);
+
+	UPROPERTY(EditAnywhere, Category=Appearance)
+	FLinearColor WhisperHyperlinkChatColor;
+	FFriendsChatStyle& SetWhisplerHyperlinkChatColor(const FLinearColor& InFontColor);
+
+	UPROPERTY(EditAnywhere, Category = Appearance)
+	FLinearColor GlobalHyperlinkChatColor;
+	FFriendsChatStyle& SetGlobalHyperlinkChatColor(const FLinearColor& InFontColor);
+
+	UPROPERTY(EditAnywhere, Category=Appearance)
+	FLinearColor GameHyperlinkChatColor;
+	FFriendsChatStyle& SetGameHyperlinkChatColor(const FLinearColor& InFontColor);
+
+	UPROPERTY(EditAnywhere, Category = Appearance)
+	FLinearColor PartyHyperlinkChatColor;
+	FFriendsChatStyle& SetPartyHyperlinkChatColor(const FLinearColor& InFontColor);
 
 	UPROPERTY(EditAnywhere, Category=Appearance)
 	FSlateBrush ChatGlobalBrush;
@@ -124,8 +150,8 @@ struct FRIENDSANDCHAT_API FFriendsChatStyle
 	FFriendsChatStyle& SetChatChannelsBackgroundBrush(const FSlateBrush& InChatChannelsBackgroundBrush);
 
 	UPROPERTY(EditAnywhere, Category = Appearance)
-	FScrollBorderStyle ScrollBorderStyle;
-	FFriendsChatStyle& SetScrollBorderStyle(const FScrollBorderStyle& InScrollBorderStyle);
+	FScrollBoxStyle ScrollBorderStyle;
+	FFriendsChatStyle& SetScrollBorderStyle(const FScrollBoxStyle& InScrollBorderStyle);
 
 	UPROPERTY(EditAnywhere, Category = Appearance)
 	FSlateBrush QuickSettingsBrush;
@@ -134,6 +160,20 @@ struct FRIENDSANDCHAT_API FFriendsChatStyle
 	UPROPERTY(EditAnywhere, Category = Appearance)
 	FSlateBrush ChatSettingsBrush;
 	FFriendsChatStyle& SetChatSettingsBrush(const FSlateBrush& Brush);
+
+	UPROPERTY(EditAnywhere, Category = Appearance)
+	FSlateBrush MessageNotificationBrush;
+	FFriendsChatStyle& SetMessageNotificationBrush(const FSlateBrush& Brush);
+
+	UPROPERTY()
+	FButtonStyle FriendsMinimizeButtonStyle;
+	FFriendsChatStyle& SetMinimizeButtonStyle(const FButtonStyle& ButtonStyle);
+
+	UPROPERTY(EditAnywhere, Category = Appearance)
+	FButtonStyle FriendsMaximizeButtonStyle;
+	FFriendsChatStyle& SetMaximizeButtonStyle(const FButtonStyle& ButtonStyle);
+
+	FLinearColor GetChannelTextColor(EChatMessageType::Type Channel) const;
 
 };
 

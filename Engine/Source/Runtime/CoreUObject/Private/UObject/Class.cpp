@@ -52,7 +52,16 @@ COREUOBJECT_API void InitializePrivateStaticClass(
 
 	// Register the class's dependencies, then itself.
 	TClass_PrivateStaticClass->RegisterDependencies();
-	TClass_PrivateStaticClass->Register(PackageName,Name);
+	if (!TClass_PrivateStaticClass->HasAnyFlags(RF_Dynamic))
+	{
+		// Defer
+		TClass_PrivateStaticClass->Register(PackageName, Name);
+	}
+	else
+	{
+		// Register immediately (don't let the function name mistake you!)
+		TClass_PrivateStaticClass->DeferredRegister(UDynamicClass::StaticClass(), PackageName, Name);
+	}
 }
 
 void FNativeFunctionRegistrar::RegisterFunction(class UClass* Class, const ANSICHAR* InName, Native InPointer)
@@ -1040,8 +1049,8 @@ void UStruct::SerializeTaggedProperties(FArchive& Ar, uint8* Data, UStruct* Defa
 				if (Tag.EnumName != NAME_None)
 				{
 					//@warning: mirrors loading code in UByteProperty::SerializeItem()
-					FName EnumValue;
-					Ar << EnumValue;
+					FName EnumName;
+					Ar << EnumName;
 					UEnum* Enum = FindField<UEnum>((DefaultsClass != NULL) ? DefaultsClass : DefaultsStruct->GetTypedOuter<UClass>(), Tag.EnumName);
 					if (Enum == NULL)
 					{
@@ -1055,8 +1064,8 @@ void UStruct::SerializeTaggedProperties(FArchive& Ar, uint8* Data, UStruct* Defa
 					else
 					{
 						Ar.Preload(Enum);
-						PreviousValue = Enum->GetValueByName(EnumValue);
-						if (Enum->GetNameByValue(PreviousValue) != NAME_None)
+						PreviousValue = Enum->GetValueByName(EnumName);
+						if (!Enum->IsValidEnumValue(PreviousValue))
 						{
 							PreviousValue = Enum->GetMaxEnumValue();
 						}
@@ -1282,8 +1291,8 @@ void UStruct::SerializeTaggedProperties(FArchive& Ar, uint8* Data, UStruct* Defa
 				{
 					// attempt to find the old enum and get the byte value from the serialized enum name
 					//@warning: mirrors loading code in UByteProperty::SerializeItem()
-					FName EnumValue;
-					Ar << EnumValue;
+					FName EnumName;
+					Ar << EnumName;
 					UEnum* Enum = FindField<UEnum>((DefaultsClass != NULL) ? DefaultsClass : DefaultsStruct->GetTypedOuter<UClass>(), Tag.EnumName);
 					if (Enum == NULL)
 					{
@@ -1297,8 +1306,8 @@ void UStruct::SerializeTaggedProperties(FArchive& Ar, uint8* Data, UStruct* Defa
 					else
 					{
 						Ar.Preload(Enum);
-						PreviousValue = Enum->GetValueByName(EnumValue);
-						if (Enum->GetNameByValue(PreviousValue) != NAME_None)
+						PreviousValue = Enum->GetValueByName(EnumName);
+						if (!Enum->IsValidEnumValue(PreviousValue))
 						{
 							PreviousValue = Enum->GetMaxEnumValue();
 						}
@@ -1835,7 +1844,17 @@ struct TStructOpsTypeTraits<FTestStruct> : public TStructOpsTypeTraitsBase
 **/
 static TMap<FName,UScriptStruct::ICppStructOps*>& GetDeferredCppStructOps()
 {
-	static TMap<FName,UScriptStruct::ICppStructOps*> DeferredCppStructOps;
+	static struct TMapWithAutoCleanup : public TMap<FName, UScriptStruct::ICppStructOps*>
+	{
+		~TMapWithAutoCleanup()
+		{
+			for (PairSetType::TConstIterator It(Pairs); It; ++It)
+			{
+				delete It->Value;
+			}
+		}
+	}
+	DeferredCppStructOps;
 	return DeferredCppStructOps;
 }
 
@@ -3629,6 +3648,7 @@ void UClass::PurgeClass(bool bRecompilingOnLoad)
 	ScriptObjectReferences.Empty();
 
 	FuncMap.Empty();
+	ClearFunctionMapsCaches();
 	PropertyLink = NULL;
 }
 
@@ -3951,22 +3971,48 @@ void UClass::AddNativeFunction(const ANSICHAR* InName,Native InPointer)
 
 UFunction* UClass::FindFunctionByName(FName InName, EIncludeSuperFlag::Type IncludeSuper) const
 {
-	if (!IncludeSuper)
-		return FuncMap.FindRef(InName);
-
-	for (const UClass* SearchClass = this; SearchClass; SearchClass = SearchClass->GetSuperClass())
+	UFunction* Result = FuncMap.FindRef(InName);
+	if (Result == nullptr && IncludeSuper == EIncludeSuperFlag::IncludeSuper)
 	{
-		if (UFunction* Result = SearchClass->FuncMap.FindRef(InName))
-			return Result;
-
-		for (auto& Inter : SearchClass->Interfaces)
+		if (Interfaces.Num())
 		{
-			if (UFunction* Result = Inter.Class->FindFunctionByName(InName))
-				return Result;
+			if (UFunction** InterfaceResult = InterfaceFuncMap.Find(InName))
+			{
+				Result = *InterfaceResult;
+			}
+			else
+			{
+				for (const FImplementedInterface& Inter : Interfaces)
+				{
+					Result = Inter.Class->FindFunctionByName(InName);
+					if (Result)
+					{
+						break;
+					}
+				}
+
+				InterfaceFuncMap.Add(InName, Result);
+			}
+		}
+
+		if (Result == nullptr)
+		{
+			if (UClass* SuperClass = GetSuperClass())
+			{
+				if (UFunction** ParentResult = ParentFuncMap.Find(InName))
+				{
+					Result = *ParentResult;
+				}
+				else
+				{
+					Result = SuperClass->FindFunctionByName(InName);
+					ParentFuncMap.Add(InName, Result);
+				}
+			}
 		}
 	}
 
-	return NULL;
+	return Result;
 }
 
 const FString UClass::GetConfigName() const
@@ -4120,6 +4166,125 @@ IMPLEMENT_CORE_INTRINSIC_CLASS(UClass, UStruct,
 	}
 );
 
+UClass::StaticClassFunctionType GetDynamicClassConstructFn(FName ClassName);
+
+void GetPrivateStaticClassBody(
+	const TCHAR* PackageName,
+	const TCHAR* Name,
+	UClass*& ReturnClass,
+	void(*RegisterNativeFunc)(),
+	uint32 InSize,
+	uint32 InClassFlags,
+	EClassCastFlags InClassCastFlags,
+	const TCHAR* InConfigName,
+	UClass::ClassConstructorType InClassConstructor,
+	UClass::ClassVTableHelperCtorCallerType InClassVTableHelperCtorCaller,
+	UClass::ClassAddReferencedObjectsType InClassAddReferencedObjects,
+	UClass::StaticClassFunctionType InSuperClassFn,
+	UClass::StaticClassFunctionType InWithinClassFn,
+	bool bIsDynamic /*= false*/
+	)
+{
+#if WITH_HOT_RELOAD
+	if (GIsHotReload)
+	{
+		check(!bIsDynamic);
+		UPackage* Package = FindPackage(NULL, PackageName);
+		if (!Package)
+		{
+			UE_LOG(LogClass, Log, TEXT("Could not find existing package %s for HotReload."), PackageName);
+			return;
+		}
+		ReturnClass = FindObject<UClass>((UObject *)Package, Name);
+		if (ReturnClass)
+		{
+			if (ReturnClass->HotReloadPrivateStaticClass(
+				InSize,
+				InClassFlags,
+				InClassCastFlags,
+				InConfigName,
+				InClassConstructor,
+#if WITH_HOT_RELOAD_CTORS
+				InClassVTableHelperCtorCaller,
+#endif // WITH_HOT_RELOAD_CTORS
+				InClassAddReferencedObjects,
+				InSuperClassFn(),
+				InWithinClassFn()
+				))
+			{
+				// Register the class's native functions.
+				RegisterNativeFunc();
+			}
+			return;
+		}
+		else
+		{
+			UE_LOG(LogClass, Log, TEXT("Could not find existing class %s in package %s for HotReload, assuming new class"), Name, PackageName);
+		}
+	}
+#endif
+
+	if (!bIsDynamic)
+	{
+		ReturnClass = (UClass*)GUObjectAllocator.AllocateUObject(sizeof(UClass), ALIGNOF(UClass), true);
+		ReturnClass = ::new (ReturnClass)
+			UClass
+			(
+			EC_StaticConstructor,
+			Name,
+			InSize,
+			InClassFlags,
+			InClassCastFlags,
+			InConfigName,
+			EObjectFlags(RF_Public | RF_Standalone | RF_Transient | RF_Native | RF_RootSet),
+			InClassConstructor,
+#if WITH_HOT_RELOAD_CTORS
+			InClassVTableHelperCtorCaller,
+#endif // WITH_HOT_RELOAD_CTORS
+			InClassAddReferencedObjects
+			);
+		check(ReturnClass);
+	}
+	else
+	{
+		ReturnClass = (UClass*)GUObjectAllocator.AllocateUObject(sizeof(UDynamicClass), ALIGNOF(UDynamicClass), true);
+		ReturnClass = ::new (ReturnClass)
+			UDynamicClass
+			(
+			EC_StaticConstructor,
+			Name,
+			InSize,
+			InClassFlags,
+			InClassCastFlags,
+			InConfigName,
+			EObjectFlags(RF_Public | RF_Standalone | RF_Transient | RF_Native | RF_Dynamic),
+			InClassConstructor,
+#if WITH_HOT_RELOAD_CTORS
+			InClassVTableHelperCtorCaller,
+#endif // WITH_HOT_RELOAD_CTORS
+			InClassAddReferencedObjects
+			);
+		check(ReturnClass);
+	}
+	InitializePrivateStaticClass(
+		InSuperClassFn(),
+		ReturnClass,
+		InWithinClassFn(),
+		PackageName,
+		Name
+		);
+
+	// Register the class's native functions.
+	RegisterNativeFunc();
+
+	if (bIsDynamic)
+	{
+		// Now call the UHT-generated Z_Construct* function for the dynamic class
+		UClass::StaticClassFunctionType ZConstructDynamicClassFn = GetDynamicClassConstructFn(Name);
+		check(ZConstructDynamicClassFn);
+		ZConstructDynamicClassFn();
+	}
+}
 
 /*-----------------------------------------------------------------------------
 	UFunction.
@@ -4441,6 +4606,13 @@ UScriptStruct* TBaseStructure<FRandomStream>::Get()
 	return ScriptStruct;
 }
 
+UScriptStruct* TBaseStructure<FGuid>::Get()
+{
+	static auto ScriptStruct = StaticGetBaseStructureInternal(TEXT("Guid"));
+	return ScriptStruct;
+}
+
+
 UScriptStruct* TBaseStructure<FFallbackStruct>::Get()
 {
 	static auto ScriptStruct = StaticGetBaseStructureInternal(TEXT("FallbackStruct"));
@@ -4470,6 +4642,91 @@ IMPLEMENT_CORE_INTRINSIC_CLASS(UDelegateFunction, UFunction,
 	}
 );
 
+/*-----------------------------------------------------------------------------
+UDynamicClass constructors.
+-----------------------------------------------------------------------------*/
+
+/**
+* Internal constructor.
+*/
+UDynamicClass::UDynamicClass(const FObjectInitializer& ObjectInitializer)
+: UClass(ObjectInitializer)
+{
+	// If you add properties here, please update the other constructors and PurgeClass()
+}
+
+/**
+* Create a new UDynamicClass given its superclass.
+*/
+UDynamicClass::UDynamicClass(const FObjectInitializer& ObjectInitializer, UClass* InBaseClass)
+: UClass(ObjectInitializer, InBaseClass)
+{
+}
+
+/**
+* Called when dynamically linked.
+*/
+UDynamicClass::UDynamicClass(
+	EStaticConstructor,
+	FName			InName,
+	uint32			InSize,
+	uint32			InClassFlags,
+	EClassCastFlags	InClassCastFlags,
+	const TCHAR*    InConfigName,
+	EObjectFlags	InFlags,
+	ClassConstructorType InClassConstructor,
+#if WITH_HOT_RELOAD_CTORS
+	ClassVTableHelperCtorCallerType InClassVTableHelperCtorCaller,
+#endif // WITH_HOT_RELOAD_CTORS
+	ClassAddReferencedObjectsType InClassAddReferencedObjects)
+: UClass(
+  EC_StaticConstructor
+, InName
+, InSize
+, InClassFlags
+, InClassCastFlags
+, InConfigName
+, InFlags
+, InClassConstructor
+#if WITH_HOT_RELOAD_CTORS
+, InClassVTableHelperCtorCaller
+#endif // WITH_HOT_RELOAD_CTORS
+, InClassAddReferencedObjects)
+{
+}
+
+void UDynamicClass::AddReferencedObjects(UObject* InThis, FReferenceCollector& Collector)
+{
+	UDynamicClass* This = CastChecked<UDynamicClass>(InThis);
+
+	Collector.AddReferencedObjects(This->MiscConvertedSubobjects, This);
+	Collector.AddReferencedObjects(This->ReferencedConvertedFields, This);
+	Collector.AddReferencedObjects(This->UsedAssets, This);
+	Collector.AddReferencedObjects(This->DynamicBindingObjects, This);
+	Collector.AddReferencedObjects(This->ComponentTemplates, This);
+	Collector.AddReferencedObjects(This->Timelines, This);
+
+	Super::AddReferencedObjects(This, Collector);
+}
+
+void UDynamicClass::PurgeClass(bool bRecompilingOnLoad)
+{
+	Super::PurgeClass(bRecompilingOnLoad);
+
+	MiscConvertedSubobjects.Empty();
+	ReferencedConvertedFields.Empty();
+	UsedAssets.Empty();
+
+	DynamicBindingObjects.Empty();
+	ComponentTemplates.Empty();
+	Timelines.Empty();
+}
+
+IMPLEMENT_CORE_INTRINSIC_CLASS(UDynamicClass, UClass,
+{
+	Class->ClassAddReferencedObjects = &UDynamicClass::AddReferencedObjects;
+}
+);
 
 #if _MSC_VER == 1900
 	#ifdef PRAGMA_ENABLE_SHADOW_VARIABLE_WARNINGS

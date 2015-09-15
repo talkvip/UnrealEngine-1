@@ -6,12 +6,11 @@
 #include "SelectedKey.h"
 #include "EditorUndoClient.h"
 
-
 class UMovieScene;
 class IToolkitHost;
 class UMovieSceneSequence;
 class ISequencerObjectChangeListener;
-
+class IDetailKeyframeHandler;
 
 /**
  * Sequencer is the editing tool for MovieScene assets.
@@ -31,9 +30,10 @@ public:
 	 *
 	 * @param InitParams Initialization parameters.
 	 * @param InObjectChangeListener The object change listener to use.
+	 * @param InDetailKeyframeHandler The detail keyframe handler to use.
 	 * @param TrackEditorDelegates Delegates to call to create auto-key handlers for this sequencer.
 	 */
-	void InitSequencer(const FSequencerInitParams& InitParams, const TSharedRef<ISequencerObjectChangeListener>& InObjectChangeListener, const TArray<FOnCreateTrackEditor>& TrackEditorDelegates);
+	void InitSequencer(const FSequencerInitParams& InitParams, const TSharedRef<ISequencerObjectChangeListener>& InObjectChangeListener, const TSharedRef<IDetailKeyframeHandler>& InDetailKeyframeHandler, const TArray<FOnCreateTrackEditor>& TrackEditorDelegates);
 
 	/** Constructor */
 	FSequencer();
@@ -43,13 +43,13 @@ public:
 
 public:
 
-	// FGCObject interface
+	//~ Begin FGCObject Interface
 
 	virtual void AddReferencedObjects(FReferenceCollector& Collector) override;
 
 public:
 
-	// FTickableEditorObject interface
+	//~ Begin FTickableEditorObject Interface
 
 	virtual void Tick(float DeltaTime) override;
 	virtual bool IsTickable() const override { return true; }
@@ -57,7 +57,7 @@ public:
 
 public:
 
-	// ISequencer interface
+	//~ Begin ISequencer Interface
 
 	virtual void Close() override;
 	virtual TSharedRef<SWidget> GetSequencerWidget() const override { return SequencerWidget.ToSharedRef(); }
@@ -72,12 +72,16 @@ public:
 	virtual void AddAnimation(FGuid ObjectGuid, class UAnimSequence* AnimSequence) override;
 	virtual bool GetAutoKeyEnabled() const override;
 	virtual void SetAutoKeyEnabled(bool bAutoKeyEnabled) override;
+	virtual bool GetKeyAllEnabled() const override;
+	virtual void SetKeyAllEnabled(bool bKeyAllEnabled) override;
+	virtual bool GetKeyInterpPropertiesOnly() const override;
+	virtual void SetKeyInterpPropertiesOnly(bool bKeyInterpPropertiesOnly) override;
 	virtual bool IsRecordingLive() const override;
 	virtual float GetCurrentLocalTime(UMovieSceneSequence& InMovieSceneSequence) override;
 	virtual float GetGlobalTime() override;
 	virtual void SetGlobalTime(float Time) override;
 	virtual void SetPerspectiveViewportPossessionEnabled(bool bEnabled) override;
-	virtual FGuid GetHandleToObject(UObject* Object) override;
+	virtual FGuid GetHandleToObject(UObject* Object, bool bCreateHandleIfMissing = true) override;
 	virtual ISequencerObjectChangeListener& GetObjectChangeListener() override;
 	virtual void NotifyMovieSceneDataChanged() override;
 	virtual void UpdateRuntimeInstances() override;
@@ -88,6 +92,9 @@ public:
 	virtual void KeyProperty(FKeyPropertyParams KeyPropertyParams) override;
 	virtual FSequencerSelection& GetSelection() override;
 	virtual void NotifyMapChanged(class UWorld* NewWorld, EMapChangeType MapChangeType) override;
+
+	/** Set the global time directly, without performing any auto-scroll */
+	void SetGlobalTimeDirectly(float Time);
 
 	/** @return The current view range */
 	virtual FAnimatedRange GetViewRange() const override;
@@ -115,14 +122,29 @@ public:
 	void SpawnOrDestroyPuppetObjects( TSharedRef<FMovieSceneSequenceInstance> MovieSceneInstance );
 
 	/** 
-	 * Deletes the passed in section
+	 * Deletes the passed in sections
 	 */
-	void DeleteSection(class UMovieSceneSection* Section);
+	void DeleteSections(const TSet<TWeakObjectPtr<UMovieSceneSection> > & Sections);
 
 	/**
 	 * Deletes the currently selected in keys
 	 */
 	void DeleteSelectedKeys();
+
+	/**
+	 * Set interpolation modes
+	 */
+	void SetInterpTangentMode(ERichCurveInterpMode InterpMode, ERichCurveTangentMode TangentMode);
+
+	/**
+	 * Is interpolation mode selected
+	 */
+	bool IsInterpTangentModeSelected(ERichCurveInterpMode InterpMode, ERichCurveTangentMode TangentMode) const;
+
+	/**
+	 * Snap the currently selected keys to frame
+	 */
+	void SnapToFrame();
 
 	/**
 	 * @return Movie scene tools used by the sequencer
@@ -210,7 +232,16 @@ public:
 	 * @param ObjectBinding	The object binding of the selected node
 	 * @param ObjectClass	The class of the selected object
 	 */
-	void BuildObjectBindingContextMenu(class FMenuBuilder& MenuBuilder, const FGuid& ObjectBinding, const class UClass* ObjectClass);
+	void BuildObjectBindingContextMenu(class FMenuBuilder& MenuBuilder, const FGuid& ObjectBinding, const class UClass* ObjectClass, FObjectBindingNode* ObjectBindingNode);
+
+	/**
+	 * Builds up the track menu for object binding nodes in the outliner
+	 * 
+	 * @param MenuBuilder	The track menu builder to add things to
+	 * @param ObjectBinding	The object binding of the selected node
+	 * @param ObjectClass	The class of the selected object
+	 */
+	void BuildObjectBindingTrackMenu(class FMenuBuilder& MenuBuilder, const FGuid& ObjectBinding, const class UClass* ObjectClass);
 
 	/**
 	 * Builds up the edit buttons for object binding nodes in the outliner
@@ -257,6 +288,14 @@ public:
 	/** Called to save the current movie scene */
 	void SaveCurrentMovieScene();
 
+	/** Called to add selected objects to the movie scene */
+	void AddSelectedObjects();
+
+public:
+
+	/** Access the currently enabled edit tool */
+	ISequencerEditTool& GetEditTool();
+
 protected:
 
 	/** Reset data about a movie scene when pushing or popping a movie scene. */
@@ -294,7 +333,7 @@ protected:
 	 *
 	 * @param	NewViewRange The new view range
 	 */
-	void OnViewRangeChanged( TRange<float> NewViewRange, EViewRangeInterpolation Interpolation = EViewRangeInterpolation::Animated );
+	void OnViewRangeChanged( TRange<float> NewViewRange, EViewRangeInterpolation Interpolation = EViewRangeInterpolation::Animated, bool bExpandClampRange = false );
 
 	/**
 	 * Called when the clamp range is changed by the user
@@ -325,7 +364,15 @@ public:
 	/** Stop the sequencer from autoscrolling */
 	void StopAutoscroll();
 
+	/** Scroll the sequencer vertically by the specified number of slate units */
+	void VerticalScroll(float ScrollAmountUnits);
+
 protected:
+	/**
+	 * Update autoscroll mechanics as a result of a new time position
+	 */
+	void UpdateAutoScroll(float NewTime);
+
 	/**
 	 * Calculates the amount of encroachment the specified time has into the autoscroll region, if any
 	 */
@@ -351,8 +398,12 @@ protected:
 	
 	/** Called when a user executes the delete command to delete sections or keys */
 	void DeleteSelectedItems();
-	bool CanDeleteSelectedItems();
+	bool CanDeleteSelectedItems() const;
 	
+	/** Called when a user executes the assign actor to track menu item */
+	void AssignActor(FGuid ObjectBinding, FObjectBindingNode* ObjectBindingNode);
+	bool CanAssignActor(FGuid ObjectBinding) const;
+
 	/** Transport controls */
 	void TogglePlay();
 	void PlayForward();
@@ -363,6 +414,9 @@ protected:
 	void StepToPreviousKey();
 	void StepToNextCameraKey();
 	void StepToPreviousCameraKey();
+
+	void ExpandNodesAndDescendants();
+	void CollapseNodesAndDescendants();
 
 	/** Expand or collapse selected nodes */
 	void ToggleExpandCollapseNodes();
@@ -376,7 +430,12 @@ protected:
 	/** Generates command bindings for UI commands */
 	void BindSequencerCommands();
 
-	// Begin FEditorUndoClient Interface
+	void ActivateSequencerEditorMode();
+
+	void ActivateDetailKeyframeHandler();
+	void DeactivateDetailKeyframeHandler();
+
+	//~ Begin FEditorUndoClient Interface
 	virtual void PostUndo(bool bSuccess) override;
 	virtual void PostRedo(bool bSuccess) override { PostUndo(bSuccess); }
 	// End of FEditorUndoClient
@@ -390,6 +449,12 @@ protected:
 
 	/** Called after the world has been saved. The sequencer updates to the animated state. */
 	void OnPostSaveWorld(uint32 SaveFlags, class UWorld* World, bool bSuccess);
+
+	/** Called after a new level has been created. The sequencer editor mode needs to be enabled. */
+	void OnNewCurrentLevel();
+
+	/** Called after a map has been opened. The sequencer editor mode needs to be enabled. */
+	void OnMapOpened(const FString& Filename, bool bLoadAsTemplate);
 
 	/** Updates a viewport client from camera cut data */
 	void UpdatePreviewLevelViewportClientFromCameraCut( FLevelEditorViewportClient& InViewportClient, UObject* InCameraObject, bool bNewCameraCut ) const;
@@ -413,6 +478,9 @@ private:
 
 	/** Listener for object changes being made while this sequencer is open*/
 	TSharedPtr< class ISequencerObjectChangeListener > ObjectChangeListener;
+
+	/** Listener for object changes being made while this sequencer is open*/
+	TSharedPtr< class IDetailKeyframeHandler > DetailKeyframeHandler;
 
 	/** The runtime instance for the root movie scene */
 	TSharedPtr< class FMovieSceneSequenceInstance > RootMovieSceneSequenceInstance;

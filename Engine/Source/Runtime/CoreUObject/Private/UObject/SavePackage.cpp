@@ -47,33 +47,31 @@ static uint32 GSavePackageTransactionNumber = 0;
 
 	// static ICookingStats* CookingStats = GetCookingStats();
 
-void CookStatsStartStat(const FName& Key, const TCHAR *Filename)
-{
+	void CookStatsStartStat(const FName& Key, const TCHAR *Filename)
+	{
 #if UE_OUTPUTSTATSTOLOG
-	UE_LOG(LogSavePackage, Log, TEXT("Starting save package for %s"), Filename);
+		UE_LOG(LogSavePackage, Log, TEXT("Starting save package for %s"), Filename);
 #endif
+
 		ICookingStats* CookingStats = GetCookingStats();
 		if (CookingStats)
 		{
 			CookingStats->AddTagValue(Key, TEXT("Filename"), FString(Filename));
 		}
-
-}
+	}
 
 	void CookStatsAddStat(const FName& Key, const FName& Tag, const float TimeMilliseconds)
-{
+	{
 #if UE_OUTPUTSTATSTOLOG
-	UE_LOG(LogSavePackage, Log, TEXT("TIMING: %s took %fms"), Tag, TimeMilliseconds);
+		UE_LOG(LogSavePackage, Log, TEXT("TIMING: %s took %.2fms"), Tag, TimeMilliseconds);
 #endif
+
 		ICookingStats* CookingStats = GetCookingStats();
 		if (CookingStats)
 		{
 			CookingStats->AddTagValue(Key, Tag, FString::Printf(TEXT("%fms"), TimeMilliseconds));
 		}
 	}
-
-
-
 }; // namespace SavePackageStats
 
 
@@ -92,7 +90,7 @@ void CookStatsStartStat(const FName& Key, const TCHAR *Filename)
 	UE_LOG_COOK_TIME(TEXT("UnaccountedTime")); \
 	{\
 		double CurrentTime = FPlatformTime::Seconds(); \
-		UE_LOG(LogSavePackage, Log, TEXT("Total save time: %fms"), (CurrentTime - StartTime) * 1000.0f); \
+		UE_LOG(LogSavePackage, Log, TEXT("Total save time: %.2fms"), (CurrentTime - StartTime) * 1000.0f); \
 	}
 
 #else
@@ -345,6 +343,92 @@ public:
 	}
 };
 
+/** Returns if true if a class comes from an editor-only package */
+static bool IsEditorOnlyStruct(UStruct* InStruct)
+{
+	// If any of the classes in this class' hierarchy comes from editor only package
+	// this class is also classified as editor-only.
+	for (UStruct* Struct = InStruct; Struct; Struct = Struct->GetSuperStruct())
+	{
+		UPackage* StructPackage = Struct->GetOutermost();
+		check(StructPackage);
+		if (StructPackage->PackageFlags & PKG_EditorOnly)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+/** 
+ * Returns if true if the object is editor-only:
+ * - it's a package marked as PKG_EditorOnly
+ * or
+ * - it's a class from a package marked as PKG_EditorOnly
+ * or
+ * - its class is from a package marked as PKG_EditorOnly
+ * or
+ * - its outer is editor-only
+*/
+static bool IsEditorOnlyObject(UObject* InObject)
+{
+	DECLARE_SCOPE_CYCLE_COUNTER(TEXT("IsEditorOnlyObject"), STAT_IsEditorOnlyObject, STATGROUP_LoadTime);
+
+	// Configurable via ini setting
+	static struct FCanStripEditorOnlyExportsAndImports
+	{
+		bool bCanStripEditorOnlyObjects;
+		FCanStripEditorOnlyExportsAndImports()
+			: bCanStripEditorOnlyObjects(true)
+		{
+			GConfig->GetBool(TEXT("Core.System"), TEXT("CanStripEditorOnlyExportsAndImports"), bCanStripEditorOnlyObjects, GEngineIni);
+		}
+		FORCEINLINE operator bool() const { return bCanStripEditorOnlyObjects; }
+	} CanStripEditorOnlyExportsAndImports;
+	if (!CanStripEditorOnlyExportsAndImports)
+	{
+		return false;
+	}
+
+	if (InObject->HasAnyMarks(OBJECTMARK_EditorOnly))
+	{
+		return true;
+	}
+
+	bool bResult = false;
+	check(InObject);
+	// If this is a package that is editor only or the object is in editor-only package,
+	// the object is editor-only too.
+	UPackage* Package = Cast<UPackage>(InObject);
+	if (!Package)
+	{
+		Package = InObject->GetOutermost();
+	}
+	if (Package && (Package->PackageFlags & PKG_EditorOnly))
+	{
+		bResult = true;
+	}
+	if (!bResult && !InObject->IsA(UPackage::StaticClass()))
+	{
+		// Otherwise the object is editor-only if its class is editor-only
+		UStruct* Struct = InObject->IsA(UStruct::StaticClass()) ? CastChecked<UStruct>(InObject) : InObject->GetClass();
+		bResult = IsEditorOnlyStruct(Struct);
+		if (!bResult && InObject->GetOuter())
+		{
+			// Now check if the outer is editor only
+			bResult = IsEditorOnlyObject(InObject->GetOuter());
+		}
+	}
+	return bResult;
+}
+
+/**
+* Returns true if cook target is set and it doesn't support editor-only data
+**/
+static bool IsCookingForNoEditorDataPlatform(FArchive& Ar)
+{
+	return Ar.IsCooking() && !Ar.CookingTarget()->HasEditorOnlyData();
+}
 
 /**
  * Archive for tagging objects and names that must be exported
@@ -409,7 +493,7 @@ FArchive& FArchiveSaveTagExports::operator<<( UObject*& Obj )
 {
 	check(Outer);
 	CheckObjectPriorToSave(*this, Obj, Outer);
-	if( Obj && Obj->IsIn(Outer) && !Obj->HasAnyFlags(RF_Transient) && !Obj->HasAnyMarks(OBJECTMARK_TagExp) )
+	if (Obj && Obj->IsIn(Outer) && !Obj->HasAnyFlags(RF_Transient) && !Obj->HasAnyMarks((EObjectMark)(OBJECTMARK_TagExp | OBJECTMARK_EditorOnly)))
 	{
 #if 0
 		// the following line should be used to track down the cause behind
@@ -423,8 +507,18 @@ FArchive& FArchiveSaveTagExports::operator<<( UObject*& Obj )
 			UE_LOG(LogSavePackage, Log, TEXT(""));
 		}
 #endif
-		// Set flags.
-		Obj->Mark(OBJECTMARK_TagExp);
+
+		const bool bIsEditorOnly = IsCookingForNoEditorDataPlatform(*this) && IsEditorOnlyObject(Obj);
+		if (bIsEditorOnly)
+		{
+			Obj->Mark(OBJECTMARK_EditorOnly);
+			UE_LOG(LogSavePackage, Verbose, TEXT("Skipping editor-only export %s"), *Obj->GetPathName());
+		}
+		else
+		{
+			// Set flags.
+			Obj->Mark(OBJECTMARK_TagExp);
+		}
 
 		// first, serialize this object's archetype so that if the archetype's load flags are set correctly if this object
 		// is encountered by the SaveTagExports archive before its archetype.  This is necessary for the code below which verifies
@@ -629,7 +723,13 @@ public:
 	{
 		if (Value.IsValid())
 		{
-			const FString& Path = Value.ToString();
+			FString Path = Value.ToString();
+			if (FCoreUObjectDelegates::StringAssetReferenceSaving.IsBound())
+			{
+				// This picks up any redirectors
+				Path = FCoreUObjectDelegates::StringAssetReferenceSaving.Execute(Path);
+			}
+
 			if (GetIniFilenameFromObjectsReference(Path) != nullptr)
 			{
 				StringAssetReferencesMap.AddUnique(Path);
@@ -659,7 +759,6 @@ public:
 	 * This is overridden for the specific Archive Types
 	 **/
 	virtual FString GetArchiveName() const override;
-
 };
 
 
@@ -686,15 +785,22 @@ FArchive& FArchiveSaveTagImports::operator<<( UObject*& Obj )
 	const EObjectMark ObjectMarks = UPackage::GetObjectMarksForTargetPlatform( CookingTarget(), IsCooking() );
 	
 	// Skip PendingKill objects and objects that are both not for client and not for server when cooking.
-	if( Obj && !Obj->IsPendingKill() && (!IsCooking() || !Obj->HasAllMarks(ObjectMarks)))
+	if (Obj && !Obj->IsPendingKill() && (!IsCooking() || !Obj->HasAllMarks(ObjectMarks)) && !Obj->HasAnyMarks(OBJECTMARK_EditorOnly))
 	{
 		if( !Obj->HasAnyFlags(RF_Transient) || Obj->HasAllFlags(RF_Native) )
 		{
 			// remember it as a dependency, unless it's a top level package or native
-			bool bIsTopLevelPackage = Obj->GetOuter() == NULL && dynamic_cast<UPackage*>(Obj);
+			const bool bIsTopLevelPackage = Obj->GetOuter() == NULL && dynamic_cast<UPackage*>(Obj);
 			bool bIsNative = Obj->HasAnyFlags(RF_Native);
 			UObject* Outer = Obj->GetOuter();
-			
+
+			const bool bIsEditorOnly = IsCookingForNoEditorDataPlatform(*this) && IsEditorOnlyObject(Obj);
+			if (bIsEditorOnly)
+			{
+				Obj->Mark(OBJECTMARK_EditorOnly);
+				UE_LOG(LogSavePackage, Verbose, TEXT("Skipping editor-only import %s"), *Obj->GetPathName());
+			}
+
 			// go up looking for native classes
 			while (!bIsNative && Outer)
 			{
@@ -714,7 +820,10 @@ FArchive& FArchiveSaveTagImports::operator<<( UObject*& Obj )
 			if( !Obj->HasAnyMarks(OBJECTMARK_TagExp) )  
 			{
 				// mark this object as an import
-				Obj->Mark(OBJECTMARK_TagImp);
+				if (!bIsEditorOnly)
+				{
+					Obj->Mark(OBJECTMARK_TagImp);
+				}
 
 				if ( Obj->HasAnyFlags(RF_ClassDefaultObject) )
 				{
@@ -2972,32 +3081,12 @@ TMap<UObject*, UObject*> UnmarkExportTagFromDuplicates()
 }
 #endif // WITH_EDITOR
 
-/**
- * Save one specific object (along with any objects it references contained within the same Outer) into an Unreal package.
- * 
- * @param	InOuter							the outer to use for the new package
- * @param	Base							the object that should be saved into the package
- * @param	TopLevelFlags					For all objects which are not referenced [either directly, or indirectly] through Base, only objects
- *											that contain any of these flags will be saved.  If 0 is specified, only objects which are referenced
- *											by Base will be saved into the package.
- * @param	Filename						the name to use for the new package file
- * @param	Error							error output
- * @param	Conform							if non-NULL, all index tables for this will be sorted to match the order of the corresponding index table
- *											in the conform package
- * @param	bForceByteSwapping				whether we should forcefully byte swap before writing to disk
- * @param	bWarnOfLongFilename				[opt] If true (the default), warn when saving to a long filename.
- * @param	SaveFlags						Flags to control saving
- * @param	TargetPlatform					The platform being saved for
- * @param	FinalTimeStamp					If not FDateTime::MinValue(), the timestamp the saved file should be set to. (Intended for cooking only...)
- *
- * @return	true if the package was saved successfully.
- */
 
 #if WITH_EDITOR
 COREUOBJECT_API extern bool GOutputCookingWarnings;
 #endif
 
-bool UPackage::SavePackage( UPackage* InOuter, UObject* Base, EObjectFlags TopLevelFlags, const TCHAR* Filename, 
+ESavePackageResult UPackage::Save(UPackage* InOuter, UObject* Base, EObjectFlags TopLevelFlags, const TCHAR* Filename,
 	FOutputDevice* Error, FLinkerLoad* Conform, bool bForceByteSwapping, bool bWarnOfLongFilename, uint32 SaveFlags, 
 	const class ITargetPlatform* TargetPlatform, const FDateTime&  FinalTimeStamp, bool bSlowTask)
 {
@@ -3008,13 +3097,30 @@ bool UPackage::SavePackage( UPackage* InOuter, UObject* Base, EObjectFlags TopLe
 		if (GIsSavingPackage)
 		{
 			ensureMsgf(false, TEXT("Recursive SavePackage() is not supported"));
-			return false;
+			return ESavePackageResult::Error;
 		}
 
+		// Sanity checks
+		check(InOuter);
+		check(Filename);
 
-		
-		bool bIsCooking = TargetPlatform != NULL;
-
+		const bool bIsCooking = TargetPlatform != nullptr;
+#if WITH_EDITORONLY_DATA
+		if (bIsCooking)
+		{
+			// Don't save packages marked as editor-only.
+			if (InOuter->IsLoadedByEditorPropertiesOnly())
+			{				
+				UE_CLOG(!(SaveFlags & SAVE_NoError), LogSavePackage, Display, TEXT("Package loaded by editor-only properties: %s. Package will not be saved."), *InOuter->GetName());
+				return ESavePackageResult::ReferencedOnlyByEditorOnlyData;
+			}
+			else if (InOuter->PackageFlags & PKG_EditorOnly)
+			{
+				UE_CLOG(!(SaveFlags & SAVE_NoError), LogSavePackage, Display, TEXT("Package marked as editor-only: %s. Package will not be saved."), *InOuter->GetName());
+				return ESavePackageResult::ReferencedOnlyByEditorOnlyData;
+			}
+		}
+#endif
 		// if we are cooking we should be doing it in the editor
 		// otherwise some other assumptions are bad
 		check( !bIsCooking || WITH_EDITOR );
@@ -3052,8 +3158,6 @@ bool UPackage::SavePackage( UPackage* InOuter, UObject* Base, EObjectFlags TopLe
 
 		UE_LOG_COOK_TIME(TEXT("BlockTillAllRequestsFinished"));
 
-		check(InOuter);
-		check(Filename);
 		uint32 Time=0; CLOCK_CYCLES(Time);
 
 		// Make sure package is fully loaded before saving. 
@@ -3077,7 +3181,7 @@ bool UPackage::SavePackage( UPackage* InOuter, UObject* Base, EObjectFlags TopLe
 				}
 				Error->Logf(ELogVerbosity::Warning, *ErrorText.ToString());
 			}
-			return false;
+			return ESavePackageResult::Error;
 		}
 
 		// Make sure package is allowed to be saved.
@@ -3103,7 +3207,7 @@ bool UPackage::SavePackage( UPackage* InOuter, UObject* Base, EObjectFlags TopLe
 					}
 					Error->Logf(ELogVerbosity::Warning, *ErrorText.ToString());
 				}
-				return false;
+				return ESavePackageResult::Error;
 			}
 		}
 
@@ -3127,7 +3231,7 @@ bool UPackage::SavePackage( UPackage* InOuter, UObject* Base, EObjectFlags TopLe
 				}
 				Error->Logf(ELogVerbosity::Error, *ErrorText.ToString());
 			}
-			return false;
+			return ESavePackageResult::Error;
 		}
 
 		bool FilterEditorOnly = (InOuter->PackageFlags & PKG_FilterEditorOnly) != 0;
@@ -3207,7 +3311,7 @@ bool UPackage::SavePackage( UPackage* InOuter, UObject* Base, EObjectFlags TopLe
 
 			
 				// Clear OBJECTMARK_TagExp again as we need to redo tagging below.
-				UnMarkAllObjects(OBJECTMARK_TagExp);
+				UnMarkAllObjects((EObjectMark)(OBJECTMARK_TagExp|OBJECTMARK_EditorOnly));
 			
 
 				// We need to serialize objects yet again to tag objects that were created by PreSave as OBJECTMARK_TagExp.
@@ -3287,7 +3391,10 @@ bool UPackage::SavePackage( UPackage* InOuter, UObject* Base, EObjectFlags TopLe
 				InOuter->LinkerLicenseeVersion = Linker->LicenseeUE4Ver();
 				InOuter->LinkerCustomVersion = Linker->GetCustomVersions();
 
-				if ( EndSavingIfCancelled( Linker, TempFilename ) ) { return false; }
+				if (EndSavingIfCancelled(Linker, TempFilename)) 
+				{ 
+					return ESavePackageResult::Canceled; 
+				}
 				SlowTask.EnterProgressFrame();
 			
 				// keep a list of objects that would normally have gone into the dependency map, but since they are from cross-level dependencies, won't be found in the import map
@@ -3319,12 +3426,8 @@ bool UPackage::SavePackage( UPackage* InOuter, UObject* Base, EObjectFlags TopLe
 					GetObjectsWithAnyMarks(TagExpObjects, OBJECTMARK_TagExp);
 					if (TagExpObjects.Num() == 0)
 					{
-						if (!(SaveFlags & SAVE_NoError))
-						{
-							UE_LOG(LogSavePackage, Display, TEXT("No exports found (or all exports are editor-only) for %s. Package will not be saved."), *BaseFilename);
-						}
-
-						return false;
+						UE_CLOG(!(SaveFlags & SAVE_NoError), LogSavePackage, Display, TEXT("No exports found (or all exports are editor-only) for %s. Package will not be saved."), *BaseFilename);
+						return ESavePackageResult::ContainsEditorOnlyData;
 					}
 				}
 
@@ -3390,7 +3493,10 @@ bool UPackage::SavePackage( UPackage* InOuter, UObject* Base, EObjectFlags TopLe
 
 				UE_LOG_COOK_TIME(TEXT("SerializeImports"));
 				
-				if ( EndSavingIfCancelled( Linker, TempFilename ) ) { return false; }
+				if ( EndSavingIfCancelled( Linker, TempFilename ) ) 
+				{ 
+					return ESavePackageResult::Canceled;
+				}
 				SlowTask.EnterProgressFrame();
 
 				if ( !(Linker->Summary.PackageFlags & PKG_FilterEditorOnly) )
@@ -3415,7 +3521,10 @@ bool UPackage::SavePackage( UPackage* InOuter, UObject* Base, EObjectFlags TopLe
 
 				UE_LOG_COOK_TIME(TEXT("GatherLocalizableTextData"));
 				
-				if ( EndSavingIfCancelled( Linker, TempFilename ) ) { return false; }
+				if ( EndSavingIfCancelled( Linker, TempFilename ) ) 
+				{ 
+					return ESavePackageResult::Canceled;
+				}
 				SlowTask.EnterProgressFrame();
 
 				TArray<UObject*> PrivateObjects;
@@ -3492,7 +3601,10 @@ bool UPackage::SavePackage( UPackage* InOuter, UObject* Base, EObjectFlags TopLe
 
 				UE_LOG_COOK_TIME(TEXT("MarkNames"));
 
-				if ( EndSavingIfCancelled( Linker, TempFilename ) ) { return false; }
+				if ( EndSavingIfCancelled( Linker, TempFilename ) ) 
+				{ 
+					return ESavePackageResult::Canceled;
+				}
 				SlowTask.EnterProgressFrame();
 
 				if ( LevelObjects.Num() > 0 && ObjectsInOtherMaps.Num() == 0 )
@@ -3564,7 +3676,7 @@ bool UPackage::SavePackage( UPackage* InOuter, UObject* Base, EObjectFlags TopLe
 					{
 						Error->Logf(ELogVerbosity::Warning, TEXT("Can't save %s: Graph is linked to object %s in external map"), Filename, *CulpritString);
 					}
-					return false;
+					return ESavePackageResult::Error;
 				}
 
 				// The graph is linked to private objects!
@@ -3616,7 +3728,7 @@ bool UPackage::SavePackage( UPackage* InOuter, UObject* Base, EObjectFlags TopLe
 					{
 						Error->Logf(ELogVerbosity::Warning, TEXT("Can't save %s: Graph is linked to external private object %s"), Filename, *CulpritString);
 					}
-					return false;
+					return ESavePackageResult::Error;
 				}
 
 
@@ -3650,7 +3762,10 @@ bool UPackage::SavePackage( UPackage* InOuter, UObject* Base, EObjectFlags TopLe
 				*Linker << Linker->Summary;
 				int32 OffsetAfterPackageFileSummary = Linker->Tell();
 		
-				if ( EndSavingIfCancelled( Linker, TempFilename ) ) { return false; }
+				if ( EndSavingIfCancelled( Linker, TempFilename ) ) 
+				{ 
+					return ESavePackageResult::Canceled;
+				}
 				SlowTask.EnterProgressFrame();
 
 
@@ -3680,14 +3795,20 @@ bool UPackage::SavePackage( UPackage* InOuter, UObject* Base, EObjectFlags TopLe
 
 				UE_LOG_COOK_TIME(TEXT("SerializeSummary"));
 
-				if ( EndSavingIfCancelled( Linker, TempFilename ) ) { return false; }
+				if ( EndSavingIfCancelled( Linker, TempFilename ) ) 
+				{ 
+					return ESavePackageResult::Canceled;
+				}
 				SlowTask.EnterProgressFrame();
 
 				// Sort names.
 				FObjectNameSortHelper NameSortHelper;
 				NameSortHelper.SortNames( Linker, Conform );
 
-				if ( EndSavingIfCancelled( Linker, TempFilename ) ) { return false; }
+				if ( EndSavingIfCancelled( Linker, TempFilename ) ) 
+				{ 
+					return ESavePackageResult::Canceled;
+				}
 				SlowTask.EnterProgressFrame();
 
 				// Save names.
@@ -3700,7 +3821,10 @@ bool UPackage::SavePackage( UPackage* InOuter, UObject* Base, EObjectFlags TopLe
 
 				UE_LOG_COOK_TIME(TEXT("SerializeNames"));
 
-				if ( EndSavingIfCancelled( Linker, TempFilename ) ) { return false; }
+				if ( EndSavingIfCancelled( Linker, TempFilename ) ) 
+				{ 
+					return ESavePackageResult::Canceled;
+				}
 				SlowTask.EnterProgressFrame();
 
 				Linker->Summary.GatherableTextDataOffset = 0;
@@ -3719,7 +3843,10 @@ bool UPackage::SavePackage( UPackage* InOuter, UObject* Base, EObjectFlags TopLe
 
 				UE_LOG_COOK_TIME(TEXT("SerializeGatherableTextData"));
 
-				if ( EndSavingIfCancelled( Linker, TempFilename ) ) { return false; }
+				if ( EndSavingIfCancelled( Linker, TempFilename ) ) 
+				{ 
+					return ESavePackageResult::Canceled;
+				}
 				SlowTask.EnterProgressFrame();
 
 				// Build ImportMap.
@@ -3735,7 +3862,10 @@ bool UPackage::SavePackage( UPackage* InOuter, UObject* Base, EObjectFlags TopLe
 				}
 
 
-				if ( EndSavingIfCancelled( Linker, TempFilename ) ) { return false; }
+				if ( EndSavingIfCancelled( Linker, TempFilename ) ) 
+				{ 
+					return ESavePackageResult::Canceled;
+				}
 				SlowTask.EnterProgressFrame();
 
 				// sort and conform imports
@@ -3743,7 +3873,10 @@ bool UPackage::SavePackage( UPackage* InOuter, UObject* Base, EObjectFlags TopLe
 				ImportSortHelper.SortImports( Linker, Conform );
 				Linker->Summary.ImportCount = Linker->ImportMap.Num();
 
-				if ( EndSavingIfCancelled( Linker, TempFilename ) ) { return false; }
+				if ( EndSavingIfCancelled( Linker, TempFilename ) ) 
+				{ 
+					return ESavePackageResult::Canceled;
+				}
 				SlowTask.EnterProgressFrame();
 
 				
@@ -3781,7 +3914,10 @@ bool UPackage::SavePackage( UPackage* InOuter, UObject* Base, EObjectFlags TopLe
 
 				UE_LOG_COOK_TIME(TEXT("BuildExportMap"));
 
-				if ( EndSavingIfCancelled( Linker, TempFilename ) ) { return false; }
+				if ( EndSavingIfCancelled( Linker, TempFilename ) ) 
+				{ 
+					return ESavePackageResult::Canceled;
+				}
 				SlowTask.EnterProgressFrame();
 
 				// Sort exports alphabetically and conform the export table (if necessary)
@@ -3790,7 +3926,10 @@ bool UPackage::SavePackage( UPackage* InOuter, UObject* Base, EObjectFlags TopLe
 				
 				UE_LOG_COOK_TIME(TEXT("SortExportsNonSeekfree"));
 
-				if ( EndSavingIfCancelled( Linker, TempFilename ) ) { return false; }
+				if ( EndSavingIfCancelled( Linker, TempFilename ) ) 
+				{ 
+					return ESavePackageResult::Canceled;
+				}
 				SlowTask.EnterProgressFrame();
 
 				// Sort exports for seek-free loading.
@@ -3802,7 +3941,10 @@ bool UPackage::SavePackage( UPackage* InOuter, UObject* Base, EObjectFlags TopLe
 				
 				UE_LOG_COOK_TIME(TEXT("SortExportsSeekfree"));
 
-				if ( EndSavingIfCancelled( Linker, TempFilename ) ) { return false; }
+				if ( EndSavingIfCancelled( Linker, TempFilename ) ) 
+				{ 
+					return ESavePackageResult::Canceled;
+				}
 				SlowTask.EnterProgressFrame();
 
 				// Pre-size depends map.
@@ -3884,7 +4026,10 @@ bool UPackage::SavePackage( UPackage* InOuter, UObject* Base, EObjectFlags TopLe
 
 
 
-				if ( EndSavingIfCancelled( Linker, TempFilename ) ) { return false; }
+				if ( EndSavingIfCancelled( Linker, TempFilename ) ) 
+				{ 
+					return ESavePackageResult::Canceled;
+				}
 				SlowTask.EnterProgressFrame();
 
 				// Set linker reverse mappings.
@@ -3908,7 +4053,10 @@ bool UPackage::SavePackage( UPackage* InOuter, UObject* Base, EObjectFlags TopLe
 					}
 				}
 
-				if ( EndSavingIfCancelled( Linker, TempFilename ) ) { return false; }
+				if ( EndSavingIfCancelled( Linker, TempFilename ) ) 
+				{ 
+					return ESavePackageResult::Canceled;
+				}
 				SlowTask.EnterProgressFrame();
 
 				// If this is a map package, make sure there is a world or level in the export map.
@@ -3944,7 +4092,10 @@ bool UPackage::SavePackage( UPackage* InOuter, UObject* Base, EObjectFlags TopLe
 
 				UE_LOG_COOK_TIME(TEXT("BuildDependencyMap"));
 
-				if ( EndSavingIfCancelled( Linker, TempFilename ) ) { return false; }
+				if ( EndSavingIfCancelled( Linker, TempFilename ) ) 
+				{ 
+					return ESavePackageResult::Canceled;
+				}
 				SlowTask.EnterProgressFrame();
 
 				for( int32 i=0; i<Linker->ImportMap.Num(); i++ )
@@ -3967,7 +4118,10 @@ bool UPackage::SavePackage( UPackage* InOuter, UObject* Base, EObjectFlags TopLe
 
 				// Find components referenced by exports.
 
-				if ( EndSavingIfCancelled( Linker, TempFilename ) ) { return false; }
+				if ( EndSavingIfCancelled( Linker, TempFilename ) ) 
+				{ 
+					return ESavePackageResult::Canceled;
+				}
 				SlowTask.EnterProgressFrame();
 
 				// Save dummy import map, overwritten later.
@@ -3983,7 +4137,10 @@ bool UPackage::SavePackage( UPackage* InOuter, UObject* Base, EObjectFlags TopLe
 
 				UE_LOG_COOK_TIME(TEXT("SerializeImportMap"));
 
-				if ( EndSavingIfCancelled( Linker, TempFilename ) ) { return false; }
+				if ( EndSavingIfCancelled( Linker, TempFilename ) ) 
+				{ 
+					return ESavePackageResult::Canceled;
+				}
 				SlowTask.EnterProgressFrame();
 
 				// Save dummy export map, overwritten later.
@@ -3998,7 +4155,10 @@ bool UPackage::SavePackage( UPackage* InOuter, UObject* Base, EObjectFlags TopLe
 
 				UE_LOG_COOK_TIME(TEXT("SerializeExportMap"));
 
-				if ( EndSavingIfCancelled( Linker, TempFilename ) ) { return false; }
+				if ( EndSavingIfCancelled( Linker, TempFilename ) ) 
+				{ 
+					return ESavePackageResult::Canceled;
+				}
 				SlowTask.EnterProgressFrame();
 
 				// save depends map (no need for later patching)
@@ -4013,7 +4173,10 @@ bool UPackage::SavePackage( UPackage* InOuter, UObject* Base, EObjectFlags TopLe
 
 				UE_LOG_COOK_TIME(TEXT("SerializeDependencyMap"));
 
-				if (EndSavingIfCancelled(Linker, TempFilename)) { return false; }
+				if (EndSavingIfCancelled(Linker, TempFilename)) 
+				{ 
+					return ESavePackageResult::Canceled;
+				}
 				SlowTask.EnterProgressFrame();
 
 				// Save string asset reference map
@@ -4038,7 +4201,10 @@ bool UPackage::SavePackage( UPackage* InOuter, UObject* Base, EObjectFlags TopLe
 				
 				Linker->Summary.TotalHeaderSize	= Linker->Tell();
 
-				if ( EndSavingIfCancelled( Linker, TempFilename ) ) { return false; }
+				if ( EndSavingIfCancelled( Linker, TempFilename ) ) 
+				{ 
+					return ESavePackageResult::Canceled;
+				}
 				SlowTask.EnterProgressFrame(1, NSLOCTEXT("Core", "ProcessingExports", "ProcessingExports..."));
 
 				// look for this package in the list of packages to generate script SHA for 
@@ -4059,7 +4225,10 @@ bool UPackage::SavePackage( UPackage* InOuter, UObject* Base, EObjectFlags TopLe
 					int32 LastExportSaveStep = 0;
 					for( int32 i=0; i<Linker->ExportMap.Num(); i++ )
 					{
-						if ( EndSavingIfCancelled( Linker, TempFilename ) ) { return false; }
+						if ( EndSavingIfCancelled( Linker, TempFilename ) ) 
+						{ 
+							return ESavePackageResult::Canceled;
+						}
 						ExportScope.EnterProgressFrame();
 
 						FObjectExport& Export = Linker->ExportMap[i];
@@ -4149,7 +4318,10 @@ bool UPackage::SavePackage( UPackage* InOuter, UObject* Base, EObjectFlags TopLe
 				}
 
 				
-				if ( EndSavingIfCancelled( Linker, TempFilename ) ) { return false; }
+				if ( EndSavingIfCancelled( Linker, TempFilename ) ) 
+				{ 
+					return ESavePackageResult::Canceled;
+				}
 				SlowTask.EnterProgressFrame(1, NSLOCTEXT("Core", "SerializingBulkData", "Serializing bulk data"));
 
 				// now we write all the bulkdata that is supposed to be at the end of the package
@@ -4259,7 +4431,10 @@ bool UPackage::SavePackage( UPackage* InOuter, UObject* Base, EObjectFlags TopLe
 
 				UE_LOG_COOK_TIME(TEXT("SerializeExportMap"));
 
-				if ( EndSavingIfCancelled( Linker, TempFilename ) ) { return false; }
+				if ( EndSavingIfCancelled( Linker, TempFilename ) ) 
+				{ 
+					return ESavePackageResult::Canceled;
+				}
 				SlowTask.EnterProgressFrame();
 
 				FFormatNamedArguments NamedArgs;
@@ -4287,7 +4462,10 @@ bool UPackage::SavePackage( UPackage* InOuter, UObject* Base, EObjectFlags TopLe
 				*Linker << Linker->Summary;
 				check( Linker->Tell() == OffsetAfterPackageFileSummary );
 
-				if ( EndSavingIfCancelled( Linker, TempFilename ) ) { return false; }
+				if ( EndSavingIfCancelled( Linker, TempFilename ) ) 
+				{ 
+					return ESavePackageResult::Canceled;
+				}
 				SlowTask.EnterProgressFrame();
 
 				// Detach archive used for saving, closing file handle.
@@ -4298,7 +4476,10 @@ bool UPackage::SavePackage( UPackage* InOuter, UObject* Base, EObjectFlags TopLe
 				UNCLOCK_CYCLES(Time);
 				UE_LOG(LogSavePackage, Log,  TEXT("Save=%.2fms"), FPlatformTime::ToMilliseconds(Time) );
 		
-				if ( EndSavingIfCancelled( Linker, TempFilename ) ) { return false; }
+				if ( EndSavingIfCancelled( Linker, TempFilename ) ) 
+				{ 
+					return ESavePackageResult::Canceled;
+				}
 				SlowTask.EnterProgressFrame();
 
 				if( Success == true )
@@ -4491,15 +4672,22 @@ bool UPackage::SavePackage( UPackage* InOuter, UObject* Base, EObjectFlags TopLe
 
 		UE_LOG(LogSavePackage, Display, TEXT("Finished SavePackage %s"), Filename);
 
-		return Success;
+		return Success ? ESavePackageResult::Success : ESavePackageResult::Error;
 	}
 	else
 	{
-		return false;
+		return ESavePackageResult::Error;
 	}
 }
 
-
+bool UPackage::SavePackage(UPackage* InOuter, UObject* Base, EObjectFlags TopLevelFlags, const TCHAR* Filename,
+	FOutputDevice* Error, FLinkerLoad* Conform, bool bForceByteSwapping, bool bWarnOfLongFilename, uint32 SaveFlags,
+	const class ITargetPlatform* TargetPlatform, const FDateTime&  FinalTimeStamp, bool bSlowTask)
+{
+	const ESavePackageResult Result = Save(InOuter, Base, TopLevelFlags, Filename, Error, Conform, bForceByteSwapping, 
+		bWarnOfLongFilename, SaveFlags, TargetPlatform, FinalTimeStamp, bSlowTask);
+	return Result == ESavePackageResult::Success;
+}
 
 /**
  * Static: Saves thumbnail data for the specified package outer and linker

@@ -321,7 +321,7 @@ void FRCPassPostProcessScreenSpaceReflections::Process(FRenderingCompositePassCo
 	
 	if (SSRStencilPrePass)
 	{ // ScreenSpaceReflectionsStencil draw event
-		SCOPED_DRAW_EVENT(RHICmdList, ScreenSpaceReflectionsStencil);
+		SCOPED_DRAW_EVENTF(Context.RHICmdList, ScreenSpaceReflectionsStencil, TEXT("ScreenSpaceReflectionsStencil %dx%d"), View.ViewRect.Width(), View.ViewRect.Height());
 
 		TShaderMapRef< FPostProcessVS > VertexShader(Context.GetShaderMap());
 		TShaderMapRef< FPostProcessScreenSpaceReflectionsStencilPS > PixelShader(Context.GetShaderMap());
@@ -348,21 +348,23 @@ void FRCPassPostProcessScreenSpaceReflections::Process(FRenderingCompositePassCo
 		// disable blend mode
 		RHICmdList.SetBlendState(TStaticBlendState<>::GetRHI());
 	
-		// Draw a quad mapping scene color to the view's render target to set stencil to set the stencil mask where it needs to be
-		DrawRectangle( 
+		DrawPostProcessPass(
 			Context.RHICmdList,
 			0, 0,
 			View.ViewRect.Width(), View.ViewRect.Height(),
-			View.ViewRect.Min.X, View.ViewRect.Min.Y, 
+			View.ViewRect.Min.X, View.ViewRect.Min.Y,
 			View.ViewRect.Width(), View.ViewRect.Height(),
 			View.ViewRect.Size(),
 			SceneContext.GetBufferSizeXY(),
 			*VertexShader,
+			View.StereoPass,
+			Context.HasHmdMesh(),
 			EDRF_UseTriangleOptimization);
+
 	} // ScreenSpaceReflectionsStencil draw event
 
 	{ // ScreenSpaceReflections draw event
-		SCOPED_DRAW_EVENT(Context.RHICmdList, ScreenSpaceReflections);
+		SCOPED_DRAW_EVENTF(Context.RHICmdList, ScreenSpaceReflections, TEXT("ScreenSpaceReflections %dx%d"), View.ViewRect.Width(), View.ViewRect.Height());
 
 		if (SSRStencilPrePass)
 		{
@@ -411,19 +413,19 @@ void FRCPassPostProcessScreenSpaceReflections::Process(FRenderingCompositePassCo
 		}
 		#undef CASE
 
-
-		// Draw a quad mapping scene color to the view's render target
-		DrawRectangle( 
+		DrawPostProcessPass(
 			RHICmdList,
 			0, 0,
 			View.ViewRect.Width(), View.ViewRect.Height(),
-			View.ViewRect.Min.X, View.ViewRect.Min.Y, 
+			View.ViewRect.Min.X, View.ViewRect.Min.Y,
 			View.ViewRect.Width(), View.ViewRect.Height(),
 			View.ViewRect.Size(),
 			FSceneRenderTargets::Get(Context.RHICmdList).GetBufferSizeXY(),
 			*VertexShader,
+			View.StereoPass,
+			Context.HasHmdMesh(),
 			EDRF_UseTriangleOptimization);
-
+	
 		RHICmdList.CopyToResolveTarget(DestRenderTarget.TargetableTexture, DestRenderTarget.ShaderResourceTexture, false, FResolveParams());
 	} // ScreenSpaceReflections
 }

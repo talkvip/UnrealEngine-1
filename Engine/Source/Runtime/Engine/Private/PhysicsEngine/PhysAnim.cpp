@@ -93,9 +93,9 @@ public:
 	}
 };
 
-
+typedef TArray<FAssetWorldBoneTM, TMemStackAllocator<ALIGNOF(FAssetWorldBoneTM)>> TAssetWorldBoneTMArray;
 // Use current pose to calculate world-space position of this bone without physics now.
-void UpdateWorldBoneTM(TArray<FAssetWorldBoneTM> & WorldBoneTMs, const TArray<FTransform>& InLocalAtoms, int32 BoneIndex, USkeletalMeshComponent* SkelComp, const FTransform &LocalToWorldTM, const FVector& Scale3D)
+void UpdateWorldBoneTM(TAssetWorldBoneTMArray& WorldBoneTMs, const TArray<FTransform>& InLocalAtoms, int32 BoneIndex, USkeletalMeshComponent* SkelComp, const FTransform &LocalToWorldTM, const FVector& Scale3D)
 {
 	// If its already up to date - do nothing
 	if(	WorldBoneTMs[BoneIndex].bUpToDate )
@@ -152,9 +152,9 @@ void USkeletalMeshComponent::PerformBlendPhysicsBones(const TArray<FBoneIndexTyp
 		return;
 	}
 
+	FMemMark Mark(FMemStack::Get());
 	// Make sure scratch space is big enough.
-	TArray<FAssetWorldBoneTM> WorldBoneTMs;
-	WorldBoneTMs.Reset();
+	TAssetWorldBoneTMArray WorldBoneTMs;
 	WorldBoneTMs.AddZeroed(GetNumSpaceBases());
 	
 	FTransform LocalToWorldTM = ComponentToWorld;
@@ -167,8 +167,7 @@ void USkeletalMeshComponent::PerformBlendPhysicsBones(const TArray<FBoneIndexTyp
 		FBodyInstance* BI;
 		FTransform TM;
 	};
-
-	TArray<FBodyTMPair> PendingBodyTMs;
+	TArray<FBodyTMPair, TMemStackAllocator<ALIGNOF(FBodyTMPair)>> PendingBodyTMs;
 
 #if WITH_PHYSX
 	// Lock the scenes we need (flags set in InitArticulated)
@@ -398,7 +397,8 @@ void USkeletalMeshComponent::BlendInPhysics(FTickFunction& ThisTickFunction)
 				AnimEvaluationContext.VertexAnims = ActiveVertexAnims;
 			}
 
-			AnimEvaluationContext.LocalAtoms = LocalAtoms;
+			AnimEvaluationContext.LocalAtoms.Reset(LocalAtoms.Num());
+			AnimEvaluationContext.LocalAtoms.Append(LocalAtoms);
 
 			ParallelAnimationEvaluationTask = TGraphTask<FParallelBlendPhysicsTask>::CreateTask().ConstructAndDispatchWhenReady(this);
 
@@ -410,7 +410,8 @@ void USkeletalMeshComponent::BlendInPhysics(FTickFunction& ThisTickFunction)
 			ParallelBlendPhysicsCompletionTask = TGraphTask<FParallelBlendPhysicsCompletionTask>::CreateTask(&Prerequistes).ConstructAndDispatchWhenReady(this);
 
 			ThisTickFunction.GetCompletionHandle()->DontCompleteUntil(ParallelBlendPhysicsCompletionTask);
-		}else
+		}
+		else
 		{
 			PerformBlendPhysicsBones(RequiredBones, LocalAtoms);
 			PostBlendPhysics();
@@ -423,6 +424,8 @@ void USkeletalMeshComponent::PostBlendPhysics()
 	SCOPE_CYCLE_COUNTER(STAT_UpdateLocalToWorldAndOverlaps);
 	
 	FinalizeBoneTransform();
+
+	UpdateComponentToWorld();
 
 	// Update Child Transform - The above function changes bone transform, so will need to update child transform
 	UpdateChildTransforms();
@@ -545,7 +548,7 @@ void USkeletalMeshComponent::UpdateKinematicBonesToAnim(const TArray<FTransform>
 				FBodyInstance* BodyInst = Bodies[i];
 				check(BodyInst);
 
-				if (bTeleport || (BodyInst->IsValidBodyInstance() && !BodyInst->IsInstanceSimulatingPhysics()))
+				if (BodyInst->IsValidBodyInstance() && (bTeleport || !BodyInst->IsInstanceSimulatingPhysics()))
 				{
 					const int32 BoneIndex = BodyInst->InstanceBoneIndex;
 

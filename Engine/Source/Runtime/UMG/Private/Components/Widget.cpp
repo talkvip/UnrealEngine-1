@@ -75,11 +75,14 @@ public:
 
 	virtual void OnClosed() override
 	{
+		//TODO Notify interface implementing widget of closure
+
 		CachedToolTip.Reset();
 	}
 
 	virtual void OnOpening() override
 	{
+		//TODO Notify interface implementing widget of opening
 	}
 
 public:
@@ -234,7 +237,8 @@ void UWidget::SetVisibility(ESlateVisibility InVisibility)
 	TSharedPtr<SWidget> SafeWidget = GetCachedWidget();
 	if (SafeWidget.IsValid())
 	{
-		return SafeWidget->SetVisibility(UWidget::ConvertSerializedVisibilityToRuntime(InVisibility));
+		EVisibility SlateVisibility = UWidget::ConvertSerializedVisibilityToRuntime(InVisibility);
+		return SafeWidget->SetVisibility(SlateVisibility);
 	}
 }
 
@@ -792,10 +796,16 @@ void UWidget::SynchronizeProperties()
 		SafeWidget->SetToolTipText(GAME_SAFE_OPTIONAL_BINDING(FText, ToolTipText));
 	}
 
-#if WITH_EDITOR
+#if WITH_EDITORONLY_DATA
 	// In editor builds we add metadata to the widget so that once hit with the widget reflector it can report
 	// where it comes from, what blueprint, what the name of the widget was...etc.
 	SafeWidget->AddMetadata<FReflectionMetaData>(MakeShareable(new FReflectionMetaData(GetFName(), GetClass(), WidgetGeneratedBy)));
+#else
+
+#if !UE_BUILD_SHIPPING
+	SafeWidget->AddMetadata<FReflectionMetaData>(MakeShareable(new FReflectionMetaData(GetFName(), GetClass(), WidgetGeneratedByClass)));
+#endif
+
 #endif
 }
 

@@ -35,7 +35,7 @@ void* FGenericPlatformProcess::GetDllExport( void* DllHandle, const TCHAR* ProcN
 int32 FGenericPlatformProcess::GetDllApiVersion( const TCHAR* Filename )
 {
 	UE_LOG(LogHAL, Fatal, TEXT("FPlatformProcess::GetBinaryFileVersion not implemented on this platform"));
-	return GCompatibleWithEngineVersion.GetChangelist();
+	return FEngineVersion::CompatibleWith().GetChangelist();
 }
 
 uint32 FGenericPlatformProcess::GetCurrentProcessId()
@@ -123,7 +123,7 @@ void FGenericPlatformProcess::SetShaderDir(const TCHAR*Where)
  */
 const FString FGenericPlatformProcess::ShaderWorkingDir()
 {
-	return (FPaths::GameIntermediateDir() / TEXT("Shaders/WorkingDirectory/"));
+	return (FPaths::GameIntermediateDir() / TEXT("Shaders/tmp/"));
 }
 
 /**
@@ -133,8 +133,10 @@ void FGenericPlatformProcess::CleanShaderWorkingDir()
 {
 	// Path to the working directory where files are written for multi-threaded compilation
 	FString ShaderWorkingDirectory = ShaderWorkingDir();
-
 	IFileManager::Get().DeleteDirectory(*ShaderWorkingDirectory, false, true);
+
+	FString LegacyShaderWorkingDirectory = FPaths::GameIntermediateDir() / TEXT("Shaders/WorkingDirectory/");
+	IFileManager::Get().DeleteDirectory(*LegacyShaderWorkingDirectory, false, true);
 }
 
 const TCHAR* FGenericPlatformProcess::ExecutableName(bool bRemoveExtension)
@@ -173,6 +175,12 @@ const FString FGenericPlatformProcess::GetModulesDirectory()
 void FGenericPlatformProcess::LaunchURL( const TCHAR* URL, const TCHAR* Parms, FString* Error )
 {
 	UE_LOG(LogHAL, Fatal, TEXT("FGenericPlatformProcess::LaunchURL not implemented on this platform"));
+}
+
+bool FGenericPlatformProcess::CanLaunchURL(const TCHAR* URL)
+{
+	UE_LOG(LogHAL, Warning, TEXT("FGenericPlatformProcess::CanLaunchURL not implemented on this platform"));
+	return false;
 }
 
 FProcHandle FGenericPlatformProcess::CreateProc( const TCHAR* URL, const TCHAR* Parms, bool bLaunchDetached, bool bLaunchHidden, bool bLaunchReallyHidden, uint32* OutProcessID, int32 PriorityModifier, const TCHAR* OptionalWorkingDirectory, void* PipeWrite )
@@ -512,4 +520,13 @@ bool FGenericPlatformProcess::Daemonize()
 {
 	UE_LOG(LogHAL, Fatal, TEXT("FGenericPlatformProcess::Daemonize not implemented on this platform"));
 	return false;
+}
+
+bool FGenericPlatformProcess::IsFirstInstance()
+{
+#if !(UE_BUILD_SHIPPING && WITH_EDITOR)
+	return GIsFirstInstance;
+#elif
+	return true;
+#endif
 }

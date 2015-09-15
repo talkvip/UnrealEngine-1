@@ -20,11 +20,22 @@
 /** If true, optimized depth-only index buffers are used for shadow rendering. */
 static bool GUseShadowIndexBuffer = true;
 
+/** If true, reversed index buffer are used for mesh with negative transform determinants. */
+static bool GUseReversedIndexBuffer = true;
+
 static void ToggleShadowIndexBuffers()
 {
 	FlushRenderingCommands();
 	GUseShadowIndexBuffer = !GUseShadowIndexBuffer;
 	UE_LOG(LogStaticMesh,Log,TEXT("Optimized shadow index buffers %s"),GUseShadowIndexBuffer ? TEXT("ENABLED") : TEXT("DISABLED"));
+	FGlobalComponentReregisterContext ReregisterContext;
+}
+
+static void ToggleReversedIndexBuffers()
+{
+	FlushRenderingCommands();
+	GUseReversedIndexBuffer = !GUseReversedIndexBuffer;
+	UE_LOG(LogStaticMesh,Log,TEXT("Reversed index buffers %s"),GUseReversedIndexBuffer ? TEXT("ENABLED") : TEXT("DISABLED"));
 	FGlobalComponentReregisterContext ReregisterContext;
 }
 
@@ -34,13 +45,19 @@ static FAutoConsoleCommand GToggleShadowIndexBuffersCmd(
 	FConsoleCommandDelegate::CreateStatic(ToggleShadowIndexBuffers)
 	);
 
+static FAutoConsoleCommand GToggleReversedIndexBuffersCmd(
+	TEXT("ToggleReversedIndexBuffers"),
+	TEXT("Render static meshes with negative transform determinants using a reversed index buffer."),
+	FConsoleCommandDelegate::CreateStatic(ToggleReversedIndexBuffers)
+	);
+
 bool GForceDefaultMaterial = false;
 
 static void ToggleForceDefaultMaterial()
 {
 	FlushRenderingCommands();
 	GForceDefaultMaterial = !GForceDefaultMaterial;
-	UE_LOG(LogStaticMesh,Log,TEXT("Force default material %s"),GUseShadowIndexBuffer ? TEXT("ENABLED") : TEXT("DISABLED"));
+	UE_LOG(LogStaticMesh,Log,TEXT("Force default material %s"),GForceDefaultMaterial ? TEXT("ENABLED") : TEXT("DISABLED"));
 	FGlobalComponentReregisterContext ReregisterContext;
 }
 
@@ -52,16 +69,19 @@ static FAutoConsoleCommand GToggleForceDefaultMaterialCmd(
 
 /** Initialization constructor. */
 FStaticMeshSceneProxy::FStaticMeshSceneProxy(UStaticMeshComponent* InComponent):
-	FPrimitiveSceneProxy(InComponent, InComponent->StaticMesh->GetFName()),
-	Owner(InComponent->GetOwner()),
-	StaticMesh(InComponent->StaticMesh),
-	BodySetup(InComponent->GetBodySetup()),
-	RenderData(InComponent->StaticMesh->RenderData),
-	ForcedLodModel(InComponent->ForcedLodModel),
-	bCastShadow(InComponent->CastShadow),
-	CollisionTraceFlag(ECollisionTraceFlag::CTF_UseDefault),
-	MaterialRelevance(InComponent->GetMaterialRelevance(GetScene().GetFeatureLevel())),
-	CollisionResponse(InComponent->GetCollisionResponseToChannels())
+	FPrimitiveSceneProxy(InComponent, InComponent->StaticMesh->GetFName())
+	, Owner(InComponent->GetOwner())
+	, StaticMesh(InComponent->StaticMesh)
+	, BodySetup(InComponent->GetBodySetup())
+	, RenderData(InComponent->StaticMesh->RenderData)
+	, ForcedLodModel(InComponent->ForcedLodModel)
+	, bCastShadow(InComponent->CastShadow)
+	, CollisionTraceFlag(ECollisionTraceFlag::CTF_UseDefault)
+	, MaterialRelevance(InComponent->GetMaterialRelevance(GetScene().GetFeatureLevel()))
+	, CollisionResponse(InComponent->GetCollisionResponseToChannels())
+#if WITH_EDITORONLY_DATA
+	, SectionIndexPreview(InComponent->SectionIndexPreview)
+#endif
 {
 	check(RenderData);
 
@@ -176,20 +196,24 @@ bool FStaticMeshSceneProxy::GetShadowMeshElement(int32 LODIndex, int32 BatchInde
 	const FStaticMeshLODResources& LOD = RenderData->LODResources[LODIndex];
 	const FLODInfo& ProxyLODInfo = LODs[LODIndex];
 
+	const bool bUseReversedIndices = GUseReversedIndexBuffer && IsLocalToWorldDeterminantNegative() && LOD.bHasReversedDepthOnlyIndices;
+
 	FMeshBatchElement& OutBatchElement = OutMeshBatch.Elements[0];
 	OutMeshBatch.MaterialRenderProxy = UMaterial::GetDefaultMaterial(MD_Surface)->GetRenderProxy(false, false);
 	OutMeshBatch.VertexFactory = &LOD.VertexFactory;
-	OutBatchElement.IndexBuffer = &LOD.DepthOnlyIndexBuffer;
+	OutBatchElement.IndexBuffer = bUseReversedIndices ? &LOD.ReversedDepthOnlyIndexBuffer : &LOD.DepthOnlyIndexBuffer;
 	OutMeshBatch.Type = PT_TriangleList;
 	OutBatchElement.FirstIndex = 0;
-	OutBatchElement.NumPrimitives = LOD.DepthOnlyIndexBuffer.GetNumIndices() / 3;
+	OutBatchElement.NumPrimitives = LOD.DepthOnlyNumTriangles;
 	OutBatchElement.PrimitiveUniformBufferResource = &GetUniformBuffer();
 	OutBatchElement.MinVertexIndex = 0;
 	OutBatchElement.MaxVertexIndex = LOD.PositionVertexBuffer.GetNumVertices() - 1;
 	OutMeshBatch.DepthPriorityGroup = InDepthPriorityGroup;
-	OutMeshBatch.ReverseCulling = IsLocalToWorldDeterminantNegative();
-	OutMeshBatch.CastShadow = true;
+	OutMeshBatch.ReverseCulling = IsLocalToWorldDeterminantNegative() && !bUseReversedIndices;
 	OutMeshBatch.LODIndex = LODIndex;
+#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+	OutMeshBatch.VisualizeLODIndex = LODIndex;
+#endif
 	OutMeshBatch.LCI = &ProxyLODInfo;
 	if (ForcedLodModel > 0) 
 	{
@@ -207,6 +231,10 @@ bool FStaticMeshSceneProxy::GetShadowMeshElement(int32 LODIndex, int32 BatchInde
 		}
 	}
 
+	// By default this will be a shadow only mesh.
+	OutMeshBatch.bUseAsOccluder = false;
+	OutMeshBatch.bUseForMaterial = false;
+
 	return true;
 }
 
@@ -220,6 +248,14 @@ bool FStaticMeshSceneProxy::GetMeshElement(int32 LODIndex, int32 BatchIndex, int
 	UMaterialInterface* Material = ProxyLODInfo.Sections[SectionIndex].Material;
 	OutMeshBatch.MaterialRenderProxy = Material->GetRenderProxy(bUseSelectedMaterial,bUseHoveredMaterial);
 	OutMeshBatch.VertexFactory = &LOD.VertexFactory;
+
+#if WITH_EDITORONLY_DATA
+	// If section is hidden, then skip the draw.
+	if ((SectionIndexPreview >= 0) && (SectionIndexPreview != SectionIndex))
+	{
+		return false;
+	}
+#endif
 
 	// Has the mesh component overridden the vertex color stream for this mesh LOD?
 	if( ProxyLODInfo.OverrideColorVertexBuffer != NULL )
@@ -237,8 +273,9 @@ bool FStaticMeshSceneProxy::GetMeshElement(int32 LODIndex, int32 BatchIndex, int
 
 	const bool bWireframe = false;
 	const bool bRequiresAdjacencyInformation = RequiresAdjacencyInformation( Material, OutMeshBatch.VertexFactory->GetType(), GetScene().GetFeatureLevel() );
+	const bool bUseReversedIndices = GUseReversedIndexBuffer && !bWireframe && !bRequiresAdjacencyInformation && IsLocalToWorldDeterminantNegative() && LOD.bHasReversedIndices;
 
-	SetIndexSource(LODIndex, SectionIndex, OutMeshBatch, bWireframe, bRequiresAdjacencyInformation );
+	SetIndexSource(LODIndex, SectionIndex, OutMeshBatch, bWireframe, bRequiresAdjacencyInformation, bUseReversedIndices);
 
 	FMeshBatchElement& OutBatchElement = OutMeshBatch.Elements[0];
 
@@ -250,8 +287,11 @@ bool FStaticMeshSceneProxy::GetMeshElement(int32 LODIndex, int32 BatchIndex, int
 		OutBatchElement.MinVertexIndex = Section.MinVertexIndex;
 		OutBatchElement.MaxVertexIndex = Section.MaxVertexIndex;
 		OutMeshBatch.LODIndex = LODIndex;
+#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+		OutMeshBatch.VisualizeLODIndex = LODIndex;
+#endif
 		OutMeshBatch.UseDynamicData = false;
-		OutMeshBatch.ReverseCulling = IsLocalToWorldDeterminantNegative();
+		OutMeshBatch.ReverseCulling = IsLocalToWorldDeterminantNegative() && !bUseReversedIndices;
 		OutMeshBatch.CastShadow = bCastShadow && Section.bCastShadow;
 		OutMeshBatch.DepthPriorityGroup = (ESceneDepthPriorityGroup)InDepthPriorityGroup;
 		if (ForcedLodModel > 0) 
@@ -312,8 +352,9 @@ bool FStaticMeshSceneProxy::GetWireframeMeshElement(int32 LODIndex, int32 BatchI
 
 	const bool bWireframe = true;
 	const bool bRequiresAdjacencyInformation = false;
+	const bool bUseReversedIndices = false;
 
-	SetIndexSource(LODIndex, 0, OutMeshBatch, bWireframe, bRequiresAdjacencyInformation);
+	SetIndexSource(LODIndex, 0, OutMeshBatch, bWireframe, bRequiresAdjacencyInformation, bUseReversedIndices);
 
 	return OutBatchElement.NumPrimitives > 0;
 }
@@ -321,7 +362,7 @@ bool FStaticMeshSceneProxy::GetWireframeMeshElement(int32 LODIndex, int32 BatchI
 /**
  * Sets IndexBuffer, FirstIndex and NumPrimitives of OutMeshElement.
  */
-void FStaticMeshSceneProxy::SetIndexSource(int32 LODIndex, int32 SectionIndex, FMeshBatch& OutMeshElement, bool bWireframe, bool bRequiresAdjacencyInformation) const
+void FStaticMeshSceneProxy::SetIndexSource(int32 LODIndex, int32 SectionIndex, FMeshBatch& OutMeshElement, bool bWireframe, bool bRequiresAdjacencyInformation, bool bUseReversedIndices) const
 {
 	FMeshBatchElement& OutElement = OutMeshElement.Elements[0];
 	const FStaticMeshLODResources& LODModel = RenderData->LODResources[LODIndex];
@@ -350,7 +391,7 @@ void FStaticMeshSceneProxy::SetIndexSource(int32 LODIndex, int32 SectionIndex, F
 	{
 		const FStaticMeshSection& Section = LODModel.Sections[SectionIndex];
 		OutMeshElement.Type = PT_TriangleList;
-		OutElement.IndexBuffer = &LODModel.IndexBuffer;
+		OutElement.IndexBuffer = bUseReversedIndices ? &LODModel.ReversedIndexBuffer : &LODModel.IndexBuffer;
 		OutElement.FirstIndex = Section.FirstIndex;
 		OutElement.NumPrimitives = Section.NumTriangles;
 	}
@@ -484,23 +525,23 @@ void FStaticMeshSceneProxy::DrawStaticElements(FStaticPrimitiveDrawInterface* PD
 				const FStaticMeshLODResources& LODModel = RenderData->LODResources[LODIndex];
 				float ScreenSize = GetScreenSize(LODIndex);
 
-				bool bHaveShadowOnlyMesh = false;
-				if (GUseShadowIndexBuffer
-					&& bCastShadow
-					&& LODModel.DepthOnlyIndexBuffer.GetNumIndices() > 0)
+				bool bUseUnifiedMeshForShadow = false;
+				bool bUseUnifiedMeshForDepth = false;
+
+				if (GUseShadowIndexBuffer && LODModel.bHasDepthOnlyIndices)
 				{
 					const FLODInfo& ProxyLODInfo = LODs[LODIndex];
 
 					// The shadow-only mesh can be used only if all elements cast shadows and use opaque materials with no vertex modification.
 					// In some cases (e.g. LPV) we don't want the optimization
-					bool bSafeToUseShadowOnlyMesh = AllowShadowOnlyMesh(FeatureLevel);
+					bool bSafeToUseUnifiedMesh = AllowShadowOnlyMesh(FeatureLevel);
 
-					bool bAnySectionCastsShadow = false;
 					bool bAnySectionUsesDitheredLODTransition = false;
 					bool bAllSectionsUseDitheredLODTransition = true;
 					bool bIsMovable = IsMovable();
+					bool bAllSectionsCastShadow = bCastShadow;
 
-					for (int32 SectionIndex = 0; bSafeToUseShadowOnlyMesh && SectionIndex < LODModel.Sections.Num(); SectionIndex++)
+					for (int32 SectionIndex = 0; bSafeToUseUnifiedMesh && SectionIndex < LODModel.Sections.Num(); SectionIndex++)
 					{
 						const FMaterial* Material = ProxyLODInfo.Sections[SectionIndex].Material->GetRenderProxy(false)->GetMaterial(FeatureLevel);
 						// no support for stateless dithered LOD transitions for movable meshes
@@ -508,28 +549,42 @@ void FStaticMeshSceneProxy::DrawStaticElements(FStaticPrimitiveDrawInterface* PD
 						bAllSectionsUseDitheredLODTransition = bAllSectionsUseDitheredLODTransition && (!bIsMovable && Material->IsDitheredLODTransition());
 						const FStaticMeshSection& Section = LODModel.Sections[SectionIndex];
 
-						bSafeToUseShadowOnlyMesh =
-							Section.bCastShadow
-							&& !(bAnySectionUsesDitheredLODTransition && !bAllSectionsUseDitheredLODTransition) // can't use a single section if they are not homogeneous
+						bSafeToUseUnifiedMesh =
+							!(bAnySectionUsesDitheredLODTransition && !bAllSectionsUseDitheredLODTransition) // can't use a single section if they are not homogeneous
 							&& Material->WritesEveryPixel()
 							&& !Material->IsTwoSided()
 							&& !IsTranslucentBlendMode(Material->GetBlendMode())
 							&& !Material->MaterialModifiesMeshPosition_RenderThread();
-						bAnySectionCastsShadow |= Section.bCastShadow;
+
+						bAllSectionsCastShadow &= Section.bCastShadow;
 					}
 
-					if (bAnySectionCastsShadow && bSafeToUseShadowOnlyMesh)
+					if (bSafeToUseUnifiedMesh)
 					{
-						const int32 NumBatches = GetNumMeshBatches();
+						bUseUnifiedMeshForShadow = bAllSectionsCastShadow;
 
-						for (int32 BatchIndex = 0; BatchIndex < NumBatches; BatchIndex++)
+						// Depth pass is only used for deferred renderer. The other conditions are meant to match the logic in FStaticMesh::AddToDrawLists.
+						// Could not link to "GEarlyZPassMovable" so moveable are ignored.
+						bUseUnifiedMeshForDepth = ShouldUseAsOccluder() && GetScene().ShouldUseDeferredRenderer() && !IsMovable();
+
+						if (bUseUnifiedMeshForShadow || bUseUnifiedMeshForDepth)
 						{
-							FMeshBatch MeshBatch;
+							const int32 NumBatches = GetNumMeshBatches();
 
-							if (GetShadowMeshElement(LODIndex, BatchIndex, PrimitiveDPG, MeshBatch, bAllSectionsUseDitheredLODTransition))
+							for (int32 BatchIndex = 0; BatchIndex < NumBatches; BatchIndex++)
 							{
-								bHaveShadowOnlyMesh = true;
-								PDI->DrawMesh(MeshBatch, ScreenSize, /*bShadowOnly=*/true);
+								FMeshBatch MeshBatch;
+
+								if (GetShadowMeshElement(LODIndex, BatchIndex, PrimitiveDPG, MeshBatch, bAllSectionsUseDitheredLODTransition))
+								{
+									bUseUnifiedMeshForShadow = bAllSectionsCastShadow;
+
+									MeshBatch.CastShadow = bUseUnifiedMeshForShadow;
+									MeshBatch.bUseAsOccluder = bUseUnifiedMeshForDepth;
+									MeshBatch.bUseForMaterial = false;
+
+									PDI->DrawMesh(MeshBatch, ScreenSize);
+								}
 							}
 						}
 					}
@@ -557,7 +612,9 @@ void FStaticMeshSceneProxy::DrawStaticElements(FStaticPrimitiveDrawInterface* PD
 						if (GetMeshElement(LODIndex, BatchIndex, SectionIndex, PrimitiveDPG, bUseSelectedMaterial, bUseHoveredMaterial, MeshBatch))
 						{
 							// If we have submitted an optimized shadow-only mesh, remaining mesh elements must not cast shadows.
-							MeshBatch.CastShadow = MeshBatch.CastShadow && !bHaveShadowOnlyMesh;
+							MeshBatch.CastShadow &= !bUseUnifiedMeshForShadow;
+							MeshBatch.bUseAsOccluder &= !bUseUnifiedMeshForDepth;
+
 							PDI->DrawMesh(MeshBatch, ScreenSize);
 						}
 					}
@@ -901,7 +958,7 @@ bool FStaticMeshSceneProxy::CanBeOccluded() const
 	return !MaterialRelevance.bDisableDepthTest && !ShouldRenderCustomDepth();
 }
 
-FPrimitiveViewRelevance FStaticMeshSceneProxy::GetViewRelevance(const FSceneView* View)
+FPrimitiveViewRelevance FStaticMeshSceneProxy::GetViewRelevance(const FSceneView* View) const
 {   
 	checkSlow(IsInParallelRenderingThread());
 

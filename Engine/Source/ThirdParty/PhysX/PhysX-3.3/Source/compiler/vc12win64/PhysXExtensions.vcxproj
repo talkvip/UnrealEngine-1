@@ -67,7 +67,6 @@
 	</PropertyGroup>
 	<ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='debug|x64'">
 		<ClCompile>
-			<TreatWarningAsError>true</TreatWarningAsError>
 			<StringPooling>true</StringPooling>
 			<RuntimeTypeInfo>false</RuntimeTypeInfo>
 			<BufferSecurityCheck>false</BufferSecurityCheck>
@@ -109,7 +108,6 @@
 	</PropertyGroup>
 	<ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='checked|x64'">
 		<ClCompile>
-			<TreatWarningAsError>true</TreatWarningAsError>
 			<StringPooling>true</StringPooling>
 			<RuntimeTypeInfo>false</RuntimeTypeInfo>
 			<BufferSecurityCheck>false</BufferSecurityCheck>
@@ -150,7 +148,6 @@
 	</PropertyGroup>
 	<ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='profile|x64'">
 		<ClCompile>
-			<TreatWarningAsError>true</TreatWarningAsError>
 			<StringPooling>true</StringPooling>
 			<RuntimeTypeInfo>false</RuntimeTypeInfo>
 			<BufferSecurityCheck>false</BufferSecurityCheck>
@@ -192,7 +189,6 @@
 	</PropertyGroup>
 	<ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='release|x64'">
 		<ClCompile>
-			<TreatWarningAsError>true</TreatWarningAsError>
 			<StringPooling>true</StringPooling>
 			<RuntimeTypeInfo>false</RuntimeTypeInfo>
 			<BufferSecurityCheck>false</BufferSecurityCheck>
@@ -265,8 +261,6 @@
 		<ClInclude Include="..\..\..\Include\extensions\PxJointLimit.h">
 		</ClInclude>
 		<ClInclude Include="..\..\..\Include\extensions\PxJointRepXSerializer.h">
-		</ClInclude>
-		<ClInclude Include="..\..\..\Include\extensions\PxMassProps.h">
 		</ClInclude>
 		<ClInclude Include="..\..\..\Include\extensions\PxParticleExt.h">
 		</ClInclude>

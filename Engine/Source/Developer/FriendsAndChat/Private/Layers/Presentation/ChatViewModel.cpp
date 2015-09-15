@@ -23,9 +23,29 @@ class FChatViewModelImpl
 public:
 
 	// Begin FChatViewModel interface
+
+	virtual TSharedRef<FChatViewModel> Clone(const TSharedRef<class IChatDisplayService>& InChatDisplayService, TArray<TSharedRef<ICustomSlashCommand> >* CustomSlashCommands) override
+	{
+		TSharedRef< FChatViewModelImpl > ViewModel(new FChatViewModelImpl(FriendViewModelFactory, MessageService, NavigationService, MarkupService, InChatDisplayService, FriendsService, GamePartyService));
+		ViewModel->Initialize(true);
+		ViewModel->SetFilteredMessages(FilteredMessages);
+		ViewModel->SetChannelFlags(ChatChannelFlags);
+		ViewModel->DefaultChannel = DefaultChannel;
+		ViewModel->DefaultChatChannelFlags = DefaultChatChannelFlags;
+		if(SelectedFriend.IsValid())
+		{
+			ViewModel->SetWhisperFriend(SelectedFriend, false);
+		}
+		if(CustomSlashCommands!= nullptr)
+		{
+			ViewModel->AddCustomSlashCommands(*CustomSlashCommands);
+		}
+		return ViewModel;
+	}
+
 	virtual FText GetChatGroupText(bool ShowWhisperFriendsName) const override
 	{
-		return SelectedFriend.IsValid() && ShowWhisperFriendsName ? SelectedFriend->DisplayName : EChatMessageType::ToText(GetChatChannelType());
+		return SelectedFriend.IsValid() && ShowWhisperFriendsName ? SelectedFriend->DisplayName : EChatMessageType::ToText(DefaultChannel);
 	}
 
 	virtual TArray< TSharedRef<FChatItemViewModel > >& GetMessages() override
@@ -36,6 +56,51 @@ public:
 	virtual int32 GetMessageCount() const override
 	{
 		return FilteredMessages.Num();
+	}
+
+	virtual int32 GetUnreadChannelMessageCount() const override
+	{
+		int32 NewChannelMessageCount = 0;
+		if (!IsActive() || !bMessageShown)
+		{
+			for (int32 MessageIndex = LastSeenMessageCount; MessageIndex < GetMessageCount(); ++MessageIndex)
+			{
+				if(FilteredMessages[MessageIndex]->GetMessageType() == EChatMessageType::Admin)
+				{
+					NewChannelMessageCount++;
+				}
+				// Don't count messages we sent ourselves
+				else if (!FilteredMessages[MessageIndex]->IsFromSelf())
+				{
+					// Show Missed Messages if the active channel does now show our default message type.
+					if ((GetDefaultChannelType() & ReadChannelFlags) == 0)
+					{
+						// Show missed messages if we are the default channel for this message type or if we are the current active window
+						if (FilteredMessages[MessageIndex]->GetMessageType() == GetDefaultChannelType() || IsActive())
+						{
+							NewChannelMessageCount++;
+						}
+					}
+				}
+			}
+		}
+		return NewChannelMessageCount;
+	}
+
+	virtual void SetReadChannelFlags(uint8 ChannelFlags) override
+	{
+		// All channel read admin messages
+		if (ChannelFlags != 0)
+		{
+			ChannelFlags |= EChatMessageType::Admin;
+		}
+
+		if ((ChannelFlags & GetDefaultChannelType()) ||
+			(ReadChannelFlags & GetDefaultChannelType() && ChannelFlags == 0))
+		{
+			LastSeenMessageCount = GetMessageCount();
+		}
+		ReadChannelFlags = ChannelFlags;
 	}
 
 	virtual TSharedPtr<FFriendViewModel> GetFriendViewModel(const TSharedPtr<const FUniqueNetId> InUserID, const FText Username) override
@@ -62,11 +127,37 @@ public:
 		return GetFriendViewModel(NetID, Username);
 	}
 
+	virtual void SetDefaultOutgoingChannel(EChatMessageType::Type InChannel)
+	{
+		DefaultChannel = InChannel;
+		SetOutgoingMessageChannel(DefaultChannel);
+	}
+
+	virtual void SetDefaultChannelFlags(uint8 ChatFlags) override
+	{
+		DefaultChatChannelFlags = ChatFlags;
+		SetChannelFlags(DefaultChatChannelFlags);
+	}
+
+	virtual void ResetToDefaultChannel() override
+	{
+		SetChannelFlags(DefaultChatChannelFlags);
+		SetOutgoingMessageChannel(DefaultChannel);
+	}
+
 	virtual void SetChannelFlags(uint8 ChatFlags) override
 	{
 		ChatChannelFlags = ChatFlags;
 		bHasActionPending = false;
-		SelectedFriend.Reset();
+		if (!IsChannelSet(EChatMessageType::Whisper))
+		{
+			SelectedFriend.Reset();
+		}
+	}
+
+	virtual uint8 GetChannelFlags() override
+	{
+		return ChatChannelFlags;
 	}
 
 	virtual bool IsChannelSet(const EChatMessageType::Type InChannel) override
@@ -92,6 +183,22 @@ public:
 		}
 	}
 
+	virtual void NavigateToChannel(const EChatMessageType::Type InChannel) override
+	{
+		if(InChannel == EChatMessageType::Party || InChannel == EChatMessageType::Game)
+		{
+			// ToDo - move this logic into the navigation system rather than checking party membership here
+			if(GamePartyService->IsInGameSession() || GamePartyService->IsInPartyChat())
+			{
+				NavigationService->ChangeViewChannel(InChannel);
+			}
+		}
+		else
+		{
+			NavigationService->ChangeViewChannel(InChannel);
+		}
+	}
+
 	virtual EChatMessageType::Type GetOutgoingChatChannel() const override
 	{
 		return OutgoingMessageChannel;
@@ -102,12 +209,21 @@ public:
 		return OutGoingChannelText;
 	}
 
+	virtual FText GetChannelErrorText() const override
+	{
+		if(OutgoingMessageChannel == EChatMessageType::Whisper && !IsWhisperFriendSet())
+		{
+			return NSLOCTEXT("ChatViewModel", "NoFriendSet", "No Friend Set.");
+		}
+		return FText::GetEmpty();
+	}
+
 	virtual TSharedRef<FChatTipViewModel> GetChatTipViewModel() const
 	{
 		return FChatTipViewModelFactory::Create(MarkupService);
 	}
 
-	virtual void SetWhisperFriend(const TSharedPtr<FSelectedFriend> InFriend) override
+	virtual void SetWhisperFriend(const TSharedPtr<FSelectedFriend> InFriend, bool bSetFocus) override
 	{
 		SelectedFriend = InFriend;
 		if (SelectedFriend->UserID.IsValid())
@@ -118,15 +234,29 @@ public:
 		bHasActionPending = false;
 
 		// Re set the channel to rebuild the channel text
-		if(OutgoingMessageChannel == EChatMessageType::Whisper)
+		if(OutgoingMessageChannel == EChatMessageType::Whisper || GetChatChannelType() == EChatMessageType::Custom)
 		{
 			SetOutgoingMessageChannel(EChatMessageType::Whisper);
+		}
+		if(bSetFocus)
+		{
+			SetFocus();
 		}
 	}
 
 	virtual bool IsWhisperFriendSet() const override
 	{
 		return SelectedFriend.IsValid();
+	}
+
+	virtual bool IsInPartyChat() const override
+	{
+		return GamePartyService->IsInPartyChat();
+	}
+
+	virtual bool IsInGameChat() const override
+	{
+		return GamePartyService->IsInGameSession();
 	}
 
 	virtual bool IsChatConnected() const override
@@ -176,6 +306,7 @@ public:
 	virtual bool SendMessage(const FText NewMessage, const FText PlainText) override
 	{
 		bool bSuccess = true;
+		bool MessageSent = false;
 		if (!AllowMarkup() || !MarkupService->ValidateSlashMarkup(NewMessage.ToString(), PlainText.ToString()))
 		{
 			if(!PlainText.IsEmptyOrWhitespace())
@@ -188,20 +319,19 @@ public:
 						{
 							if (SelectedFriend.IsValid() && SelectedFriend->UserID.IsValid())
 							{
-								if (MessageService->SendPrivateMessage(SelectedFriend->ViewModel->GetFriendItem(), PlainText))
-								{
-									bSuccess = true;
-								}
+								bSuccess = MessageService->SendPrivateMessage(SelectedFriend->ViewModel->GetFriendItem(), PlainText);
+								MessageSent = true;
 							}
 						}
 						break;
 						case EChatMessageType::Party:
 						{
-							TSharedPtr<const FOnlinePartyId> PartyRoomId = GamePartyService->GetPartyChatRoomId();
-							if (GamePartyService->IsInActiveParty() && PartyRoomId.IsValid())
+							FChatRoomId PartyChatRoomId = GamePartyService->GetPartyChatRoomId();
+							if (GamePartyService->IsInPartyChat() && !PartyChatRoomId.IsEmpty())
 							{
 								//@todo will need to support multiple party channels eventually, hardcoded to first party for now
-								bSuccess = MessageService->SendRoomMessage((*PartyRoomId).ToString(), NewMessage.ToString());
+								bSuccess = MessageService->SendRoomMessage(PartyChatRoomId, NewMessage.ToString());
+								MessageSent = true;
 
 								MessageService->GetAnalytics()->RecordChannelChat(TEXT("Party"));
 							}
@@ -209,10 +339,20 @@ public:
 						break;
 						case EChatMessageType::Global:
 						{
-								//@todo samz - send message to specific room (empty room name will send to all rooms)
-								bSuccess = MessageService->SendRoomMessage(FString(), PlainText.ToString());
-								MessageService->GetAnalytics()->RecordChannelChat(TEXT("Global"));
+							//@todo samz - send message to specific room (empty room name will send to all rooms)
+							bSuccess = MessageService->SendRoomMessage(FString(), PlainText.ToString());
+							MessageService->GetAnalytics()->RecordChannelChat(TEXT("Global"));
+							MessageSent = true;
 						}
+						break;
+						case EChatMessageType::Game:
+						{
+							ChatDisplayService->SendGameMessage(PlainText.ToString());
+							MessageService->GetAnalytics()->RecordChannelChat(TEXT("Game"));
+							MessageSent = true;
+							bSuccess = true;
+						}
+						break;
 					}
 				}
 			}
@@ -220,6 +360,10 @@ public:
 
 		ChatDisplayService->MessageCommitted();
 		MarkupService->CloseChatTips();
+		if(MessageSent)
+		{
+			OnMessageCommitted().Broadcast();
+		}
 
 		return bSuccess;
 	}
@@ -230,16 +374,40 @@ public:
 		{
 			return EChatMessageType::Global;
 		}
-		if ((ChatChannelFlags ^ EChatMessageType::Game) == 0)
-		{
-			return EChatMessageType::Game;
-		}
 		if ((ChatChannelFlags ^ EChatMessageType::Whisper) == 0)
 		{
 			return EChatMessageType::Whisper;
 		}
+		if ((ChatChannelFlags ^ EChatMessageType::Party) == 0)
+		{
+			return EChatMessageType::Party;
+		}
+		if ((ChatChannelFlags ^ EChatMessageType::Game) == 0)
+		{
+			return EChatMessageType::Game;
+		}
+		if ((ChatChannelFlags ^ EChatMessageType::Empty) == 0)
+		{
+			return EChatMessageType::Empty;
+		}
 		return EChatMessageType::Custom;
 	}
+
+	virtual EChatMessageType::Type GetDefaultChannelType() const override
+	{
+		return DefaultChannel;
+	}
+
+	virtual bool DisplayChatOption(TSharedRef<FFriendViewModel> FriendViewModel) override
+	{
+		return GetOutgoingChatChannel() != EChatMessageType::Whisper || !SelectedFriend.IsValid() || SelectedFriend->ViewModel->GetFriendItem() != FriendViewModel->GetFriendItem();
+	}
+
+	virtual bool IsOverrideDisplaySet() override
+	{
+		return OverrideDisplayVisibility;
+	}
+
 	// End FChatViewModel interface
 
 	/*
@@ -247,7 +415,7 @@ public:
 	 * @param Username Friend Name
 	 * @param UniqueID Friends Network ID
 	 */
-	void SetWhisperFriend(const FText Username, TSharedPtr<const FUniqueNetId> UniqueID)
+	void SetWhisperFriend(const FText Username, TSharedPtr<const FUniqueNetId> UniqueID, bool bSetFocus)
 	{
 		TSharedPtr<FSelectedFriend> NewFriend = FindFriend(UniqueID);
 		if (!NewFriend.IsValid())
@@ -255,7 +423,7 @@ public:
 			NewFriend = MakeShareable(new FSelectedFriend());
 			NewFriend->DisplayName = Username;
 			NewFriend->UserID = UniqueID;
-			SetWhisperFriend(NewFriend);
+			SetWhisperFriend(NewFriend, bSetFocus);
 		}
 	}
 
@@ -280,15 +448,15 @@ protected:
 		bool Changed = false;
 
 		// Set outgoing whisper recipient if not set
-		if (GetChatChannelType() == EChatMessageType::Whisper && Message->MessageType == EChatMessageType::Whisper && !SelectedFriend.IsValid())
+		if (GetDefaultChannelType() == EChatMessageType::Whisper && Message->MessageType == EChatMessageType::Whisper && !SelectedFriend.IsValid())
 		{
 			if (Message->bIsFromSelf)
 			{
-				SetWhisperFriend(Message->ToName, Message->RecipientId);
+				SetWhisperFriend(Message->ToName, Message->RecipientId, false);
 			}
 			else
 			{ 
-				SetWhisperFriend(Message->FromName, Message->SenderId);
+				SetWhisperFriend(Message->FromName, Message->SenderId, false);
 			}
 		}
 
@@ -369,8 +537,11 @@ private:
 
 	void HandleChatFriendSelected(TSharedRef<IFriendItem> ChatFriend)
 	{
-		SetWhisperFriend(FText::FromString(ChatFriend->GetName()), ChatFriend->GetUniqueID());
-		OnChatListUpdated().Broadcast();
+		if(GetOutgoingChatChannel() == EChatMessageType::Whisper)
+		{
+			SetWhisperFriend(FText::FromString(ChatFriend->GetName()), ChatFriend->GetUniqueID(), true);
+			OnChatListUpdated().Broadcast();
+		}
 	}
 
 	void HandleViewChangedEvent(EChatMessageType::Type NewChannel)
@@ -381,6 +552,16 @@ private:
 	void HandleChatInputUpdated()
 	{
 		OnTextValidated().Broadcast();
+	}
+
+	void HandleMessageCommitted()
+	{
+		OnMessageCommitted().Broadcast();
+	}
+
+	void HandleSendNetworkMessage(const FString& NewMessage)
+	{
+		ChatDisplayService->SendGameMessage(NewMessage);
 	}
 
 	/*
@@ -405,8 +586,10 @@ private:
 	/*
 	 * Fill in View model for current Selected friend
 	 */
-	void UpdateSelectedFriendsViewModel()
+	void HandleFriendListUpdated()
 	{
+		bool bUpdateTab = false;
+
 		if( SelectedFriend.IsValid())
 		{
 			if(SelectedFriend->UserID.IsValid())
@@ -419,6 +602,23 @@ private:
 				SelectedFriend->ViewModel = GetFriendViewModel(SelectedFriend->SelectedMessage->GetSenderID(), SelectedFriend->SelectedMessage->GetSenderName());
 				bHasActionPending = false;
 			}
+
+			// Clear selected friend if they go offline
+			if(!SelectedFriend->ViewModel.IsValid() || !SelectedFriend->ViewModel->IsOnline())
+			{
+				SelectedFriend.Reset();
+				bUpdateTab = true;
+			}
+		}
+
+		if(OutgoingMessageChannel == EChatMessageType::Party && !GamePartyService->IsInPartyChat())
+		{
+			bUpdateTab = true;
+		}
+
+		if(bUpdateTab && IsActive())
+		{
+			SetIsActive(true);
 		}
 	}
 
@@ -451,9 +651,14 @@ public:
 		return ChatDisplayService->GetEntryBarVisibility();
 	}
 
+	virtual bool IsFadeBackgroundEnabled() const override
+	{
+		return ChatDisplayService->IsFadeBackgroundEnabled();
+	}
+
 	virtual EVisibility GetBackgroundVisibility() const override
 	{
-		return EVisibility::Visible;
+		return ChatDisplayService->GetBackgroundVisibility();
 	}
 
 	virtual EVisibility GetTipVisibility() const override
@@ -463,11 +668,22 @@ public:
 
 	virtual EVisibility GetChatListVisibility() const override
 	{
-		if (bAllowFade)
-		{
-			return ChatDisplayService->GetChatListVisibility();
-		}
-		return EVisibility::Visible;
+		return ChatDisplayService->GetChatListVisibility();
+	}
+
+	virtual EVisibility GetChatMaximizeVisibility() const override
+	{
+		return ChatDisplayService->IsChatMinimizeEnabled() && ChatDisplayService->IsChatMinimized() ? EVisibility::Visible : EVisibility::Collapsed;
+	}
+
+	virtual bool IsChatMinimized() const override
+	{
+		return ChatDisplayService->IsChatMinimized();
+	}
+
+	virtual void ToggleChatMinimized() override
+	{
+		ChatDisplayService->ToggleChatMinimized();
 	}
 
 	virtual void ValidateChatInput(const FText Message, const FText PlainText)
@@ -490,31 +706,65 @@ public:
 	virtual void SetIsActive(bool InIsActive)
 	{
 		bIsActive = InIsActive;
+		OverrideDisplayVisibility = true;
+
+		// If active, ensure we have a valid chat channel
+		if(bIsActive)
+		{
+			if (GetDefaultChannelType() == EChatMessageType::Custom)
+			{
+				if(SelectedFriend.IsValid() && SelectedFriend->ViewModel.IsValid() && SelectedFriend->ViewModel->IsOnline())
+				{
+					SetOutgoingMessageChannel(EChatMessageType::Whisper);
+				}
+				else if(GamePartyService->IsInPartyChat())
+				{
+					SetOutgoingMessageChannel(EChatMessageType::Party);
+				}
+				else
+				{
+					SetOutgoingMessageChannel(EChatMessageType::Global);
+				}
+			}
+			else if(GetDefaultChannelType() == EChatMessageType::Party)
+			{
+				if(GamePartyService->IsInGameSession())
+				{
+					SetOutgoingMessageChannel(EChatMessageType::Game);
+				}
+				else if(GamePartyService->IsInPartyChat())
+				{
+					SetOutgoingMessageChannel(EChatMessageType::Party);
+				}
+			}
+			else
+			{
+				// Reset the chat channel to default option when opened
+				SetOutgoingMessageChannel(GetDefaultChannelType());
+			}
+			ChatDisplayService->SetActiveTab(SharedThis(this));
+		}
+		else
+		{
+			if (bMessageShown)
+			{
+				LastSeenMessageCount = GetMessageCount();
+			}
+		}
+
+		if(!ChatDisplayService->ShouldAutoRelease() && !ChatDisplayService->IsChatMinimized())
+		{
+			SetFocus();
+		}
 	}
 
-	virtual void SetInParty(bool bInPartySetting) override
+	virtual void SetMessageShown(bool Shown, int32 NumMissedMessages) override
 	{
-		// ToDo NickD - Move this to display services
-// 		if (bInParty != bInPartySetting)
-// 		{
-// 			if (bInPartySetting)
-// 			{
-// 				// Entered a party.  Change the selected chat channel to party if we're not in a game and not whispering
-// 				if (SelectedChatChannel != EChatMessageType::Whisper && !bInGame)
-// 				{
-// 					SetViewChannel(EChatMessageType::Party);
-// 				}
-// 			}
-// 			else
-// 			{
-// 				// Left a party.  If Party is selected for chat, fall back to global.  Note having party selected implies we're not in a game.
-// 				if (SelectedChatChannel == EChatMessageType::Party)
-// 				{
-// 					SetViewChannel(EChatMessageType::Global);
-// 				}
-// 			}
-// 			bInParty = bInPartySetting;
-// 		}
+		if (bMessageShown == true && Shown == false && IsActive() == true)
+		{
+			LastSeenMessageCount = GetMessageCount() - NumMissedMessages;
+		}
+		bMessageShown = Shown;
 	}
 
 	virtual bool AllowMarkup() override
@@ -530,6 +780,11 @@ public:
 	virtual void SetFocus() override
 	{
 		ChatDisplayService->SetFocus();
+	}
+
+	virtual void SetInteracted() override
+	{
+		ChatDisplayService->ChatEntered();
 	}
 
 	virtual float GetWindowOpacity() override
@@ -594,7 +849,27 @@ public:
 
 	virtual FReply HandleChatKeyEntry(const FKeyEvent& KeyEvent) override
 	{
+		if (KeyEvent.GetKey() == EKeys::Escape)
+		{
+			ChatDisplayService->OnFocuseReleasedEvent().Broadcast();
+		}
+		ChatDisplayService->ChatEntered();
 		return AllowMarkup() ? MarkupService->HandleChatKeyEntry(KeyEvent) : FReply::Unhandled();
+	}
+
+	virtual void AddCustomSlashCommands(TArray<TSharedRef<class ICustomSlashCommand> >& InCustomSlashCommands) override
+	{
+		MarkupService->AddCustomSlashMarkupCommand(InCustomSlashCommands);
+	}
+
+	virtual EChatMessageType::Type GetMarkupChannel() const override
+	{
+		const EChatMessageType::Type MarkupChannel = MarkupService->GetMarkupChannel();
+		if(MarkupChannel != EChatMessageType::Invalid)
+		{
+			return MarkupChannel;
+		}
+		return DefaultChannel;
 	}
 
 	DECLARE_DERIVED_EVENT(FChatViewModelImpl, FChatViewModel::FChatListSetFocus, FChatListSetFocus);
@@ -613,6 +888,12 @@ public:
 	virtual FChatListUpdated& OnChatListUpdated() override
 	{
 		return ChatListUpdatedEvent;
+	}
+
+	DECLARE_DERIVED_EVENT(FChatViewModelImpl, FChatViewModel::FChatMessageCommitted, FChatMessageCommitted)
+	virtual FChatMessageCommitted& OnMessageCommitted() override
+	{
+		return ChatMessageCommittedEvent;
 	}
 
 	DECLARE_DERIVED_EVENT(FChatViewModelImpl, FChatViewModel::FChatSettingsUpdated, FChatSettingsUpdated)
@@ -635,6 +916,11 @@ private:
 		OnChatListSetFocus().Broadcast();
 	}
 
+	void SetFilteredMessages(TArray<TSharedRef<FChatItemViewModel> > InFilteredMessages)
+	{
+		FilteredMessages = InFilteredMessages;
+	}
+
 protected:
 
 	FChatViewModelImpl(
@@ -646,6 +932,8 @@ protected:
 		const TSharedRef<FFriendsService>& InFriendsService,
 		const TSharedRef<FGameAndPartyService>& InGamePartyService)
 		: ChatChannelFlags(0)
+		, DefaultChannel(EChatMessageType::Custom)
+		, DefaultChatChannelFlags(0)
 		, OutgoingMessageChannel(EChatMessageType::Custom)
 		, FriendViewModelFactory(InFriendViewModelFactory)
 		, MessageService(InMessageService)
@@ -656,19 +944,25 @@ protected:
 		, GamePartyService(InGamePartyService)
 		, bIsActive(false)
 		, bInGame(true)
+		, bInParty(false)
 		, bHasActionPending(false)
 		, bAllowJoinGame(false)
+		, OverrideDisplayVisibility(false)
 		, bAllowFade(true)
 		, bUseOverrideColor(false)
 		, bAllowGlobalChat(true)
 		, bCaptureFocus(false)
+		, bDisplayChatTip(false)
 		, WindowOpacity(1.0f)
+		, LastSeenMessageCount(0)
+		, bMessageShown(true)
+		, ReadChannelFlags(0)
 	{
 	}
 
 	void Initialize(bool bBindNavService)
 	{
-		FriendsService->OnFriendsListUpdated().AddSP(this, &FChatViewModelImpl::UpdateSelectedFriendsViewModel);
+		FriendsService->OnFriendsListUpdated().AddSP(this, &FChatViewModelImpl::HandleFriendListUpdated);
 		if (bBindNavService)
 		{
 			NavigationService->OnChatViewChanged().AddSP(this, &FChatViewModelImpl::HandleViewChangedEvent);
@@ -677,6 +971,9 @@ protected:
 		MessageService->OnChatMessageAdded().AddSP(this, &FChatViewModelImpl::HandleMessageAdded);
 		ChatDisplayService->OnChatListSetFocus().AddSP(this, &FChatViewModelImpl::HandleSetFocus);
 		MarkupService->OnValidateInputReady().AddSP(this, &FChatViewModelImpl::HandleChatInputUpdated);
+		MarkupService->OnMessageCommitted().AddSP(this, &FChatViewModelImpl::HandleMessageCommitted);
+		MarkupService->OnSendNetworkMessageEvent().AddSP(this, &FChatViewModelImpl::HandleSendNetworkMessage);
+
 		RefreshMessages();
 	}
 
@@ -684,6 +981,10 @@ private:
 
 	// The Channels we are subscribed too
 	uint8 ChatChannelFlags;
+
+	// The Channel we default too when resetting;
+	EChatMessageType::Type DefaultChannel;
+	uint8 DefaultChatChannelFlags;
 
 	// The Current outgoing channel we are sending messages on
 	EChatMessageType::Type OutgoingMessageChannel;
@@ -702,6 +1003,7 @@ private:
 	bool bInParty;
 	bool bHasActionPending;
 	bool bAllowJoinGame;
+	bool OverrideDisplayVisibility;
 
 	TArray<TSharedRef<FChatItemViewModel> > FilteredMessages;
 	TArray<TSharedPtr<FSelectedFriend> > RecentPlayerList;
@@ -721,10 +1023,15 @@ private:
 	FChatListSetFocus ChatListSetFocusEvent;
 	FChatTextValidatedEvent ChatTextValidatedEvent;
 	FChatListUpdated ChatListUpdatedEvent;
+	FChatMessageCommitted ChatMessageCommittedEvent;
 	FChatSettingsUpdated ChatSettingsUpdatedEvent;
 
 	EVisibility ChatEntryVisibility;
 	FSlateColor OverrideColor;
+
+	int32 LastSeenMessageCount;
+	bool bMessageShown;
+	uint8 ReadChannelFlags;
 
 private:
 	friend FChatViewModelFactory;

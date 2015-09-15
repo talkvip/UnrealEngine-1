@@ -13,6 +13,20 @@
 #include "Engine/Polys.h"
 #include "Engine/Selection.h"
 #include "Components/BrushComponent.h"
+#include "Classes/GeomModifier.h"
+#include "Classes/GeomModifier_Edit.h"
+#include "Classes/GeomModifier_Clip.h"
+#include "Classes/GeomModifier_Create.h"
+#include "Classes/GeomModifier_Delete.h"
+#include "Classes/GeomModifier_Extrude.h"
+#include "Classes/GeomModifier_Flip.h"
+#include "Classes/GeomModifier_Lathe.h"
+#include "Classes/GeomModifier_Pen.h"
+#include "Classes/GeomModifier_Split.h"
+#include "Classes/GeomModifier_Triangulate.h"
+#include "Classes/GeomModifier_Optimize.h"
+#include "Classes/GeomModifier_Turn.h"
+#include "Classes/GeomModifier_Weld.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogGeomModifier, Log, All);
 
@@ -36,6 +50,7 @@ UGeomModifier::UGeomModifier(const FObjectInitializer& ObjectInitializer)
 {
 	bPushButton = false;
 	bInitialized = false;
+	bPendingPivotOffsetUpdate = false;
 	CachedPolys = NULL;
 }
 
@@ -109,12 +124,17 @@ void UGeomModifier::GeomError(const FString& InErrorMsg)
 bool UGeomModifier::StartModify()
 {
 	bInitialized = false;
+	bPendingPivotOffsetUpdate = false;
 	return false;
 }
 
 
 bool UGeomModifier::EndModify()
 {
+	if (bPendingPivotOffsetUpdate)
+	{
+		UpdatePivotOffset();
+	}
 	StoreAllCurrentGeomSelections();
 	FEditorSupportDelegates::RedrawAllViewports.Broadcast();
 	return true;
@@ -284,7 +304,7 @@ void UGeomModifier::UpdatePivotOffset()
 			}
 		}
 
-		Brush->SetPivotOffset(Brush->GetTransform().TransformPosition(VertexCenter));
+		Brush->SetPivotOffset(VertexCenter);
 	}
 }
 
@@ -620,9 +640,7 @@ bool UGeomModifier_Edit::InputDelta(FEditorViewportClient* InViewportClient,FVie
 	}
 
 	EndTrans();
-
-	UpdatePivotOffset();
-
+	bPendingPivotOffsetUpdate = true;
 	GEditor->RedrawLevelEditingViewports(true);
 
 	return true;
@@ -705,8 +723,7 @@ bool UGeomModifier_Extrude::OnApply()
 	GLevelEditorModeTools().SetCoordSystem(SaveCS);
 
 	GEditor->RebuildAlteredBSP(); // Brush has been altered, update the Bsp
-
-	UpdatePivotOffset();
+	bPendingPivotOffsetUpdate = true;
 
 	return true;
 }
@@ -808,7 +825,7 @@ void UGeomModifier_Extrude::Apply(int32 InLength, int32 InSegments)
 			{
 				FORCEINLINE bool operator()( const FPoly& A, const FPoly& B ) const
 				{
-					return (B.Normal - A.Normal).Size() < 0;
+					return (B.Normal - A.Normal).SizeSquared() < 0.f;
 				}
 			};
 			Polygons.Sort( FCompareFPolyNormal() );
@@ -908,8 +925,7 @@ bool UGeomModifier_Lathe::OnApply()
 
 	GEditor->RebuildAlteredBSP(); // Brush has been altered, update the Bsp
 
-	UpdatePivotOffset();
-
+	bPendingPivotOffsetUpdate = true;
 	return true;
 }
 
@@ -1224,8 +1240,7 @@ bool UGeomModifier_Pen::OnApply()
 {
 	Apply();
 
-	UpdatePivotOffset();
-
+	bPendingPivotOffsetUpdate = true;
 	return true;
 }
 
@@ -2029,8 +2044,7 @@ bool UGeomModifier_Clip::OnApply()
 
 	GEditor->RebuildAlteredBSP(); // Brush has been altered, update the Bsp
 
-	UpdatePivotOffset();
-
+	bPendingPivotOffsetUpdate = true;
 	return true;
 }
 
@@ -2469,8 +2483,7 @@ bool UGeomModifier_Delete::OnApply()
 		Tools.SetPivotLocation( SelectedActor->GetActorLocation() , false );
 	}
 	
-	UpdatePivotOffset();
-
+	bPendingPivotOffsetUpdate = true;
 	return bHandled;
 }
 
@@ -2536,7 +2549,7 @@ bool UGeomModifier_Create::OnApply()
 
 	GEditor->RebuildAlteredBSP(); // Brush has been altered, update the Bsp
 
-	UpdatePivotOffset();
+	bPendingPivotOffsetUpdate = true;
 	return true;
 }
 
@@ -2582,7 +2595,7 @@ bool UGeomModifier_Flip::OnApply()
 
 	GEditor->RebuildAlteredBSP(); // Brush has been altered, update the Bsp
 
-	UpdatePivotOffset();
+	bPendingPivotOffsetUpdate = true;
 	return true;
 }
 
@@ -2954,8 +2967,7 @@ bool UGeomModifier_Split::OnApply()
 
 	GEditor->RebuildAlteredBSP(); // Brush has been altered, update the Bsp
 
-	UpdatePivotOffset();
-
+	bPendingPivotOffsetUpdate = true;
 	return true;
 }
 

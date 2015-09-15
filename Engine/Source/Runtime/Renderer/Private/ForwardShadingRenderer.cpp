@@ -21,6 +21,8 @@ uint32 GetShadowQuality();
 FForwardShadingSceneRenderer::FForwardShadingSceneRenderer(const FSceneViewFamily* InViewFamily,FHitProxyConsumer* HitProxyConsumer)
 	:	FSceneRenderer(InViewFamily, HitProxyConsumer)
 {
+	bModulatedShadowsInUse = false;
+	bCSMShadowsInUse = false;
 }
 
 /**
@@ -33,9 +35,10 @@ void FForwardShadingSceneRenderer::InitViews(FRHICommandListImmediate& RHICmdLis
 
 	SCOPE_CYCLE_COUNTER(STAT_InitViewsTime);
 
+	FILCUpdatePrimTaskData ILCTaskData;
 	PreVisibilityFrameSetup(RHICmdList);
 	ComputeViewVisibility(RHICmdList);
-	PostVisibilityFrameSetup();
+	PostVisibilityFrameSetup(ILCTaskData);
 
 	bool bDynamicShadows = ViewFamily.EngineShowFlags.DynamicShadows && GetShadowQuality() > 0;
 
@@ -43,6 +46,12 @@ void FForwardShadingSceneRenderer::InitViews(FRHICommandListImmediate& RHICmdLis
 	{
 		// Setup dynamic shadows.
 		InitDynamicShadows(RHICmdList);		
+	}
+
+	// if we kicked off ILC update via task, wait and finalize.
+	if (ILCTaskData.TaskRef.IsValid())
+	{
+		Scene->IndirectLightingCache.FinalizeCacheUpdates(Scene, *this, ILCTaskData);
 	}
 
 	// initialize per-view uniform buffer.  Pass in shadow info as necessary.
@@ -136,8 +145,8 @@ void FForwardShadingSceneRenderer::Render(FRHICommandListImmediate& RHICmdList)
 	RenderForwardShadingBasePass(RHICmdList);
 
 	// Make a copy of the scene depth if the current hardware doesn't support reading and writing to the same depth buffer
-	SceneContext.ResolveSceneDepthToAuxiliaryTexture(RHICmdList);
-
+	ConditionalResolveSceneDepth(RHICmdList);
+	
 	if (ViewFamily.EngineShowFlags.Decals)
 	{
 		RenderDecals(RHICmdList);
@@ -160,7 +169,7 @@ void FForwardShadingSceneRenderer::Render(FRHICommandListImmediate& RHICmdList)
 		// Having the distortion applied between two different translucency passes would make it consistent with the deferred pass.
 		// This is not done yet.
 
-		if (ViewFamily.EngineShowFlags.Refraction)
+		if(GetRefractionQuality(ViewFamily) > 0)
 		{
 			// to apply refraction effect by distorting the scene color
 			RenderDistortion(RHICmdList);
@@ -270,4 +279,37 @@ void FForwardShadingSceneRenderer::BasicPostProcess(FRHICommandListImmediate& RH
 	Context.FinalOutput.GetOutput()->RenderTargetDesc = Desc;
 
 	CompositeContext.Process(Context.FinalOutput.GetPass(), TEXT("ES2BasicPostProcess"));
+}
+
+void FForwardShadingSceneRenderer::ConditionalResolveSceneDepth(FRHICommandListImmediate& RHICmdList)
+{
+	FSceneRenderTargets& SceneContext = FSceneRenderTargets::Get(RHICmdList);
+	
+	SceneContext.ResolveSceneDepthToAuxiliaryTexture(RHICmdList);
+
+#if !PLATFORM_HTML5
+	auto ShaderPlatform = ViewFamily.GetShaderPlatform();
+
+	if (IsMobilePlatform(ShaderPlatform) 
+		&& !IsPCPlatform(ShaderPlatform)) // exclude mobile emulation on PC
+	{
+		bool bSceneDepthInAlpha = (SceneContext.GetSceneColor()->GetDesc().Format == PF_FloatRGBA);
+		bool bOnChipDepthFetch = (GSupportsShaderDepthStencilFetch || (bSceneDepthInAlpha && GSupportsShaderFramebufferFetch));
+		
+		if (!bOnChipDepthFetch)
+		{
+			// Only these features require depth texture
+			bool bDecals = ViewFamily.EngineShowFlags.Decals && Scene->Decals.Num();
+			bool bModulatedShadows = ViewFamily.EngineShowFlags.DynamicShadows && GetShadowQuality() > 0 && bModulatedShadowsInUse;
+
+			if (bDecals || bModulatedShadows)
+			{
+				// Switch depth target to force hardware flush current depth to texture
+				FTextureRHIRef DummyDepthTarget = GSystemTextures.DepthDummy->GetRenderTargetItem().TargetableTexture;
+				SetRenderTarget(RHICmdList, SceneContext.GetSceneColorSurface(), DummyDepthTarget, ESimpleRenderTargetMode::EUninitializedColorClearDepth, FExclusiveDepthStencil::DepthWrite_StencilWrite);
+				RHICmdList.DiscardRenderTargets(true, true, 0);
+			}
+		}
+	}
+#endif //!PLATFORM_HTML5
 }

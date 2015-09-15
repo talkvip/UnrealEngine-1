@@ -10,16 +10,14 @@
 #include "EngineModule.h"
 #include "SlateUTextureResource.h"
 #include "SlateMaterialResource.h"
+#include "Rendering/DrawElements.h"
 
 DECLARE_CYCLE_STAT(TEXT("Update Buffers RT"), STAT_SlateUpdateBufferRTTime, STATGROUP_Slate);
 DECLARE_CYCLE_STAT(TEXT("PreFill Buffers RT"), STAT_SlatePreFullBufferRTTime, STATGROUP_Slate);
-DECLARE_CYCLE_STAT(TEXT("Draw Time RT"), STAT_SlateDrawTime, STATGROUP_Slate);
 DECLARE_DWORD_COUNTER_STAT(TEXT("Num Layers"), STAT_SlateNumLayers, STATGROUP_Slate);
 DECLARE_DWORD_COUNTER_STAT(TEXT("Num Batches"), STAT_SlateNumBatches, STATGROUP_Slate);
 DECLARE_DWORD_COUNTER_STAT(TEXT("Num Vertices"), STAT_SlateVertexCount, STATGROUP_Slate);
 
-DECLARE_MEMORY_STAT(TEXT("Batch Vertex Memory"), STAT_SlateVertexBatchMemory, STATGROUP_SlateMemory);
-DECLARE_MEMORY_STAT(TEXT("Batch Index Memory"), STAT_SlateIndexBatchMemory, STATGROUP_SlateMemory);
 DECLARE_MEMORY_STAT(TEXT("Vertex Buffer Memory"), STAT_SlateVertexBufferMemory, STATGROUP_SlateMemory);
 DECLARE_MEMORY_STAT(TEXT("Index Buffer Memory"), STAT_SlateIndexBufferMemory, STATGROUP_SlateMemory);
 
@@ -40,12 +38,26 @@ void FSlateElementIndexBuffer::Init( int32 MinNumIndices )
 {
 	MinBufferSize = sizeof(SlateIndex) * FMath::Max( MinNumIndices, 200 );
 
-	BeginInitResource(this);
+	if ( IsInRenderingThread() )
+	{
+		InitResource();
+	}
+	else
+	{
+		BeginInitResource(this);
+	}
 }
 
 void FSlateElementIndexBuffer::Destroy()
 {
-	BeginReleaseResource(this);
+	if ( IsInRenderingThread() )
+	{
+		ReleaseResource();
+	}
+	else
+	{
+		BeginReleaseResource(this);
+	}
 }
 
 
@@ -143,6 +155,8 @@ FSlateRHIRenderingPolicy::FSlateRHIRenderingPolicy( TSharedPtr<FSlateFontCache> 
 
 FSlateRHIRenderingPolicy::~FSlateRHIRenderingPolicy()
 {
+	// Delete released resources.  Note this MUST NOT be called before the rendering resources have been released
+	DeleteReleasedResources();
 }
 
 void FSlateRHIRenderingPolicy::InitResources()
@@ -177,6 +191,49 @@ void FSlateRHIRenderingPolicy::ReleaseResources()
 		VertexBuffers[BufferIndex].Destroy();
 		IndexBuffers[BufferIndex].Destroy();
 	}
+
+	for ( TCachedBufferMap::TIterator BufferIt(CachedBuffers); BufferIt; ++BufferIt )
+	{
+		FSlateRenderDataHandle* Handle = BufferIt.Key();
+		FCachedRenderBuffers* Buffer = BufferIt.Value();
+
+		Handle->Disconnect();
+
+		Buffer->VertexBuffer.Destroy();
+		Buffer->IndexBuffer.Destroy();
+	}
+
+	for ( TCachedBufferPoolMap::TIterator BufferIt(CachedBufferPool); BufferIt; ++BufferIt )
+	{
+		TArray< FCachedRenderBuffers* >& Pool = BufferIt.Value();
+		for ( FCachedRenderBuffers* PooledBuffer : Pool )
+		{
+			PooledBuffer->VertexBuffer.Destroy();
+			PooledBuffer->IndexBuffer.Destroy();
+		}
+	}
+}
+
+void FSlateRHIRenderingPolicy::DeleteReleasedResources()
+{
+	for ( TCachedBufferMap::TIterator BufferIt(CachedBuffers); BufferIt; ++BufferIt )
+	{
+		FCachedRenderBuffers* Buffer = BufferIt.Value();
+		delete Buffer;
+	}
+
+	CachedBuffers.Empty();
+
+	for ( TCachedBufferPoolMap::TIterator BufferIt(CachedBufferPool); BufferIt; ++BufferIt )
+	{
+		TArray< FCachedRenderBuffers* >& Pool = BufferIt.Value();
+		for ( FCachedRenderBuffers* PooledBuffer : Pool )
+		{
+			delete PooledBuffer;
+		}
+	}
+
+	CachedBufferPool.Empty();
 }
 
 void FSlateRHIRenderingPolicy::BeginDrawingWindows()
@@ -186,8 +243,9 @@ void FSlateRHIRenderingPolicy::BeginDrawingWindows()
 
 void FSlateRHIRenderingPolicy::EndDrawingWindows()
 {
-	check( IsInRenderingThread() );
+	check( IsInParallelRenderingThread() );
 
+#if STATS
 	uint32 TotalVertexBufferMemory = 0;
 	uint32 TotalIndexBufferMemory = 0;
 
@@ -206,9 +264,33 @@ void FSlateRHIRenderingPolicy::EndDrawingWindows()
 		TotalIndexBufferUsage += IndexBuffers[BufferIndex].GetBufferUsageSize();
 	}
 
+	for ( TCachedBufferMap::TIterator BufferIt(CachedBuffers); BufferIt; ++BufferIt )
+	{
+		FCachedRenderBuffers* PooledBuffer = BufferIt.Value();
+
+		TotalVertexBufferMemory += PooledBuffer->VertexBuffer.GetBufferSize();
+		TotalVertexBufferUsage += PooledBuffer->VertexBuffer.GetBufferUsageSize();
+
+		TotalIndexBufferMemory += PooledBuffer->IndexBuffer.GetBufferSize();
+		TotalIndexBufferUsage += PooledBuffer->IndexBuffer.GetBufferUsageSize();
+	}
+
+	for ( TCachedBufferPoolMap::TIterator BufferIt(CachedBufferPool); BufferIt; ++BufferIt )
+	{
+		TArray< FCachedRenderBuffers* >& Pool = BufferIt.Value();
+		for ( FCachedRenderBuffers* PooledBuffer : Pool )
+		{
+			TotalVertexBufferMemory += PooledBuffer->VertexBuffer.GetBufferSize();
+			TotalVertexBufferUsage += PooledBuffer->VertexBuffer.GetBufferUsageSize();
+
+			TotalIndexBufferMemory += PooledBuffer->IndexBuffer.GetBufferSize();
+			TotalIndexBufferUsage += PooledBuffer->IndexBuffer.GetBufferUsageSize();
+		}
+	}
 
 	SET_MEMORY_STAT( STAT_SlateVertexBufferMemory, TotalVertexBufferMemory );
 	SET_MEMORY_STAT( STAT_SlateIndexBufferMemory, TotalIndexBufferMemory );
+#endif
 }
 
 struct FSlateUpdateVertexAndIndexBuffers : public FRHICommand<FSlateUpdateVertexAndIndexBuffers>
@@ -239,6 +321,92 @@ struct FSlateUpdateVertexAndIndexBuffers : public FRHICommand<FSlateUpdateVertex
 
 void FSlateRHIRenderingPolicy::UpdateVertexAndIndexBuffers(FRHICommandListImmediate& RHICmdList, FSlateBatchData& InBatchData)
 {
+	TSlateElementVertexBuffer<FSlateVertex>& VertexBuffer = VertexBuffers[CurrentBufferIndex];
+	FSlateElementIndexBuffer& IndexBuffer = IndexBuffers[CurrentBufferIndex];
+
+	UpdateVertexAndIndexBuffers(RHICmdList, InBatchData, VertexBuffer, IndexBuffer);
+}
+
+void FSlateRHIRenderingPolicy::UpdateVertexAndIndexBuffers(FRHICommandListImmediate& RHICmdList, FSlateBatchData& InBatchData, const TSharedRef<FSlateRenderDataHandle, ESPMode::ThreadSafe>& RenderHandle)
+{
+	// Should only be called by the rendering thread
+	check(IsInRenderingThread());
+
+	FCachedRenderBuffers* Buffers = CachedBuffers.FindRef(&RenderHandle.Get());
+	if ( Buffers == nullptr )
+	{
+		// Rather than having a global pool, we associate the pools with a particular layout cacher.
+		// If we don't do this, all buffers eventually become as larger as the largest buffer, and it
+		// would be much better to keep the pools coherent with the sizes typically associated with
+		// a particular caching panel.
+		const ILayoutCache* LayoutCacher = RenderHandle->GetCacher();
+		TArray< FCachedRenderBuffers* >& Pool = CachedBufferPool.FindOrAdd(LayoutCacher);
+
+		// If the cached buffer pool is empty, time to create a new one!
+		if ( Pool.Num() == 0 )
+		{
+			Buffers = new FCachedRenderBuffers();
+			Buffers->VertexBuffer.Init(200);
+			Buffers->IndexBuffer.Init(200);
+		}
+		else
+		{
+			// If we found one in the pool, lets use it!
+			Buffers = Pool[0];
+			Pool.RemoveAtSwap(0, 1, false);
+		}
+
+		CachedBuffers.Add(&RenderHandle.Get(), Buffers);
+	}
+
+	UpdateVertexAndIndexBuffers(RHICmdList, InBatchData, Buffers->VertexBuffer, Buffers->IndexBuffer);
+}
+
+void FSlateRHIRenderingPolicy::ReleaseCachedRenderData(FSlateRenderDataHandle* InRenderHandle)
+{
+	// Should only be called by the rendering thread
+	check(IsInRenderingThread());
+	check(InRenderHandle);
+
+	FCachedRenderBuffers* PooledBuffer = CachedBuffers.FindRef(InRenderHandle);
+	if ( ensure(PooledBuffer != nullptr) )
+	{
+		const ILayoutCache* LayoutCacher = InRenderHandle->GetCacher();
+		TArray< FCachedRenderBuffers* >* Pool = CachedBufferPool.Find(LayoutCacher);
+		if ( Pool )
+		{
+			Pool->Add(PooledBuffer);
+		}
+		else
+		{
+			// The buffer pool may have already been released, so lets just delete this buffer.
+			PooledBuffer->VertexBuffer.Destroy();
+			PooledBuffer->IndexBuffer.Destroy();
+			delete PooledBuffer;
+		}
+		
+		CachedBuffers.Remove(InRenderHandle);
+	}
+}
+
+void FSlateRHIRenderingPolicy::ReleaseCachingResourcesFor(const ILayoutCache* Cacher)
+{
+	TArray< FCachedRenderBuffers* >* Pool = CachedBufferPool.Find(Cacher);
+	if ( Pool )
+	{
+		for ( FCachedRenderBuffers* PooledBuffer : *Pool )
+		{
+			PooledBuffer->VertexBuffer.Destroy();
+			PooledBuffer->IndexBuffer.Destroy();
+			delete PooledBuffer;
+		}
+
+		CachedBufferPool.Remove(Cacher);
+	}
+}
+
+void FSlateRHIRenderingPolicy::UpdateVertexAndIndexBuffers(FRHICommandListImmediate& RHICmdList, FSlateBatchData& InBatchData, TSlateElementVertexBuffer<FSlateVertex>& VertexBuffer, FSlateElementIndexBuffer& IndexBuffer)
+{
 	SCOPE_CYCLE_COUNTER( STAT_SlateUpdateBufferRTTime );
 
 	// Should only be called by the rendering thread
@@ -249,9 +417,6 @@ void FSlateRHIRenderingPolicy::UpdateVertexAndIndexBuffers(FRHICommandListImmedi
 
 	if( InBatchData.GetRenderBatches().Num() > 0  && NumVertices > 0 && NumIndices > 0)
 	{
-		TSlateElementVertexBuffer<FSlateVertex>& VertexBuffer = VertexBuffers[CurrentBufferIndex];
-		FSlateElementIndexBuffer& IndexBuffer = IndexBuffers[CurrentBufferIndex];
-
 		bool bShouldShrinkResources = false;
 
 		VertexBuffer.PreFillBuffer(NumVertices, bShouldShrinkResources);
@@ -272,6 +437,9 @@ void FSlateRHIRenderingPolicy::UpdateVertexAndIndexBuffers(FRHICommandListImmedi
 			new (RHICmdList.AllocCommand<FSlateUpdateVertexAndIndexBuffers>()) FSlateUpdateVertexAndIndexBuffers(VertexBuffer, IndexBuffer, InBatchData);
 		}
 	}
+
+	checkSlow(VertexBuffer.GetBufferUsageSize() <= VertexBuffer.GetBufferSize());
+	checkSlow(IndexBuffer.GetBufferUsageSize() <= IndexBuffer.GetBufferSize());
 
 	SET_DWORD_STAT( STAT_SlateNumLayers, InBatchData.GetNumLayers() );
 	SET_DWORD_STAT( STAT_SlateNumBatches, InBatchData.GetRenderBatches().Num() );
@@ -314,8 +482,9 @@ static FSceneView& CreateSceneView( FSceneViewFamilyContext& ViewFamilyContext, 
 	ViewUniformShaderParameters.ViewRectMin = FVector4(ViewRect.Min.X, ViewRect.Min.Y, 0.0f, 0.0f);
 	ViewUniformShaderParameters.ViewSizeAndInvSize = FVector4(ViewRect.Width(), ViewRect.Height(), 1.0f/ViewRect.Width(), 1.0f/ViewRect.Height() );
 	ViewUniformShaderParameters.BufferSizeAndInvSize = ViewUniformShaderParameters.ViewSizeAndInvSize;
-	ViewUniformShaderParameters.ViewOrigin = View->ViewMatrices.ViewOrigin;
-	ViewUniformShaderParameters.TranslatedViewOrigin = View->ViewMatrices.ViewOrigin + View->ViewMatrices.PreViewTranslation;
+	ViewUniformShaderParameters.WorldViewOrigin = View->ViewMatrices.ViewOrigin;
+	ViewUniformShaderParameters.WorldCameraOrigin = View->ViewMatrices.ViewOrigin;
+	ViewUniformShaderParameters.TranslatedWorldCameraOrigin = ViewUniformShaderParameters.WorldCameraOrigin + View->ViewMatrices.PreViewTranslation;
 	ViewUniformShaderParameters.DiffuseOverrideParameter = View->DiffuseOverrideParameter;
 	ViewUniformShaderParameters.SpecularOverrideParameter = View->SpecularOverrideParameter;
 	ViewUniformShaderParameters.NormalOverrideParameter = View->NormalOverrideParameter;
@@ -353,13 +522,8 @@ static FSceneView& CreateSceneView( FSceneViewFamilyContext& ViewFamilyContext, 
 
 void FSlateRHIRenderingPolicy::DrawElements(FRHICommandListImmediate& RHICmdList, FSlateBackBuffer& BackBuffer, const FMatrix& ViewProjectionMatrix, const TArray<FSlateRenderBatch>& RenderBatches, bool bAllowSwitchVerticalAxis)
 {
-	SCOPE_CYCLE_COUNTER( STAT_SlateDrawTime );
-
 	// Should only be called by the rendering thread
 	check(IsInRenderingThread());
-
-	TSlateElementVertexBuffer<FSlateVertex>& VertexBuffer = VertexBuffers[CurrentBufferIndex];
-	FSlateElementIndexBuffer& IndexBuffer = IndexBuffers[CurrentBufferIndex];
 
 	float TimeSeconds = FPlatformTime::Seconds() - GStartTime;
 	float RealTimeSeconds = FPlatformTime::Seconds() - GStartTime;
@@ -383,24 +547,58 @@ void FSlateRHIRenderingPolicy::DrawElements(FRHICommandListImmediate& RHICmdList
 
 	FSceneView* SceneView = NULL;
 
-	TShaderMapRef<FSlateElementVS> VertexShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
+	TShaderMapRef<FSlateElementVS> GlobalVertexShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
 
 	// Disabled stencil test state
 	FDepthStencilStateRHIRef DSOff = TStaticDepthStencilState<false,CF_Always>::GetRHI();
 
 	FSamplerStateRHIRef BilinearClamp = TStaticSamplerState<SF_Bilinear,AM_Clamp,AM_Clamp,AM_Clamp>::GetRHI();
 
-	if (GRHISupportsBaseVertexIndex)
+	TSlateElementVertexBuffer<FSlateVertex>* VertexBuffer = &VertexBuffers[CurrentBufferIndex];
+	FSlateElementIndexBuffer* IndexBuffer = &IndexBuffers[CurrentBufferIndex];
+
+	if ( GRHISupportsBaseVertexIndex )
 	{
-		RHICmdList.SetStreamSource(0, VertexBuffer.VertexBufferRHI, sizeof(FSlateVertex), 0);
+		RHICmdList.SetStreamSource(0, VertexBuffer->VertexBufferRHI, sizeof(FSlateVertex), 0);
 	}
+
+	const FSlateRenderDataHandle* LastHandle = nullptr;
 
 	// Draw each element
 	for( int32 BatchIndex = 0; BatchIndex < RenderBatches.Num(); ++BatchIndex )
 	{
 		const FSlateRenderBatch& RenderBatch = RenderBatches[BatchIndex];
-		const FSlateShaderResource* ShaderResource = RenderBatch.Texture;
+		const FSlateRenderDataHandle* RenderHandle = RenderBatch.CachedRenderHandle.Get();
 
+		if ( RenderHandle != LastHandle )
+		{
+			LastHandle = RenderHandle;
+
+			if ( RenderHandle )
+			{
+				FCachedRenderBuffers* Buffers = CachedBuffers.FindRef(RenderHandle);
+				if ( Buffers != nullptr )
+				{
+					VertexBuffer = &Buffers->VertexBuffer;
+					IndexBuffer = &Buffers->IndexBuffer;
+				}
+			}
+			else
+			{
+				VertexBuffer = &VertexBuffers[CurrentBufferIndex];
+				IndexBuffer = &IndexBuffers[CurrentBufferIndex];
+			}
+
+			checkSlow(VertexBuffer);
+			checkSlow(IndexBuffer);
+
+			if ( GRHISupportsBaseVertexIndex )
+			{
+				RHICmdList.SetStreamSource(0, VertexBuffer->VertexBufferRHI, sizeof(FSlateVertex), 0);
+			}
+		}
+
+		const FSlateShaderResource* ShaderResource = RenderBatch.Texture;
 		const ESlateBatchDrawFlag::Type DrawFlags = RenderBatch.DrawFlags;
 		const ESlateDrawEffect::Type DrawEffects = RenderBatch.DrawEffects;
 		const ESlateShader::Type ShaderType = RenderBatch.ShaderType;
@@ -409,6 +607,8 @@ void FSlateRHIRenderingPolicy::DrawElements(FRHICommandListImmediate& RHICmdList
 		if( !RenderBatch.CustomDrawer.IsValid() )
 		{
 			check(RenderBatch.NumIndices > 0);
+
+			FMatrix DynamicOffset = FTranslationMatrix::Make(FVector(RenderBatch.DynamicOffset.X, RenderBatch.DynamicOffset.Y, 0));
 
 			if (RenderBatch.ScissorRect.IsSet())
 			{
@@ -419,21 +619,22 @@ void FSlateRHIRenderingPolicy::DrawElements(FRHICommandListImmediate& RHICmdList
 				RHICmdList.SetScissorRect(false, 0, 0, 0, 0);
 			}
 
-			if( !ShaderResource || ShaderResource->GetType() != ESlateShaderResource::Material ) 
+			ESlateShaderResource::Type ResourceType = ShaderResource ? ShaderResource->GetType() : ESlateShaderResource::Invalid;
+			if( ResourceType != ESlateShaderResource::Material ) 
 			{
 				FSlateElementPS* PixelShader = GetTexturePixelShader(ShaderType, DrawEffects);
 
 				RHICmdList.SetLocalBoundShaderState(RHICmdList.BuildLocalBoundShaderState(
 					GSlateVertexDeclaration.VertexDeclarationRHI,
-					VertexShader->GetVertexShader(),
+					GlobalVertexShader->GetVertexShader(),
 					nullptr,
 					nullptr,
 					PixelShader->GetPixelShader(),
 					FGeometryShaderRHIRef()));
 
 
-				VertexShader->SetViewProjection(RHICmdList, ViewProjectionMatrix);
-				VertexShader->SetVerticalAxisMultiplier(RHICmdList, bAllowSwitchVerticalAxis && RHINeedsToSwitchVerticalAxis(GShaderPlatformForFeatureLevel[GMaxRHIFeatureLevel]) ? -1.0f : 1.0f );
+				GlobalVertexShader->SetViewProjection(RHICmdList, DynamicOffset * ViewProjectionMatrix);
+				GlobalVertexShader->SetVerticalAxisMultiplier(RHICmdList, bAllowSwitchVerticalAxis && RHINeedsToSwitchVerticalAxis(GShaderPlatformForFeatureLevel[GMaxRHIFeatureLevel]) ? -1.0f : 1.0f );
 #if !DEBUG_OVERDRAW
 				RHICmdList.SetBlendState(
 					(RenderBatch.DrawFlags & ESlateBatchDrawFlag::NoBlending)
@@ -456,17 +657,21 @@ void FSlateRHIRenderingPolicy::DrawElements(FRHICommandListImmediate& RHICmdList
 					RHICmdList.SetRasterizerState(TStaticRasterizerState<FM_Solid, CM_None, true>::GetRHI());
 				}
 
-			
 
-				FTexture2DRHIRef TextureRHI;
-				if(ShaderResource)
+				FSamplerStateRHIRef SamplerState = BilinearClamp;
+				FTextureRHIRef TextureRHI = GWhiteTexture->TextureRHI;
+				if( ShaderResource )
 				{
-					TextureRHI = ((TSlateTexture<FTexture2DRHIRef>*)ShaderResource)->GetTypedResource();
-				}
-
-				if( ShaderResource && IsValidRef( TextureRHI ) )
-				{
-					FSamplerStateRHIRef SamplerState; 
+					if (ResourceType == ESlateShaderResource::TextureObject)
+					{
+						FSlateUTextureResource* TextureObjectResource = (FSlateUTextureResource*)ShaderResource;
+		
+						TextureRHI = TextureObjectResource->AccessRHIResource();
+					}
+					else
+					{	
+						TextureRHI = ((TSlateTexture<FTexture2DRHIRef>*)ShaderResource)->GetTypedResource();
+					}
 
 					if( DrawFlags == (ESlateBatchDrawFlag::TileU | ESlateBatchDrawFlag::TileV) )
 					{
@@ -484,13 +689,9 @@ void FSlateRHIRenderingPolicy::DrawElements(FRHICommandListImmediate& RHICmdList
 					{
 						SamplerState = BilinearClamp;
 					}
-					PixelShader->SetTexture(RHICmdList, TextureRHI, SamplerState);
-				}
-				else
-				{
-					PixelShader->SetTexture(RHICmdList, GWhiteTexture->TextureRHI, BilinearClamp);
 				}
 
+				PixelShader->SetTexture(RHICmdList, TextureRHI, SamplerState);
 				PixelShader->SetShaderParams(RHICmdList, ShaderParams.PixelParams);
 				PixelShader->SetDisplayGamma(RHICmdList, (DrawFlags & ESlateBatchDrawFlag::NoGamma) ? 1.0f : DisplayGamma);
 
@@ -499,12 +700,12 @@ void FSlateRHIRenderingPolicy::DrawElements(FRHICommandListImmediate& RHICmdList
 				// for RHIs that can't handle VertexOffset, we need to offset the stream source each time
 				if (!GRHISupportsBaseVertexIndex)
 				{
-					RHICmdList.SetStreamSource(0, VertexBuffer.VertexBufferRHI, sizeof(FSlateVertex), RenderBatch.VertexOffset * sizeof(FSlateVertex));
-					RHICmdList.DrawIndexedPrimitive(IndexBuffer.IndexBufferRHI, GetRHIPrimitiveType(RenderBatch.DrawPrimitiveType), 0, 0, RenderBatch.NumVertices, RenderBatch.IndexOffset, PrimitiveCount, 1);
+					RHICmdList.SetStreamSource(0, VertexBuffer->VertexBufferRHI, sizeof(FSlateVertex), RenderBatch.VertexOffset * sizeof(FSlateVertex));
+					RHICmdList.DrawIndexedPrimitive(IndexBuffer->IndexBufferRHI, GetRHIPrimitiveType(RenderBatch.DrawPrimitiveType), 0, 0, RenderBatch.NumVertices, RenderBatch.IndexOffset, PrimitiveCount, 1);
 				}
 				else
 				{
-					RHICmdList.DrawIndexedPrimitive(IndexBuffer.IndexBufferRHI, GetRHIPrimitiveType(RenderBatch.DrawPrimitiveType), RenderBatch.VertexOffset, 0, RenderBatch.NumVertices, RenderBatch.IndexOffset, PrimitiveCount, 1);
+					RHICmdList.DrawIndexedPrimitive(IndexBuffer->IndexBufferRHI, GetRHIPrimitiveType(RenderBatch.DrawPrimitiveType), RenderBatch.VertexOffset, 0, RenderBatch.NumVertices, RenderBatch.IndexOffset, PrimitiveCount, 1);
 				}
 
 			}
@@ -523,7 +724,10 @@ void FSlateRHIRenderingPolicy::DrawElements(FRHICommandListImmediate& RHICmdList
 
 				FSlateMaterialShaderPS* PixelShader = GetMaterialPixelShader( Material, ShaderType, DrawEffects );
 
-				if( PixelShader )
+				const bool bUseInstancing = false;
+				FSlateMaterialShaderVS* VertexShader = GetMaterialVertexShader( Material, bUseInstancing );
+
+				if( VertexShader && PixelShader )
 				{
 					RHICmdList.SetLocalBoundShaderState(RHICmdList.BuildLocalBoundShaderState(
 						GSlateVertexDeclaration.VertexDeclarationRHI,
@@ -532,6 +736,10 @@ void FSlateRHIRenderingPolicy::DrawElements(FRHICommandListImmediate& RHICmdList
 						nullptr,
 						PixelShader->GetPixelShader(),
 						FGeometryShaderRHIRef()));
+
+					VertexShader->SetViewProjection(RHICmdList, DynamicOffset * ViewProjectionMatrix);
+					VertexShader->SetVerticalAxisMultiplier(RHICmdList, bAllowSwitchVerticalAxis && RHINeedsToSwitchVerticalAxis(GShaderPlatformForFeatureLevel[GMaxRHIFeatureLevel]) ? -1.0f : 1.0f );
+					VertexShader->SetMaterialShaderParameters(RHICmdList, *SceneView, MaterialRenderProxy, Material);
 
 					PixelShader->SetParameters(RHICmdList, *SceneView, MaterialRenderProxy, Material, DisplayGamma, ShaderParams.PixelParams);
 					PixelShader->SetDisplayGamma(RHICmdList, (DrawFlags & ESlateBatchDrawFlag::NoGamma) ? 1.0f : DisplayGamma);
@@ -544,24 +752,20 @@ void FSlateRHIRenderingPolicy::DrawElements(FRHICommandListImmediate& RHICmdList
 						FTexture2DRHIRef TextureRHI;
 						TextureRHI = ((TSlateTexture<FTexture2DRHIRef>*)MaskResource)->GetTypedResource();
 
-			
 						PixelShader->SetAdditionalTexture(RHICmdList, TextureRHI, BilinearClamp);
 					}
-
-					VertexShader->SetViewProjection( RHICmdList, ViewProjectionMatrix );
-
 
 					uint32 PrimitiveCount = RenderBatch.DrawPrimitiveType == ESlateDrawPrimitive::LineList ? RenderBatch.NumIndices / 2 : RenderBatch.NumIndices / 3;
 
 					// for RHIs that can't handle VertexOffset, we need to offset the stream source each time
 					if (!GRHISupportsBaseVertexIndex)
 					{
-						RHICmdList.SetStreamSource(0, VertexBuffer.VertexBufferRHI, sizeof(FSlateVertex), RenderBatch.VertexOffset * sizeof(FSlateVertex));
-						RHICmdList.DrawIndexedPrimitive(IndexBuffer.IndexBufferRHI, GetRHIPrimitiveType(RenderBatch.DrawPrimitiveType), 0, 0, RenderBatch.NumVertices, RenderBatch.IndexOffset, PrimitiveCount, 1);
+						RHICmdList.SetStreamSource(0, VertexBuffer->VertexBufferRHI, sizeof(FSlateVertex), RenderBatch.VertexOffset * sizeof(FSlateVertex));
+						RHICmdList.DrawIndexedPrimitive(IndexBuffer->IndexBufferRHI, GetRHIPrimitiveType(RenderBatch.DrawPrimitiveType), 0, 0, RenderBatch.NumVertices, RenderBatch.IndexOffset, PrimitiveCount, 1);
 					}
 					else
 					{
-						RHICmdList.DrawIndexedPrimitive(IndexBuffer.IndexBufferRHI, GetRHIPrimitiveType(RenderBatch.DrawPrimitiveType), RenderBatch.VertexOffset, 0, RenderBatch.NumVertices, RenderBatch.IndexOffset, PrimitiveCount, 1);
+						RHICmdList.DrawIndexedPrimitive(IndexBuffer->IndexBufferRHI, GetRHIPrimitiveType(RenderBatch.DrawPrimitiveType), RenderBatch.VertexOffset, 0, RenderBatch.NumVertices, RenderBatch.IndexOffset, PrimitiveCount, 1);
 					}
 				}
 			}
@@ -577,7 +781,7 @@ void FSlateRHIRenderingPolicy::DrawElements(FRHICommandListImmediate& RHICmdList
 
 				// Something may have messed with the viewport size so set it back to the full target.
 				RHICmdList.SetViewport( 0,0,0,BackBuffer.GetSizeXY().X, BackBuffer.GetSizeXY().Y, 0.0f ); 
-				RHICmdList.SetStreamSource(0, VertexBuffer.VertexBufferRHI, sizeof(FSlateVertex), 0);
+				RHICmdList.SetStreamSource(0, VertexBuffer->VertexBufferRHI, sizeof(FSlateVertex), 0);
 
 			}
 		}
@@ -716,6 +920,23 @@ FSlateMaterialShaderPS* FSlateRHIRenderingPolicy::GetMaterialPixelShader( const 
 	}
 
 	return FoundShader ? (FSlateMaterialShaderPS*)FoundShader->GetShaderChecked() : nullptr;
+}
+
+FSlateMaterialShaderVS* FSlateRHIRenderingPolicy::GetMaterialVertexShader( const FMaterial* Material, bool bUseInstancing )
+{
+	const FMaterialShaderMap* MaterialShaderMap = Material->GetRenderingThreadShaderMap();
+
+	FShader* FoundShader = nullptr;
+	if( bUseInstancing )
+	{
+		FoundShader = MaterialShaderMap->GetShader(&TSlateMaterialShaderVS<true>::StaticType);
+	}
+	else
+	{
+		FoundShader = MaterialShaderMap->GetShader(&TSlateMaterialShaderVS<false>::StaticType);
+	}
+	
+	return FoundShader ? (FSlateMaterialShaderVS*)FoundShader->GetShaderChecked() : nullptr;
 }
 
 EPrimitiveType FSlateRHIRenderingPolicy::GetRHIPrimitiveType(ESlateDrawPrimitive::Type SlateType)

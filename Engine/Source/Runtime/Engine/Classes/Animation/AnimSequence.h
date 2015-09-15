@@ -142,10 +142,6 @@ struct ENGINE_API FTrackToSkeletonMap
 {
 	GENERATED_USTRUCT_BODY()
 
-	// 0 is the current Skeleton (the one above), and N is the Nth parent.
-	UPROPERTY()
-	int32 SkeletonIndex_DEPRECATED;
-
 	// Index of Skeleton.BoneTree this Track belongs to.
 	UPROPERTY()
 	int32 BoneTreeIndex;
@@ -354,7 +350,7 @@ class ENGINE_API UAnimSequence : public UAnimSequenceBase
 	TArray<FName> AnimationTrackNames;
 
 	/**
-	 * Source RawAnimationData. Only can be overriden by when transform curves are added first time OR imported
+	 * Source RawAnimationData. Only can be overridden by when transform curves are added first time OR imported
 	 */
 	TArray<struct FRawAnimSequenceTrack> SourceRawAnimationData;
 #endif // WITH_EDITORONLY_DATA
@@ -386,7 +382,7 @@ class ENGINE_API UAnimSequence : public UAnimSequenceBase
 	 * The compression scheme that was most recently used to compress this animation.
 	 * May be NULL.
 	 */
-	UPROPERTY(Instanced, Category=Compression, VisibleAnywhere)
+	UPROPERTY(Instanced, Category=Compression, EditAnywhere)
 	class UAnimCompress* CompressionScheme;
 #endif // WITH_EDITORONLY_DATA
 
@@ -508,7 +504,7 @@ class ENGINE_API UAnimSequence : public UAnimSequenceBase
 	uint32 bWasCompressedWithoutTranslations:1;
 
 	/** Importing data and options used for this mesh */
-	UPROPERTY(EditAnywhere, Instanced, Category=Reimport)
+	UPROPERTY(VisibleAnywhere, Instanced, Category=ImportSettings)
 	class UAssetImportData* AssetImportData;
 
 	/***  for Reimport **/
@@ -523,11 +519,21 @@ class ENGINE_API UAnimSequence : public UAnimSequenceBase
 	UPROPERTY(transient)
 	bool bNeedsRebake;
 
+	// Track whether we have updated markers so cached data can be updated
+	int32 MarkerDataUpdateCounter;
 #endif // WITH_EDITORONLY_DATA
 
+	/** Authored Sync markers */
+	UPROPERTY()
+	TArray<FAnimSyncMarker>		AuthoredSyncMarkers;
+
+	/** List of Unique marker names in this animation sequence */
+	TArray<FName>				UniqueMarkerNames;
+
 public:
-	// Begin UObject interface
+	//~ Begin UObject Interface
 	virtual void Serialize(FArchive& Ar) override;
+	virtual void PostInitProperties() override;
 	virtual void PostLoad() override;
 	virtual void PreSave() override;
 #if WITH_EDITOR
@@ -537,21 +543,23 @@ public:
 	virtual void BeginDestroy() override;
 	virtual SIZE_T GetResourceSize(EResourceSizeMode::Type Mode) override;
 	virtual void GetAssetRegistryTags(TArray<FAssetRegistryTag>& OutTags) const override;
-	// End of UObject interface
+	//~ End UObject Interface
 
-	// Begin UAnimationAsset interface
+	//~ Begin UAnimationAsset Interface
 	virtual bool IsValidAdditive() const override;
+	virtual TArray<FName>* GetUniqueMarkerNames() { return &UniqueMarkerNames; }
 #if WITH_EDITOR
 	virtual bool GetAllAnimationSequencesReferred(TArray<UAnimSequence*>& AnimationSequences) override;
 	virtual void ReplaceReferredAnimations(const TMap<UAnimSequence*, UAnimSequence*>& ReplacementMap) override;
 	virtual int32 GetNumberOfFrames() const override { return NumFrames; }
 #endif
-	// End of UAnimationAsset interface
+	//~ End UAnimationAsset Interface
 
-	// Begin UAnimSequenceBase interface
+	//~ Begin UAnimSequenceBase Interface
 	virtual void OnAssetPlayerTickedInternal(FAnimAssetTickContext &Context, const float PreviousTime, const float MoveDelta, const FAnimTickRecord &Instance, class UAnimInstance* InstanceOwner) const override;
 	virtual bool HasRootMotion() const override { return bEnableRootMotion; }
-	// End UAnimSequenceBase interface
+	virtual void RefreshCacheData() override;
+	//~ End UAnimSequenceBase Interface
 
 	// Extract Root Motion transform from the animation
 	FTransform ExtractRootMotion(float StartTime, float DeltaTime, bool bAllowLooping) const;
@@ -789,7 +797,23 @@ public:
 	 * Add validation check to see if it's being ready to play or not
 	 */
 	virtual bool IsValidToPlay() const override;
+
+	// Get a pointer to the data for a given Anim Notify
+	uint8* FindSyncMarkerPropertyData(int32 SyncMarkerIndex, UArrayProperty*& ArrayProperty);
+
+	virtual int32 GetMarkerUpdateCounter() const { return MarkerDataUpdateCounter; }
 #endif
+
+	/** Sort the sync markers array by time, earliest first. */
+	void SortSyncMarkers();
+
+	// Advancing based on markers
+	float GetCurrentTimeFromMarkers(FMarkerPair& PrevMarker, FMarkerPair& NextMarker, float PositionBetweenMarkers) const;
+	virtual void AdvanceMarkerPhaseAsLeader(bool bLooping, float MoveDelta, const TArray<FName>& ValidMarkerNames, float& CurrentTime, FMarkerPair& PrevMarker, FMarkerPair& NextMarker, TArray<FPassedMarker>& MarkersPassed) const;
+	virtual void AdvanceMarkerPhaseAsFollower(const FMarkerTickContext& Context, float DeltaRemaining, bool bLooping, float& CurrentTime, FMarkerPair& PreviousMarker, FMarkerPair& NextMarker) const;
+	virtual void GetMarkerIndicesForTime(float CurrentTime, bool bLooping, const TArray<FName>& ValidMarkerNames, FMarkerPair& OutPrevMarker, FMarkerPair& OutNextMarker) const;
+	virtual FMarkerSyncAnimPosition GetMarkerSyncPositionfromMarkerIndicies(int32 PrevMarker, int32 NextMarker, float CurrentTime) const;
+	virtual void GetMarkerIndicesForPosition(const FMarkerSyncAnimPosition& SyncPosition, bool bLooping, FMarkerPair& OutPrevMarker, FMarkerPair& OutNextMarker, float& CurrentTime) const;
 
 private:
 	/**
@@ -840,6 +864,9 @@ private:
 	void ResizeSequence(float NewLength, int32 NewNumFrames, bool bInsert, int32 StartFrame/*inclusive */, int32 EndFrame/*inclusive*/);
 
 #endif
+
+	/** Refresh sync marker data*/
+	void RefreshSyncMarkerDataFromAuthored();
 
 	friend class UAnimationAsset;
 };

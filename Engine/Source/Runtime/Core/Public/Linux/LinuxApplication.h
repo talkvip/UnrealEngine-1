@@ -10,7 +10,7 @@ class FLinuxWindow;
 class FGenericApplicationMessageHandler;
 
 
-class FLinuxApplication : public GenericApplication
+class FLinuxApplication : public GenericApplication, public FSelfRegisteringExec
 {
 
 public:
@@ -25,6 +25,9 @@ public:
 	virtual ~FLinuxApplication();
 	
 	virtual void DestroyApplication() override;
+
+	// FSelfRegisteringExec
+	virtual bool Exec(UWorld* InWorld, const TCHAR* Cmd, FOutputDevice& Ar) override;
 
 public:
 	virtual void SetMessageHandler( const TSharedRef< class FGenericApplicationMessageHandler >& InMessageHandler ) override;
@@ -83,6 +86,34 @@ public:
 		return (Windows.Num() > 0) ? bActivateApp : true;
 	}
 
+	/**
+	 * Windows can move during an event loop (like in
+	 * FLinuxPlatformMisc::PumpMessages(), but SDL queues many events
+	 * up before any windows move. This can lead to the screen-space
+	 * position of the mouse cursor being calculated incorrectly with
+	 * the old event data and new window location data. Use this to
+	 * save the window locations for use during the loop.
+	 */
+	void SaveWindowLocationsForEventLoop(void);
+
+	/** Clear out data saved in SaveWindowLocationsForEventLoop(). */
+	void ClearWindowLocationsAfterEventLoop(void);
+
+	/**
+	 * Get a window position inside the event loop. Fall back on
+	 * SDL_GetWindowPosition if not present in the saved window
+	 * locations.
+	 *
+	 * @param NativeWindow The native SDL_HWindow to look up. This is
+	 *					 a drop-in replacement for
+	 *					 SDL_GetWindowPosition, so it uses the
+	 *					 native window type.
+	 * @param x			Pointer to the X component of the position.
+	 * @param y			Pointer to the Y component of the position.
+	 */
+	void GetWindowPositionInEventLoop(SDL_HWindow NativeWindow, int *x, int *y);
+
+	virtual bool IsMouseAttached() const override;
 private:
 
 	FLinuxApplication();
@@ -128,6 +159,12 @@ private:
 
 	TSharedPtr< FLinuxWindow > GetRootWindow(const TSharedPtr< FLinuxWindow >& Window);
 
+	/** Handles "Cursor" exec commands" */
+	bool HandleCursorCommand(const TCHAR* Cmd, FOutputDevice& Ar);
+
+	/** Handles "Window" exec commands" */
+	bool HandleWindowCommand(const TCHAR* Cmd, FOutputDevice& Ar);
+
 private:
 
 	void RefreshDisplayCache();
@@ -154,8 +191,6 @@ private:
 		}
 	};
 
-	bool bUsingHighPrecisionMouseInput;
-
 	TArray< SDL_Event > PendingEvents;
 
 	TArray< TSharedRef< FLinuxWindow > > Windows;
@@ -166,9 +201,24 @@ private:
 	/** Array of windows to focus when current gets removed. */
 	TArray< TSharedRef< FLinuxWindow > > RevertFocusStack;
 
+	/**
+	 * Saved window locations used for event loop. Note: Using raw
+	 * handle here because weak pointers can change meaning as a
+	 * response to some event in the middle of the loop, potentially
+	 * corrupting our indexing. These keys should not be de-referenced
+	 * (but comparison is okay).
+	 */
+	TMap< SDL_HWindow, FVector2D > SavedWindowLocationsForEventLoop;
+
 	int32 bAllowedToDeferMessageProcessing;
 
+	/** Using high precision mouse input */
+	bool bUsingHighPrecisionMouseInput;
+
+	/** TODO: describe */
 	bool bIsMouseCursorLocked;
+
+	/** TODO: describe */
 	bool bIsMouseCaptureEnabled;
 
 	/** Window that we think has been activated last. */

@@ -21,6 +21,7 @@ static const int32 GlobalMaxStore = 100;
 static const int32 WhisperMaxStore = 100;
 static const int32 GameMaxStore = 100;
 static const int32 PartyMaxStore = 100;
+static const int32 AdminMaxStore = 100;
 
 class FMessageServiceImpl
 	: public FMessageService
@@ -59,7 +60,9 @@ public:
 		}
 		RoomJoins.Empty();
 		LoggedInUser.Reset();
+		bJoinedGlobalChat = false;
 		UnInitialize();
+		bJoinedGlobalChat = false;
 	}
 
 	virtual const TArray<TSharedRef<FFriendChatMessage> >& GetMessages() const override
@@ -91,9 +94,12 @@ public:
 					OSSScheduler->GetChatInterface()->GetJoinedRooms(*LoggedInUser, JoinedRooms);
 					for (auto RoomId : JoinedRooms)
 					{
-						if (ChatInterface->SendRoomChat(*LoggedInUser, RoomId, MsgBody))
+						if (RoomJoins.Contains(RoomId))
 						{
-							bAbleToSend = true;
+							if (ChatInterface->SendRoomChat(*LoggedInUser, RoomId, MsgBody))
+							{
+								bAbleToSend = true;
+							}
 						}
 					}
 					return bAbleToSend;
@@ -143,6 +149,20 @@ public:
 		GameMessagesCount++;
 		AddMessage(ChatItem.ToSharedRef());
 	}
+
+	virtual void InsertAdminMessage(const FString& MsgBody) override
+	{
+		TSharedPtr< FFriendChatMessage > ChatItem = MakeShareable(new FFriendChatMessage());
+		ChatItem->FromName = FText::FromString("Admin");
+		ChatItem->Message = FText::FromString(MsgBody);
+		ChatItem->MessageType = EChatMessageType::Admin;
+		ChatItem->MessageTime = FDateTime::Now();
+		ChatItem->ExpireTime = FDateTime::Now() + FTimespan::FromSeconds(GameMessageLifetime);
+		ChatItem->bIsFromSelf = false;
+		AdminMessagesCount++;
+		AddMessage(ChatItem.ToSharedRef());
+	}
+	
 
 	virtual void JoinPublicRoom(const FString& RoomName) override
 	{
@@ -224,6 +244,7 @@ private:
 		GameMessagesCount = 0;
 		PartyMessagesCount = 0;
 		ReceivedMessages.Empty();
+		bJoinedGlobalChat = false;
 
 		IOnlineChatPtr ChatInterface = OSSScheduler->GetChatInterface();
 		if (ChatInterface.IsValid())
@@ -244,12 +265,6 @@ private:
 			OnChatRoomMessageReceivedDelegateHandle = ChatInterface->AddOnChatRoomMessageReceivedDelegate_Handle(OnChatRoomMessageReceivedDelegate);
 			OnChatPrivateMessageReceivedDelegateHandle = ChatInterface->AddOnChatPrivateMessageReceivedDelegate_Handle(OnChatPrivateMessageReceivedDelegate);
 		}
-		IOnlinePresencePtr PresenceInterface = OSSScheduler->GetPresenceInterface();
-		if (PresenceInterface.IsValid())
-		{
-			OnPresenceReceivedDelegate = FOnPresenceReceivedDelegate::CreateSP(this, &FMessageServiceImpl::OnPresenceReceived);
-			OnPresenceReceivedDelegateHandle = PresenceInterface->AddOnPresenceReceivedDelegate_Handle(OnPresenceReceivedDelegate);
-		}
 	}
 
 	void UnInitialize()
@@ -264,11 +279,6 @@ private:
 			ChatInterface->ClearOnChatRoomMemberUpdateDelegate_Handle      (OnChatRoomMemberUpdateDelegateHandle);
 			ChatInterface->ClearOnChatRoomMessageReceivedDelegate_Handle   (OnChatRoomMessageReceivedDelegateHandle);
 			ChatInterface->ClearOnChatPrivateMessageReceivedDelegate_Handle(OnChatPrivateMessageReceivedDelegateHandle);
-		}
-		IOnlinePresencePtr PresenceInterface = OSSScheduler->GetPresenceInterface();
-		if (PresenceInterface.IsValid())
-		{
-			PresenceInterface->ClearOnPresenceReceivedDelegate_Handle(OnPresenceReceivedDelegateHandle);
 		}
 	}
 
@@ -345,12 +355,12 @@ private:
 		{
 			// Determine roomtype for the message.  
 			FString GlobalChatRoomId;
-			TSharedPtr<const FOnlinePartyId> PartyChatRoomId = OSSScheduler->GetPartyChatRoomId();
+			FChatRoomId PartyChatRoomId = OSSScheduler->GetPartyChatRoomId();
 			if (GetGlobalChatRoomId(GlobalChatRoomId) && ChatRoomID == GlobalChatRoomId)
 			{
 				ChatItem->MessageType = EChatMessageType::Global;
 			}
-			else if (PartyChatRoomId.IsValid() && ChatRoomID == (*PartyChatRoomId).ToString())
+			else if (!PartyChatRoomId.IsEmpty() && ChatRoomID == PartyChatRoomId)
 			{
 				ChatItem->MessageType = EChatMessageType::Party;
 			}
@@ -395,22 +405,6 @@ private:
 		}
 	}
 
-	void OnPresenceReceived(const FUniqueNetId& UserId, const TSharedRef<FOnlineUserPresence>& Presence)
-	{
-		if (LoggedInUser.IsValid() &&
-			*LoggedInUser == UserId)
-		{
-			if (Presence->bIsOnline)
-			{
-				for (auto RoomName : RoomJoins)
-				{
-					// @todo What is this for?  Rooms are rejoined on xmpploginchanged and onlogin, why spam joins on self-presence received too?
-					JoinPublicRoom(RoomName);
-				}
-			}
-		}
-	}
-
 	void AddMessage(TSharedRef< FFriendChatMessage > NewMessage)
 	{
 		//TSharedRef<FChatItemViewModel> NewMessage = FChatItemViewModelFactory::Create(ChatItem);
@@ -420,6 +414,8 @@ private:
 			bool bGameTimeFound = false;
 			bool bPartyTimeFound = false;
 			bool bWhisperFound = false;
+			bool bAdminFound = false;
+
 			FDateTime CurrentTime = FDateTime::Now();
 			for(int32 Index = 0; Index < ReceivedMessages.Num(); Index++)
 			{
@@ -485,9 +481,22 @@ private:
 							}
 						}
 						break;
+						case EChatMessageType::Admin :
+						{
+							if(AdminMessagesCount > AdminMaxStore)
+							{
+								RemoveMessage(Message);
+								Index--;
+							}
+							else
+							{
+								bAdminFound = true;
+							}
+						}
+						break;
 					}
 				}
-				if (ReceivedMessages.Num() < MessageStore || (bPartyTimeFound && bGameTimeFound && bGlobalTimeFound && bWhisperFound))
+				if (ReceivedMessages.Num() < MessageStore || (bPartyTimeFound && bGameTimeFound && bGlobalTimeFound && bWhisperFound && bAdminFound))
 				{
 					break;
 				}
@@ -504,6 +513,7 @@ private:
 			case EChatMessageType::Game: GameMessagesCount--; break;
 			case EChatMessageType::Party: PartyMessagesCount--; break;
 			case EChatMessageType::Whisper : WhisperMessagesCount--; break;
+			case EChatMessageType::Admin : AdminMessagesCount--; break;
 		}
 		ReceivedMessages.Remove(Message);
 	}
@@ -537,7 +547,6 @@ private:
 	FOnChatRoomMemberUpdateDelegate OnChatRoomMemberUpdateDelegate;
 	FOnChatRoomMessageReceivedDelegate OnChatRoomMessageReceivedDelegate;
 	FOnChatPrivateMessageReceivedDelegate OnChatPrivateMessageReceivedDelegate;
-	FOnPresenceReceivedDelegate OnPresenceReceivedDelegate;
 
 	// Handles to the above registered delegates
 	FDelegateHandle OnChatRoomJoinPublicDelegateHandle;
@@ -547,7 +556,6 @@ private:
 	FDelegateHandle OnChatRoomMemberUpdateDelegateHandle;
 	FDelegateHandle OnChatRoomMessageReceivedDelegateHandle;
 	FDelegateHandle OnChatPrivateMessageReceivedDelegateHandle;
-	FDelegateHandle OnPresenceReceivedDelegateHandle;
 
 	// Outgoing events
 	FOnChatMessageReceivedEvent MessageReceivedEvent;
@@ -564,6 +572,7 @@ private:
 	int32 WhisperMessagesCount;
 	int32 GameMessagesCount;
 	int32 PartyMessagesCount;
+	int32 AdminMessagesCount;
 	
 	bool bEnableEnterExitMessages;
 	int32 LocalControllerIndex;

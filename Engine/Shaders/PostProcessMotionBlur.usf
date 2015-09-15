@@ -587,7 +587,7 @@ void MainPS(float4 UVAndScreenPos : TEXCOORD0, out float4 OutColor : SV_Target0)
 #if MOTION_BLUR_QUALITY == 0
 	// visualize motion blur
 	{
-		float3 AbsWorldPos = View.ViewOrigin.xyz + OffsetWorldPos;
+		float3 AbsWorldPos = View.WorldCameraOrigin + OffsetWorldPos;
 		float3 WorldCheckerboard = Compute3DCheckerBoard(AbsWorldPos * 0.02f) * 0.1f + Compute3DCheckerBoard(AbsWorldPos * 0.002f) * 0.3f + Compute3DCheckerBoard(AbsWorldPos * 0.0002f) * 0.6f;
 
 		OutColor = float4(lerp(WorldCheckerboard, OutColor.rgb, 0.7f), 1);
@@ -675,15 +675,7 @@ void VelocityScatterVS(
 
 	// needs to be the same on C++ side (faster on NVIDIA and AMD)
 	uint QuadsPerInstance = 8;
-#if MAC
-	// remap the indices to get vertexid to VId and quadid into IId
-	IId = IId * QuadsPerInstance + (VId / 6);
-	VId = VId % 6;
 
-	// triangle A: 0:left top, 1:right top, 2: left bottom
-	// triangle B: 3:right bottom, 4:left bottom, 5: right top
-	float2 CornerOffset = float2(VId % 2, VId > 1 && VId < 5) * 2 - 1;
-#else
 	// remap the indices to get vertexid to VId and quadid into IId
 	IId = IId * QuadsPerInstance + (VId / 4);
 	VId = VId % 4;
@@ -691,7 +683,6 @@ void VelocityScatterVS(
 	// triangle A: 0:left top, 1:right top, 2: left bottom
 	// triangle B: 3:right bottom, 4:left bottom, 5: right top
 	float2 CornerOffset = float2(VId % 2, VId / 2) * 2 - 1;
-#endif
 
 	uint2 TilePos = uint2( IId % ViewportRect.z, IId / ViewportRect.z );
 

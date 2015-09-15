@@ -116,6 +116,8 @@
 #include "PhysicsPublic.h"
 #include "Engine/CoreSettings.h"
 
+#include "AnimationRecorder.h"
+
 DEFINE_LOG_CATEGORY_STATIC(LogEditor, Log, All);
 
 #define LOCTEXT_NAMESPACE "UnrealEd.Editor"
@@ -213,8 +215,6 @@ UEditorEngine::UEditorEngine(const FObjectInitializer& ObjectInitializer)
 		struct FConstructorStatics
 		{
 			ConstructorHelpers::FObjectFinder<UTexture2D> BadTexture;
-			ConstructorHelpers::FObjectFinder<UTexture2D> BackgroundTexture;
-			ConstructorHelpers::FObjectFinder<UTexture2D> BackgroundHiTexture;
 			ConstructorHelpers::FObjectFinder<UStaticMesh> EditorCubeMesh;
 			ConstructorHelpers::FObjectFinder<UStaticMesh> EditorSphereMesh;
 			ConstructorHelpers::FObjectFinder<UStaticMesh> EditorPlaneMesh;
@@ -222,8 +222,6 @@ UEditorEngine::UEditorEngine(const FObjectInitializer& ObjectInitializer)
 			ConstructorHelpers::FObjectFinder<UFont> SmallFont;
 			FConstructorStatics()
 				: BadTexture(TEXT("/Engine/EditorResources/Bad"))
-				, BackgroundTexture(TEXT("/Engine/EditorResources/Bkgnd"))
-				, BackgroundHiTexture(TEXT("/Engine/EditorResources/BkgndHi"))
 				, EditorCubeMesh(TEXT("/Engine/EditorMeshes/EditorCube"))
 				, EditorSphereMesh(TEXT("/Engine/EditorMeshes/EditorSphere"))
 				, EditorPlaneMesh(TEXT("/Engine/EditorMeshes/EditorPlane"))
@@ -235,8 +233,6 @@ UEditorEngine::UEditorEngine(const FObjectInitializer& ObjectInitializer)
 		static FConstructorStatics ConstructorStatics;
 
 		Bad = ConstructorStatics.BadTexture.Object;
-		Bkgnd = ConstructorStatics.BackgroundTexture.Object;
-		BkgndHi = ConstructorStatics.BackgroundHiTexture.Object;
 		EditorCube = ConstructorStatics.EditorCubeMesh.Object;
 		EditorSphere = ConstructorStatics.EditorSphereMesh.Object;
 		EditorPlane = ConstructorStatics.EditorPlaneMesh.Object;
@@ -443,7 +439,7 @@ void UEditorEngine::InitEditor(IEngineLoop* InEngineLoop)
 		IDesktopPlatform* DesktopPlatform = FDesktopPlatformModule::Get();
 		if ( DesktopPlatform != NULL )
 		{
-			DesktopPlatform->OpenLauncher(false, TEXT(""));
+			DesktopPlatform->OpenLauncher(false, FString(), FString());
 		}
 	}
 
@@ -1394,7 +1390,7 @@ void UEditorEngine::Tick( float DeltaSeconds, bool bIdleMode )
 
 	// Update viewports.
 
-	for(int32 ViewportIndex = 0;ViewportIndex < AllViewportClients.Num();ViewportIndex++)
+	for (int32 ViewportIndex = AllViewportClients.Num()-1; ViewportIndex >= 0; ViewportIndex--)
 	{
 		FEditorViewportClient* ViewportClient = AllViewportClients[ ViewportIndex ];
 
@@ -1580,6 +1576,8 @@ void UEditorEngine::Tick( float DeltaSeconds, bool bIdleMode )
 
 	FUnrealEdMisc::Get().TickPerformanceAnalytics();
 
+	FAnimationRecorderManager::Get().Tick(DeltaSeconds);
+	
 	// If the fadeout animation has completed for the undo/redo notification item, allow it to be deleted
 	if(UndoRedoNotificationItem.IsValid() && UndoRedoNotificationItem->GetCompletionState() == SNotificationItem::CS_None)
 	{
@@ -1770,6 +1768,17 @@ void UEditorEngine::PostEditChangeProperty(FPropertyChangedEvent& PropertyChange
 		{
 			UBlueprint* Blueprint = *BlueprintIt;
 			Blueprint->Status = BS_Dirty;
+		}
+	}
+	else if (PropertyName == GET_MEMBER_NAME_CHECKED(UEngine, bOptimizeAnimBlueprintMemberVariableAccess))
+	{
+		FScopedSlowTask SlowTask(100, LOCTEXT("DirtyingAnimBlueprintsDueToOptimizationChange", "Invalidating All Anim Blueprints"));
+
+		// Flag all Blueprints as out of date (this doesn't dirty the package as needs saving but will force a recompile during PIE)
+		for (TObjectIterator<UAnimBlueprint> AnimBlueprintIt; AnimBlueprintIt; ++AnimBlueprintIt)
+		{
+			UAnimBlueprint* AnimBlueprint = *AnimBlueprintIt;
+			AnimBlueprint->Status = BS_Dirty;
 		}
 	}
 }
@@ -3692,11 +3701,19 @@ void UEditorEngine::OnSourceControlDialogClosed(bool bEnabled)
 	}
 }
 
-bool UEditorEngine::SavePackage( UPackage* InOuter, UObject* InBase, EObjectFlags TopLevelFlags, const TCHAR* Filename, 
+ESavePackageResult UEditorEngine::Save( UPackage* InOuter, UObject* InBase, EObjectFlags TopLevelFlags, const TCHAR* Filename, 
 				 FOutputDevice* Error, FLinkerLoad* Conform, bool bForceByteSwapping, bool bWarnOfLongFilename, 
 				 uint32 SaveFlags, const class ITargetPlatform* TargetPlatform, const FDateTime& FinalTimeStamp, bool bSlowTask )
 {
 	FScopedSlowTask SlowTask(100, FText(), bSlowTask);
+
+	// If we we need to fixup string asset references, load any referenced by this package before it is saved
+	static bool bForceLoadStringAssetReferences = FParse::Param(FCommandLine::Get(), TEXT("FixupStringAssetReferences"));
+
+	if (bForceLoadStringAssetReferences)
+	{
+		GRedirectCollector.ResolveStringAssetReference(Filename);
+	}
 
 	UObject* Base = InBase;
 	if ( !Base && InOuter && InOuter->PackageFlags & PKG_ContainsMap )
@@ -3775,13 +3792,13 @@ bool UEditorEngine::SavePackage( UPackage* InOuter, UObject* InBase, EObjectFlag
 
 	SlowTask.EnterProgressFrame(70);
 
-	bool bSuccess = UPackage::SavePackage(InOuter, Base, TopLevelFlags, Filename, Error, Conform, bForceByteSwapping, bWarnOfLongFilename, SaveFlags, TargetPlatform, FinalTimeStamp, bSlowTask);
+	const ESavePackageResult Result = UPackage::Save(InOuter, Base, TopLevelFlags, Filename, Error, Conform, bForceByteSwapping, bWarnOfLongFilename, SaveFlags, TargetPlatform, FinalTimeStamp, bSlowTask);
 
 	SlowTask.EnterProgressFrame(10);
 
 	// If the package is a valid candidate for being automatically-added to source control, go ahead and add it
 	// to the default changelist
-	if( bSuccess && bAutoAddPkgToSCC )
+	if (Result == ESavePackageResult::Success && bAutoAddPkgToSCC)
 	{
 		// IsPackageValidForAutoAdding should not return true if SCC is disabled
 		check(ISourceControlModule::Get().IsEnabled());
@@ -3808,7 +3825,7 @@ bool UEditorEngine::SavePackage( UPackage* InOuter, UObject* InBase, EObjectFlag
 			World->PersistentLevel->OwningWorld = OriginalOwningWorld;
 		}
 
-		OnPostSaveWorld(SaveFlags, World, OriginalPackageFlags, bSuccess);
+		OnPostSaveWorld(SaveFlags, World, OriginalPackageFlags, Result == ESavePackageResult::Success);
 
 		if (bInitializedPhysicsSceneForSave)
 		{
@@ -3822,7 +3839,17 @@ bool UEditorEngine::SavePackage( UPackage* InOuter, UObject* InBase, EObjectFlag
 		}
 	}
 
-	return bSuccess;
+	return Result;
+}
+
+bool UEditorEngine::SavePackage(UPackage* InOuter, UObject* InBase, EObjectFlags TopLevelFlags, const TCHAR* Filename,
+	FOutputDevice* Error, FLinkerLoad* Conform, bool bForceByteSwapping, bool bWarnOfLongFilename,
+	uint32 SaveFlags, const class ITargetPlatform* TargetPlatform, const FDateTime& FinalTimeStamp, bool bSlowTask)
+{
+	// Workaround to avoid function signature change while keeping both bool and ESavePackageResult versions of SavePackage
+	const ESavePackageResult Result = Save(InOuter, InBase, TopLevelFlags, Filename, Error, Conform, bForceByteSwapping,
+		bWarnOfLongFilename, SaveFlags, TargetPlatform, FinalTimeStamp, bSlowTask);
+	return Result == ESavePackageResult::Success;
 }
 
 void UEditorEngine::OnPreSaveWorld(uint32 SaveFlags, UWorld* World)
@@ -4981,7 +5008,7 @@ AActor* UEditorEngine::ConvertBrushesToStaticMesh(const FString& InStaticMeshPac
 		InBrushesToConvert[BrushesIdx]->TeleportTo(Location - InPivotLocation, Rotation, false, true);
 	}
 
-	GEditor->RebuildModelFromBrushes(ConversionTempModel, true );
+	GEditor->RebuildModelFromBrushes(ConversionTempModel, true, true );
 	GEditor->bspBuildFPolys(ConversionTempModel, true, 0);
 
 	if (0 < ConversionTempModel->Polys->Element.Num())

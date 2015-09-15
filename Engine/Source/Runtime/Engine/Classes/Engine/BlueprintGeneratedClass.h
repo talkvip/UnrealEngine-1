@@ -451,7 +451,8 @@ public:
 	UActorComponent* FindComponentTemplateByName(const FName& TemplateName) const;
 
 	/** Create Timeline objects for this Actor based on the Timelines array*/
-	virtual void CreateComponentsForActor(AActor* Actor) const;
+	static void CreateComponentsForActor(const UClass* ThisClass, AActor* Actor);
+	static void CreateTimelineComponent(AActor* Actor, const UTimelineTemplate* TimelineTemplate);
 
 	// UObject interface
 	virtual void Serialize(FArchive& Ar) override;
@@ -492,23 +493,25 @@ public:
 #endif
 
 	/** Bind functions on supplied actor to delegates */
-	void BindDynamicDelegates(UObject* InInstance) const;
+	static void BindDynamicDelegates(const UClass* ThisClass, UObject* InInstance);
 
+	// Finds the desired dynamic binding object for this blueprint generated class
+	static UDynamicBlueprintBinding* GetDynamicBindingObject(const UClass* ThisClass, UClass* BindingClass);
+
+#if WITH_EDITOR
 	/** Unbind functions on supplied actor from delegates tied to a specific property */
 	void UnbindDynamicDelegatesForProperty(UObject* InInstance, const UObjectProperty* InObjectProperty);
-	
-	// Finds the desired dynamic binding object for this blueprint generated class
-	UDynamicBlueprintBinding* GetDynamicBindingObject(UClass* InClass) const;
+#endif
 
 	/** called to gather blueprint replicated properties */
 	virtual void GetLifetimeBlueprintReplicationList(TArray<class FLifetimeProperty>& OutLifetimeProps) const;
 	/** called prior to replication of an instance of this BP class */
-	virtual void InstancePreReplication(class IRepChangedPropertyTracker& ChangedPropertyTracker) const
+	virtual void InstancePreReplication(UObject* Obj, class IRepChangedPropertyTracker& ChangedPropertyTracker) const
 	{
 		UBlueprintGeneratedClass* SuperBPClass = Cast<UBlueprintGeneratedClass>(GetSuperStruct());
 		if (SuperBPClass != NULL)
 		{
-			SuperBPClass->InstancePreReplication(ChangedPropertyTracker);
+			SuperBPClass->InstancePreReplication(Obj, ChangedPropertyTracker);
 		}
 	}
 };

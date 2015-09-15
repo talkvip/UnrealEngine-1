@@ -95,6 +95,47 @@ void UEdGraph::PostInitProperties()
 		GraphGuid = FGuid::NewGuid();
 	}
 }
+
+void UEdGraph::Serialize( FArchive& Ar )
+{
+	Super::Serialize(Ar);
+	// Keep track of RF_Public
+	if( Ar.IsTransacting() )
+	{
+		bool bIsPublic = HasAnyFlags(RF_Public);
+		if( Ar.IsLoading() )
+		{
+			Ar << bIsPublic;
+			if (bIsPublic)
+			{
+				SetFlags( RF_Public );
+			}
+			else
+			{
+				ClearFlags( RF_Public );
+			}
+		}
+		else if( Ar.IsSaving() )
+		{
+			Ar << bIsPublic;
+		}
+	}
+}
+
+void UEdGraph::PostLoad()
+{
+	Super::PostLoad();
+
+	// Strip out null nodes (likely from missing node classes) as they will cause crashes 
+	for (int32 i = Nodes.Num() - 1; i >= 0; i--)
+	{
+		if (Nodes[i] == nullptr)
+		{
+			Nodes.RemoveAt(i);
+			UE_LOG(LogBlueprint, Warning, TEXT("Found NULL Node in EdGraph Nodes array. A node type may have been deleted without creating an ActiveClassRedictor to K2Node_DeadClass."));
+		}
+	}
+}
 #endif
 
 const UEdGraphSchema* UEdGraph::GetSchema() const
@@ -198,8 +239,28 @@ void UEdGraph::MoveNodesToAnotherGraph(UEdGraph* DestinationGraph, bool bIsLoadi
 		{
 #if WITH_EDITOR
 			// During compilation, do not move ghost nodes, they are not used during compilation.
-			if (bInIsCompiling && !Node->bIsNodeEnabled)
+			if (bInIsCompiling && !Node->IsNodeEnabled())
 			{
+				// Pass existing connections through non-enabled nodes
+				for (auto Pin : Node->Pins)
+				{
+					if (Pin->Direction == EGPD_Input && Pin->LinkedTo.Num() > 0)
+					{
+						UEdGraphPin* PassThroughPin = Node->GetPassThroughPin(Pin);
+						if (PassThroughPin != nullptr && PassThroughPin->LinkedTo.Num() > 0)
+						{
+							for (auto OutputPin : Pin->LinkedTo)
+							{
+								for (auto InputPin : PassThroughPin->LinkedTo)
+								{
+									InputPin->LinkedTo.Add(OutputPin);
+									OutputPin->LinkedTo.Add(InputPin);
+								}
+							}
+						}
+					}
+				}
+
 				// Break all node links, if any exist, do not move the node
 				Node->BreakAllNodeLinks();
 				continue;

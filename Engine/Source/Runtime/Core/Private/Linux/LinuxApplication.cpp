@@ -299,7 +299,7 @@ void FLinuxApplication::ProcessDeferredMessage( SDL_Event Event )
 					if (motionEvent.x != (width / 2) || motionEvent.y != (height / 2))
 					{
 						int xOffset, yOffset;
-						SDL_GetWindowPosition(NativeWindow, &xOffset, &yOffset);
+						GetWindowPositionInEventLoop(NativeWindow, &xOffset, &yOffset);
 						LinuxCursor->SetPosition(width / 2 + xOffset, height / 2 + yOffset);
 					}
 					else
@@ -311,8 +311,12 @@ void FLinuxApplication::ProcessDeferredMessage( SDL_Event Event )
 			else
 			{
 				int xOffset, yOffset;
-				SDL_GetWindowPosition( NativeWindow, &xOffset, &yOffset );
-				LinuxCursor->SetCachedPosition( motionEvent.x + xOffset, motionEvent.y + yOffset );
+				GetWindowPositionInEventLoop(NativeWindow, &xOffset, &yOffset);
+
+				int32 BorderSizeX, BorderSizeY;
+				CurrentEventWindow->GetNativeBordersSize(BorderSizeX, BorderSizeY);
+
+				LinuxCursor->SetCachedPosition(motionEvent.x + xOffset + BorderSizeX, motionEvent.y + yOffset + BorderSizeY);
 
 				FVector2D CurrentPosition = LinuxCursor->GetPosition();
 				if( LinuxCursor->UpdateCursorClipping( CurrentPosition ) )
@@ -731,17 +735,6 @@ void FLinuxApplication::ProcessDeferredMessage( SDL_Event Event )
 
 				case SDL_WINDOWEVENT_RESIZED:
 					{
-						int NewWidth  = windowEvent.data1;
-						int NewHeight = windowEvent.data2;
-
-						MessageHandler->OnSizeChanged(
-							CurrentEventWindow.ToSharedRef(),
-							NewWidth,
-							NewHeight,
-							//	bWasMinimized
-							false
-						);
-
 						MessageHandler->OnResizingWindow( CurrentEventWindow.ToSharedRef() );
 					}
 					break;
@@ -784,17 +777,6 @@ void FLinuxApplication::ProcessDeferredMessage( SDL_Event Event )
 								SDL_SetWindowInputFocus(CurrentEventWindow->GetHWnd());
 							}
 						}
-
-						int Width, Height;
-
-						SDL_GetWindowSize(NativeWindow, &Width, &Height);
-
-						MessageHandler->OnSizeChanged(
-							CurrentEventWindow.ToSharedRef(),
-							Width,
-							Height,
-							false
-						);
 					}
 					break;
 
@@ -889,7 +871,10 @@ void FLinuxApplication::ProcessDeferredMessage( SDL_Event Event )
 							ActivateApplication();
 						}
 
-						if(CurrentFocusWindow != CurrentEventWindow)
+						// Some windows like notification windows may popup without needing the focus. That is handled in the SDL_WINDOWEVENT_SHOWN case.
+						// The problem would be that the WM will send the Take Focus event and wants to set the focus. We don't want it to set it
+						// for notifications because they are already handled in the above mentioned event.
+						if ((CurrentFocusWindow != CurrentEventWindow) && !CurrentEventWindow->IsNotificationWindow())
 						{
 							SDL_SetWindowInputFocus(CurrentEventWindow->GetHWnd());
 						}
@@ -1597,4 +1582,126 @@ TSharedPtr< FLinuxWindow > FLinuxApplication::GetRootWindow(const TSharedPtr< FL
 		ParentWindow = ParentWindow->GetParent();
 	}
 	return ParentWindow;
+}
+
+bool FLinuxApplication::Exec(UWorld* InWorld, const TCHAR* Cmd, FOutputDevice& Ar)
+{
+	// Ignore any execs that doesn't start with LinuxApp
+	if (!FParse::Command(&Cmd, TEXT("LinuxApp")))
+	{
+		return false;
+	}
+
+	if (FParse::Command(&Cmd, TEXT("Cursor")))
+	{
+		return HandleCursorCommand(Cmd, Ar);
+	}
+	else if (FParse::Command(&Cmd, TEXT("Window")))
+	{
+		return HandleWindowCommand(Cmd, Ar);
+	}
+
+	return false;
+}
+
+bool FLinuxApplication::HandleCursorCommand(const TCHAR* Cmd, FOutputDevice& Ar)
+{
+	if (FParse::Command(&Cmd, TEXT("Status")))
+	{
+		FLinuxCursor *LinuxCursor = static_cast<FLinuxCursor*>(Cursor.Get());
+		FVector2D CurrentPosition = LinuxCursor->GetPosition();
+
+		Ar.Logf(TEXT("Cursor status:"));
+		Ar.Logf(TEXT("Position: (%f, %f)"), CurrentPosition.X, CurrentPosition.Y);
+		Ar.Logf(TEXT("IsHidden: %s"), LinuxCursor->IsHidden() ? TEXT("true") : TEXT("false"));
+		Ar.Logf(TEXT("bIsMouseCaptureEnabled: %s"), bIsMouseCaptureEnabled ? TEXT("true") : TEXT("false"));
+		Ar.Logf(TEXT("bUsingHighPrecisionMouseInput: %s"), bUsingHighPrecisionMouseInput ? TEXT("true") : TEXT("false"));
+		Ar.Logf(TEXT("bIsMouseCaptureEnabled: %s"), bIsMouseCaptureEnabled ? TEXT("true") : TEXT("false"));
+
+		return true;
+	}
+
+	return false;
+}
+
+bool FLinuxApplication::HandleWindowCommand(const TCHAR* Cmd, FOutputDevice& Ar)
+{
+	if (FParse::Command(&Cmd, TEXT("List")))
+	{
+		Ar.Logf(TEXT("Window list:"));
+		for (int WindowIdx = 0, NumWindows = Windows.Num(); WindowIdx < NumWindows; ++WindowIdx)
+		{
+			Ar.Logf(TEXT("%d: native handle: %p, debugging ID: %d"), WindowIdx, Windows[WindowIdx]->GetHWnd(), Windows[WindowIdx]->GetID());
+		}
+
+		return true;
+	}
+
+	return false;
+}
+
+void FLinuxApplication::SaveWindowLocationsForEventLoop(void)
+{
+	for (int32 WindowIndex = 0; WindowIndex < Windows.Num(); ++WindowIndex)
+	{
+		TSharedRef< FLinuxWindow > Window = Windows[WindowIndex];
+		int x = 0;
+		int y = 0;
+		SDL_HWindow NativeWindow = Window->GetHWnd();
+		SDL_GetWindowPosition(NativeWindow, &x, &y);
+		SavedWindowLocationsForEventLoop.FindOrAdd(NativeWindow) = FVector2D(x, y);
+	}
+}
+
+void FLinuxApplication::ClearWindowLocationsAfterEventLoop(void)
+{
+	SavedWindowLocationsForEventLoop.Empty();
+}
+
+void FLinuxApplication::GetWindowPositionInEventLoop(SDL_HWindow NativeWindow, int *x, int *y)
+{
+	FVector2D *Position = SavedWindowLocationsForEventLoop.Find(NativeWindow);
+	if(Position)
+	{
+		// Found saved location.
+		*x = Position->X;
+		*y = Position->Y;
+	}
+	else if(NativeWindow)
+	{
+		SDL_GetWindowPosition(NativeWindow, x, y);
+
+		// If we've hit this case, then we're either not in the event
+		// loop, or suddenly have a new window to keep track of.
+		// Record the initial window position.
+		SavedWindowLocationsForEventLoop.FindOrAdd(NativeWindow) = FVector2D(*x, *y);
+	}
+	else
+	{
+		UE_LOG(LogLinuxWindowEvent, Error, TEXT("Tried to get the location of a non-existing window\n"));
+		*x = 0;
+		*y = 0;
+	}
+}
+
+bool FLinuxApplication::IsMouseAttached() const
+{
+	printf("--- check mouse ---\n");
+	int rc;
+	char Mouse[64] = "/sys/class/input/mouse0";
+	int MouseIdx = strlen(Mouse) - 1;
+	strcat(Mouse, "/device/name");
+
+	for (int i=0; i<9; i++)
+	{
+		Mouse[MouseIdx] = '0' + i;
+		if (access(Mouse, F_OK) == 0)
+		{
+			printf("--- check mouse found %d---\n", i);
+			return true;
+		}
+	}
+
+	printf("--- check mouse none found ---\n");
+	return false;
 }

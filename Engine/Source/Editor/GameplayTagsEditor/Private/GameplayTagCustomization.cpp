@@ -75,28 +75,20 @@ TSharedRef<SWidget> FGameplayTagCustomization::GetListContent()
 		.AutoHeight()
 		.MaxHeight(400)
 		[
-			SNew(SScaleBox)
-			.HAlign(EHorizontalAlignment::HAlign_Left)
-			.VAlign(EVerticalAlignment::VAlign_Top)
-			.StretchDirection(EStretchDirection::DownOnly)
-			.Stretch(EStretch::ScaleToFit)
-			.Content()
-			[
-				SNew(SGameplayTagWidget, EditableContainers)
-				.Filter(Categories)
-				.ReadOnly(bReadOnly)
-				.TagContainerName(StructPropertyHandle->GetPropertyDisplayName().ToString())
-				.MultiSelect(false)
-				.OnTagChanged(this, &FGameplayTagCustomization::OnTagChanged)
-				.PropertyHandle(StructPropertyHandle)
-			]
+            SNew(SGameplayTagWidget, EditableContainers)
+            .Filter(Categories)
+            .ReadOnly(bReadOnly)
+            .TagContainerName(StructPropertyHandle->GetPropertyDisplayName().ToString())
+            .MultiSelect(false)
+            .OnTagChanged(this, &FGameplayTagCustomization::OnTagChanged)
+            .PropertyHandle(StructPropertyHandle)
 		];
 }
 
 void FGameplayTagCustomization::OnPropertyValueChanged()
 {
 	TagName = TEXT("");
-	if (StructPropertyHandle.IsValid() && EditableContainers.Num() > 0)
+	if (StructPropertyHandle.IsValid() && StructPropertyHandle->GetProperty() && EditableContainers.Num() > 0)
 	{
 		TArray<void*> RawStructData;
 		StructPropertyHandle->AccessRawData(RawStructData);
@@ -117,7 +109,7 @@ void FGameplayTagCustomization::OnPropertyValueChanged()
 void FGameplayTagCustomization::OnTagChanged()
 {
 	TagName = TEXT("");
-	if (StructPropertyHandle.IsValid() && EditableContainers.Num() > 0)
+	if (StructPropertyHandle.IsValid() && StructPropertyHandle->GetProperty() && EditableContainers.Num() > 0)
 	{
 		TArray<void*> RawStructData;
 		StructPropertyHandle->AccessRawData(RawStructData);
@@ -164,7 +156,7 @@ void FGameplayTagCustomization::BuildEditableContainerList()
 {
 	EditableContainers.Empty();
 
-	if(StructPropertyHandle.IsValid())
+	if(StructPropertyHandle.IsValid() && StructPropertyHandle->GetProperty())
 	{
 		TArray<void*> RawStructData;
 		StructPropertyHandle->AccessRawData(RawStructData);

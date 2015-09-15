@@ -42,7 +42,7 @@ float GetRoughness(const in FGBufferData GBuffer)
 {
 	float Roughness = GBuffer.Roughness;
 
-#if USE_CLEARCOAT
+#if 1//USE_CLEARCOAT
 	BRANCH
 	if( GBuffer.ShadingModelID == SHADINGMODELID_CLEAR_COAT )
 	{
@@ -125,7 +125,7 @@ void ScreenSpaceReflectionsPS(in float4 UVAndScreenPos : TEXCOORD0, out float4 O
 	const float3 N = GBuffer.WorldNormal;
 	const float SceneDepth = CalcSceneDepth(UV);
 	const float3 PositionTranslatedWorld = mul( float4( ScreenPos * SceneDepth, SceneDepth, 1 ), View.ScreenToTranslatedWorld ).xyz;
-	const float3 V = normalize(View.TranslatedViewOrigin.xyz - PositionTranslatedWorld);
+	const float3 V = normalize(View.TranslatedWorldCameraOrigin - PositionTranslatedWorld);
 
 	uint FrameRandom;
 	{

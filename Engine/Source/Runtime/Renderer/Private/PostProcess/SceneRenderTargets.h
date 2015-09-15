@@ -103,6 +103,33 @@ BEGIN_UNIFORM_BUFFER_STRUCT(FGBufferResourceStruct, )
 	DECLARE_UNIFORM_BUFFER_STRUCT_MEMBER_SAMPLER( SamplerState,			GBufferVelocityTextureSampler)
 END_UNIFORM_BUFFER_STRUCT( FGBufferResourceStruct )
 
+/*
+* Stencil layout:
+*		BIT ID    | USE
+*		[0]       | sandbox bit
+*		[1]       | unallocated
+*		[2]       | unallocated
+*		[3]       | unallocated
+*		[4]       | unallocated
+*		[5]       | unallocated
+*		[6]       | unallocated
+*		[7]       | primitive receive decal bit
+*
+* The sandbox bit is dedicated to be used by any render passes which would
+* need to generate non persistent stencil and use it locally, but this is
+* the render pass' responsibility to set it back to ZERO.
+*/
+#define STENCIL_SANDBOX_BIT_ID				0
+#define STENCIL_RECEIVE_DECAL_BIT_ID		7
+
+// Outputs a compile-time constant stencil's bit mask ready to be used
+// in TStaticDepthStencilState<> template parameter. It also takes care
+// of masking the Value macro parameter to only keep the low significant
+// bit to ensure to not overflow on other bits.
+#define GET_STENCIL_BIT_MASK(BIT_NAME,Value) uint8((uint8(Value) & uint8(0x01)) << (STENCIL_##BIT_NAME##_BIT_ID))
+
+#define STENCIL_SANDBOX_MASK GET_STENCIL_BIT_MASK(SANDBOX,1)
+
 /**
  * Encapsulates the render targets used for scene rendering.
  */
@@ -298,24 +325,7 @@ public:
 			return (const FTexture2DRHIRef&)ShadowDepthZ->GetRenderTargetItem().ShaderResourceTexture; 
 		}
 	}
-	const FTexture2DRHIRef* GetActualDepthTexture() const
-	{
-		const FTexture2DRHIRef* DepthTexture = NULL;
-		if((CurrentFeatureLevel >= ERHIFeatureLevel::SM4) || IsPCPlatform(GShaderPlatformForFeatureLevel[CurrentFeatureLevel]))
-		{
-			if(GSupportsDepthFetchDuringDepthTest)
-			{
-				DepthTexture = &GetSceneDepthTexture();
-			}
-			else
-			{
-				DepthTexture = &GetAuxiliarySceneDepthSurface();
-			}
-		}
-		check(DepthTexture != NULL);
-
-		return DepthTexture;
-	}
+	const FTexture2DRHIRef* GetActualDepthTexture() const;
 	const FTexture2DRHIRef& GetReflectiveShadowMapDepthTexture() const { return (const FTexture2DRHIRef&)ReflectiveShadowMapDepth->GetRenderTargetItem().ShaderResourceTexture; }
 	const FTexture2DRHIRef& GetReflectiveShadowMapNormalTexture() const { return (const FTexture2DRHIRef&)ReflectiveShadowMapNormal->GetRenderTargetItem().ShaderResourceTexture; }
 	const FTexture2DRHIRef& GetReflectiveShadowMapDiffuseTexture() const { return (const FTexture2DRHIRef&)ReflectiveShadowMapDiffuse->GetRenderTargetItem().ShaderResourceTexture; }
@@ -420,6 +430,7 @@ public:
 	FUniformBufferRHIParamRef GetGBufferResourcesUniformBuffer() const 
 	{ 
 		// if this triggers you need to make sure the GBuffer is not getting released before (using AdjustGBufferRefCount(1) and AdjustGBufferRefCount(-1))
+		// Maybe You use a SceneTexture material expression that should set MaterialCompilationOutput.bNeedsGBuffer
 		check(IsValidRef(GBufferResourcesUniformBuffer));
 
 		return GBufferResourcesUniformBuffer; 
@@ -498,7 +509,10 @@ public:
 	{
 		bVelocityPass = bInVelocityPass;
 	}
-
+	
+	// Can be called when the Scene Color content is no longer needed. As we create SceneColor on demand we can make sure it is created with the right format.
+	// (as a call to SetSceneColor() can override it with a different format)
+	void ReleaseSceneColor();
 
 private: // Get...() methods instead of direct access
 

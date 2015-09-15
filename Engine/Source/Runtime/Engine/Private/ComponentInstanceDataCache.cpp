@@ -81,7 +81,7 @@ bool FActorComponentInstanceData::MatchesComponent(const UActorComponent* Compon
 	bool bMatches = false;
 	if (   Component
 		&& Component->CreationMethod == SourceComponentCreationMethod
-		&& ComponentTemplate == SourceComponentTemplate)
+		&& (ComponentTemplate == SourceComponentTemplate || (GIsReinstancing && ComponentTemplate->GetFName() == SourceComponentTemplate->GetFName())))
 	{
 		if (SourceComponentCreationMethod != EComponentCreationMethod::UserConstructionScript)
 		{
@@ -95,13 +95,15 @@ bool FActorComponentInstanceData::MatchesComponent(const UActorComponent* Compon
 			{
 				for (const UActorComponent* BlueprintCreatedComponent : ComponentOwner->BlueprintCreatedComponents)
 				{
-					if (   BlueprintCreatedComponent
-						&& (BlueprintCreatedComponent->GetArchetype() == SourceComponentTemplate)
-						&& (BlueprintCreatedComponent->CreationMethod == SourceComponentCreationMethod)
-						&& (++FoundSerializedComponentsOfType == SourceComponentTypeSerializedIndex))
+					if (BlueprintCreatedComponent != nullptr && BlueprintCreatedComponent->CreationMethod == SourceComponentCreationMethod)
 					{
-						bMatches = (BlueprintCreatedComponent == Component);
-						break;
+						const UObject* BlueprintComponentTemplate = BlueprintCreatedComponent->GetArchetype();
+						if (   (BlueprintComponentTemplate == SourceComponentTemplate || (GIsReinstancing && BlueprintComponentTemplate->GetFName() == SourceComponentTemplate->GetFName()))
+							&& (++FoundSerializedComponentsOfType == SourceComponentTypeSerializedIndex))
+						{
+							bMatches = (BlueprintCreatedComponent == Component);
+							break;
+						}
 					}
 				}
 			}
@@ -164,15 +166,10 @@ FComponentInstanceDataCache::FComponentInstanceDataCache(const AActor* Actor)
 		{
 			if (Component->IsCreatedByConstructionScript()) // Only cache data from 'created by construction script' components
 			{
-				// Also exclude instances that are based on the component CDO (i.e. not a unique archetype) - these are not going to be editable anyway.
-				const UObject* ComponentTemplate = Component->GetArchetype();
-				if (ComponentTemplate && ComponentTemplate != Component->GetClass()->GetDefaultObject())
+				FActorComponentInstanceData* ComponentInstanceData = Component->GetComponentInstanceData();
+				if (ComponentInstanceData)
 				{
-					FActorComponentInstanceData* ComponentInstanceData = Component->GetComponentInstanceData();
-					if (ComponentInstanceData)
-					{
-						ComponentsInstanceData.Add(ComponentInstanceData);
-					}
+					ComponentsInstanceData.Add(ComponentInstanceData);
 				}
 			}
 			else if (Component->CreationMethod == EComponentCreationMethod::Instance)

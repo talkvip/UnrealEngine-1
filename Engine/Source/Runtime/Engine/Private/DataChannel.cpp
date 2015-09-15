@@ -79,10 +79,10 @@ void UChannel::Close()
 	{
 		if ( ChIndex == 0 )
 		{
-			UE_LOG(LogNet, Log, TEXT("UChannel::Close: Sending CloseBunch. ChIndex == 0. Name: %s"), *GetName());
+			UE_LOG(LogNet, Log, TEXT("UChannel::Close: Sending CloseBunch. ChIndex == 0. Name: %s"), *Describe());
 		}
 
-		UE_LOG(LogNetDormancy, Verbose, TEXT("UChannel::Close: Sending CloseBunch. ChIndex: %d, Name: %s, Dormant: %d"), ChIndex, *GetName(), Dormant );
+		UE_LOG(LogNetDormancy, Verbose, TEXT("UChannel::Close: Sending CloseBunch. Dormant: %d, %s"), Dormant, *Describe());
 
 		// Send a close notify, and wait for ack.
 		FOutBunch CloseBunch( this, 1 );
@@ -119,11 +119,7 @@ bool UChannel::CleanUp( const bool bForDestroy )
 	// if this is the control channel, make sure we properly killed the connection
 	if (ChIndex == 0 && !Closing)
 	{
-		UE_LOG(LogNet, Log, TEXT("UChannel::CleanUp: [%s] [%s] [%s]. ChIndex == 0. Closing connection."), 
-			Connection->Driver ? *Connection->Driver->NetDriverName.ToString() : TEXT("NULL"),
-			Connection->PlayerController ? *Connection->PlayerController->GetName() : TEXT("NoPC"),
-			Connection->OwningActor ? *Connection->OwningActor->GetName() : TEXT("No Owner"));
-
+		UE_LOG(LogNet, Log, TEXT("UChannel::CleanUp: ChIndex == 0. Closing connection. %s"), *Describe());
 		Connection->Close();
 	}
 
@@ -230,7 +226,7 @@ void UChannel::ReceivedAcks()
 	// If a close has been acknowledged in sequence, we're done.
 	if( DoClose || (OpenTemporary && OpenAcked) )
 	{
-		UE_LOG(LogNetDormancy, Verbose, TEXT("Channel[%d] '%s' DoClose. Dormant: %d"), ChIndex, *Describe(), Dormant );		
+		UE_LOG(LogNetDormancy, Verbose, TEXT("ReceivedAcks: Cleaning up after close acked. Dormant: %d %s"), Dormant, *Describe());		
 
 		check(!OutRec);
 		ConditionalCleanUp();
@@ -587,8 +583,13 @@ bool UChannel::ReceivedNextBunch( FInBunch & Bunch, bool & bOutSkipAck )
 			// (unless we opened it locally, in which case it's safe to process packets)
 			if ( !OpenedLocally && !OpenAcked )
 			{
-				// If we receive a reliable at this point, this means reliables are out of order, which shouldn't be possible
-				check( !HandleBunch->bReliable );
+				if ( HandleBunch->bReliable )
+				{
+					UE_LOG( LogNetTraffic, Error, TEXT( "ReceivedNextBunch: Reliable bunch before channel was fully open. ChSequence: %i, OpenPacketId.First: %i, OpenPacketId.Last: %i, bPartial: %i, %s" ), Bunch.ChSequence, OpenPacketId.First, OpenPacketId.Last, ( int32 )HandleBunch->bPartial, *Describe() );
+					Bunch.SetError();
+					return false;
+				}
+
 				check( !Connection->InternalAck );	// Shouldn't be possible for 100% reliable connections
 
 				// Don't ack this packet (since we won't process all of it)
@@ -808,7 +809,7 @@ FPacketIdRange UChannel::SendBunch( FOutBunch* Bunch, bool Merge )
 
 	if (Bunch->bReliable && (NumOutRec + OutgoingBunches.Num() >= RELIABLE_BUFFER + Bunch->bClose))
 	{
-		UE_LOG(LogNetPartialBunch, Warning, TEXT("Channel[%d] - %s. Reliable partial bunch overflows reliable buffer!"), ChIndex, *Describe() );
+		UE_LOG(LogNetPartialBunch, Warning, TEXT("SendBunch: Reliable partial bunch overflows reliable buffer! %s"), *Describe() );
 		UE_LOG(LogNetPartialBunch, Warning, TEXT("   Num OutgoingBunches: %d. NumOutRec: %d"), OutgoingBunches.Num(), NumOutRec );
 		PrintReliableBunchBuffer();
 
@@ -904,7 +905,7 @@ FOutBunch* UChannel::PrepBunch(FOutBunch* Bunch, FOutBunch* OutBunch, bool Merge
 #if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
 			if (!(NumOutRec<RELIABLE_BUFFER-1+Bunch->bClose))
 			{
-				UE_LOG(LogNetTraffic, Warning, TEXT("Reliable buffer overflow! %s"), *Describe());
+				UE_LOG(LogNetTraffic, Warning, TEXT("PrepBunch: Reliable buffer overflow! %s"), *Describe());
 				PrintReliableBunchBuffer();
 			}
 #else
@@ -967,7 +968,7 @@ int32 UChannel::SendRawBunch(FOutBunch* OutBunch, bool Merge)
 
 FString UChannel::Describe()
 {
-	return FString(TEXT("State=")) + (Closing ? TEXT("closing") : TEXT("open") );
+	return FString::Printf(TEXT("[UChannel] ChIndex: %d, Closing: %d %s"), ChIndex, (int32)Closing, Connection ? *Connection->Describe() : TEXT( "NULL CONNECTION" ));
 }
 
 
@@ -1177,6 +1178,17 @@ void UControlChannel::ReceivedBunch( FInBunch& Bunch )
 					UE_LOG(LogNet, Warning, TEXT("UControlChannel::RecievedBunch: The client is sending an actor channel failure message with an invalid actor channel index."));
 				}
 
+			}
+		}
+		else if (MessageType == NMT_GameSpecific)
+		{
+			// the most common Notify handlers do not support subclasses by default and so we redirect the game specific messaging to the GameInstance instead
+			uint8 MessageByte;
+			FString MessageStr;
+			FNetControlMessage<NMT_GameSpecific>::Receive(Bunch, MessageByte, MessageStr);
+			if (Connection->Driver->World != NULL && Connection->Driver->World->GetGameInstance() != NULL)
+			{
+				Connection->Driver->World->GetGameInstance()->HandleGameNetControlMessage(Connection, MessageByte, MessageStr);
 			}
 		}
 		else if(MessageType == NMT_SecurityViolation)
@@ -1390,7 +1402,7 @@ void UControlChannel::Tick()
 
 FString UControlChannel::Describe()
 {
-	return FString(TEXT("Text ")) + UChannel::Describe();
+	return UChannel::Describe();
 }
 
 /*-----------------------------------------------------------------------------
@@ -1502,7 +1514,7 @@ bool UActorChannel::CleanUp( const bool bForDestroy )
 
 	const bool bIsServer = Connection->Driver->IsServer();
 
-	UE_LOG( LogNetTraffic, Log, TEXT( "UActorChannel::CleanUp: Channel: %i, IsServer: %s" ), ChIndex, bIsServer ? TEXT( "YES" ) : TEXT( "NO" ) );
+	UE_LOG( LogNetTraffic, Log, TEXT( "UActorChannel::CleanUp: %s" ), *Describe() );
 
 	// If we're the client, destroy this actor.
 	if (!bIsServer)
@@ -1514,10 +1526,16 @@ bool UActorChannel::CleanUp( const bool bForDestroy )
 		{
 			if (Actor->bTearOff && !Connection->Driver->ShouldClientDestroyTearOffActors())
 			{
-				Actor->Role = ROLE_Authority;
-				Actor->SetReplicates(false);
-				bTornOff = true;
-				Actor->TornOff();
+				if (!bTornOff)
+				{
+					Actor->Role = ROLE_Authority;
+					Actor->SetReplicates(false);
+					bTornOff = true;
+					if (Actor->GetWorld() != NULL && !GIsRequestingExit)
+					{
+						Actor->TornOff();
+					}
+				}
 			}
 			else if (Dormant && !Actor->bTearOff)
 			{
@@ -1525,7 +1543,7 @@ bool UActorChannel::CleanUp( const bool bForDestroy )
 			}
 			else if (!Actor->bNetTemporary && Actor->GetWorld() != NULL && !GIsRequestingExit)
 			{
-				UE_LOG(LogNetDormancy, Verbose, TEXT("Channel[%d] '%s' Destroying Actor."), ChIndex, *Describe() );
+				UE_LOG(LogNetDormancy, Verbose, TEXT("UActorChannel::CleanUp: Destroying Actor. %s"), *Describe() );
 
 				DestroyActorAndComponents();
 			}
@@ -2262,10 +2280,14 @@ bool UActorChannel::ReplicateActor()
 
 FString UActorChannel::Describe()
 {
-	if( Closing || !Actor )
-		return FString(TEXT("Actor=None ")) + UChannel::Describe();
+	if (!Actor)
+	{
+		return FString::Printf(TEXT("Actor: None %s"), *UChannel::Describe());
+	}
 	else
-		return FString::Printf(TEXT("Actor=%s (Role=%i RemoteRole=%i)"), *Actor->GetFullName(), (int32)Actor->Role, (int32)Actor->GetRemoteRole() ) + UChannel::Describe();
+	{
+		return FString::Printf(TEXT("[UActorChannel] Actor: %s, Role: %i, RemoteRole: %i %s"), *Actor->GetFullName(), ( int32 )Actor->Role, ( int32 )Actor->GetRemoteRole(), *UChannel::Describe());
+	}
 }
 
 
@@ -2296,7 +2318,7 @@ void UActorChannel::QueueRemoteFunctionBunch( UObject* CallTarget, UFunction* Fu
 
 void UActorChannel::BecomeDormant()
 {
-	UE_LOG(LogNetDormancy, Verbose, TEXT("Channel[%d] '%s' BecomeDormant()"), ChIndex, *Describe() );
+	UE_LOG(LogNetDormancy, Verbose, TEXT("BecomeDormant: %s"), *Describe() );
 	bPendingDormancy = false;
 	Dormant = true;
 	Close();
@@ -2321,7 +2343,7 @@ bool UActorChannel::ReadyForDormancy(bool suppressLogs)
 
 void UActorChannel::StartBecomingDormant()
 {
-	UE_LOG(LogNetDormancy, Verbose, TEXT("Channel[%d] '%s' StartBecomingDormant()"), ChIndex, *Describe() );
+	UE_LOG(LogNetDormancy, Verbose, TEXT("StartBecomingDormant: %s"), *Describe() );
 
 	for (auto MapIt = ReplicationMap.CreateIterator(); MapIt; ++MapIt)
 	{
@@ -2517,7 +2539,7 @@ UObject* UActorChannel::ReadContentBlockHeader(FInBunch & Bunch, bool& bObjectDe
 			// (ignore though if this is for replays)
 			if ( !Connection->InternalAck )
 			{
-				UE_LOG( LogNetTraffic, Error, TEXT( "ReadContentBlockHeader: Stably named sub-object not found. Actor: %s" ), *Actor->GetName() );
+				UE_LOG( LogNetTraffic, Error, TEXT( "ReadContentBlockHeader: Stably named sub-object not found. Component: %s, Actor: %s" ), *Connection->Driver->GuidCache->FullNetGUIDPath( NetGUID ), *Actor->GetName() );
 				Bunch.SetError();
 			}
 

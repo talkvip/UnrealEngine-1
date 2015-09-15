@@ -3,6 +3,7 @@
 #include "FriendsAndChatPrivatePCH.h"
 #include "ChatChromeTabViewModel.h"
 #include "ChatViewModel.h"
+#include "ChatDisplayService.h"
 
 class FChatChromeTabViewModelImpl
 	: public FChatChromeTabViewModel
@@ -14,39 +15,61 @@ public:
 	{
 	}
 
-	bool IsTabVisible() const override
+	virtual bool IsTabVisible() const override
 	{
 		if (!ChatViewModel.IsValid())
 		{
 			return false;
 		}
 
-		if(ChatViewModel->GetChatChannelType() == EChatMessageType::Whisper)
+		if (ChatViewModel->GetDefaultChannelType() == EChatMessageType::Party)
 		{
-			return (ChatViewModel->IsWhisperFriendSet() || ChatViewModel->GetMessageCount() > 0);
+			return ChatViewModel->IsInPartyChat() ||  ChatViewModel->IsInGameChat();
+		}
+
+		if (ChatViewModel->GetDefaultChannelType() == EChatMessageType::Whisper)
+		{
+			return (ChatViewModel->IsWhisperFriendSet() || ChatViewModel->GetMessageCount() > 0 || ChatViewModel->IsOverrideDisplaySet());
 		}
 
 		return true;
 	}
 
-	const FText GetTabText() const override
+	virtual const FText GetTabText() const override
 	{
 		return ChatViewModel->GetChatGroupText(false);
 	}
 
-	virtual const EChatMessageType::Type GetTabID() const override
+	virtual FText GetMessageNotificationsText() const override
 	{
-		return ChatViewModel->GetChatChannelType();
+		int32 Messages = ChatViewModel.IsValid() ? ChatViewModel->GetUnreadChannelMessageCount() : 0;
+		if (Messages < 10)
+		{
+			return FText::AsNumber(Messages);
+		}
+		const FText Count = FText::AsNumber(9);
+		return FText::Format(NSLOCTEXT("","PlusNumber","{0}+"), Count);
 	}
 
-	const FSlateBrush* GetTabImage() const override
+	virtual const EChatMessageType::Type GetTabID() const override
+	{
+		return ChatViewModel->GetDefaultChannelType();
+	}
+
+	virtual const FSlateBrush* GetTabImage() const override
 	{
 		return nullptr;
 	}
 
-	const TSharedPtr<FChatViewModel> GetChatViewModel() const override
+	virtual const TSharedPtr<FChatViewModel> GetChatViewModel() const override
 	{
 		return ChatViewModel;
+	}
+
+	virtual TSharedRef<IChatTabViewModel> Clone(TSharedRef<IChatDisplayService> ChatDisplayService,  TArray<TSharedRef<ICustomSlashCommand> >* CustomSlashCommands) override
+	{
+		TSharedRef< FChatChromeTabViewModelImpl > ViewModel(new FChatChromeTabViewModelImpl(ChatViewModel->Clone(ChatDisplayService, CustomSlashCommands)));
+		return ViewModel;
 	}
 
 	DECLARE_DERIVED_EVENT(FChatChromeTabViewModelImpl, IChatTabViewModel::FChatTabVisibilityChangedEvent, FChatTabVisibilityChangedEvent)

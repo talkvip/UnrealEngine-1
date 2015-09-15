@@ -160,7 +160,7 @@ namespace UnrealBuildTool
 						throw new BuildException("Configuration setting was using ${PROJECT_ROOT}, but there was no project specified");
 					}
 
-					string Temp = Result.Replace("${PROJECT_ROOT}", Path.GetFullPath(UnrealBuildTool.GetUProjectPath()));
+					string Temp = Result.Replace("${PROJECT_ROOT}", Path.GetFullPath(UnrealBuildTool.GetUProjectPath().FullName));
 					
 					// get the best version
 					Result = LookForSpecialFile(Temp);
@@ -211,7 +211,7 @@ namespace UnrealBuildTool
 		{
 			base.ParseProjectSettings();
 
-			ConfigCacheIni Ini = new ConfigCacheIni(UnrealTargetPlatform.IOS, "Engine", UnrealBuildTool.GetUProjectPath());
+			ConfigCacheIni Ini = ConfigCacheIni.CreateConfigCacheIni(UnrealTargetPlatform.IOS, "Engine", UnrealBuildTool.GetUProjectPath());
 			string ServerName = RemoteServerName;
 			if (Ini.GetString("/Script/IOSRuntimeSettings.IOSRuntimeSettings", "RemoteServerName", out ServerName) && !String.IsNullOrEmpty(ServerName))
 			{
@@ -387,16 +387,18 @@ namespace UnrealBuildTool
 					if (!bFoundOverrideSSHPrivateKey)
 					{
 						// all the places to look for a key
-						string[] Locations = new string[] {
-							Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Unreal Engine", "UnrealBuildTool"),
-							Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Personal), "Unreal Engine", "UnrealBuildTool"),
-							Path.Combine(UnrealBuildTool.GetUProjectPath(), "Build", "NotForLicensees"),
-							Path.Combine(UnrealBuildTool.GetUProjectPath(), "Build", "NoRedist"),
-							Path.Combine(UnrealBuildTool.GetUProjectPath(), "Build"),
-							Path.Combine(BuildConfiguration.RelativeEnginePath, "Build", "NotForLicensees"),
-							Path.Combine(BuildConfiguration.RelativeEnginePath, "Build", "NoRedist"),
-							Path.Combine(BuildConfiguration.RelativeEnginePath, "Build"),
-						};
+						List<string> Locations = new List<string>();
+						Locations.Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Unreal Engine", "UnrealBuildTool"));
+						Locations.Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Personal), "Unreal Engine", "UnrealBuildTool"));
+						if(UnrealBuildTool.HasUProjectFile())
+						{
+							Locations.Add(Path.Combine(UnrealBuildTool.GetUProjectPath().FullName, "Build", "NotForLicensees"));
+							Locations.Add(Path.Combine(UnrealBuildTool.GetUProjectPath().FullName, "Build", "NoRedist"));
+							Locations.Add(Path.Combine(UnrealBuildTool.GetUProjectPath().FullName, "Build"));
+						}
+						Locations.Add(Path.Combine(BuildConfiguration.RelativeEnginePath, "Build", "NotForLicensees"));
+						Locations.Add(Path.Combine(BuildConfiguration.RelativeEnginePath, "Build", "NoRedist"));
+						Locations.Add(Path.Combine(BuildConfiguration.RelativeEnginePath, "Build"));
 
 						// look for a key file
 						foreach (string Location in Locations)
@@ -472,7 +474,7 @@ namespace UnrealBuildTool
 		}
 
         /** Converts the passed in path from UBT host to compiler native format. */
-        public override String ConvertPath(String OriginalPath)
+        public override string ConvertPath(string OriginalPath)
         {
             if (BuildHostPlatform.Current.Platform != UnrealTargetPlatform.Mac)
             {
@@ -507,7 +509,7 @@ namespace UnrealBuildTool
 			}
 			else
 			{
-				return ".";
+				return UnrealBuildTool.EngineSourceDirectory.FullName;;
 			}
 		}
 
@@ -644,11 +646,14 @@ namespace UnrealBuildTool
 		}
 
 		private static Dictionary<Object,StringBuilder> SSHOutputMap = new Dictionary<object,StringBuilder>();
+		private static System.Threading.Mutex DictionaryLock = new System.Threading.Mutex();
 		static public void OutputReceivedForSSH(Object Sender, DataReceivedEventArgs Line)
 		{
 			if ((Line != null) && (Line.Data != null) && (Line.Data != ""))
 			{
+				DictionaryLock.WaitOne();
 				StringBuilder SSHOutput = SSHOutputMap[Sender];
+				DictionaryLock.ReleaseMutex();
 				if (SSHOutput.Length != 0)
 				{
 					SSHOutput.Append(Environment.NewLine);
@@ -890,7 +895,9 @@ namespace UnrealBuildTool
 			Hashtable Return = new Hashtable();
 
 			// add this process to the map
+			DictionaryLock.WaitOne();
 			SSHOutputMap[SSHProcess] = new StringBuilder("");
+			DictionaryLock.ReleaseMutex();
 			SSHProcess.OutputDataReceived += new DataReceivedEventHandler(OutputReceivedForSSH);
 			SSHProcess.ErrorDataReceived += new DataReceivedEventHandler(OutputReceivedForSSH);
 
@@ -899,10 +906,12 @@ namespace UnrealBuildTool
 			Console.WriteLine("Execute took {0}", (DateTime.Now - Start).ToString());
 
 			// now we have enough to fill out the HashTable
+			DictionaryLock.WaitOne();
 			Return["CommandOutput"] = SSHOutputMap[SSHProcess].ToString();
 			Return["ExitCode"] = (object)ExitCode;
 
 			SSHOutputMap.Remove(SSHProcess);
+			DictionaryLock.ReleaseMutex();
 
 			return Return;
 		}

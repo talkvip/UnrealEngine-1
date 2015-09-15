@@ -192,29 +192,51 @@ void UBehaviorTreeComponent::StopTree(EBTStopMode::Type StopMode)
 			InstanceInfo.ActiveAuxNodes.Reset();
 
 			// notify active parallel tasks
+			//
+			// calling OnTaskFinished with result other than InProgress will unregister parallel task,
+			// modifying array we're iterating on - iterator needs to be moved one step back in that case
+			//
 			for (int32 ParallelIndex = 0; ParallelIndex < InstanceInfo.ParallelTasks.Num(); ParallelIndex++)
 			{
-				FBehaviorTreeParallelTask& ParalleInfo = InstanceInfo.ParallelTasks[ParallelIndex];
-				if (ParalleInfo.TaskNode && (ParalleInfo.Status == EBTTaskStatus::Active))
-				{
-					// remove all message observers from node to abort to avoid calling OnTaskFinished from AbortTask
-					UnregisterMessageObserversFrom(ParalleInfo.TaskNode);
+				FBehaviorTreeParallelTask& ParallelTaskInfo = InstanceInfo.ParallelTasks[ParallelIndex];
+				const UBTTaskNode* CachedTaskNode = ParallelTaskInfo.TaskNode;
 
-					uint8* NodeMemory = ParalleInfo.TaskNode->GetNodeMemory<uint8>(InstanceInfo);
-					EBTNodeResult::Type NodeResult = ParalleInfo.TaskNode->WrappedAbortTask(*this, NodeMemory);
+				if (CachedTaskNode && (ParallelTaskInfo.Status == EBTTaskStatus::Active) && !CachedTaskNode->IsPendingKill())
+				{
+					// remove all message observers added by task execution, so they won't interfere with Abort call
+					UnregisterMessageObserversFrom(CachedTaskNode);
+
+					uint8* NodeMemory = CachedTaskNode->GetNodeMemory<uint8>(InstanceInfo);
+					EBTNodeResult::Type NodeResult = CachedTaskNode->WrappedAbortTask(*this, NodeMemory);
 
 					UE_VLOG(GetOwner(), LogBehaviorTree, Log, TEXT("Parallel task aborted: %s (%s)"),
-						*UBehaviorTreeTypes::DescribeNodeHelper(ParalleInfo.TaskNode),
+						*UBehaviorTreeTypes::DescribeNodeHelper(CachedTaskNode),
 						(NodeResult == EBTNodeResult::InProgress) ? TEXT("in progress") : TEXT("instant"));
 
 					// mark as pending abort
 					if (NodeResult == EBTNodeResult::InProgress)
 					{
-						ParalleInfo.Status = EBTTaskStatus::Aborting;
-						bWaitingForAbortingTasks = true;
+						const bool bIsValidForStatus = InstanceInfo.ParallelTasks.IsValidIndex(ParallelIndex) && (ParallelTaskInfo.TaskNode == CachedTaskNode);
+						if (bIsValidForStatus)
+						{
+							ParallelTaskInfo.Status = EBTTaskStatus::Aborting;
+							bWaitingForAbortingTasks = true;
+						}
+						else
+						{
+							UE_VLOG(GetOwner(), LogBehaviorTree, Warning, TEXT("Parallel task %s was unregistered before completing Abort state!"),
+								*UBehaviorTreeTypes::DescribeNodeHelper(CachedTaskNode));
+						}
 					}
 
-					OnTaskFinished(ParalleInfo.TaskNode, NodeResult);
+					OnTaskFinished(CachedTaskNode, NodeResult);
+
+					const bool bIsValidAfterFinishing = InstanceInfo.ParallelTasks.IsValidIndex(ParallelIndex) && (ParallelTaskInfo.TaskNode == CachedTaskNode);
+					if (!bIsValidAfterFinishing)
+					{
+						// move iterator back if current task was unregistered
+						ParallelIndex--;
+					}
 				}
 			}
 
@@ -469,6 +491,11 @@ bool UBehaviorTreeComponent::IsAuxNodeActive(const UBTAuxiliaryNode* AuxNode) co
 	}
 
 	return false;
+}
+
+bool UBehaviorTreeComponent::IsAuxNodeActive(const UBTAuxiliaryNode* AuxNodeTemplate, int32 InstanceIdx) const
+{
+	return InstanceStack.IsValidIndex(InstanceIdx) && InstanceStack[InstanceIdx].ActiveAuxNodes.Contains(AuxNodeTemplate);
 }
 
 EBTTaskStatus::Type UBehaviorTreeComponent::GetTaskStatus(const UBTTaskNode* TaskNode) const
@@ -1175,6 +1202,22 @@ void UBehaviorTreeComponent::ProcessExecutionRequest()
 		{
 			const FBTNodeIndex NextTaskIdx(ActiveInstanceIdx, NextTask->GetExecutionIndex());
 			bIsSearchValid = NextTaskIdx.TakesPriorityOver(ExecutionRequest.SearchEnd);
+			
+			// is new task is valid, but wants to ignore rerunning itself
+			// check it's the same as active node (or any of active parallel tasks)
+			if (bIsSearchValid && NextTask->ShouldIgnoreRestartSelf())
+			{
+				for (int32 TestInstanceIdx = 0; TestInstanceIdx <= ActiveInstanceIdx; TestInstanceIdx++)
+				{
+					const bool bIsTaskRunning = InstanceStack[TestInstanceIdx].HasActiveNode(NextTaskIdx.ExecutionIndex);
+					if (bIsTaskRunning)
+					{
+						BT_SEARCHLOG(SearchData, Verbose, TEXT("Task doesn't allow restart and it's already running! Discaring search."));
+						bIsSearchValid = false;
+						break;
+					}
+				}
+			}
 		}
 
 		if (bIsSearchValid)

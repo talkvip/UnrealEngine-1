@@ -70,7 +70,7 @@ FPropertyAccess::Result FPropertyValueImpl::GetPropertyValueString( FString& Out
 				{
 					const uint8 EnumValue = ByteProperty->GetPropertyValue(ValueAddress);
 
-					if (EnumValue >= 0 && EnumValue < ByteProperty->Enum->GetMaxEnumValue() + 1)
+					if (ByteProperty->Enum->IsValidEnumValue(EnumValue))
 					{
 						// See if we specified an alternate name for this value using metadata
 						OutString = ByteProperty->Enum->GetDisplayNameTextByValue(EnumValue).ToString();
@@ -519,9 +519,15 @@ void FPropertyValueImpl::SetOnPropertyValueChanged( const FSimpleDelegate& InOnP
 {
 	if( PropertyNode.IsValid() )
 	{
-		PropertyValueChangedDelegate = InOnPropertyValueChanged;
-
 		PropertyNode.Pin()->OnPropertyValueChanged().Add( InOnPropertyValueChanged );
+	}
+}
+
+void FPropertyValueImpl::SetOnChildPropertyValueChanged( const FSimpleDelegate& InOnChildPropertyValueChanged )
+{
+	if( PropertyNode.IsValid() )
+	{
+		PropertyNode.Pin()->OnChildPropertyValueChanged().Add( InOnChildPropertyValueChanged );
 	}
 }
 
@@ -688,12 +694,6 @@ FPropertyAccess::Result FPropertyValueImpl::SetValueAsString( const FString& InV
 					// Starting with something valid -- break.
 					break;
 				}
-			}
-
-			// Ensure the name is enclosed with quotes.
-			if( Value.Len() )
-			{
-				Value = FString::Printf( TEXT("\"%s\""), *Value.TrimQuotes() );
 			}
 		}
 
@@ -1390,10 +1390,22 @@ void FPropertyValueImpl::DuplicateChild( TSharedPtr<FPropertyNode> ChildNodeToDu
 
 		ArrayHelper.InsertValues(Index);
 
-
 		// Copy the selected item's value to the new item.
-		NodeProperty->CopyCompleteValue(ArrayHelper.GetRawPtr(ChildNodePtr->GetArrayIndex()), ArrayHelper.GetRawPtr(ChildNodePtr->GetArrayIndex() + 1));
+		NodeProperty->CopyCompleteValue(ArrayHelper.GetRawPtr(Index), ArrayHelper.GetRawPtr(Index + 1));
 
+		if (UObjectProperty* ObjProp = Cast<UObjectProperty>(NodeProperty))
+		{
+			UObject* CurrentObject = ObjProp->GetObjectPropertyValue(ArrayHelper.GetRawPtr(Index));
+
+			// Fpr DefaultSubObjects and ArchetypeObjects we need to do a deep copy instead of a shallow copy
+			if (CurrentObject && CurrentObject->HasAnyFlags(RF_DefaultSubObject | RF_ArchetypeObject))
+			{
+				// Make a deep copy and assign it into the array.
+				UObject* DuplicatedObject = DuplicateObject(CurrentObject, CurrentObject->GetOuter());
+				ObjProp->SetObjectPropertyValue(ArrayHelper.GetRawPtr(Index + 1), DuplicatedObject);
+			}
+		}
+		
 		// Find the object that owns the array and instance any subobjects
 		if (FObjectPropertyNode* ObjectPropertyNode = ChildNodePtr->FindObjectItemParent())
 		{
@@ -1428,7 +1440,7 @@ void FPropertyValueImpl::DuplicateChild( TSharedPtr<FPropertyNode> ChildNodeToDu
 	}
 }
 
-bool FPropertyValueImpl::HasValidProperty() const
+bool FPropertyValueImpl::HasValidPropertyNode() const
 {
 	return PropertyNode.IsValid();
 }
@@ -1476,7 +1488,7 @@ FPropertyHandleBase::FPropertyHandleBase( TSharedPtr<FPropertyNode> PropertyNode
  
 bool FPropertyHandleBase::IsValidHandle() const
 {
-	return Implementation->HasValidProperty();
+	return Implementation->HasValidPropertyNode();
 }
 
 FText FPropertyHandleBase::GetPropertyDisplayName() const
@@ -1677,6 +1689,11 @@ void FPropertyHandleBase::AccessRawData( TArray<const void*>& RawData ) const
 void FPropertyHandleBase::SetOnPropertyValueChanged( const FSimpleDelegate& InOnPropertyValueChanged )
 {
 	return Implementation->SetOnPropertyValueChanged(InOnPropertyValueChanged);
+}
+
+void FPropertyHandleBase::SetOnChildPropertyValueChanged( const FSimpleDelegate& InOnChildPropertyValueChanged )
+{
+	return Implementation->SetOnChildPropertyValueChanged( InOnChildPropertyValueChanged );
 }
 
 TSharedPtr<FPropertyNode> FPropertyHandleBase::GetPropertyNode() const
@@ -2000,6 +2017,17 @@ void FPropertyHandleBase::NotifyPostChange()
 	{
 		FPropertyChangedEvent PropertyChangedEvent( PropertyNode->GetProperty() );
 		PropertyNode->NotifyPostChange( PropertyChangedEvent, Implementation->GetNotifyHook() );
+	}
+}
+
+void FPropertyHandleBase::NotifyFinishedChangingProperties()
+{
+	TSharedPtr<FPropertyNode> PropertyNode = Implementation->GetPropertyNode();
+	if( PropertyNode.IsValid() )
+	{
+		FPropertyChangedEvent ChangeEvent(PropertyNode->GetProperty(), EPropertyChangeType::ValueSet);
+		PropertyNode->FixPropertiesInEvent(ChangeEvent);
+		Implementation->GetPropertyUtilities()->NotifyFinishedChangingProperties(ChangeEvent);
 	}
 }
 
@@ -2961,5 +2989,5 @@ TSharedRef<IPropertyHandle> FPropertyHandleArray::GetElement( int32 Index ) cons
 bool FPropertyHandleArray::IsEditable() const
 {
 	// Property is editable if its a non-const dynamic array
-	return Implementation->HasValidProperty() && !Implementation->IsEditConst() && Implementation->IsPropertyTypeOf(UArrayProperty::StaticClass());
+	return Implementation->HasValidPropertyNode() && !Implementation->IsEditConst() && Implementation->IsPropertyTypeOf(UArrayProperty::StaticClass());
 }

@@ -692,12 +692,12 @@ static FORCEINLINE bool NeedsPrePass(const FDeferredShadingSceneRenderer* Render
  */
 static FORCEINLINE bool HasHiddenAreaMask()
 {
-	static const IConsoleVariable* const CVar = IConsoleManager::Get().FindConsoleVariable(TEXT("vr.HiddenAreaMask"));
-
-	return (CVar->GetInt() == 1 &&
+	static const auto* const HiddenAreaMaskCVar = IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("vr.HiddenAreaMask"));
+	return (HiddenAreaMaskCVar != nullptr &&
+		HiddenAreaMaskCVar->GetValueOnRenderThread() == 1 &&
 		GEngine &&
 		GEngine->HMDDevice.IsValid() &&
-		GEngine->HMDDevice->HasHiddenAreaMask());
+		GEngine->HMDDevice->HasHiddenAreaMesh());
 }
 
 static void SetAndClearViewGBuffer(FRHICommandListImmediate& RHICmdList, FViewInfo& View, bool bClearDepth)
@@ -766,7 +766,7 @@ void FDeferredShadingSceneRenderer::RenderOcclusion(FRHICommandListImmediate& RH
 			for (int32 Dest = 1; Dest < NumFrames; Dest++)
 			{
 				OcclusionSubmittedFence[Dest] = OcclusionSubmittedFence[Dest - 1];
-			}
+		}
 			OcclusionSubmittedFence[0] = RHICmdList.RHIThreadFence();
 		}
 	}
@@ -779,9 +779,18 @@ static void ServiceLocalQueue()
 	FTaskGraphInterface::Get().ProcessThreadUntilIdle(ENamedThreads::RenderThread_Local);
 }
 
+static TAutoConsoleVariable<float> CVarStallInitViews(
+	TEXT("CriticalPathStall.AfterInitViews"),
+	0.0f,
+	TEXT("Sleep for the given time after InitViews. Time is given in ms. This is a debug option used for critical path analysis and forcing a change in the critical path."));
+
 void FDeferredShadingSceneRenderer::Render(FRHICommandListImmediate& RHICmdList)
 {
 	FSceneRenderTargets& SceneContext = FSceneRenderTargets::Get(RHICmdList);
+
+	// this way we make sure the SceneColor format is the correct one and not the one from the end of frame before
+	SceneContext.ReleaseSceneColor();
+
 	bool bDBuffer = IsDBufferEnabled();	
 
 	if (GRHIThread)
@@ -810,6 +819,13 @@ void FDeferredShadingSceneRenderer::Render(FRHICommandListImmediate& RHICmdList)
 
 	// Find the visible primitives.
 	InitViews(RHICmdList);
+#if !UE_BUILD_SHIPPING
+	if (CVarStallInitViews.GetValueOnRenderThread() > 0.0f)
+	{
+		QUICK_SCOPE_CYCLE_COUNTER(STAT_InitViews_Intentional_Stall);
+		FPlatformProcess::Sleep(CVarStallInitViews.GetValueOnRenderThread() / 1000.0f);
+	}
+#endif
 
 	if (GRHICommandList.UseParallelAlgorithms())
 	{
@@ -853,10 +869,6 @@ void FDeferredShadingSceneRenderer::Render(FRHICommandListImmediate& RHICmdList)
 
 	static const auto GBufferCVar = IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.GBuffer"));
 	bool bGBuffer = GBufferCVar ? (GBufferCVar->GetValueOnRenderThread() != 0) : true;
-	if (ViewFamily.EngineShowFlags.ForceGBuffer)
-	{
-		bGBuffer = true;
-	}
 
 	if (ClearMethodCVar)
 	{
@@ -1024,8 +1036,7 @@ void FDeferredShadingSceneRenderer::Render(FRHICommandListImmediate& RHICmdList)
 	if (bIsWireframe && FSceneRenderer::ShouldCompositeEditorPrimitives(Views[0]))
 	{
 		// In Editor we want wire frame view modes to be MSAA for better quality. Resolve will be done with EditorPrimitives
-		SetRenderTarget(RHICmdList, SceneContext.GetEditorPrimitivesColor(), SceneContext.GetEditorPrimitivesDepth());
-		RHICmdList.Clear(true, FLinearColor(0, 0, 0, 0), true, (float)ERHIZBuffer::FarPlane, false, 0, FIntRect());
+		SetRenderTarget(RHICmdList, SceneContext.GetEditorPrimitivesColor(), SceneContext.GetEditorPrimitivesDepth(), ESimpleRenderTargetMode::EClearColorAndDepth);
 	}
 	else if (!bIsGBufferCurrent)
 	{
@@ -1269,7 +1280,7 @@ void FDeferredShadingSceneRenderer::Render(FRHICommandListImmediate& RHICmdList)
 		RenderTranslucency(RHICmdList);
 		ServiceLocalQueue();
 
-		if (ViewFamily.EngineShowFlags.Refraction)
+		if(GetRefractionQuality(ViewFamily) > 0)
 		{
 			// To apply refraction effect by distorting the scene color.
 			// After non separate translucency as that is considered at scene depth anyway
@@ -1413,7 +1424,7 @@ static void RenderHiddenAreaMaskView(FRHICommandList& RHICmdList, const FViewInf
 	TShaderMapRef<TOneColorVS<true> > VertexShader(ShaderMap);
 	static FGlobalBoundShaderState BoundShaderState;
 	SetGlobalBoundShaderState(RHICmdList, FeatureLevel, BoundShaderState, GetVertexDeclarationFVector4(), *VertexShader, nullptr);
-	GEngine->HMDDevice->DrawHiddenAreaMaskView_RenderThread(RHICmdList, View);
+	GEngine->HMDDevice->DrawHiddenAreaMesh_RenderThread(RHICmdList, View.StereoPass);
 }
 
 bool FDeferredShadingSceneRenderer::RenderPrePassView(FRHICommandList& RHICmdList, const FViewInfo& View)
@@ -1624,9 +1635,6 @@ bool FDeferredShadingSceneRenderer::RenderPrePassHMD(FRHICommandListImmediate& R
 		return false;
 	}
 
-	SCOPED_DRAW_EVENT(RHICmdList, PrePassHMD);
-	SCOPE_CYCLE_COUNTER(STAT_DepthDrawTime);
-
 	FSceneRenderTargets& SceneContext = FSceneRenderTargets::Get(RHICmdList);
 	SceneContext.BeginRenderingPrePass(RHICmdList, true);
 
@@ -1667,10 +1675,15 @@ bool FDeferredShadingSceneRenderer::RenderBasePass(FRHICommandListImmediate& RHI
 		GPrevPerBoneMotionBlur.StartAppend(RHICmdList, ViewFamily.bWorldIsPaused);
 	}
 
-	if(ViewFamily.EngineShowFlags.LightMapDensity && AllowDebugViewmodes())
+	if (ViewFamily.EngineShowFlags.LightMapDensity && AllowDebugViewmodes())
 	{
 		// Override the base pass with the lightmap density pass if the viewmode is enabled.
 		bDirty = RenderLightMapDensities(RHICmdList);
+	}
+	else if (ViewFamily.EngineShowFlags.VertexDensities && AllowDebugViewmodes())
+	{
+		// Override the base pass with the lightmap density pass if the viewmode is enabled.
+		bDirty = RenderVertexDensities(RHICmdList);
 	}
 	else
 	{
@@ -1686,10 +1699,10 @@ bool FDeferredShadingSceneRenderer::RenderBasePass(FRHICommandListImmediate& RHI
 				FViewInfo& View = Views[ViewIndex];
 				RenderBasePassViewParallel(View, RHICmdList);
 			}
-			bDirty = true; // assume dirty since we are not going to wait
-			if (FVelocityRendering::OutputsToGBuffer())
-			{
-				GPrevPerBoneMotionBlur.EndAppendFence(RHICmdList);
+				bDirty = true; // assume dirty since we are not going to wait
+				if (FVelocityRendering::OutputsToGBuffer())
+				{
+					GPrevPerBoneMotionBlur.EndAppendFence(RHICmdList);
 			}
 		}
 		else

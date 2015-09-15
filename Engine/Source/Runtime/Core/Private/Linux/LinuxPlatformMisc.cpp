@@ -13,6 +13,7 @@
 #include <sched.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <sys/vfs.h>	// statfs()
 
 #include "ModuleManager.h"
 
@@ -95,7 +96,7 @@ void FLinuxPlatformMisc::NormalizePath(FString& InPath)
 			// if var failed
 			if (!bHaveHome)
 			{
-				struct passwd * UserInfo = getpwuid(getuid());
+				struct passwd * UserInfo = getpwuid(geteuid());
 				if (NULL != UserInfo && NULL != UserInfo->pw_dir)
 				{
 					FCString::Strcpy(CachedResult, ARRAY_COUNT(CachedResult) - 1, ANSI_TO_TCHAR(UserInfo->pw_dir));
@@ -118,6 +119,25 @@ namespace
 	bool GInitializedSDL = false;
 }
 
+size_t GCacheLineSize = CACHE_LINE_SIZE;
+
+void LinuxPlatform_UpdateCacheLineSize()
+{
+	// sysfs "API", as usual ;/
+	FILE * SysFsFile = fopen("/sys/devices/system/cpu/cpu0/cache/index0/coherency_line_size", "r");
+	if (SysFsFile)
+	{
+		int SystemLineSize = 0;
+		fscanf(SysFsFile, "%d", &SystemLineSize);
+		fclose(SysFsFile);
+
+		if (SystemLineSize > 0)
+		{
+			GCacheLineSize = SystemLineSize;
+		}
+	}
+}
+
 void FLinuxPlatformMisc::PlatformInit()
 {
 	// install a platform-specific signal handler
@@ -127,10 +147,19 @@ void FLinuxPlatformMisc::PlatformInit()
 	UE_LOG(LogInit, Log, TEXT(" - this process' id (pid) is %d, parent process' id (ppid) is %d"), static_cast< int32 >(getpid()), static_cast< int32 >(getppid()));
 	UE_LOG(LogInit, Log, TEXT(" - we are %srunning under debugger"), IsDebuggerPresent() ? TEXT("") : TEXT("not "));
 	UE_LOG(LogInit, Log, TEXT(" - machine network name is '%s'"), FPlatformProcess::ComputerName());
+	UE_LOG(LogInit, Log, TEXT(" - user name is '%s' (%s)"), FPlatformProcess::UserName(), FPlatformProcess::UserName(false));
 	UE_LOG(LogInit, Log, TEXT(" - we're logged in %s"), FPlatformMisc::HasBeenStartedRemotely() ? TEXT("remotely") : TEXT("locally"));
 	UE_LOG(LogInit, Log, TEXT(" - Number of physical cores available for the process: %d"), FPlatformMisc::NumberOfCores());
 	UE_LOG(LogInit, Log, TEXT(" - Number of logical cores available for the process: %d"), FPlatformMisc::NumberOfCoresIncludingHyperthreads());
+	LinuxPlatform_UpdateCacheLineSize();
+	UE_LOG(LogInit, Log, TEXT(" - Cache line size: %Zu"), GCacheLineSize);
 	UE_LOG(LogInit, Log, TEXT(" - Memory allocator used: %s"), GMalloc->GetDescriptiveName());
+
+	// programs don't need it by default
+	if (!IS_PROGRAM || FParse::Param(FCommandLine::Get(), TEXT("calibrateclock")))
+	{
+		FPlatformTime::CalibrateClock();
+	}
 
 	UE_LOG(LogInit, Log, TEXT("Linux-specific commandline switches:"));
 	UE_LOG(LogInit, Log, TEXT(" -%s (currently %s): suppress parsing of DWARF debug info (callstacks will be generated faster, but won't have line numbers)"), 
@@ -180,13 +209,22 @@ bool FLinuxPlatformMisc::PlatformInitMultimedia()
 			return false;
 		}
 
+		// print out version information
+		SDL_version CompileTimeSDLVersion;
+		SDL_version RunTimeSDLVersion;
+		SDL_VERSION(&CompileTimeSDLVersion);
+		SDL_GetVersion(&RunTimeSDLVersion);
+		UE_LOG(LogInit, Log, TEXT("Initialized SDL %d.%d.%d (compiled against %d.%d.%d)"),
+			CompileTimeSDLVersion.major, CompileTimeSDLVersion.minor, CompileTimeSDLVersion.patch,
+			RunTimeSDLVersion.major, RunTimeSDLVersion.minor, RunTimeSDLVersion.patch
+			);
+
 		// Used to make SDL push SDL_TEXTINPUT events.
 		SDL_StartTextInput();
 
 		GInitializedSDL = true;
 
 		// needs to come after GInitializedSDL, otherwise it will recurse here
-		// @TODO [RCL] 2014-09-30 - move to FDisplayMetrics itself sometime after 4.5
 		if (!UE_BUILD_SHIPPING)
 		{
 			// dump information about screens for debug
@@ -245,15 +283,28 @@ void FLinuxPlatformMisc::SetEnvironmentVar(const TCHAR* InVariableName, const TC
 
 void FLinuxPlatformMisc::PumpMessages( bool bFromMainLoop )
 {
-	if( bFromMainLoop )
+	if (GInitializedSDL && bFromMainLoop)
 	{
-		SDL_Event event;
-
-		while (SDL_PollEvent(&event))
+		if( LinuxApplication )
 		{
-			if( LinuxApplication )
+			LinuxApplication->SaveWindowLocationsForEventLoop();
+
+			SDL_Event event;
+
+			while (SDL_PollEvent(&event))
 			{
 				LinuxApplication->AddPendingEvent( event );
+			}
+
+			LinuxApplication->ClearWindowLocationsAfterEventLoop();
+		}
+		else
+		{
+			// No application to send events to. Just flush out the
+			// queue.
+			SDL_Event event;
+			while (SDL_PollEvent(&event))
+			{
 			}
 		}
 	}
@@ -345,6 +396,20 @@ uint32 FLinuxPlatformMisc::GetKeyMap( uint32* KeyCodes, FString* KeyNames, uint3
 
 	check(NumMappings < MaxMappings);
 	return NumMappings;
+}
+
+const TCHAR* FLinuxPlatformMisc::GetSystemErrorMessage(TCHAR* OutBuffer, int32 BufferCount, int32 Error)
+{
+	check(OutBuffer && BufferCount);
+	if (Error == 0)
+	{
+		Error = errno;
+	}
+
+	FString Message = FString::Printf(TEXT("errno=%d (%s)"), Error, UTF8_TO_TCHAR(strerror(Error)));
+	FCString::Strncpy(OutBuffer, *Message, BufferCount);
+
+	return OutBuffer;
 }
 
 void FLinuxPlatformMisc::ClipboardCopy(const TCHAR* Str)
@@ -547,7 +612,16 @@ int32 FLinuxPlatformMisc::NumberOfCores()
 		else
 		{
 			char FileNameBuffer[1024];
-			unsigned char PossibleCores[CPU_SETSIZE] = { 0 };
+			struct CpuInfo
+			{
+				int Core;
+				int Package;
+			}
+			CpuInfos[CPU_SETSIZE];
+
+			FMemory::Memzero(CpuInfos);
+			int MaxCoreId = 0;
+			int MaxPackageId = 0;
 
 			for(int32 CpuIdx = 0; CpuIdx < CPU_SETSIZE; ++CpuIdx)
 			{
@@ -555,29 +629,49 @@ int32 FLinuxPlatformMisc::NumberOfCores()
 				{
 					sprintf(FileNameBuffer, "/sys/devices/system/cpu/cpu%d/topology/core_id", CpuIdx);
 					
-					FILE* CoreIdFile = fopen(FileNameBuffer, "r");
-					unsigned int CoreId = 0;
-					if (CoreIdFile)
+					if (FILE* CoreIdFile = fopen(FileNameBuffer, "r"))
 					{
-						if (1 != fscanf(CoreIdFile, "%d", &CoreId))
+						if (1 != fscanf(CoreIdFile, "%d", &CpuInfos[CpuIdx].Core))
 						{
-							CoreId = 0;
+							CpuInfos[CpuIdx].Core = 0;
 						}
 						fclose(CoreIdFile);
 					}
 
-					if (CoreId >= ARRAY_COUNT(PossibleCores))
+					sprintf(FileNameBuffer, "/sys/devices/system/cpu/cpu%d/topology/physical_package_id", CpuIdx);
+
+					unsigned int PackageId = 0;
+					if (FILE* PackageIdFile = fopen(FileNameBuffer, "r"))
 					{
-						CoreId = 0;
+						if (1 != fscanf(PackageIdFile, "%d", &CpuInfos[CpuIdx].Package))
+						{
+							CpuInfos[CpuIdx].Package = 0;
+						}
+						fclose(PackageIdFile);
 					}
-					
-					PossibleCores[ CoreId ] = 1;
+
+					MaxCoreId = FMath::Max(MaxCoreId, CpuInfos[CpuIdx].Core);
+					MaxPackageId = FMath::Max(MaxPackageId, CpuInfos[CpuIdx].Package);
 				}
 			}
 
-			for(int32 Idx = 0; Idx < ARRAY_COUNT(PossibleCores); ++Idx)
+			int NumCores = MaxCoreId + 1;
+			int NumPackages = MaxPackageId + 1;
+			int NumPairs = NumPackages * NumCores;
+			unsigned char * Pairs = reinterpret_cast<unsigned char *>(FMemory_Alloca(NumPairs * sizeof(unsigned char)));
+			FMemory::Memzero(Pairs, NumPairs * sizeof(unsigned char));
+
+			for (int32 CpuIdx = 0; CpuIdx < CPU_SETSIZE; ++CpuIdx)
 			{
-				NumCoreIds += PossibleCores[Idx];
+				if (CPU_ISSET(CpuIdx, &AvailableCpusMask))
+				{
+					Pairs[CpuInfos[CpuIdx].Package * NumCores + CpuInfos[CpuIdx].Core] = 1;
+				}
+			}
+
+			for (int32 Idx = 0; Idx < NumPairs; ++Idx)
+			{
+				NumCoreIds += Pairs[Idx];
 			}
 		}
 	}
@@ -773,6 +867,103 @@ FString FLinuxPlatformMisc::GetOperatingSystemId()
 
 bool FLinuxPlatformMisc::GetDiskTotalAndFreeSpace(const FString& InPath, uint64& TotalNumberOfBytes, uint64& NumberOfFreeBytes)
 {
-	STUBBED("FLinuxPlatformMisc::GetDiskTotalAndFreeSpace");
-	return false;
+	struct statfs FSStat = { 0 };
+	FTCHARToUTF8 Converter(*InPath);
+	int Err = statfs((ANSICHAR*)Converter.Get(), &FSStat);
+	if (Err == 0)
+	{
+		TotalNumberOfBytes = FSStat.f_blocks * FSStat.f_bsize;
+		NumberOfFreeBytes = FSStat.f_bavail * FSStat.f_bsize;
+	}
+	else
+	{
+		int ErrNo = errno;
+		UE_LOG(LogLinux, Warning, TEXT("Unable to statfs('%s'): errno=%d (%s)"), *InPath, ErrNo, ANSI_TO_TCHAR(strerror(ErrNo)));
+	}
+	return (Err == 0);
+}
+
+
+TArray<uint8> FLinuxPlatformMisc::GetMacAddress()
+{
+	char path[64] = "/sys/class/net/eth0";
+	int eth_idx = strlen(path) - 1;
+	char mac_string[64];
+	uint MAC[6] = {0,0,0,0,0,0};
+	TArray<uint8> Result;
+
+	strcat(path, "/address");
+
+	// check to see if eth0-eth9 exist. Use the MAC from the first one we get a hit on
+	for (int i=0; i<=9; i++)
+	{
+		path[eth_idx] = '0' + i;
+
+		int EtherInterface = open(path, O_RDONLY);
+		if (EtherInterface != -1)
+		{
+			ssize_t ReadBytes = read(EtherInterface, mac_string, 64 - 1);
+			close(EtherInterface);
+
+			if (ReadBytes < 0)
+			{
+				continue;
+			}
+
+			mac_string[ReadBytes] = 0;
+
+			if (ReadBytes > 0)
+			{
+				printf("--- MAC Address: %s\n", mac_string);
+				int rc = sscanf(mac_string,"%x:%x:%x:%x:%x:%x", &MAC[0],&MAC[1],&MAC[2],&MAC[3],&MAC[4],&MAC[5]);
+
+				if (rc == 6)
+				{
+					for (int j=0; j<6; j++)
+					{
+						Result.Add(MAC[j]);
+					}
+
+					break;
+				}
+			}
+		}
+	}
+
+	return Result;
+}
+
+
+static int64 LastBatteryCheck = 0;
+static bool bIsOnBattery = false;
+
+bool FLinuxPlatformMisc::IsRunningOnBattery()
+{
+	char scratch[8];
+	FDateTime Time = FDateTime::Now();
+	int64 Seconds = Time.ToUnixTimestamp();
+
+	// don't poll the OS for battery state on every tick. Just do it once every 10 seconds.
+	if (LastBatteryCheck != 0 && (Seconds - LastBatteryCheck) < 10)
+	{
+		return bIsOnBattery;
+	}
+
+	LastBatteryCheck = Seconds;
+	bIsOnBattery = false;
+
+	int State = open("/sys/class/power_supply/ADP0/online", O_RDONLY);
+	if (State != -1)
+	{
+		// found ACAD device. check its state.
+		ssize_t ReadBytes = read(State, scratch, 1);
+		close(State);
+
+		if (ReadBytes > 0)
+		{
+			bIsOnBattery = (scratch[0] == '0');
+		}
+	}
+
+	return bIsOnBattery;
 }

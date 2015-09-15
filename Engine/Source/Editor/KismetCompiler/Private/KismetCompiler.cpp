@@ -121,6 +121,7 @@ void FKismetCompilerContext::SpawnNewClass(const FString& NewClassName)
 	else
 	{
 		// Already existed, but wasn't linked in the Blueprint yet due to load ordering issues
+		NewClass->ClassGeneratedBy = Blueprint;
 		FBlueprintCompileReinstancer::Create(NewClass);
 	}
 }
@@ -639,7 +640,7 @@ void FKismetCompilerContext::CreatePropertiesFromList(UStruct* Scope, UField**& 
 			{
 				continue;
 			}
-			MessageLog.Warning(*FString::Printf(*LOCTEXT("AssociatedVarProperty_Error", "AssociatedVarProperty property overriden %s from @@ type (%s)").ToString(), *Term.Name, *UEdGraphSchema_K2::TypeToText(Term.Type).ToString()), Term.Source);
+			MessageLog.Warning(*FString::Printf(*LOCTEXT("AssociatedVarProperty_Error", "AssociatedVarProperty property overridden %s from @@ type (%s)").ToString(), *Term.Name, *UEdGraphSchema_K2::TypeToText(Term.Type).ToString()), Term.Source);
 		}
 
 		if (Term.bIsLiteral)
@@ -1174,8 +1175,9 @@ void FKismetCompilerContext::PrecompileFunction(FKismetFunctionContext& Context)
 
 		// Determine if this is a new function or if it overrides a parent function
 			//@TODO: Does not support multiple overloads for a parent virtual function
-		UFunction* ParentFunction = Blueprint->ParentClass->FindFunctionByName(NewFunctionName);
-
+		UClass* SuperClass = Context.NewClass->GetSuperClass();
+		UFunction* ParentFunction = Context.NewClass->GetSuperClass()->FindFunctionByName(NewFunctionName);
+		
 		const FString NewFunctionNameString = NewFunctionName.ToString();
 		if (CreatedFunctionNames.Contains(NewFunctionNameString))
 		{
@@ -1246,7 +1248,7 @@ void FKismetCompilerContext::PrecompileFunction(FKismetFunctionContext& Context)
 		// Inherit extra flags from the entry node
 		if (Context.EntryPoint)
 		{
-			Context.Function->FunctionFlags |= Context.EntryPoint->ExtraFlags;
+			Context.Function->FunctionFlags |= Context.EntryPoint->GetExtraFlags(Context);
 		}
 
 		// First try to get the overriden function from the super class
@@ -1265,7 +1267,7 @@ void FKismetCompilerContext::PrecompileFunction(FKismetFunctionContext& Context)
 		// Inherit flags and validate against overridden function if it exists
 		if (OverridenFunction)
 		{
-			Context.Function->FunctionFlags |= (OverridenFunction->FunctionFlags & (FUNC_FuncInherit | FUNC_Public | FUNC_Protected | FUNC_Private));
+			Context.Function->FunctionFlags |= (OverridenFunction->FunctionFlags & (FUNC_FuncInherit | FUNC_Public | FUNC_Protected | FUNC_Private | FUNC_BlueprintPure));
 
 			if ((Context.Function->FunctionFlags & FUNC_AccessSpecifiers) != (OverridenFunction->FunctionFlags & FUNC_AccessSpecifiers))
 			{
@@ -1354,7 +1356,7 @@ void FKismetCompilerContext::PrecompileFunction(FKismetFunctionContext& Context)
 		CreateLocalVariablesForFunction(Context);
 
 		//Validate AccessSpecifier
-		const uint32 AccessSpecifierFlag = FUNC_AccessSpecifiers & Context.EntryPoint->ExtraFlags;
+		const uint32 AccessSpecifierFlag = FUNC_AccessSpecifiers & Context.EntryPoint->GetExtraFlags(Context);
 		const bool bAcceptedAccessSpecifier = 
 			(0 == AccessSpecifierFlag) || (FUNC_Public == AccessSpecifierFlag) || (FUNC_Protected == AccessSpecifierFlag) || (FUNC_Private == AccessSpecifierFlag);
 		if(!bAcceptedAccessSpecifier)
@@ -1831,7 +1833,7 @@ void FKismetCompilerContext::BuildDynamicBindingObjects(UBlueprintGeneratedClass
 
 				if (DynamicBindingClass)
 				{
-					UDynamicBlueprintBinding* DynamicBindingObject = Class->GetDynamicBindingObject(DynamicBindingClass);
+					UDynamicBlueprintBinding* DynamicBindingObject = UBlueprintGeneratedClass::GetDynamicBindingObject(Class, DynamicBindingClass);
 					if (DynamicBindingObject == NULL)
 					{
 						DynamicBindingObject = NewObject<UDynamicBlueprintBinding>(Class, DynamicBindingClass);
@@ -2187,7 +2189,7 @@ void FKismetCompilerContext::CreateFunctionStubForEvent(UK2Node_Event* SrcEventN
 
 	if(!SrcEventNode->bOverrideFunction && SrcEventNode->IsUsedByAuthorityOnlyDelegate())
 	{
-		EntryNode->ExtraFlags |= FUNC_BlueprintAuthorityOnly;
+		EntryNode->SetExtraFlags(EntryNode->GetFunctionFlags() | FUNC_BlueprintAuthorityOnly);
 	}
 
 	// If this is a customizable event, make sure to copy over the user defined pins
@@ -2485,7 +2487,7 @@ void FKismetCompilerContext::CreateAndProcessUbergraph()
 		{
 			if (OldEventGraph)
 			{
-				OldEventGraph->Rename(NULL, GetTransientPackage());
+				OldEventGraph->Rename(NULL, GetTransientPackage(), Blueprint->bIsRegeneratingOnLoad ? REN_ForceNoResetLoaders : 0);
 			}
 		}
 	}

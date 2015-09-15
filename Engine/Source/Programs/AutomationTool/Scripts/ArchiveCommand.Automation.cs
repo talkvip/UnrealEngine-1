@@ -26,9 +26,9 @@ public partial class Project : CommandUtils
 
 		if (Params.ArchiveMetaData)
 		{
-			// archive the build.properties for extra info for testing, etc
-			string BuildPropertiesFile = CombinePaths(SC.LocalRoot, "Engine", "Build", "build.properties");
-			SC.ArchiveFiles(Path.GetDirectoryName(BuildPropertiesFile), Path.GetFileName(BuildPropertiesFile));
+			// archive the build.version file for extra info for testing, etc
+			string BuildVersionFile = CombinePaths(SC.LocalRoot, "Engine", "Build", "Build.version");
+			SC.ArchiveFiles(Path.GetDirectoryName(BuildVersionFile), Path.GetFileName(BuildVersionFile));
 		}
 	}
 
@@ -57,7 +57,7 @@ public partial class Project : CommandUtils
 			return;
 		}
 
-		LogConsole("********** ARCHIVE COMMAND STARTED **********");
+		Log("********** ARCHIVE COMMAND STARTED **********");
 
 		if (!Params.NoClient)
 		{
@@ -81,7 +81,7 @@ public partial class Project : CommandUtils
 				SC.StageTargetPlatform.ProcessArchivedProject(Params, SC);
 			}
 		}
-		LogConsole("********** ARCHIVE COMMAND COMPLETED **********");
+		Log("********** ARCHIVE COMMAND COMPLETED **********");
     }
 
 	#endregion

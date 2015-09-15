@@ -244,7 +244,18 @@ void SSettingsEditor::NotifyPostChange( const FPropertyChangedEvent& PropertyCha
 	{
 		RecordPreferenceChangedAnalytics( SelectedSection, PropertyChangedEvent );
 
-		SelectedSection->Save();
+		// Determine if the Property is an Array or Array Element
+		UObject* Outer = PropertyChangedEvent.Property->GetOuter();
+		bool bIsArrayOrArrayElement = PropertyThatChanged->GetActiveMemberNode()->GetValue()->IsA(UArrayProperty::StaticClass()) || ((Outer != nullptr) && Outer->IsA(UArrayProperty::StaticClass()));
+
+		if (SelectedSection->GetSettingsObject()->GetClass()->HasAnyClassFlags(CLASS_DefaultConfig) && !bIsArrayOrArrayElement)
+		{
+			SelectedSection->GetSettingsObject()->UpdateSinglePropertyInConfigFile(PropertyThatChanged->GetActiveMemberNode()->GetValue(), SelectedSection->GetSettingsObject()->GetDefaultConfigFilename());
+		}
+		else
+		{
+			SelectedSection->Save();
+		}
 
 		static const FName ConfigRestartRequiredKey = "ConfigRestartRequired";
 		if (PropertyChangedEvent.Property->GetBoolMetaData(ConfigRestartRequiredKey))

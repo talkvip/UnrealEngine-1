@@ -24,6 +24,8 @@
 
 #include "Engine/DemoNetDriver.h"
 
+#include "PerfCountersHelpers.h"
+
 DEFINE_LOG_CATEGORY_STATIC(LogCharacterMovement, Log, All);
 DEFINE_LOG_CATEGORY_STATIC(LogNavMeshMovement, Log, All);
 
@@ -343,6 +345,11 @@ void UCharacterMovementComponent::PostEditChangeProperty(FPropertyChangedEvent& 
 
 void UCharacterMovementComponent::OnRegister()
 {
+	if (bUseRVOAvoidance && GetNetMode() == NM_Client)
+	{
+		bUseRVOAvoidance = false;
+	}
+
 	Super::OnRegister();
 
 #if WITH_EDITOR
@@ -1122,6 +1129,8 @@ void UCharacterMovementComponent::SimulateRootMotion(float DeltaSeconds, const F
 {
 	if( CharacterOwner && CharacterOwner->GetMesh() && (DeltaSeconds > 0.f) )
 	{
+		FScopedMovementUpdate ScopedMovementUpdate(UpdatedComponent, bEnableScopedMovementUpdates ? EScopedUpdate::DeferredUpdates : EScopedUpdate::ImmediateUpdates);
+
 		// Convert Local Space Root Motion to world space. Do it right before used by physics to make sure we use up to date transforms, as translation is relative to rotation.
 		const FTransform WorldSpaceRootMotionTransform = CharacterOwner->GetMesh()->ConvertLocalRootMotionToWorld(LocalRootMotionTransform);
 
@@ -1152,15 +1161,22 @@ void UCharacterMovementComponent::SimulateRootMotion(float DeltaSeconds, const F
 
 FVector UCharacterMovementComponent::CalcRootMotionVelocity(const FVector& RootMotionDeltaMove, float DeltaSeconds, const FVector& CurrentVelocity) const
 {
-	FVector RootMotionVelocity = RootMotionDeltaMove / DeltaSeconds;
-	
-	// Do not override Velocity.Z if in falling physics, we want to keep the effect of gravity.
-	if (IsFalling())
+	if (ensure(DeltaSeconds > 0.f))
 	{
-		RootMotionVelocity.Z = CurrentVelocity.Z;
+		FVector RootMotionVelocity = RootMotionDeltaMove / DeltaSeconds;
+
+		// Do not override Velocity.Z if in falling physics, we want to keep the effect of gravity.
+		if (IsFalling())
+		{
+			RootMotionVelocity.Z = CurrentVelocity.Z;
+		}
+
+		return RootMotionVelocity;
 	}
-	
-	return RootMotionVelocity;
+	else
+	{
+		return CurrentVelocity;
+	}
 }
 
 
@@ -3624,7 +3640,7 @@ void UCharacterMovementComponent::PhysWalking(float deltaTime, int32 Iterations)
 		return;
 	}
 
-	if (!UpdatedComponent->IsCollisionEnabled())
+	if (!UpdatedComponent->IsQueryCollisionEnabled())
 	{
 		SetMovementMode(MOVE_Walking);
 		return;
@@ -3732,7 +3748,7 @@ void UCharacterMovementComponent::PhysWalking(float deltaTime, int32 Iterations)
 			{
 				// see if it is OK to jump
 				// @todo collision : only thing that can be problem is that oldbase has world collision on
-				bool bMustJump = bZeroDelta || (OldBase == NULL || (!OldBase->IsCollisionEnabled() && MovementBaseUtility::IsDynamicBase(OldBase)));
+				bool bMustJump = bZeroDelta || (OldBase == NULL || (!OldBase->IsQueryCollisionEnabled() && MovementBaseUtility::IsDynamicBase(OldBase)));
 				if ( (bMustJump || !bCheckedFall) && CheckFall(OldFloor, CurrentFloor.HitResult, Delta, OldLocation, remainingTime, timeTick, Iterations, bMustJump) )
 				{
 					return;
@@ -3784,7 +3800,7 @@ void UCharacterMovementComponent::PhysWalking(float deltaTime, int32 Iterations)
 			// See if we need to start falling.
 			if (!CurrentFloor.IsWalkableFloor() && !CurrentFloor.HitResult.bStartPenetrating)
 			{
-				const bool bMustJump = bJustTeleported || bZeroDelta || (OldBase == NULL || (!OldBase->IsCollisionEnabled() && MovementBaseUtility::IsDynamicBase(OldBase)));
+				const bool bMustJump = bJustTeleported || bZeroDelta || (OldBase == NULL || (!OldBase->IsQueryCollisionEnabled() && MovementBaseUtility::IsDynamicBase(OldBase)));
 				if ((bMustJump || !bCheckedFall) && CheckFall(OldFloor, CurrentFloor.HitResult, Delta, OldLocation, remainingTime, timeTick, Iterations, bMustJump) )
 				{
 					return;
@@ -4712,7 +4728,7 @@ void UCharacterMovementComponent::ComputeFloorDist(const FVector& CapsuleLocatio
 	OutFloorResult.Clear();
 
 	// No collision, no floor...
-	if (!UpdatedComponent->IsCollisionEnabled())
+	if (!UpdatedComponent->IsQueryCollisionEnabled())
 	{
 		return;
 	}
@@ -4858,7 +4874,7 @@ void UCharacterMovementComponent::FindFloor(const FVector& CapsuleLocation, FFin
 	SCOPE_CYCLE_COUNTER(STAT_CharFindFloor);
 
 	// No collision, no floor...
-	if (!HasValidData() || !UpdatedComponent->IsCollisionEnabled())
+	if (!HasValidData() || !UpdatedComponent->IsQueryCollisionEnabled())
 	{
 		OutFloorResult.Clear();
 		return;
@@ -4892,7 +4908,7 @@ void UCharacterMovementComponent::FindFloor(const FVector& CapsuleLocation, FFin
 
 			if (MovementBase != NULL)
 			{
-				MutableThis->bForceNextFloorCheck = !MovementBase->IsCollisionEnabled()
+				MutableThis->bForceNextFloorCheck = !MovementBase->IsQueryCollisionEnabled()
 				|| MovementBase->GetCollisionResponseToChannel(CollisionChannel) != ECR_Block
 				|| MovementBaseUtility::IsDynamicBase(MovementBase);
 			}
@@ -5778,12 +5794,12 @@ void UCharacterMovementComponent::SmoothClientPosition(float DeltaSeconds)
 			{
 				ClientData->MeshRotationOffset = FQuat::Identity;
 			}
-		}
 
-		if (IsMovingOnGround())
-		{
-			// don't smooth Z position if walking on ground
-			ClientData->MeshTranslationOffset.Z = 0;
+			if (IsMovingOnGround())
+			{
+				// don't smooth Z position if walking on ground
+				ClientData->MeshTranslationOffset.Z = 0;
+			}
 		}
 
 		const FVector NewRelTranslation = UpdatedComponent->GetComponentToWorld().InverseTransformVectorNoScale(ClientData->MeshTranslationOffset) + CharacterOwner->GetBaseTranslationOffset();
@@ -5991,6 +6007,13 @@ void UCharacterMovementComponent::ReplicateMoveToServer(float DeltaTime, const F
 	// Can only start sending moves if our controllers are synced up over the network, otherwise we flood the reliable buffer.
 	APlayerController* PC = Cast<APlayerController>(CharacterOwner->GetController());
 	if (PC && PC->AcknowledgedPawn != CharacterOwner)
+	{
+		return;
+	}
+
+	// Bail out if our character's controller doesn't have a Player. This may be the case when the local player
+	// has switched to another controller, such as a debug camera controller.
+	if (PC && PC->Player == nullptr)
 	{
 		return;
 	}
@@ -6493,6 +6516,8 @@ void UCharacterMovementComponent::ServerMoveHandleClientError(float ClientTimeSt
 		ServerData->PendingAdjustment.TimeStamp = ClientTimeStamp;
 		ServerData->PendingAdjustment.bAckGoodMove = false;
 		ServerData->PendingAdjustment.MovementMode = PackNetworkMovementMode();
+
+		PerfCountersIncrement(TEXT("NumServerMoveCorrections"));
 	}
 	else
 	{
@@ -6520,6 +6545,8 @@ void UCharacterMovementComponent::ServerMoveHandleClientError(float ClientTimeSt
 		ServerData->PendingAdjustment.TimeStamp = ClientTimeStamp;
 		ServerData->PendingAdjustment.bAckGoodMove = true;
 	}
+
+	PerfCountersIncrement(TEXT("NumServerMoves"));
 
 	ServerData->bForceClientUpdate = false;
 }

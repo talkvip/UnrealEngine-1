@@ -52,50 +52,40 @@ bool FWebBrowserHandler::OnTooltip(CefRefPtr<CefBrowser> Browser, CefString& Tex
 
 void FWebBrowserHandler::OnAfterCreated(CefRefPtr<CefBrowser> Browser)
 {
-	TSharedPtr<FWebBrowserWindow> BrowserWindow = BrowserWindowPtr.Pin();
-
-	if (BrowserWindow.IsValid())
+	if(Browser->IsPopup())
 	{
-
-		BrowserWindow->BindCefBrowser(Browser);
-	}
-	else
-	{
-		if(Browser->IsPopup())
+		TSharedPtr<FWebBrowserWindow> BrowserWindowParent = BrowserWindowParentPtr.Pin();
+		if(BrowserWindowParent.IsValid() && BrowserWindowParent->SupportsNewWindows())
 		{
-			TSharedPtr<FWebBrowserWindow> BrowserWindowParent = BrowserWindowParentPtr.Pin();
-			if(BrowserWindowParent.IsValid() && BrowserWindowParent->SupportsNewWindows())
-			{
-				TSharedPtr<FWebBrowserWindowInfo> NewBrowserWindowInfo = MakeShareable(new FWebBrowserWindowInfo(Browser, this));
-				TSharedPtr<IWebBrowserWindow> NewBrowserWindow = IWebBrowserModule::Get().GetSingleton()->CreateBrowserWindow( 
-					BrowserWindowParent,
-					NewBrowserWindowInfo
-					);	
+			TSharedPtr<FWebBrowserWindowInfo> NewBrowserWindowInfo = MakeShareable(new FWebBrowserWindowInfo(Browser, this));
+			TSharedPtr<IWebBrowserWindow> NewBrowserWindow = IWebBrowserModule::Get().GetSingleton()->CreateBrowserWindow( 
+				BrowserWindowParent,
+				NewBrowserWindowInfo
+				);	
 
-				{
-					// @todo: At the moment we need to downcast since the handler does not support using the interface.
-					TSharedPtr<FWebBrowserWindow> HandlerSpecificBrowserWindow = StaticCastSharedPtr<FWebBrowserWindow>(NewBrowserWindow);
-					BrowserWindowPtr = HandlerSpecificBrowserWindow;
-				}
-
-				// Request a UI window for the browser.  If it is not created we do some cleanup.
-				bool bUIWindowCreated = BrowserWindowParent->RequestCreateWindow(NewBrowserWindow.ToSharedRef(), BrowserPopupFeatures);
-				if(!bUIWindowCreated)
-				{
-					NewBrowserWindow->CloseBrowser(true);
-				}
-			}
-			else
 			{
-				Browser->GetHost()->CloseBrowser(true);
+				// @todo: At the moment we need to downcast since the handler does not support using the interface.
+				TSharedPtr<FWebBrowserWindow> HandlerSpecificBrowserWindow = StaticCastSharedPtr<FWebBrowserWindow>(NewBrowserWindow);
+				BrowserWindowPtr = HandlerSpecificBrowserWindow;
 			}
+
+			// Request a UI window for the browser.  If it is not created we do some cleanup.
+			bool bUIWindowCreated = BrowserWindowParent->RequestCreateWindow(NewBrowserWindow.ToSharedRef(), BrowserPopupFeatures);
+			if(!bUIWindowCreated)
+			{
+				NewBrowserWindow->CloseBrowser(true);
+			}
+		}
+		else
+		{
+			Browser->GetHost()->CloseBrowser(true);
 		}
 	}
 }
 
  bool FWebBrowserHandler::DoClose(CefRefPtr<CefBrowser> Browser)
  {
-	 TSharedPtr<FWebBrowserWindow> BrowserWindow = BrowserWindowPtr.Pin();
+	TSharedPtr<FWebBrowserWindow> BrowserWindow = BrowserWindowPtr.Pin();
 	if(BrowserWindow.IsValid())
 	{
 		BrowserWindow->OnBrowserClosing();
@@ -226,8 +216,13 @@ bool FWebBrowserHandler::GetViewRect(CefRefPtr<CefBrowser> Browser, CefRect& Rec
 	{
 		return BrowserWindow->GetViewRect(Rect);
 	}
-
-	return false;
+	else
+	{
+		// Seems that if we return false from here or without a size > 0, popup menus will not show up.
+		Rect.width = 800;
+		Rect.height = 600;
+		return true;
+	}
 }
 
 void FWebBrowserHandler::OnPaint(CefRefPtr<CefBrowser> Browser,
@@ -459,6 +454,40 @@ bool FWebBrowserHandler::OnKeyEvent(CefRefPtr<CefBrowser> Browser,
 
 	return false;
 }
-#endif
+
+bool FWebBrowserHandler::OnJSDialog(CefRefPtr<CefBrowser> Browser, const CefString& OriginUrl, const CefString& AcceptLang, JSDialogType DialogType, const CefString& MessageText, const CefString& DefaultPromptText, CefRefPtr<CefJSDialogCallback> Callback, bool& OutSuppressMessage)
+{
+	bool Retval = false;
+	TSharedPtr<FWebBrowserWindow> BrowserWindow = BrowserWindowPtr.Pin();
+	if (BrowserWindow.IsValid())
+	{
+		Retval = BrowserWindow->OnJSDialog(DialogType, MessageText, DefaultPromptText, Callback, OutSuppressMessage);
+	}
+	return Retval;
+}
+
+bool FWebBrowserHandler::OnBeforeUnloadDialog(CefRefPtr<CefBrowser> Browser, const CefString& MessageText, bool IsReload, CefRefPtr<CefJSDialogCallback> Callback)
+{
+	bool Retval = false;
+	TSharedPtr<FWebBrowserWindow> BrowserWindow = BrowserWindowPtr.Pin();
+	if (BrowserWindow.IsValid())
+	{
+		Retval = BrowserWindow->OnBeforeUnloadDialog(MessageText, IsReload, Callback);
+	}
+	return Retval;
+}
+
+void FWebBrowserHandler::OnResetDialogState(CefRefPtr<CefBrowser> Browser)
+{
+	TSharedPtr<FWebBrowserWindow> BrowserWindow = BrowserWindowPtr.Pin();
+	if (BrowserWindow.IsValid())
+	{
+		BrowserWindow->OnResetDialogState();
+	}
+}
+
+
+
+#endif // WITH_CEF
 
 #undef LOCTEXT_NAMESPACE

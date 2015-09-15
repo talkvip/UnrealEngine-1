@@ -136,8 +136,6 @@ public:
 
 			MenuBuilder.EndSection();
 		}
-
-		MenuBuilder.AddMenuSeparator();
 	}
 
 private:
@@ -182,7 +180,7 @@ void F3DPathTrackEditor::AddKey( const FGuid& ObjectGuid, UObject* AdditionalAss
 	AddPath(ObjectGuid, AdditionalAsset);
 }
 
-void F3DPathTrackEditor::BuildObjectBindingContextMenu(FMenuBuilder& MenuBuilder, const FGuid& ObjectBinding, const UClass* ObjectClass)
+void F3DPathTrackEditor::BuildObjectBindingTrackMenu(FMenuBuilder& MenuBuilder, const FGuid& ObjectBinding, const UClass* ObjectClass)
 {
 	// build a menu with all the actors that have spline components, add the selected actors first
 	if (ObjectClass->IsChildOf(AActor::StaticClass()))
@@ -205,7 +203,8 @@ void F3DPathTrackEditor::BuildObjectBindingContextMenu(FMenuBuilder& MenuBuilder
 				FText::Format( NSLOCTEXT("Sequencer", "AddPath", "Add Path"), Args),
 				FText::Format( NSLOCTEXT("Sequencer", "AddPathTooltip", "Adds a path track."), Args ),
 				FSlateIcon(),
-				FUIAction(FExecuteAction::CreateSP(this, &F3DPathTrackEditor::AddPath, ObjectBinding, (UObject*)ActorWithSplineComponent))
+				FUIAction(FExecuteAction::CreateSP(this, &F3DPathTrackEditor::AddPath, ObjectBinding, (UObject*)ActorWithSplineComponent),
+						  FCanExecuteAction::CreateLambda( []{ return false; } ))
 			);
 		}
 	}
@@ -233,7 +232,7 @@ void F3DPathTrackEditor::AddPathSubMenu(FMenuBuilder& MenuBuilder, FGuid ObjectB
 			Args.Add( TEXT("PathName"), FText::FromString( ActorWithSplineComponent->GetActorLabel() ) );
 
 			MenuBuilder.AddMenuEntry(
-				FText::Format( NSLOCTEXT("Sequencer", "AddPath", "Add {PathName}"), Args ),
+				FText::Format( NSLOCTEXT("Sequencer", "AddPath", "{PathName}"), Args ),
 				FText::Format( NSLOCTEXT("Sequencer", "AddPathTooltip", "Add path track driven by {PathName}."), Args ),
 				FSlateIcon(),
 				FUIAction(FExecuteAction::CreateSP(this, &F3DPathTrackEditor::AddPath, ObjectBinding, (UObject*)ActorWithSplineComponent))
@@ -254,7 +253,7 @@ void F3DPathTrackEditor::AddPathSubMenu(FMenuBuilder& MenuBuilder, FGuid ObjectB
 			Args.Add( TEXT("PathName"), FText::FromString( ActorWithSplineComponent->GetActorLabel() ) );
 
 			MenuBuilder.AddMenuEntry(
-				FText::Format( NSLOCTEXT("Sequencer", "AddPath", "Add {PathName}"), Args ),
+				FText::Format( NSLOCTEXT("Sequencer", "AddPath", "{PathName}"), Args ),
 				FText::Format( NSLOCTEXT("Sequencer", "AddPathTooltip", "Add path track driven by {PathName}."), Args ),
 				FSlateIcon(),
 				FUIAction(FExecuteAction::CreateSP(this, &F3DPathTrackEditor::AddPath, ObjectBinding, (UObject*)ActorWithSplineComponent))
@@ -270,7 +269,7 @@ void F3DPathTrackEditor::AddPath(FGuid ObjectGuid, UObject* AdditionalAsset)
 	TArray<UObject*> OutObjects;
 	GetSequencer()->GetRuntimeObjects( GetSequencer()->GetFocusedMovieSceneSequenceInstance(), ObjectGuid, OutObjects);
 
-	AnimatablePropertyChanged( UMovieScene3DPathTrack::StaticClass(), false,
+	AnimatablePropertyChanged( UMovieScene3DPathTrack::StaticClass(),
 		FOnKeyProperty::CreateRaw( this, &F3DPathTrackEditor::AddKeyInternal, OutObjects, AdditionalAsset) );
 }
 
@@ -283,7 +282,7 @@ void F3DPathTrackEditor::SetPath(UMovieSceneSection* Section, AActor* ActorWithS
 
 	if (SplineId.IsValid())
 	{
-		PathSection->SetPathId(SplineId);
+		PathSection->SetConstraintId(SplineId);
 	}
 }
 
@@ -332,7 +331,7 @@ void F3DPathTrackEditor::AddKeyInternal( float KeyTime, const TArray<UObject*> O
 						}
 					}
 
-					Cast<UMovieScene3DPathTrack>(Track)->AddPath( KeyTime, PathEndTime, SplineId );
+					Cast<UMovieScene3DPathTrack>(Track)->AddConstraint( KeyTime, PathEndTime, SplineId );
 				}
 			}
 		}

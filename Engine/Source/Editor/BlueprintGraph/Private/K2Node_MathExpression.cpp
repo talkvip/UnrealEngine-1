@@ -2,7 +2,6 @@
 
 #include "BlueprintGraphPrivatePCH.h"
 #include "K2Node_MathExpression.h"
-#include "BlueprintGraphClasses.h"
 #include "Kismet2NameValidators.h"
 #include "EdGraphUtilities.h"
 #include "BasicTokenParser.h"
@@ -11,6 +10,7 @@
 #include "BlueprintActionDatabaseRegistrar.h"
 #include "DiffResults.h"
 #include "MathExpressionHandler.h"
+#include "BlueprintNodeSpawner.h"
 
 #define LOCTEXT_NAMESPACE "K2Node"
 
@@ -970,7 +970,7 @@ private:
 			ADD_ALIAS("VECT2D")
 		FUNC_ALIASES_END
 	
-		FUNC_ALIASES_BEGIN("MakeRot")
+		FUNC_ALIASES_BEGIN("MakeRotator")
 			ADD_ALIAS("ROTATOR")
 			ADD_ALIAS("ROT")
 		FUNC_ALIASES_END
@@ -2414,6 +2414,71 @@ UK2Node_MathExpression::UK2Node_MathExpression(const FObjectInitializer& ObjectI
 	// renaming the node rebuilds the expression (the node name is where they 
 	// specify the math equation)
 	bCanRenameNode = true;
+
+	bMadeAfterRotChange = false;
+}
+
+void UK2Node_MathExpression::Serialize(FArchive& Ar)
+{
+	UK2Node_Composite::Serialize(Ar);
+
+	if (Ar.IsLoading() && !bMadeAfterRotChange)
+	{
+		// remember that this logic has been run, we only want to run it once:
+		bMadeAfterRotChange = true;
+
+		// We need to reorder the parameters to MakeRot/MakeRotator/Rotator/Rot, to filter this expensive logic I'm just searching
+		// expressions for 'rot':
+		if (Expression.Contains(TEXT("Rot")))
+		{
+			// Now parse the expression and look for function expressions to the old MakeRot function:
+			FExpressionParser Parser;
+			TSharedPtr<IFExpressionNode> ExpressionRoot = Parser.ParseExpression(Expression);
+			
+			struct FMakeRotFixupVisitor : public FExpressionVisitor
+			{
+				virtual bool Visit(class FFunctionExpression& Node, EVisitPhase Phase)
+				{ 
+					if (Phase != VISIT_Pre)
+					{
+						return false;
+					}
+
+					const bool bIsMakeRot = (Node.FuncName == TEXT("makerot"));
+					if (bIsMakeRot ||
+						Node.FuncName == TEXT("rotator") ||
+						Node.FuncName == TEXT("rot"))
+					{
+						// reorder parameters to match new order of MakeRotator:
+						if (Node.ParamList->Children.Num() == 3)
+						{
+							TSharedRef<IFExpressionNode> OldPitch = Node.ParamList->Children[0];
+							TSharedRef<IFExpressionNode> OldYaw = Node.ParamList->Children[1];
+							TSharedRef<IFExpressionNode> OldRoll = Node.ParamList->Children[2];
+							
+							Node.ParamList->Children[0] = OldRoll;
+							Node.ParamList->Children[1] = OldPitch;
+							Node.ParamList->Children[2] = OldYaw;
+						}
+
+						// MakeRot also needs to be updated to the new name:
+						if (bIsMakeRot)
+						{
+							Node.FuncName = TEXT("MakeRotator");
+						}
+					}
+					return true;
+				}
+			};
+
+			// perform the update:
+			FMakeRotFixupVisitor Fixup;
+			ExpressionRoot->Accept(Fixup);
+
+			// reform the expression with the updated parameter order/function names:
+			Expression = ExpressionRoot->ToString();
+		}
+	}
 }
 
 //------------------------------------------------------------------------------
@@ -2682,6 +2747,7 @@ FText UK2Node_MathExpression::GetNodeTitle(ENodeTitleType::Type TitleType) const
 //------------------------------------------------------------------------------
 void UK2Node_MathExpression::PostPlacedNewNode()
 {
+	bMadeAfterRotChange = true;
 	Super::PostPlacedNewNode();
 	FEdGraphUtilities::RenameGraphToNameOrCloseToName(BoundGraph, "MathExpression");
 }

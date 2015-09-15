@@ -61,6 +61,8 @@ float FSkeletalAnimationSection::GetSectionHeight() const
 
 int32 FSkeletalAnimationSection::OnPaintSection( const FGeometry& AllottedGeometry, const FSlateRect& SectionClippingRect, FSlateWindowElementList& OutDrawElements, int32 LayerId, bool bParentEnabled ) const
 {
+	const ESlateDrawEffect::Type DrawEffects = bParentEnabled ? ESlateDrawEffect::None : ESlateDrawEffect::DisabledEffect;
+
 	UMovieSceneSkeletalAnimationSection* AnimSection = Cast<UMovieSceneSkeletalAnimationSection>(&Section);
 	
 	FTimeToPixel TimeToPixelConverter( AllottedGeometry, TRange<float>( Section.GetStartTime(), Section.GetEndTime() ) );
@@ -72,7 +74,7 @@ int32 FSkeletalAnimationSection::OnPaintSection( const FGeometry& AllottedGeomet
 		AllottedGeometry.ToPaintGeometry(),
 		FEditorStyle::GetBrush("Sequencer.GenericSection.Background"),
 		SectionClippingRect,
-		ESlateDrawEffect::None,
+		DrawEffects,
 		FLinearColor(0.7f, 0.4f, 0.7f, 1.f)
 	);
 
@@ -91,7 +93,7 @@ int32 FSkeletalAnimationSection::OnPaintSection( const FGeometry& AllottedGeomet
 			AllottedGeometry.ToPaintGeometry(FVector2D(StartPixels, 0), FVector2D(EndPixels - StartPixels, AllottedGeometry.Size.Y)),
 			FEditorStyle::GetBrush("WhiteTexture"),
 			SectionClippingRect,
-			ESlateDrawEffect::None,
+			DrawEffects,
 			FLinearColor(0.f, 0.f, 0.f, 0.3f)
 		);
 	}
@@ -113,7 +115,8 @@ int32 FSkeletalAnimationSection::OnPaintSection( const FGeometry& AllottedGeomet
 				LayerId + 2,
 				AllottedGeometry.ToPaintGeometry(),
 				Points,
-				SectionClippingRect
+				SectionClippingRect,
+				DrawEffects
 			);
 		}
 		CurrentTime += AnimSection->GetAnimationDuration();
@@ -159,7 +162,7 @@ void FSkeletalAnimationTrackEditor::AddKey(const FGuid& ObjectGuid, UObject* Add
 		TArray<UObject*> OutObjects;
 		GetSequencer()->GetRuntimeObjects( GetSequencer()->GetFocusedMovieSceneSequenceInstance(), ObjectGuid, OutObjects);
 
-		AnimatablePropertyChanged( UMovieSceneSkeletalAnimationTrack::StaticClass(), false,
+		AnimatablePropertyChanged( UMovieSceneSkeletalAnimationTrack::StaticClass(),
 			FOnKeyProperty::CreateRaw( this, &FSkeletalAnimationTrackEditor::AddKeyInternal, OutObjects, AnimSequence) );
 	}
 }
@@ -179,7 +182,7 @@ bool FSkeletalAnimationTrackEditor::HandleAssetAdded(UObject* Asset, const FGuid
 				TArray<UObject*> OutObjects;
 				GetSequencer()->GetRuntimeObjects(GetSequencer()->GetFocusedMovieSceneSequenceInstance(), TargetObjectGuid, OutObjects);
 
-				AnimatablePropertyChanged(UMovieSceneSkeletalAnimationTrack::StaticClass(), false,
+				AnimatablePropertyChanged(UMovieSceneSkeletalAnimationTrack::StaticClass(),
 					FOnKeyProperty::CreateRaw(this, &FSkeletalAnimationTrackEditor::AddKeyInternal, OutObjects, AnimSequence));
 
 				return true;
@@ -189,7 +192,7 @@ bool FSkeletalAnimationTrackEditor::HandleAssetAdded(UObject* Asset, const FGuid
 	return false;
 }
 
-void FSkeletalAnimationTrackEditor::BuildObjectBindingContextMenu(FMenuBuilder& MenuBuilder, const FGuid& ObjectBinding, const UClass* ObjectClass)
+void FSkeletalAnimationTrackEditor::BuildObjectBindingTrackMenu(FMenuBuilder& MenuBuilder, const FGuid& ObjectBinding, const UClass* ObjectClass)
 {
 	if (ObjectClass->IsChildOf(ASkeletalMeshActor::StaticClass()))
 	{
@@ -206,23 +209,42 @@ void FSkeletalAnimationTrackEditor::BuildObjectBindingContextMenu(FMenuBuilder& 
 			TArray<FAssetData> AssetDataList;
 			AssetRegistryModule.Get().GetAssetsByClass(UAnimSequence::StaticClass()->GetFName(), AssetDataList);
 
-			for( int32 AssetIndex = 0; AssetIndex < AssetDataList.Num(); ++AssetIndex )
+			if (AssetDataList.Num())
 			{
-				const FAssetData& PossibleAnimSequence = AssetDataList[AssetIndex];
-				if( FAssetData(Skeleton).GetExportTextName() == PossibleAnimSequence.TagsAndValues.FindRef("Skeleton") )
-				{
-					FFormatNamedArguments Args;
-					Args.Add( TEXT("AnimationName"), FText::FromName( PossibleAnimSequence.AssetName ) );
-
-					UAnimSequence* AnimSequence = CastChecked<UAnimSequence>(AssetDataList[AssetIndex].GetAsset());
-					MenuBuilder.AddMenuEntry(
-						FText::Format( NSLOCTEXT("Sequencer", "AddAnimSequence", "Add {AnimationName}"), Args ),
-						FText::Format( NSLOCTEXT("Sequencer", "AddAnimSequenceTooltip", "Adds a {AnimationName} animation to this skeletal mesh."), Args ),
-						FSlateIcon(),
-						FUIAction(FExecuteAction::CreateSP(ParentSequencer.Get(), &ISequencer::AddAnimation, ObjectBinding, AnimSequence))
-						);
-				}
+				MenuBuilder.AddSubMenu(
+					NSLOCTEXT("Sequencer", "AddAnimation", "Add Animation"), NSLOCTEXT("Sequencer", "AddAnimationTooltip", "Adds an animation track."),
+					FNewMenuDelegate::CreateRaw(this, &FSkeletalAnimationTrackEditor::BuildAnimationSubMenu, ObjectBinding, Skeleton));
 			}
+		}
+	}
+}
+
+void FSkeletalAnimationTrackEditor::BuildAnimationSubMenu(FMenuBuilder& MenuBuilder, FGuid ObjectBinding, USkeleton* Skeleton)
+{
+	const TSharedPtr<ISequencer> ParentSequencer = GetSequencer();
+
+	// Load the asset registry module
+	FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+
+	// Collect a full list of assets with the specified class
+	TArray<FAssetData> AssetDataList;
+	AssetRegistryModule.Get().GetAssetsByClass(UAnimSequence::StaticClass()->GetFName(), AssetDataList);
+
+	for( int32 AssetIndex = 0; AssetIndex < AssetDataList.Num(); ++AssetIndex )
+	{
+		const FAssetData& PossibleAnimSequence = AssetDataList[AssetIndex];
+		if( FAssetData(Skeleton).GetExportTextName() == PossibleAnimSequence.TagsAndValues.FindRef("Skeleton") )
+		{
+			FFormatNamedArguments Args;
+			Args.Add( TEXT("AnimationName"), FText::FromName( PossibleAnimSequence.AssetName ) );
+
+			UAnimSequence* AnimSequence = CastChecked<UAnimSequence>(AssetDataList[AssetIndex].GetAsset());
+			MenuBuilder.AddMenuEntry(
+				FText::Format( NSLOCTEXT("Sequencer", "AddAnimSequence", "{AnimationName}"), Args ),
+				FText::Format( NSLOCTEXT("Sequencer", "AddAnimSequenceTooltip", "Adds a {AnimationName} animation to this skeletal mesh."), Args ),
+				FSlateIcon(),
+				FUIAction(FExecuteAction::CreateSP(ParentSequencer.Get(), &ISequencer::AddAnimation, ObjectBinding, AnimSequence))
+				);
 		}
 	}
 }

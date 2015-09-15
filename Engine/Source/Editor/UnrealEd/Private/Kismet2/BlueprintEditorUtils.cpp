@@ -333,6 +333,7 @@ void FBasePinChangeHelper::Broadcast(UBlueprint* InBlueprint, UK2Node_EditablePi
 		const UClass* SignatureClass = Func
 			? Func->GetOwnerClass()
 			: (UClass*)(FunctionDefNode ? FunctionDefNode->SignatureClass : nullptr);
+
 		// Reconstruct all function call sites that call this function (in open blueprints)
 		for (TObjectIterator<UK2Node_CallFunction> It(RF_Transient); It; ++It)
 		{
@@ -1418,6 +1419,9 @@ static void RemoveStaleFunctions(UBlueprintGeneratedClass* Class, UBlueprint* Bl
 		}
 	}
 
+	// Clear function map caches which will be rebuilt the next time functions are searched by name
+	Class->ClearFunctionMapsCaches();
+
 	Blueprint->GeneratedClass->Children = nullptr;
 	Blueprint->GeneratedClass->Bind();
 	Blueprint->GeneratedClass->StaticLink(true);
@@ -1485,7 +1489,7 @@ UClass* FBlueprintEditorUtils::RegenerateBlueprintClass(UBlueprint* Blueprint, U
 		// Make sure the simple construction script is loaded, since the outer hierarchy isn't compatible with PreloadMembers past the root node
 		FBlueprintEditorUtils::PreloadConstructionScript(Blueprint);
 
-		// Preload Overriden Components
+		// Preload Overridden Components
 		if (Blueprint->InheritableComponentHandler)
 		{
 			Blueprint->InheritableComponentHandler->PreloadAll();
@@ -2348,9 +2352,9 @@ UFunction* FBlueprintEditorUtils::FindFunctionInImplementedInterfaces(const UBlu
 			UClass* SearchClass = (*It);
 			if( SearchClass )
 			{
-				if (UFunction* OverridenFunction = SearchClass->FindFunctionByName(FunctionName, EIncludeSuperFlag::ExcludeSuper))
+				if (UFunction* OverriddenFunction = SearchClass->FindFunctionByName(FunctionName, EIncludeSuperFlag::ExcludeSuper))
 				{
-					return OverridenFunction;
+					return OverriddenFunction;
 				}
 			}
 			else if( bOutInvalidInterface )
@@ -2732,6 +2736,26 @@ UEdGraph* FBlueprintEditorUtils::GetTopLevelGraph(const UEdGraph* InGraph)
 	return GraphToTest;
 }
 
+bool FBlueprintEditorUtils::IsGraphReadOnly(UEdGraph* InGraph)
+{
+	bool bGraphReadOnly = true;
+	if (InGraph)
+	{
+		bGraphReadOnly = !InGraph->bEditable;
+
+		if (!bGraphReadOnly)
+		{
+			const UBlueprint* BlueprintForGraph = FBlueprintEditorUtils::FindBlueprintForGraph(InGraph);
+			bool const bIsInterface = ((BlueprintForGraph != NULL) && (BlueprintForGraph->BlueprintType == BPTYPE_Interface));
+			bool const bIsDelegate  = FBlueprintEditorUtils::IsDelegateSignatureGraph(InGraph);
+			bool const bIsMathExpression = FBlueprintEditorUtils::IsMathExpressionGraph(InGraph);
+
+			bGraphReadOnly = bIsInterface || bIsDelegate || bIsMathExpression;
+		}
+	}
+	return bGraphReadOnly;
+}
+
 UK2Node_Event* FBlueprintEditorUtils::FindOverrideForFunction(const UBlueprint* Blueprint, const UClass* SignatureClass, FName SignatureName)
 {
 	TArray<UK2Node_Event*> AllEvents;
@@ -2780,6 +2804,8 @@ void FBlueprintEditorUtils::GatherDependencies(const UBlueprint* InBlueprint, TS
 				{
 					return;
 				}
+
+				Blueprint->GatherDependencies(InDependencies);
 			}
 		}
 	};
@@ -2787,6 +2813,8 @@ void FBlueprintEditorUtils::GatherDependencies(const UBlueprint* InBlueprint, TS
 	check(InBlueprint);
 	Dependencies.Empty();
 	OutUDSDependencies.Empty();
+
+	InBlueprint->GatherDependencies(Dependencies);
 
 	FGatherDependenciesHelper::ProcessHierarchy(InBlueprint->ParentClass, Dependencies);
 
@@ -2974,8 +3002,8 @@ bool FBlueprintEditorUtils::IsDataOnlyBlueprint(const UBlueprint* Blueprint)
 	{
 		for(UEdGraphNode* GraphNode : EventGraph->Nodes)
 		{
-			// If there is an enabled node in the event graph, the Blueprint is not data only
-			if (GraphNode && GraphNode->bIsNodeEnabled)
+			// If there is an enabled node in the event graph (or a node that was explicitly disabled by the user), the Blueprint is not data only
+			if (GraphNode && (GraphNode->IsNodeEnabled() || GraphNode->bUserSetEnabledState))
 			{
 				return false;
 			}
@@ -4615,25 +4643,28 @@ FBPVariableDescription FBlueprintEditorUtils::DuplicateVariableDescription(UBlue
 
 void FBlueprintEditorUtils::SetDefaultValueOnUserDefinedStructProperty(UBlueprint* InBlueprint, FString InScopeName, FBPVariableDescription* InOutVariableDescription)
 {
-	if (InOutVariableDescription->VarType.PinSubCategoryObject.IsValid() && InOutVariableDescription->VarType.PinSubCategoryObject->IsA(UUserDefinedStruct::StaticClass()))
+	auto UserDefinedStruct = InOutVariableDescription ? Cast<UUserDefinedStruct>(InOutVariableDescription->VarType.PinSubCategoryObject.Get()) : nullptr;
+	if (UserDefinedStruct)
 	{
 		// Create a variable reference for the variable, so we can resolve it and use it to generate the default value
 		FMemberReference VariableReference;
 		VariableReference.SetLocalMember(InOutVariableDescription->VarName, InScopeName, InOutVariableDescription->VarGuid);
-		UStruct* FunctionScope = VariableReference.GetMemberScope(InBlueprint->SkeletonGeneratedClass);
-		UProperty* VariableProperty = VariableReference.ResolveMember<UProperty>(InBlueprint->SkeletonGeneratedClass);
+		auto VariableProperty = VariableReference.ResolveMember<UStructProperty>(InBlueprint->SkeletonGeneratedClass);
 
-		TSharedPtr<FStructOnScope> StructData = MakeShareable(new FStructOnScope(FunctionScope));
+		if (VariableProperty && ensure(VariableProperty->Struct == UserDefinedStruct))
+		{
+			FStructOnScope StructData(UserDefinedStruct);
 
-		// Create the default value for the property
-		FStructureEditorUtils::Fill_MakeStructureDefaultValue(VariableProperty, StructData->GetStructMemory());
+			// Create the default value for the property
+			FStructureEditorUtils::Fill_MakeStructureDefaultValue(UserDefinedStruct, StructData.GetStructMemory());
 
-		// Export the default value as a string so we can store it with the variable description
-		FString DefaultValueString;
-		FBlueprintEditorUtils::PropertyValueToString(VariableProperty, StructData->GetStructMemory(), DefaultValueString);
+			// Export the default value as a string so we can store it with the variable description
+			FString DefaultValueString;
+			FBlueprintEditorUtils::PropertyValueToString_Direct(VariableProperty, StructData.GetStructMemory(), DefaultValueString);
 
-		// Set the default value
-		InOutVariableDescription->DefaultValue = DefaultValueString;
+			// Set the default value
+			InOutVariableDescription->DefaultValue = DefaultValueString;
+		}
 	}
 }
 
@@ -5417,6 +5448,33 @@ void FBlueprintEditorUtils::RemoveInterface(UBlueprint* Blueprint, const FName& 
 				Schema->MarkFunctionEntryAsEditable(CurrentGraph, true);
 
 				Blueprint->FunctionGraphs.Add(CurrentGraph);
+
+				// Move all non-exec pins from the function entry node to being user defined pins
+				TArray<UK2Node_FunctionEntry*> FunctionEntryNodes;
+				CurrentGraph->GetNodesOfClass(FunctionEntryNodes);
+				if (FunctionEntryNodes.Num() > 0)
+				{
+					UK2Node_FunctionEntry* FunctionEntry = FunctionEntryNodes[0];
+					FunctionEntry->PromoteFromInterfaceOverride();
+				}
+
+				// Move all non-exec pins from the function result node to being user defined pins
+				TArray<UK2Node_FunctionResult*> FunctionResultNodes;
+				CurrentGraph->GetNodesOfClass(FunctionResultNodes);
+				if (FunctionResultNodes.Num() > 0)
+				{
+					UK2Node_FunctionResult* PrimaryFunctionResult = FunctionResultNodes[0];
+					PrimaryFunctionResult->PromoteFromInterfaceOverride();
+
+					// Reconstruct all result nodes so they update their pins accordingly
+					for (UK2Node_FunctionResult* FunctionResult : FunctionResultNodes)
+					{
+						if (PrimaryFunctionResult != FunctionResult)
+						{
+							FunctionResult->PromoteFromInterfaceOverride(false);
+						}
+					}
+				}
 			}
 			else
 			{
@@ -7150,7 +7208,7 @@ void FBlueprintEditorUtils::UpdateOldPureFunctions( UBlueprint* Blueprint )
 						{
 							UK2Node_FunctionEntry* Entry = EntryNodes[0];
 							Entry->Modify();
-							Entry->ExtraFlags |= FUNC_BlueprintPure;
+							Entry->SetExtraFlags(Entry->GetFunctionFlags() | FUNC_BlueprintPure);
 						}
 					}
 				}
@@ -7487,7 +7545,12 @@ bool FBlueprintEditorUtils::PropertyValueFromString(const UProperty* Property, c
 
 bool FBlueprintEditorUtils::PropertyValueToString(const UProperty* Property, const uint8* Container, FString& OutForm)
 {
-	check(Property && Container);
+	return PropertyValueToString_Direct(Property, Property->ContainerPtrToValuePtr<const uint8>(Container), OutForm);
+}
+
+bool FBlueprintEditorUtils::PropertyValueToString_Direct(const UProperty* Property, const uint8* DirectValue, FString& OutForm)
+{
+	check(Property && DirectValue);
 	OutForm.Reset();
 	if (Property->IsA(UStructProperty::StaticClass()))
 	{
@@ -7502,25 +7565,25 @@ bool FBlueprintEditorUtils::PropertyValueToString(const UProperty* Property, con
 		if (StructProperty->Struct == VectorStruct)
 		{
 			FVector Vector;
-			Property->CopyCompleteValue(&Vector, Property->ContainerPtrToValuePtr<uint8>(Container));
+			Property->CopyCompleteValue(&Vector, DirectValue);
 			OutForm = FString::Printf(TEXT("%f,%f,%f"), Vector.X, Vector.Y, Vector.Z);
 		}
 		else if (StructProperty->Struct == RotatorStruct)
 		{
 			FRotator Rotator;
-			Property->CopyCompleteValue(&Rotator, Property->ContainerPtrToValuePtr<uint8>(Container));
+			Property->CopyCompleteValue(&Rotator, DirectValue);
 			OutForm = FString::Printf(TEXT("%f,%f,%f"), Rotator.Pitch, Rotator.Yaw, Rotator.Roll);
 		}
 		else if (StructProperty->Struct == TransformStruct)
 		{
 			FTransform Transform;
-			Property->CopyCompleteValue(&Transform, Property->ContainerPtrToValuePtr<uint8>(Container));
+			Property->CopyCompleteValue(&Transform, DirectValue);
 			OutForm = Transform.ToString();
 		}
 		else if (StructProperty->Struct == LinearColorStruct)
 		{
 			FLinearColor Color;
-			Property->CopyCompleteValue(&Color, Property->ContainerPtrToValuePtr<uint8>(Container));
+			Property->CopyCompleteValue(&Color, DirectValue);
 			OutForm = Color.ToString();
 		}
 	}
@@ -7528,7 +7591,7 @@ bool FBlueprintEditorUtils::PropertyValueToString(const UProperty* Property, con
 	bool bSuccedded = true;
 	if (OutForm.IsEmpty())
 	{
-		bSuccedded = Property->ExportText_InContainer(0, OutForm, Container, Container, nullptr, 0);
+		bSuccedded = Property->ExportText_Direct(OutForm, DirectValue, DirectValue, nullptr, 0);
 	}
 	return bSuccedded;
 }

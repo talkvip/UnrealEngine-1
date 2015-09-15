@@ -12,6 +12,7 @@
 #include "Misc/CString.h"
 #include "Templates/MemoryOps.h"
 
+struct FStringFormatArg;
 
 /** Determines case sensitivity options for string comparisons. */
 namespace ESearchCase
@@ -1246,7 +1247,7 @@ public:
 	 * 
 	 * @param Other 	The string test against
 	 * @param SearchCase 	Whether or not the comparison should ignore case
-	 * @return 0 if equal, -1 if less than, 1 if greater than
+	 * @return 0 if equal, negative if less than, positive if greater than
 	 */
 	FORCEINLINE int32 Compare( const FString& Other, ESearchCase::Type SearchCase = ESearchCase::CaseSensitive ) const
 	{
@@ -1286,8 +1287,14 @@ public:
 	/** @return a new string with the characters of this converted to uppercase */
 	FString ToUpper() const;
 
+	/** Converts all characters in this string to uppercase */
+	void ToUpperInline();
+
 	/** @return a new string with the characters of this converted to lowercase */
 	FString ToLower() const;
+
+	/** Converts all characters in this string to lowercase */
+	void ToLowerInline();
 
 	/** Pad the left of this string for ChCount characters */
 	FString LeftPad( int32 ChCount ) const;
@@ -1307,6 +1314,22 @@ public:
 	 * @returns FString object that was constructed using format and additional parameters.
 	 */
 	VARARG_DECL( static FString, static FString, return, Printf, VARARG_NONE, const TCHAR*, VARARG_NONE, VARARG_NONE );
+
+	/**
+	 * Format the specified string using the specified arguments. Replaces instances of { Argument } with keys in the map matching 'Argument'
+	 * @param InFormatString		A string representing the format expression
+	 * @param InNamedArguments		A map of named arguments that match the tokens specified in InExpression
+	 * @return A string containing the formatted text
+	 */
+	static FString Format(const TCHAR* InFormatString, const TMap<FString, FStringFormatArg>& InNamedArguments);
+
+	/**
+	 * Format the specified string using the specified arguments. Replaces instances of {0} with indices from the given array matching the index specified in the token
+	 * @param InFormatString		A string representing the format expression
+	 * @param InOrderedArguments	An array of ordered arguments that match the tokens specified in InExpression
+	 * @return A string containing the formatted text
+	 */
+	static FString Format(const TCHAR* InFormatString, const TArray<FStringFormatArg>& InOrderedArguments);
 
 	// @return string with Ch character
 	static FString Chr( TCHAR Ch );
@@ -1750,9 +1773,9 @@ inline const uint8 TCharToNibble( const TCHAR Char )
 inline int32 HexToBytes( const FString& HexString, uint8* OutBytes )
 {
 	int32 NumBytes = 0;
-	const bool bPaddNibble = ( HexString.Len() % 2 ) == 1;
+	const bool bPadNibble = ( HexString.Len() % 2 ) == 1;
 	const TCHAR* CharPos = *HexString;
-	if( bPaddNibble )
+	if( bPadNibble )
 	{
 		OutBytes[ NumBytes++ ] = TCharToNibble( *CharPos++ );
 	}
@@ -1762,7 +1785,7 @@ inline int32 HexToBytes( const FString& HexString, uint8* OutBytes )
 		OutBytes[ NumBytes ] += TCharToNibble( *CharPos++ );
 		++NumBytes;
 	}
-	return NumBytes - 1;
+	return NumBytes;
 }
 
 /** Namespace that houses lexical conversion for various types. User defined conversions can be implemented externally */
@@ -2029,3 +2052,5 @@ public:
  * @return the index in the given string of the closing parenthesis
  */
 CORE_API int32 FindMatchingClosingParenthesis(const FString& TargetString, const int32 StartSearch = 0);
+
+#include "Misc/StringFormatArg.h"

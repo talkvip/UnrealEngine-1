@@ -162,13 +162,13 @@ FAnalyticsProviderET::FAnalyticsProviderET(const FAnalyticsET::Config& ConfigVal
 		? FAnalyticsET::Config::GetDefaultAPIServer()
 		: ConfigValues.APIServerET;
 
-	// default to GEngineVersion if one is not provided, append GEngineVersion otherwise.
+	// default to FEngineVersion::Current() if one is not provided, append FEngineVersion::Current() otherwise.
 	FString ConfigAppVersion = ConfigValues.AppVersionET;
 	// Allow the cmdline to force a specific AppVersion so it can be set dynamically.
 	FParse::Value(FCommandLine::Get(), TEXT("ANALYTICSAPPVERSION="), ConfigAppVersion, false);
 	AppVersion = ConfigAppVersion.IsEmpty() 
-		? GEngineVersion.ToString() 
-		: ConfigAppVersion.Replace(TEXT("%VERSION%"), *GEngineVersion.ToString(), ESearchCase::CaseSensitive);
+		? FEngineVersion::Current().ToString() 
+		: ConfigAppVersion.Replace(TEXT("%VERSION%"), *FEngineVersion::Current().ToString(), ESearchCase::CaseSensitive);
 
 	UE_LOG(LogAnalytics, Log, TEXT("[%s] APIServer = %s. AppVersion = %s"), *APIKey, *APIServer, *AppVersion);
 
@@ -310,10 +310,10 @@ void FAnalyticsProviderET::FlushEvents()
 		JsonWriter->Close();
 
 		FString URLPath = FString::Printf(TEXT("CollectData.1?SessionID=%s&AppID=%s&AppVersion=%s&UserID=%s"),
-			*FGenericPlatformHttp::UrlEncode(SessionID),
-			*FGenericPlatformHttp::UrlEncode(APIKey),
-			*FGenericPlatformHttp::UrlEncode(AppVersion),
-			*FGenericPlatformHttp::UrlEncode(UserID));
+			*FPlatformHttp::UrlEncode(SessionID),
+			*FPlatformHttp::UrlEncode(APIKey),
+			*FPlatformHttp::UrlEncode(AppVersion),
+			*FPlatformHttp::UrlEncode(UserID));
 
 		// Recreate the URLPath for logging because we do not want to escape the parameters when logging.
 		// We cannot simply UrlEncode the entire Path after logging it because UrlEncode(Params) != UrlEncode(Param1) & UrlEncode(Param2) ...

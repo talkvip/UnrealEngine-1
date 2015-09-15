@@ -303,9 +303,9 @@ public:
 	/** @return Saved rotation offset of mesh. */
 	const FQuat& GetBaseRotationOffset() const { return BaseRotationOffset; }
 
-	// Begin INavAgentInterface Interface
+	//~ Begin INavAgentInterface Interface
 	virtual FVector GetNavAgentLocation() const override;
-	// End INavAgentInterface Interface
+	//~ End INavAgentInterface Interface
 
 	/** Default crouched eye height */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category=Camera)
@@ -359,7 +359,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Replicated, Category=Character)
 	float JumpMaxHoldTime;
 
-	// Begin AActor Interface.
+	//~ Begin AActor Interface.
 	virtual void ClearCrossLevelReferences() override;
 	virtual void PreNetReceive() override;
 	virtual void PostNetReceive() override;
@@ -369,7 +369,7 @@ public:
 	virtual void ApplyWorldOffset(const FVector& InOffset, bool bWorldShift) override;
 	virtual UActorComponent* FindComponentByClass(const TSubclassOf<UActorComponent> ComponentClass) const override;
 	virtual void TornOff() override;
-	// End AActor Interface
+	//~ End AActor Interface
 
 	template<class T>
 	T* FindComponentByClass() const
@@ -377,7 +377,7 @@ public:
 		return AActor::FindComponentByClass<T>();
 	}
 
-	// Begin APawn Interface.
+	//~ Begin APawn Interface.
 	virtual void PostInitializeComponents() override;
 	virtual UPawnMovementComponent* GetMovementComponent() const override;
 	virtual UPrimitiveComponent* GetMovementBase() const override final { return BasedMovement.MovementBase; }
@@ -391,7 +391,7 @@ public:
 	virtual void DisplayDebug(class UCanvas* Canvas, const FDebugDisplayInfo& DebugDisplay, float& YL, float& YPos) override;
 	virtual void RecalculateBaseEyeHeight() override;
 	virtual void UpdateNavigationRelevance() override;
-	// End APawn Interface
+	//~ End APawn Interface
 
 	/** Apply momentum caused by damage. */
 	virtual void ApplyDamageMomentum(float DamageTaken, FDamageEvent const& DamageEvent, APawn* PawnInstigator, AActor* DamageCauser);
@@ -460,7 +460,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category=Animation)
 	virtual float PlayAnimMontage(class UAnimMontage* AnimMontage, float InPlayRate = 1.f, FName StartSectionName = NAME_None);
 
-	/** Stop Animation Montage. If NULL, it will stop what's currently active **/
+	/** Stop Animation Montage. If NULL, it will stop what's currently active. The Blend Out Time is taken from the montage asset that is being stopped. **/
 	UFUNCTION(BlueprintCallable, Category=Animation)
 	virtual void StopAnimMontage(class UAnimMontage* AnimMontage = NULL);
 

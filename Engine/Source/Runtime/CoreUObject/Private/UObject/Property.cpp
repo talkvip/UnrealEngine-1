@@ -485,14 +485,26 @@ void UProperty::ExportCppDeclaration(FOutputDevice& Out, EExportedDeclaration::T
 		}
 	}
 
-	FString NameCpp = bSkipParameterName ? FString() : GetNameCPP();
+	FString NameCpp;
+	if (!bSkipParameterName)
+	{
+		if (AdditionalExportCPPFlags & CPPF_BlueprintCppBackend)
+		{
+			NameCpp = UnicodeToCPPIdentifier(GetName(), HasAnyPropertyFlags(CPF_Deprecated), TEXT("bpv__"));
+		}
+		else
+		{
+			NameCpp = GetNameCPP();
+		}
+	}
 	if (DeclarationType == EExportedDeclaration::MacroParameter)
 	{
 		NameCpp = FString(TEXT(", ")) + NameCpp;
 	}
 
 	TCHAR ArrayStr[MAX_SPRINTF]=TEXT("");
-	if( ArrayDim != 1 )
+	const bool bExportStaticArray = 0 == (CPPF_NoStaticArray & AdditionalExportCPPFlags);
+	if ((ArrayDim != 1) && bExportStaticArray)
 	{
 		if (ArrayDimOverride)
 		{
@@ -1259,6 +1271,16 @@ const TCHAR* UNumericProperty::ImportText_Internal( const TCHAR* Buffer, void* D
 void UNumericProperty::ExportTextItem( FString& ValueStr, const void* PropertyValue, const void* DefaultValue, UObject* Parent, int32 PortFlags, UObject* ExportRootScope ) const
 {
 	ValueStr += GetNumericPropertyValueToString(PropertyValue);
+}
+
+void UFloatProperty::ExportTextItem(FString& ValueStr, const void* PropertyValue, const void* DefaultValue, UObject* Parent, int32 PortFlags, UObject* ExportRootScope) const
+{
+	Super::ExportTextItem(ValueStr, PropertyValue, DefaultValue, Parent, PortFlags, ExportRootScope);
+
+	if (0 != (PortFlags & PPF_ExportCpp))
+	{
+		ValueStr += TEXT("f");
+	}
 }
 
 

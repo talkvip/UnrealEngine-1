@@ -7,7 +7,6 @@
 #include <GameKit/GKLeaderboard.h>
 #include <GameKit/GKScore.h>
 
-
 FOnlineLeaderboardsIOS::FOnlineLeaderboardsIOS(FOnlineSubsystemIOS* InSubsystem)
 {
 	UE_LOG(LogOnline, Display, TEXT("FOnlineLeaderboardsIOS::FOnlineLeaderboardsIOS()"));

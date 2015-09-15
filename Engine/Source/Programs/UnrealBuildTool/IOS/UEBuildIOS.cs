@@ -27,6 +27,12 @@ namespace UnrealBuildTool
 		[XmlConfig]
 		public static string ShippingArchitectures = "armv7,arm64";
 
+		/** additional linker flags for shipping */
+		public static string AdditionalShippingLinkerFlags = "";
+
+		/** additional linker flags for non-shipping */
+		public static string AdditionalLinkerFlags = "";
+
 		private bool bInitializedProject = false;
 
 		public string GetRunTimeVersion()
@@ -39,6 +45,18 @@ namespace UnrealBuildTool
 			return RunTimeIOSDevices;
 		}
 
+		public string GetAdditionalLinkerFlags(CPPTargetConfiguration InConfiguration)
+		{
+			if (InConfiguration != CPPTargetConfiguration.Shipping)
+			{
+				return AdditionalLinkerFlags;
+			}
+			else
+			{
+				return AdditionalShippingLinkerFlags;
+			}
+
+		}
 		// The current architecture - affects everything about how UBT operates on IOS
         public override string GetActiveArchitecture()
         {
@@ -149,7 +167,7 @@ namespace UnrealBuildTool
 
 				// update the configuration based on the project file
 				// look in ini settings for what platforms to compile for
-				ConfigCacheIni Ini = new ConfigCacheIni(InPlatform, "Engine", UnrealBuildTool.GetUProjectPath());
+				ConfigCacheIni Ini = ConfigCacheIni.CreateConfigCacheIni(InPlatform, "Engine", UnrealBuildTool.GetUProjectPath());
 				string MinVersion = "IOS_6";
 				if (Ini.GetString("/Script/IOSRuntimeSettings.IOSRuntimeSettings", "MinimumiOSVersion", out MinVersion))
 				{
@@ -237,7 +255,10 @@ namespace UnrealBuildTool
 				}
 
 				// determine if we need to generate the dsym
-				Ini.GetBool("/Script/IOSRuntimeSettings.IOSRuntimeSettings", "bGenerateSYMFile", out BuildConfiguration.bGeneratedSYMFile);
+				Ini.GetBool("/Script/IOSRuntimeSettings.IOSRuntimeSettings", "bGeneratedSYMFile", out BuildConfiguration.bGeneratedSYMFile);
+
+				Ini.GetString("/Script/IOSRuntimeSettings.IOSRuntimeSettings", "AdditionalLinkerFlags", out AdditionalLinkerFlags);
+				Ini.GetString("/Script/IOSRuntimeSettings.IOSRuntimeSettings", "AdditionalShippingLinkerFlags", out AdditionalShippingLinkerFlags);
 
 				bInitializedProject = true;
 			}
@@ -248,25 +269,27 @@ namespace UnrealBuildTool
 		 *
 		 * return true if the project uses the default build config
 		 */
-		public override bool HasDefaultBuildConfig(UnrealTargetPlatform Platform, string ProjectPath)
+		public override bool HasDefaultBuildConfig(UnrealTargetPlatform Platform, DirectoryReference ProjectDirectoryName)
 		{
 			string[] BoolKeys = new string[] {
 				"bDevForArmV7", "bDevForArm64", "bDevForArmV7S", "bShipForArmV7", 
-				"bShipForArm64", "bShipForArmV7S", "bGenerateSYMFile",
+				"bShipForArm64", "bShipForArmV7S", "bGeneratedSYMFile",
 			};
 			string[] StringKeys = new string[] {
 				"MinimumiOSVersion", 
+				"AdditionalLinkerFlags",
+				"AdditionalShippingLinkerFlags"
 			};
 
 			// look up iOS specific settings
-			if (!DoProjectSettingsMatchDefault(Platform, ProjectPath, "/Script/IOSRuntimeSettings.IOSRuntimeSettings",
+			if (!DoProjectSettingsMatchDefault(Platform, ProjectDirectoryName, "/Script/IOSRuntimeSettings.IOSRuntimeSettings",
 				    BoolKeys, null, StringKeys))
 			{
 				return false;
 			}
 
 			// check the base settings
-			return base.HasDefaultBuildConfig(Platform, ProjectPath);
+			return base.HasDefaultBuildConfig(Platform, ProjectDirectoryName);
 		}
 
 		/**
@@ -304,12 +327,6 @@ namespace UnrealBuildTool
 
             InBuildTarget.GlobalLinkEnvironment.Config.AdditionalFrameworks.Add( new UEBuildFramework( "GameKit" ) );
             InBuildTarget.GlobalLinkEnvironment.Config.AdditionalFrameworks.Add( new UEBuildFramework( "StoreKit" ) );
-			InBuildTarget.GlobalLinkEnvironment.Config.AdditionalFrameworks.Add( new UEBuildFramework( "CloudKit" ) );
-
-			if (RunTimeIOSVersion != "6.1")
-			{
-				InBuildTarget.GlobalLinkEnvironment.Config.AdditionalFrameworks.Add (new UEBuildFramework ("MultipeerConnectivity"));
-			}
         }
 
         /**
@@ -394,46 +411,49 @@ namespace UnrealBuildTool
          *     This is not required - but allows for hiding details of a
          *     particular platform.
          *     
-         *     @param InModule             The newly loaded module
-         *     @param GameName             The game being build
-         *     @param Target               The target being build
-         */
-        public override void ModifyNewlyLoadedModule(UEBuildModule InModule, TargetInfo Target)
+		 *  @param  Name			The name of the module
+		 *	@param	Rules			The module rules
+		 *	@param	Target			The target being build
+		 */
+		public override void ModifyModuleRules(string ModuleName, ModuleRules Rules, TargetInfo Target)
         {
             if ((Target.Platform == UnrealTargetPlatform.Win32) || (Target.Platform == UnrealTargetPlatform.Win64) || (Target.Platform == UnrealTargetPlatform.Mac))
             {
                 bool bBuildShaderFormats = UEBuildConfiguration.bForceBuildShaderFormats;
                 if (!UEBuildConfiguration.bBuildRequiresCookedData)
                 {
-                    if (InModule.ToString() == "Engine")
+                    if (ModuleName == "Engine")
                     {
                         if (UEBuildConfiguration.bBuildDeveloperTools)
                         {
-                            InModule.AddPlatformSpecificDynamicallyLoadedModule("IOSTargetPlatform");
+                            Rules.PlatformSpecificDynamicallyLoadedModuleNames.Add("IOSTargetPlatform");
                         }
                     }
-                    else if (InModule.ToString() == "TargetPlatform")
+                    else if (ModuleName == "TargetPlatform")
                     {
                         bBuildShaderFormats = true;
-						InModule.AddDynamicallyLoadedModule("TextureFormatPVR");
-						InModule.AddDynamicallyLoadedModule("TextureFormatASTC");
+						Rules.DynamicallyLoadedModuleNames.Add("TextureFormatPVR");
+						Rules.DynamicallyLoadedModuleNames.Add("TextureFormatASTC");
                         if (UEBuildConfiguration.bBuildDeveloperTools)
                         {
-                            InModule.AddPlatformSpecificDynamicallyLoadedModule("AudioFormatADPCM");
+                            Rules.PlatformSpecificDynamicallyLoadedModuleNames.Add("AudioFormatADPCM");
                         }
                     }
                 }
 
                 // allow standalone tools to use targetplatform modules, without needing Engine
-                if (UEBuildConfiguration.bForceBuildTargetPlatforms)
-                {
-                    InModule.AddPlatformSpecificDynamicallyLoadedModule("IOSTargetPlatform");
-                }
-
-                if (bBuildShaderFormats)
-                {
-                    InModule.AddPlatformSpecificDynamicallyLoadedModule("MetalShaderFormat");
-                }
+				if(ModuleName == "TargetPlatform")
+				{
+                    if (UEBuildConfiguration.bForceBuildTargetPlatforms)
+                    {
+                        Rules.PlatformSpecificDynamicallyLoadedModuleNames.Add("IOSTargetPlatform");
+                    }
+    
+                    if (bBuildShaderFormats)
+                    {
+                        Rules.PlatformSpecificDynamicallyLoadedModuleNames.Add("MetalShaderFormat");
+                    }
+				}
             }
         }
     }

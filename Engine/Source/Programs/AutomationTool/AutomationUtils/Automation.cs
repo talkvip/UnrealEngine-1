@@ -121,6 +121,11 @@ namespace AutomationTool
 		public static CommandLineArg UTF8Output = new CommandLineArg("-UTF8Output");
 		public static CommandLineArg NoAutoSDK = new CommandLineArg("-NoAutoSDK");
 		public static CommandLineArg IgnoreJunk = new CommandLineArg("-ignorejunk");
+        /// <summary>
+        /// Allows you to use local storage for your root build storage dir (default of P:\Builds (on PC) is changed to Engine\Saved\LocalBuilds). Used for local testing.
+        /// </summary>
+        public static CommandLineArg UseLocalBuildStorage = new CommandLineArg("-UseLocalBuildStorage");
+
 		/// <summary>
 		/// Force initialize static members by calling this.
 		/// </summary>
@@ -149,7 +154,8 @@ AutomationTool.exe [-verbose] [-compileonly] [-p4] Command0 [-Arg0 -Arg1 -Arg2 â
 	[Help("nosubmit", "Prevents any submit attempts")]
 	[Help("nokill", "Does not kill any spawned processes on exit")]
 	[Help("ignorejunk", "Prevents UBT from cleaning junk files")]
-	public static class Automation
+    [Help("UseLocalBuildStorage", @"Allows you to use local storage for your root build storage dir (default of P:\Builds (on PC) is changed to Engine\Saved\LocalBuilds). Used for local testing.")]
+    public static class Automation
 	{
 		#region Command line parsing
 
@@ -159,14 +165,15 @@ AutomationTool.exe [-verbose] [-compileonly] [-p4] Command0 [-Arg0 -Arg1 -Arg2 â
 		/// <param name="ParamIndex">Parameter index</param>
 		/// <param name="CommandLine">Command line</param>
 		/// <param name="CurrentCommand">Recently parsed command</param>
+		/// <param name="OutScriptsForProjectFileName">The only project to build scripts for</param>
 		/// <param name="OutAdditionalScriptsFolders">Additional script locations</param>
 		/// <returns>True if the parameter has been successfully parsed.</returns>
-		private static void ParseParam(string CurrentParam, CommandInfo CurrentCommand, List<string> OutAdditionalScriptsFolders)
+		private static void ParseParam(string CurrentParam, CommandInfo CurrentCommand, ref string OutScriptsForProjectFileName, List<string> OutAdditionalScriptsFolders)
 		{
 			bool bGlobalParam = false;
 			foreach (var RegisteredParam in GlobalCommandLine.RegisteredArgs)
 			{
-				if (String.Compare(CurrentParam, RegisteredParam.Key, true) == 0)
+				if (String.Compare(CurrentParam, RegisteredParam.Key, StringComparison.InvariantCultureIgnoreCase) == 0)
 				{
 					// Register and exit, we're done here.
 					RegisteredParam.Value.Set();
@@ -176,7 +183,20 @@ AutomationTool.exe [-verbose] [-compileonly] [-p4] Command0 [-Arg0 -Arg1 -Arg2 â
 			}
 
 			// The parameter was not found in the list of global parameters, continue looking...
-			if (CurrentParam.StartsWith("-ScriptDir=", StringComparison.InvariantCultureIgnoreCase))
+			if (CurrentParam.StartsWith("-ScriptsForProject=", StringComparison.InvariantCultureIgnoreCase))
+			{
+				if(OutScriptsForProjectFileName != null)
+				{
+					throw new AutomationException("The -ProjectScripts argument may only be specified once");
+				}
+				var ProjectFileName = CurrentParam.Substring(CurrentParam.IndexOf('=') + 1);
+				if(!File.Exists(ProjectFileName))
+				{
+					throw new AutomationException("Project '{0}' does not exist", ProjectFileName);
+				}
+				OutScriptsForProjectFileName = Path.GetFullPath(ProjectFileName);
+			}
+			else if (CurrentParam.StartsWith("-ScriptDir=", StringComparison.InvariantCultureIgnoreCase))
 			{
 				var ScriptDir = CurrentParam.Substring(CurrentParam.IndexOf('=') + 1);
 				if (Directory.Exists(ScriptDir))
@@ -220,12 +240,14 @@ AutomationTool.exe [-verbose] [-compileonly] [-p4] Command0 [-Arg0 -Arg1 -Arg2 â
 		/// <param name="CommandLine">Command line</param>
 		/// <param name="OutCommandsToExecute">List containing the names of commands to execute</param>
 		/// <param name="OutAdditionalScriptsFolders">Optional list of additional paths to look for scripts in</param>
-		private static void ParseCommandLine(string[] CommandLine, List<CommandInfo> OutCommandsToExecute, List<string> OutAdditionalScriptsFolders)
+		private static void ParseCommandLine(string[] CommandLine, List<CommandInfo> OutCommandsToExecute, out string OutScriptsForProjectFileName, List<string> OutAdditionalScriptsFolders)
 		{
 			// Initialize global command line parameters
 			GlobalCommandLine.Init();
 
 			Log.TraceInformation("Parsing command line: {0}", String.Join(" ", CommandLine));
+
+			OutScriptsForProjectFileName = null;
 
 			CommandInfo CurrentCommand = null;
 			for (int Index = 0; Index < CommandLine.Length; ++Index)
@@ -233,7 +255,7 @@ AutomationTool.exe [-verbose] [-compileonly] [-p4] Command0 [-Arg0 -Arg1 -Arg2 â
 				var Param = CommandLine[Index];
 				if (Param.StartsWith("-") || Param.Contains("="))
 				{
-					ParseParam(CommandLine[Index], CurrentCommand, OutAdditionalScriptsFolders);
+					ParseParam(CommandLine[Index], CurrentCommand, ref OutScriptsForProjectFileName, OutAdditionalScriptsFolders);
 				}
 				else
 				{
@@ -280,7 +302,7 @@ AutomationTool.exe [-verbose] [-compileonly] [-p4] Command0 [-Arg0 -Arg1 -Arg2 â
 		/// Main method.
 		/// </summary>
 		/// <param name="CommandLine">Command line</param>
-		public static void Process(string[] CommandLine)
+		public static ExitCode Process(string[] CommandLine)
 		{
 			// Initial check for local or build machine runs BEFORE we parse the command line (We need this value set
 			// in case something throws the exception while parsing the command line)
@@ -288,8 +310,9 @@ AutomationTool.exe [-verbose] [-compileonly] [-p4] Command0 [-Arg0 -Arg1 -Arg2 â
 
 			// Scan the command line for commands to execute.
 			var CommandsToExecute = new List<CommandInfo>();
+			string OutScriptsForProjectFileName;
 			var AdditionalScriptsFolders = new List<string>();
-			ParseCommandLine(CommandLine, CommandsToExecute, AdditionalScriptsFolders);
+			ParseCommandLine(CommandLine, CommandsToExecute, out OutScriptsForProjectFileName, AdditionalScriptsFolders);
 
 			// Check for build machine override (force local)
 			IsBuildMachine = GlobalCommandLine.ForceLocal ? false : IsBuildMachine;
@@ -303,7 +326,7 @@ AutomationTool.exe [-verbose] [-compileonly] [-p4] Command0 [-Arg0 -Arg1 -Arg2 â
 			if (CommandsToExecute.Count == 0 && GlobalCommandLine.Help)
 			{
 				DisplayHelp();
-				return;
+				return ExitCode.Success;
 			}
 
 			// Disable AutoSDKs if specified on the command line
@@ -328,27 +351,27 @@ AutomationTool.exe [-verbose] [-compileonly] [-p4] Command0 [-Arg0 -Arg1 -Arg2 â
 			// Compile scripts.
 			Log.TraceInformation("Compiling scripts.");
 			ScriptCompiler Compiler = new ScriptCompiler();
-			using(CommandUtils.TelemetryStopwatch ScriptCompileStopwatch = new CommandUtils.TelemetryStopwatch("ScriptCompile"))
+			using(TelemetryStopwatch ScriptCompileStopwatch = new TelemetryStopwatch("ScriptCompile"))
 			{
-				Compiler.FindAndCompileAllScripts(AdditionalScriptsFolders: AdditionalScriptsFolders);
+				Compiler.FindAndCompileAllScripts(OutScriptsForProjectFileName, AdditionalScriptsFolders);
 			}
 
 			if (GlobalCommandLine.CompileOnly)
 			{
 				Log.TraceInformation("Compilation successful, exiting (CompileOnly)");
-				return;
+				return ExitCode.Success;
 			}
 
 			if (GlobalCommandLine.List)
 			{
 				ListAvailableCommands(Compiler.Commands);
-				return;
+				return ExitCode.Success;
 			}
 
 			if (GlobalCommandLine.Help)
 			{
 				DisplayHelp(CommandsToExecute, Compiler.Commands);
-				return;
+				return ExitCode.Success;
 			}
 
 			// Enable or disable P4 support
@@ -361,9 +384,7 @@ AutomationTool.exe [-verbose] [-compileonly] [-p4] Command0 [-Arg0 -Arg1 -Arg2 â
 			}
 
 			// Find and execute commands.
-			Execute(CommandsToExecute, Compiler.Commands);
-
-			return;
+			return Execute(CommandsToExecute, Compiler.Commands);
 		}
 
 		/// <summary>
@@ -371,7 +392,7 @@ AutomationTool.exe [-verbose] [-compileonly] [-p4] Command0 [-Arg0 -Arg1 -Arg2 â
 		/// </summary>
 		/// <param name="CommandsToExecute"></param>
 		/// <param name="Commands"></param>
-		private static void Execute(List<CommandInfo> CommandsToExecute, CaselessDictionary<Type> Commands)
+		private static ExitCode Execute(List<CommandInfo> CommandsToExecute, CaselessDictionary<Type> Commands)
 		{
 			for (int CommandIndex = 0; CommandIndex < CommandsToExecute.Count; ++CommandIndex)
 			{
@@ -382,26 +403,32 @@ AutomationTool.exe [-verbose] [-compileonly] [-p4] Command0 [-Arg0 -Arg1 -Arg2 â
 				{
 					throw new AutomationException("Failed to find command {0}", CommandInfo.CommandName);
 				}
-				else
+
+				BuildCommand Command = (BuildCommand)Activator.CreateInstance(CommandType);
+				Command.Params = CommandInfo.Arguments.ToArray();
+				try
 				{
-					BuildCommand Command = (BuildCommand)Activator.CreateInstance(CommandType);
-					Command.Params = CommandInfo.Arguments.ToArray();
-					Command.Execute();
-					// dispose of the class if necessary
+					ExitCode Result = Command.Execute();
+					if(Result != ExitCode.Success)
 					{
-						var CommandDisposable = Command as IDisposable;
-						if (CommandDisposable != null)
-						{
-							CommandDisposable.Dispose();
-						}
+						return Result;
 					}
-
-					// Make sure there's no directories on the stack.
-					CommandUtils.ClearDirStack();
+					CommandUtils.Log("BUILD SUCCESSFUL");
 				}
-			}
+				finally
+				{
+					// dispose of the class if necessary
+					var CommandDisposable = Command as IDisposable;
+					if (CommandDisposable != null)
+					{
+						CommandDisposable.Dispose();
+					}
+				}
 
-			Log.TraceInformation("Script execution successful, exiting.");
+				// Make sure there's no directories on the stack.
+				CommandUtils.ClearDirStack();
+			}
+			return ExitCode.Success;
 		}
 
 		#endregion
@@ -450,7 +477,7 @@ AutomationTool.exe [-verbose] [-compileonly] [-p4] Command0 [-Arg0 -Arg1 -Arg2 â
 			{
 				Message += String.Format("  {0}{1}", AvailableCommand.Key, Environment.NewLine);
 			}
-			CommandUtils.LogConsole(Message);
+			CommandUtils.Log(Message);
 		}
 
 		#endregion

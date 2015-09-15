@@ -29,7 +29,7 @@ namespace Utils
 			switch (State)
 			{
 				case ESearchState::Before:	Max = SearchIndex; break;
-				case ESearchState::After:		Min = SearchIndex + 1; break;
+				case ESearchState::After:	Min = SearchIndex + 1; break;
 				case ESearchState::Found: 	return &Item;
 			}
 		}
@@ -150,6 +150,31 @@ void SSequencerTreeView::ReportChildRowGeometry(const FDisplayNodeRef& InNode, c
 void SSequencerTreeView::OnChildRowRemoved(const FDisplayNodeRef& InNode)
 {
 	CachedRowGeometry.Remove(InNode);
+}
+
+TSharedPtr<FSequencerDisplayNode> SSequencerTreeView::HitTestNode(float InPhysical) const
+{
+	auto* Found = Utils::BinarySearch<FCachedGeometry>(PhysicalNodes, [&](const FCachedGeometry& In){
+
+		if (InPhysical < In.PhysicalTop)
+		{
+			return Utils::ESearchState::Before;
+		}
+		else if (InPhysical > In.PhysicalTop + In.PhysicalHeight)
+		{
+			return Utils::ESearchState::After;
+		}
+
+		return Utils::ESearchState::Found;
+
+	});
+
+	if (Found)
+	{
+		return Found->Node;
+	}
+	
+	return nullptr;
 }
 
 float SSequencerTreeView::PhysicalToVirtual(float InPhysical) const
@@ -334,7 +359,38 @@ bool ShouldExpand(const T& InContainer, ETreeRecursion Recursion)
 	return !bAllExpanded;
 }
 
-void SSequencerTreeView::ToggleSelectedNodeExpansion(ETreeRecursion Recursion)
+void SSequencerTreeView::ToggleExpandCollapseNodes(ETreeRecursion Recursion)
+{
+	FSequencer& Sequencer = SequencerNodeTree->GetSequencer();
+
+	const TSet< FDisplayNodeRef >& SelectedNodes = Sequencer.GetSelection().GetSelectedOutlinerNodes();
+
+	bool bExpand = false;
+	if (SelectedNodes.Num() != 0)
+	{
+		bExpand = ShouldExpand(SelectedNodes, Recursion);
+	}
+	else
+	{
+		bExpand = ShouldExpand(SequencerNodeTree->GetRootNodes(), Recursion);
+	}
+
+	ExpandOrCollapseNodes(Recursion, bExpand);
+}
+
+void SSequencerTreeView::ExpandNodes(ETreeRecursion Recursion)
+{
+	const bool bExpand = true;
+	ExpandOrCollapseNodes(Recursion, bExpand);
+}
+
+void SSequencerTreeView::CollapseNodes(ETreeRecursion Recursion)
+{
+	const bool bExpand = false;
+	ExpandOrCollapseNodes(Recursion, bExpand);
+}
+
+void SSequencerTreeView::ExpandOrCollapseNodes(ETreeRecursion Recursion, bool bExpand)
 {
 	FSequencer& Sequencer = SequencerNodeTree->GetSequencer();
 
@@ -342,7 +398,6 @@ void SSequencerTreeView::ToggleSelectedNodeExpansion(ETreeRecursion Recursion)
 
 	if (SelectedNodes.Num() != 0)
 	{
-		const bool bExpand = ShouldExpand(SelectedNodes, Recursion);
 		for (auto& Item : SelectedNodes)
 		{
 			ExpandCollapseNode(Item, bExpand, Recursion);
@@ -350,7 +405,6 @@ void SSequencerTreeView::ToggleSelectedNodeExpansion(ETreeRecursion Recursion)
 	}
 	else
 	{
-		const bool bExpand = ShouldExpand(SequencerNodeTree->GetRootNodes(), Recursion);
 		for (auto& Item : SequencerNodeTree->GetRootNodes())
 		{
 			ExpandCollapseNode(Item, bExpand, Recursion);

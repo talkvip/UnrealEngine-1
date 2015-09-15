@@ -51,7 +51,7 @@ TSharedRef<SWidget> SEnumCurveKeyEditor::OnGenerateWidget(TSharedPtr<FString> In
 
 void SEnumCurveKeyEditor::OnComboSelectionChanged(TSharedPtr<FString> InSelectedItem, ESelectInfo::Type SelectInfo)
 {
-	FScopedTransaction Transaction(LOCTEXT("SetEnumKey", "Set enum key value"));
+	FScopedTransaction Transaction(LOCTEXT("SetEnumKey", "Set Enum Key Value"));
 	OwningSection->SetFlags(RF_Transactional);
 	OwningSection->Modify();
 
@@ -72,7 +72,14 @@ void SEnumCurveKeyEditor::OnComboSelectionChanged(TSharedPtr<FString> InSelected
 
 	int32 SelectedIndex;
 	EnumValues.Find(InSelectedItem, SelectedIndex);
-	Curve->UpdateOrAddKey(CurrentTime, SelectedIndex);
+	if (Curve->GetNumKeys() == 0)
+	{
+		Curve->SetDefaultValue(SelectedIndex);
+	}
+	else
+	{
+		Curve->UpdateOrAddKey(CurrentTime, SelectedIndex);
+	}
 	Sequencer->UpdateRuntimeInstances();
 }
 

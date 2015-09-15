@@ -11,6 +11,7 @@
 class ISequencerSection;
 
 DECLARE_DELEGATE_OneParam(FOnKeyProperty, float)
+DECLARE_DELEGATE_RetVal_OneParam(bool, FCanKeyProperty, float)
 
 /**
  * Base class for handling key and section drawing and manipulation for a UMovieSceneTrack class
@@ -56,6 +57,12 @@ public:
 		return Sequencer.Pin()->IsRecordingLive() || Sequencer.Pin()->GetAutoKeyEnabled();
 	}
 
+	/** Gets whether the tool can key all*/
+	virtual bool IsAllowedKeyAll() const
+	{
+		return Sequencer.Pin()->GetKeyAllEnabled();
+	}
+
 	void NotifyMovieSceneDataChanged()
 	{
 		TSharedPtr<ISequencer> SequencerPin = Sequencer.Pin();
@@ -65,16 +72,25 @@ public:
 		}
 	}
 	
-	void AnimatablePropertyChanged( TSubclassOf<class UMovieSceneTrack> TrackClass, bool bMustBeAutokeying, FOnKeyProperty OnKeyProperty )
+	bool CanKeyProperty( FCanKeyProperty InCanKeyProperty )
+	{
+		UMovieSceneSequence* MovieSceneSequence = GetMovieSceneSequence();
+		check( MovieSceneSequence );
+
+		float KeyTime = GetTimeForKey(MovieSceneSequence);
+
+		return InCanKeyProperty.Execute(KeyTime);
+	}
+	
+	void AnimatablePropertyChanged( TSubclassOf<class UMovieSceneTrack> TrackClass, FOnKeyProperty OnKeyProperty )
 	{
 		check(OnKeyProperty.IsBound());
 
 		// Get the movie scene we want to autokey
 		UMovieSceneSequence* MovieSceneSequence = GetMovieSceneSequence();
 		float KeyTime = GetTimeForKey( MovieSceneSequence );
-		bool bIsKeyingValid = !bMustBeAutokeying || IsAllowedToAutoKey();
 
-		if( bIsKeyingValid )
+		if( !Sequencer.Pin()->IsRecordingLive() )
 		{
 			check( MovieSceneSequence );
 
@@ -98,12 +114,12 @@ public:
 	 * @param Object	The object to create a binding for
 	 * @return A handle to the binding or an invalid handle if the object could not be bound
 	 */
-	FGuid FindOrCreateHandleToObject( UObject* Object )
+	FGuid FindOrCreateHandleToObject( UObject* Object, bool bCreateHandleIfMissing = true )
 	{
-		return GetSequencer()->GetHandleToObject( Object );
+		return GetSequencer()->GetHandleToObject( Object, bCreateHandleIfMissing );
 	}
 
-	UMovieSceneTrack* GetTrackForObject( const FGuid& ObjectHandle, TSubclassOf<class UMovieSceneTrack> TrackClass, FName UniqueTypeName )
+	UMovieSceneTrack* GetTrackForObject( const FGuid& ObjectHandle, TSubclassOf<class UMovieSceneTrack> TrackClass, FName UniqueTypeName, bool bCreateTrackIfMissing = true )
 	{
 		check( UniqueTypeName != NAME_None );
 
@@ -111,7 +127,7 @@ public:
 
 		UMovieSceneTrack* Type = MovieScene->FindTrack( TrackClass, ObjectHandle, UniqueTypeName );
 
-		if( !Type )
+		if( !Type && bCreateTrackIfMissing )
 		{
 			Type = AddTrack( MovieScene, ObjectHandle, TrackClass, UniqueTypeName );
 		}
@@ -195,6 +211,15 @@ public:
 	virtual void BuildObjectBindingContextMenu(FMenuBuilder& MenuBuilder, const FGuid& ObjectBinding, const UClass* ObjectClass) {}
 
 	/**
+	 * Builds up the object binding track menu for the outliner
+	 *
+	 * @param MenuBuilder	The menu builder to change
+	 * @param ObjectBinding	The object binding this is for
+	 * @param ObjectClass	The class of the object this is for
+	 */
+	virtual void BuildObjectBindingTrackMenu(FMenuBuilder& MenuBuilder, const FGuid& ObjectBinding, const UClass* ObjectClass) {}
+
+	/**
 	 * Builds up the object binding edit buttons for the outliner
 	 *
 	 * @param EditBox	    The edit box to add buttons to
@@ -202,6 +227,14 @@ public:
 	 * @param ObjectClass	The class of the object this is for
 	 */
 	virtual void BuildObjectBindingEditButtons(TSharedPtr<SHorizontalBox> EditBox, const FGuid& ObjectBinding, const UClass* ObjectClass) {}
+
+	/**
+	 * Builds an edit widget for the outliner nodes which represent tracks which are edited by this editor.
+	 * @param ObjectBinding The object binding associated with the track being edited by this editor.
+	 * @param Track The track being edited by this editor.
+	 * @returns The the widget to display in the outliner, or an empty shared ptr if not widget is to be displayed.
+	 */
+	virtual TSharedPtr<SWidget> BuildOutlinerEditWidget(const FGuid& ObjectBinding, UMovieSceneTrack* Track) { return TSharedPtr<SWidget>(); }
 
 private:
 	/** The sequencer bound to this handler.  Used to access movie scene and time info during auto-key */

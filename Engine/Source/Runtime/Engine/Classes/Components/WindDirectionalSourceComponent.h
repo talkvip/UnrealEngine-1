@@ -2,11 +2,12 @@
 
 
 #pragma once
+#include "Components/SceneComponent.h"
 #include "WindDirectionalSourceComponent.generated.h"
 
 /** Component that provides a directional wind source. Only affects SpeedTree assets. */
 UCLASS(collapsecategories, hidecategories=(Object, Mobility), editinlinenew)
-class UWindDirectionalSourceComponent : public USceneComponent
+class ENGINE_API UWindDirectionalSourceComponent : public USceneComponent
 {
 	GENERATED_UCLASS_BODY()
 
@@ -26,11 +27,11 @@ public:
 	class FWindSourceSceneProxy* SceneProxy;
 
 protected:
-	// Begin UActorComponent interface.
+	//~ Begin UActorComponent Interface.
 	virtual void CreateRenderState_Concurrent() override;
 	virtual void SendRenderTransform_Concurrent() override;
 	virtual void DestroyRenderState_Concurrent() override;
-	// End UActorComponent interface.
+	//~ End UActorComponent Interface.
 
 public:
 	/**

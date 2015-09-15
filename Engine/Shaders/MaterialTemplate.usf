@@ -25,7 +25,17 @@
 #include "PaniniProjection.usf"
 
 #ifndef USE_DITHERED_LOD_TRANSITION
-	#define USE_DITHERED_LOD_TRANSITION 0
+    #if USE_INSTANCING
+	    #ifndef USE_DITHERED_LOD_TRANSITION_FOR_INSTANCED
+		    #error "USE_DITHERED_LOD_TRANSITION_FOR_INSTANCED should have been defined"
+	    #endif
+	    #define USE_DITHERED_LOD_TRANSITION USE_DITHERED_LOD_TRANSITION_FOR_INSTANCED
+    #else
+	    #ifndef USE_DITHERED_LOD_TRANSITION_FROM_MATERIAL
+		    #error "USE_DITHERED_LOD_TRANSITION_FROM_MATERIAL should have been defined"
+	    #endif
+	    #define USE_DITHERED_LOD_TRANSITION USE_DITHERED_LOD_TRANSITION_FROM_MATERIAL
+    #endif
 #endif
 
 //Platforms that don't run the editor shouldn't need editor features in the shaders.
@@ -334,6 +344,18 @@ float3 GetTranslatedWorldPosition_NoMaterialOffsets(FMaterialPixelParameters Par
 	return Parameters.WorldPosition_NoOffsets_CamRelative;
 }
 
+// using this function allows to write the same code for VS and PS
+float4 GetScreenPosition(FMaterialVertexParameters Parameters)
+{
+	return mul(float4(Parameters.WorldPosition, 1.0f), View.TranslatedWorldToClip);
+}
+
+// using this function allows to write the same code for VS and PS
+float4 GetScreenPosition(FMaterialPixelParameters Parameters)
+{
+	return Parameters.ScreenPosition;
+}
+
 #if DECAL_RENDERSTAGE && NUM_MATERIAL_TEXCOORDS
 	/*
 	 * Material node DecalMipmapLevel's code designed to avoid the 2x2 pixels artefacts on the edges around where the decal
@@ -355,7 +377,7 @@ float3 GetTranslatedWorldPosition_NoMaterialOffsets(FMaterialPixelParameters Par
 		return DecalVector.xy;
 	}
 
-	float ComputeDecalMipmapLevel(FMaterialPixelParameters Parameters, float2 TextureSize)
+	float2 ComputeDecalDDX(FMaterialPixelParameters Parameters)
 	{
 		/*
 		 * Assuming where in a pixel shader invocation, then we compute manualy compute two d(uv)/d(x)
@@ -369,19 +391,39 @@ float3 GetTranslatedWorldPosition_NoMaterialOffsets(FMaterialPixelParameters Par
 		 * So we have two diff on the X axis, we want the one that has the smallest length
 		 * to avoid the 2x2 pixels mipmap artefacts on the edges. 
 		 */
-		float2 UvPixelDiffX = (dot(UvDiffX0, UvDiffX0) < dot(UvDiffX1, UvDiffX1) ? UvDiffX0 : UvDiffX1) * TextureSize;
-	
+		return dot(UvDiffX0, UvDiffX0) < dot(UvDiffX1, UvDiffX1) ? UvDiffX0 : UvDiffX1;
+	}
+
+	float2 ComputeDecalDDY(FMaterialPixelParameters Parameters)
+	{
 		// do same for the Y axis
 		float4 ScreenDeltaY = ddy(Parameters.ScreenPosition);
 		float2 UvDiffY0 = Parameters.TexCoords[0] - ComputeDecalUVFromScreenPosition(Parameters.ScreenPosition - ScreenDeltaY);
 		float2 UvDiffY1 = ComputeDecalUVFromScreenPosition(Parameters.ScreenPosition + ScreenDeltaY) - Parameters.TexCoords[0];
-		float2 UvPixelDiffY = (dot(UvDiffY0, UvDiffY0) < dot(UvDiffY1, UvDiffY1) ? UvDiffY0 : UvDiffY1) * TextureSize;
+
+		return dot(UvDiffY0, UvDiffY0) < dot(UvDiffY1, UvDiffY1) ? UvDiffY0 : UvDiffY1;
+	}
+
+	float ComputeDecalMipmapLevel(FMaterialPixelParameters Parameters, float2 TextureSize)
+	{
+		float2 UvPixelDiffX = ComputeDecalDDX(Parameters) * TextureSize;
+		float2 UvPixelDiffY = ComputeDecalDDY(Parameters) * TextureSize;
 
 		// Computes the mipmap level
 		float MaxDiff = max(dot(UvPixelDiffX, UvPixelDiffX), dot(UvPixelDiffY, UvPixelDiffY));
 		return 0.5 * log2(MaxDiff);
 	}
 #else
+	float2 ComputeDecalDDX(FMaterialPixelParameters Parameters)
+	{
+		return 0.0f;
+	}
+	
+	float2 ComputeDecalDDY(FMaterialPixelParameters Parameters)
+	{
+		return 0.0f;
+	}
+
 	float ComputeDecalMipmapLevel(FMaterialPixelParameters Parameters, float2 TextureSize)
 	{
 		return 0.0f;
@@ -607,9 +649,9 @@ float4 MaterialExpressionAtmosphericFog(FMaterialPixelParameters Parameters, flo
 {
 #if MATERIAL_ATMOSPHERIC_FOG
 	// WorldPosition default value is Parameters.WorldPosition if not overridden by the user
-	float3 ViewVector = WorldPosition - View.ViewOrigin.xyz;
+	float3 ViewVector = WorldPosition - View.WorldCameraOrigin;
 	float SceneDepth = length(ViewVector);
-	return GetAtmosphericFog(View.ViewOrigin.xyz, ViewVector, SceneDepth, float3(0.f, 0.f, 0.f));
+	return GetAtmosphericFog(View.WorldCameraOrigin, ViewVector, SceneDepth, float3(0.f, 0.f, 0.f));
 #else
 	return float4(0.f, 0.f, 0.f, 0.f);
 #endif
@@ -832,7 +874,7 @@ float3 GetSpeedTreeVertexOffsetInner(FMaterialVertexParameters Parameters, int G
 		const float ScreenMultiple = 0.5 * max(View.ViewSizeAndInvSize.x * View.ViewToClip[0][0],
 												View.ViewSizeAndInvSize.y * View.ViewToClip[1][1]);
 		const float ScreenRadius = ScreenMultiple * Primitive.ObjectWorldPositionAndRadius.w / 
-									max(1.0, dot(TreePos - View.ViewOrigin.xyz, View.ViewForward.xyz));
+									max(1.0, dot(TreePos - View.WorldCameraOrigin, View.ViewForward.xyz));
 		const float ScreenArea = PI * ScreenRadius * ScreenRadius * View.ViewSizeAndInvSize.z * View.ViewSizeAndInvSize.w;
 		LodInterp = saturate((ScreenArea - SpeedTreeLODInfo.x) / SpeedTreeLODInfo.z);
 	}
@@ -1009,6 +1051,7 @@ float3 GetShadingModelColor(FGBufferData GBuffer)
 	else if (GBuffer.ShadingModelID == SHADINGMODELID_CLEAR_COAT) return float3(0.1f, 0.4f, 0.4f); 
 	else if (GBuffer.ShadingModelID == SHADINGMODELID_SUBSURFACE_PROFILE) return float3(0.2f, 0.6f, 0.5f); // Cyan
 	else if (GBuffer.ShadingModelID == SHADINGMODELID_TWOSIDED_FOLIAGE) return float3(0.2f, 0.2f, 0.8f); // Blue
+	else if (GBuffer.ShadingModelID == SHADINGMODELID_HAIR) return float3(0.6f, 0.1f, 0.5f);
 	else return float3(1.0f, 1.0f, 1.0f); // White
 #else
 	switch(GBuffer.ShadingModelID)
@@ -1020,6 +1063,7 @@ float3 GetShadingModelColor(FGBufferData GBuffer)
 		case SHADINGMODELID_CLEAR_COAT: return float3(0.1f, 0.4f, 0.4f); // Brown
 		case SHADINGMODELID_SUBSURFACE_PROFILE: return float3(0.2f, 0.6f, 0.5f); // Cyan
 		case SHADINGMODELID_TWOSIDED_FOLIAGE: return float3(0.2f, 0.2f, 0.8f); // Cyan
+		case SHADINGMODELID_HAIR: return float3(0.6f, 0.1f, 0.5f);
 		default: return float3(1.0f, 1.0f, 1.0f); // White
 	}
 #endif
@@ -1056,6 +1100,10 @@ float4 GetPostProcessInputMinMax(uint Index)
 /** Applies an offset to the scene texture lookup and decodes the HDR linear space color. */
 float4 SceneTextureLookup(float2 UV, int SceneTextureIndex, bool bFiltered)
 {
+#if SCENE_TEXTURES_DISABLED
+	return float4(0.0f, 0.0f, 0.0f, 0.0f);
+#endif
+
 	FScreenSpaceData ScreenSpaceData = GetScreenSpaceData(UV, false);
 
 #if PS4_PROFILE
@@ -1065,13 +1113,13 @@ float4 SceneTextureLookup(float2 UV, int SceneTextureIndex, bool bFiltered)
 	else if (SceneTextureIndex == 1)	return ScreenSpaceData.GBuffer.Depth;
 	else if (SceneTextureIndex == 2)	return float4(ScreenSpaceData.GBuffer.DiffuseColor, 0);
 	else if (SceneTextureIndex == 3)	return float4(ScreenSpaceData.GBuffer.SpecularColor, 0);
-	else if (SceneTextureIndex == 4)	return float4(ScreenSpaceData.GBuffer.CustomData, 0);
+	else if (SceneTextureIndex == 4)	return float4(ScreenSpaceData.GBuffer.CustomData.rgb, 0);
 	else if (SceneTextureIndex == 5)	return float4(ScreenSpaceData.GBuffer.BaseColor, 0);
 	else if (SceneTextureIndex == 6)	return ScreenSpaceData.GBuffer.Specular;
 	else if (SceneTextureIndex == 7)	return ScreenSpaceData.GBuffer.Metallic;
 	else if (SceneTextureIndex == 8)	return float4(ScreenSpaceData.GBuffer.WorldNormal, 0);
 	else if (SceneTextureIndex == 9)	return 1; // todo
-	else if (SceneTextureIndex == 10)	return ScreenSpaceData.GBuffer.Opacity;
+	else if (SceneTextureIndex == 10)	return ScreenSpaceData.GBuffer.CustomData.a;
 	else if (SceneTextureIndex == 11)	return ScreenSpaceData.GBuffer.Roughness;
 	else if (SceneTextureIndex == 12)	return ScreenSpaceData.GBuffer.GBufferAO;
 	else if (SceneTextureIndex == 13)	return ScreenSpaceData.GBuffer.CustomDepth;
@@ -1084,10 +1132,12 @@ float4 SceneTextureLookup(float2 UV, int SceneTextureIndex, bool bFiltered)
 	else if (SceneTextureIndex == 19)	if (bFiltered) { return Texture2DSample(PostprocessInput5, BilinearTextureSampler0, UV);} else { return Texture2DSample(PostprocessInput5, PostprocessInput5Sampler, UV);} 
 	else if (SceneTextureIndex == 20)	if (bFiltered) { return Texture2DSample(PostprocessInput6, BilinearTextureSampler0, UV);} else { return Texture2DSample(PostprocessInput6, PostprocessInput6Sampler, UV);} 
 #endif // POST_PROCESS_MATERIAL
-	else if (SceneTextureIndex == 21)	return ScreenSpaceData.GBuffer.DecalMask;
+	else if (SceneTextureIndex == 21)	return 0; // material compiler will return an error
 	else if (SceneTextureIndex == 22)	return float4(GetShadingModelColor(ScreenSpaceData.GBuffer), 1);
 	else if (SceneTextureIndex == 23)	return ScreenSpaceData.AmbientOcclusion;
 	else if (SceneTextureIndex == 24)	return ScreenSpaceData.GBuffer.CustomStencil;
+	else if (SceneTextureIndex == 25)	return float4(ScreenSpaceData.GBuffer.StoredBaseColor, 0);
+	else if (SceneTextureIndex == 26)	return float4(ScreenSpaceData.GBuffer.StoredSpecular, 0);
 #else
 	switch(SceneTextureIndex)
 	{
@@ -1102,9 +1152,7 @@ float4 SceneTextureLookup(float2 UV, int SceneTextureIndex, bool bFiltered)
 		// PPI_SpecularColor
 		case 3: return float4(ScreenSpaceData.GBuffer.SpecularColor, 0);
 		// PPI_SubsurfaceColor
-		case 4: 
-			float3 CustomData = IsSubsurfaceModel(ScreenSpaceData.GBuffer.ShadingModelID) ? ExtractSubsurfaceColor(ScreenSpaceData.GBuffer) : ScreenSpaceData.GBuffer.CustomData;
-			return float4(CustomData, 0);
+		case 4: return IsSubsurfaceModel(ScreenSpaceData.GBuffer.ShadingModelID) ? float4( ExtractSubsurfaceColor(ScreenSpaceData.GBuffer), ScreenSpaceData.GBuffer.CustomData.a ) : ScreenSpaceData.GBuffer.CustomData;
 		// PPI_BaseColor
 		case 5: return float4(ScreenSpaceData.GBuffer.BaseColor, 0);
 		// PPI_Specular
@@ -1116,7 +1164,7 @@ float4 SceneTextureLookup(float2 UV, int SceneTextureIndex, bool bFiltered)
 		// PPI_SeparateTranslucency
 		case 9: return float4(1, 1, 1, 1);	// todo
 		// PPI_Opacity
-		case 10: return ScreenSpaceData.GBuffer.Opacity;
+		case 10: return ScreenSpaceData.GBuffer.CustomData.a;
 		// PPI_Roughness
 		case 11: return ScreenSpaceData.GBuffer.Roughness;
 		// PPI_MaterialAO
@@ -1140,13 +1188,17 @@ float4 SceneTextureLookup(float2 UV, int SceneTextureIndex, bool bFiltered)
 		case 20: return Texture2DSample(PostprocessInput6, bFiltered ? BilinearTextureSampler0 : PostprocessInput6Sampler, UV);
 #endif // __POST_PROCESS_COMMON__
 		// PPI_DecalMask
-		case 21: return ScreenSpaceData.GBuffer.DecalMask;
+		case 21: return 0;  // material compiler will return an error
 		// PPI_ShadingModel
 		case 22: return float4(GetShadingModelColor(ScreenSpaceData.GBuffer), 1);
 		// PPI_AmbientOcclusion
 		case 23: return ScreenSpaceData.AmbientOcclusion;
 		// PPI_CustomStencil
 		case 24: return ScreenSpaceData.GBuffer.CustomStencil;
+		// PPI_StoredBaseColor
+		case 25: return float4(ScreenSpaceData.GBuffer.StoredBaseColor, 0);
+		// PPI_StoredSpecular
+		case 26: return float4(ScreenSpaceData.GBuffer.StoredSpecular, 0);
 		default:
 			return float4(0, 0, 0, 0);
 	}
@@ -1263,7 +1315,7 @@ half GetMaterialRoughness(FMaterialPixelParameters Parameters)
 	}
 	#endif
 	
-	return max(0.04f, Roughness);
+	return Roughness;
 #endif
 }
 
@@ -1391,24 +1443,14 @@ half4 GetMaterialSubsurfaceData(FMaterialPixelParameters Parameters)
 	return OutSubsurface;
 }
 
-half GetMaterialClearCoatRaw(FMaterialPixelParameters Parameters)
+half GetMaterialCustomData0(FMaterialPixelParameters Parameters)
 {
 %s;
 }
 
-half GetMaterialClearCoat(FMaterialPixelParameters Parameters)
-{
-	return saturate(GetMaterialClearCoatRaw(Parameters));
-}
-
-half GetMaterialClearCoatRoughnessRaw(FMaterialPixelParameters Parameters)
+half GetMaterialCustomData1(FMaterialPixelParameters Parameters)
 {
 %s;
-}
-
-half GetMaterialClearCoatRoughness(FMaterialPixelParameters Parameters)
-{
-	return saturate(GetMaterialClearCoatRoughnessRaw(Parameters));
 }
 
 half GetMaterialAmbientOcclusionRaw(FMaterialPixelParameters Parameters)
@@ -1677,8 +1719,10 @@ half3x3 AssembleTangentToWorld( half3 TangentToWorld0, half4 TangentToWorld2 )
 #endif
 
 #if OUTPUT_PIXEL_DEPTH_OFFSET
-	#define OPTIONAL_OutDepth ,out float OutDepth : DEPTH_WRITE_SEMANTIC
+	#define OPTIONAL_OutDepthConservative ,out float OutDepth : DEPTH_WRITE_SEMANTIC
+	#define OPTIONAL_OutDepth ,out float OutDepth : SV_DEPTH
 #else
+	#define OPTIONAL_OutDepthConservative
 	#define OPTIONAL_OutDepth
 #endif
 

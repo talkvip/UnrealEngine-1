@@ -27,15 +27,16 @@ class UCurveTable
 	/** Map of name of row to row data structure. */
 	TMap<FName, FRichCurve*>	RowMap;
 
-	// Begin UObject interface.
+	//~ Begin UObject Interface.
 	virtual void FinishDestroy() override;
 	virtual void Serialize( FArchive& Ar ) override;
 
 #if WITH_EDITORONLY_DATA
 	virtual void GetAssetRegistryTags(TArray<FAssetRegistryTag>& OutTags) const override;
+	virtual void PostInitProperties() override;
 	virtual void PostLoad() override;
 
-	UPROPERTY()
+	UPROPERTY(VisibleAnywhere, Instanced, Category=ImportSettings)
 	class UAssetImportData* AssetImportData;
 
 	/** The filename imported to create this object. Relative to this object's package, BaseDir() or absolute */
@@ -44,9 +45,9 @@ class UCurveTable
 	
 #endif	// WITH_EDITORONLY_DATA
 
-	// End  UObject interface
+	//~ End  UObject Interface
 
-	// Begin UCurveTable interface
+	//~ Begin UCurveTable Interface
 
 	/** Function to find the row of a table given its name. */
 	FRichCurve* FindCurve(FName RowName, const FString& ContextString, bool WarnIfNotFound=true) const

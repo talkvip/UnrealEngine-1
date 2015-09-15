@@ -73,6 +73,9 @@ bool FOpenGLES31::bSupportsShaderFramebufferFetch = false;
 /** GL_ARM_shader_framebuffer_fetch_depth_stencil */
 bool FOpenGLES31::bSupportsShaderDepthStencilFetch = false;
 
+/** GL_EXT_multisampled_render_to_texture */
+bool FOpenGLES31::bSupportsMultisampledRenderToTexture = false;
+
 /** GL_EXT_sRGB */
 bool FOpenGLES31::bSupportsSGRB = false;
 
@@ -132,6 +135,9 @@ bool FOpenGLES31::bRequiresGLFragCoordVaryingLimitHack = false;
 
 /* This hack fixes an issue with SGX540 compiler which can get upset with some operations that mix highp and mediump */
 bool FOpenGLES31::bRequiresTexture2DPrecisionHack = false;
+
+/* Indicates shader compiler hack checks are being tested */
+bool FOpenGLES31::bIsCheckingShaderCompilerHacks = false;
 
 /** GL_EXT_disjoint_timer_query or GL_NV_timer_query*/
 bool FOpenGLES31::bSupportsDisjointTimeQueries = false;
@@ -278,6 +284,7 @@ void FOpenGLES31::ProcessExtensions( const FString& ExtensionsString )
 	bSupportsNvImageFormats = ExtensionsString.Contains(TEXT("GL_NV_image_formats"));
 	bSupportsShaderFramebufferFetch = ExtensionsString.Contains(TEXT("GL_EXT_shader_framebuffer_fetch")) || ExtensionsString.Contains(TEXT("GL_NV_shader_framebuffer_fetch")) || ExtensionsString.Contains(TEXT("GL_ARM_shader_framebuffer_fetch"));
 	bSupportsShaderDepthStencilFetch = ExtensionsString.Contains(TEXT("GL_ARM_shader_framebuffer_fetch_depth_stencil"));
+	bSupportsMultisampledRenderToTexture = ExtensionsString.Contains(TEXT("GL_EXT_multisampled_render_to_texture"));
 	// @todo es3: SRGB support does not work with our texture format setup (ES2 docs indicate that internalFormat and format must match, but they don't at all with sRGB enabled)
 	//             One possible solution us to use GLFormat.InternalFormat[bSRGB] instead of GLFormat.Format
 	bSupportsSGRB = false;//ExtensionsString.Contains(TEXT("GL_EXT_sRGB"));

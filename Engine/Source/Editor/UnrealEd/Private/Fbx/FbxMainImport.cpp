@@ -232,6 +232,7 @@ void ApplyImportUIToImportOptions(UFbxImportUI* ImportUI, FBXImportOptions& InOu
 	InOutImportOptions.VertexOverrideColor = ImportUI->StaticMeshImportData->VertexOverrideColor;
 	InOutImportOptions.bRemoveDegenerates = ImportUI->StaticMeshImportData->bRemoveDegenerates;
 	InOutImportOptions.bBuildAdjacencyBuffer = ImportUI->StaticMeshImportData->bBuildAdjacencyBuffer;
+	InOutImportOptions.bBuildReversedIndexBuffer = ImportUI->StaticMeshImportData->bBuildReversedIndexBuffer;
 	InOutImportOptions.bGenerateLightmapUVs = ImportUI->StaticMeshImportData->bGenerateLightmapUVs;
 	InOutImportOptions.bOneConvexHullPerUCX = ImportUI->StaticMeshImportData->bOneConvexHullPerUCX;
 	InOutImportOptions.bAutoGenerateCollision = ImportUI->StaticMeshImportData->bAutoGenerateCollision;
@@ -239,6 +240,7 @@ void ApplyImportUIToImportOptions(UFbxImportUI* ImportUI, FBXImportOptions& InOu
 	InOutImportOptions.bImportMeshesInBoneHierarchy = ImportUI->SkeletalMeshImportData->bImportMeshesInBoneHierarchy;
 	InOutImportOptions.bCreatePhysicsAsset = ImportUI->bCreatePhysicsAsset;
 	InOutImportOptions.PhysicsAsset = ImportUI->PhysicsAsset;
+	InOutImportOptions.bUseExperimentalTangentGeneration = ImportUI->SkeletalMeshImportData->bUseExperimentalTangentGeneration;
 	// animation options
 	InOutImportOptions.AnimationLengthImportType = ImportUI->AnimSequenceImportData->AnimationLength;
 	InOutImportOptions.AnimationRange.X = ImportUI->AnimSequenceImportData->StartFrame;
@@ -414,32 +416,6 @@ int32 FFbxImporter::GetImportType(const FString& InFilename)
 
 			bHasAnimation = SceneInfo.bHasAnimation;
 		}
-		else
-		{
-			for(ItemIndex = 0; ItemIndex < Statistics.GetNbItems(); ItemIndex++)
-			{
-				Statistics.GetItemPair(ItemIndex, ItemName, ItemCount);
-				const char* NameBuffer = ItemName.Buffer();
-				if(ItemName == "Deformer" && ItemCount > 0)
-				{
-					// if SkeletalMesh is found, just return
-					Result = 1;
-					break;
-				}
-				// if Geometry is found, sets it, but it can be overwritten by Deformer
-				else if(ItemName == "Geometry" && ItemCount > 0)
-				{
-					// let it still loop through even if Geometry is found
-					// Deformer can overwrite this information
-					Result = 0;
-				}
-				// Check for animation data. It can be overwritten by Geometry or Deformer
-				else if((ItemName == "AnimationCurve" || ItemName == "AnimationCurveNode") && ItemCount > 0)
-				{
-					bHasAnimation = true;
-				}
-			}
-		}
 
 		if (Importer)
 		{
@@ -450,14 +426,17 @@ int32 FFbxImporter::GetImportType(const FString& InFilename)
 		CurPhase = NOTSTARTED;
 
 		// In case no Geometry was found, check for animation (FBX can still contain mesh data though)
-		if ( Result == -1 )
+		if (bHasAnimation)
 		{
-			// If animation data is found, set the result to 2, otherwise default to static mesh
-			Result = bHasAnimation ? 2 : 0;
-		}
-		else if ( Result == 0 && bHasAnimation )
-		{
-			Result = 1;
+			if ( Result == -1)
+			{
+				Result = 2;
+			}
+			// by default detects as skeletalmesh since it has animation curves
+			else if (Result == 0)
+			{
+				Result = 1;
+			}
 		}
 	}
 	
@@ -585,7 +564,11 @@ bool FFbxImporter::GetSceneInfo(FString Filename, FbxSceneInfo& SceneInfo)
 		}
 		
 		SceneInfo.bHasAnimation = false;
-		for (int32 AnimCurveNodeIndex = 0; AnimCurveNodeIndex < Scene->GetSrcObjectCount<FbxAnimCurveNode>(); AnimCurveNodeIndex++)
+		int32 AnimCurveNodeCount = Scene->GetSrcObjectCount<FbxAnimCurveNode>();
+		// sadly Max export with animation curve node by default without any change, so 
+		// we'll have to skip the first two curves, which is translation/rotation
+		// if there is a valid animation, we'd expect there are more curve nodes than 2. 
+		for (int32 AnimCurveNodeIndex = 2; AnimCurveNodeIndex < AnimCurveNodeCount; AnimCurveNodeIndex++)
 		{
 			FbxAnimCurveNode* CurAnimCruveNode = Scene->GetSrcObject<FbxAnimCurveNode>(AnimCurveNodeIndex);
 			if (CurAnimCruveNode->IsAnimated(true))

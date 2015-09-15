@@ -21,12 +21,27 @@ void UAndroidRuntimeSettings::PostEditChangeProperty(struct FPropertyChangedEven
 	if (!bBuildForArmV7 && !bBuildForX86 && !bBuildForX8664)// && !bBuildForArm64)
 	{
 		bBuildForArmV7 = true;
+		UpdateSinglePropertyInConfigFile(GetClass()->FindPropertyByName(GET_MEMBER_NAME_CHECKED(UAndroidRuntimeSettings, bBuildForArmV7)), GetDefaultConfigFilename());
 	}
 
 	// Ensure that at least one GPU architecture is supported
 	if (!bBuildForES2 && !bBuildForES31)
 	{
 		bBuildForES2 = true;
+		UpdateSinglePropertyInConfigFile(GetClass()->FindPropertyByName(GET_MEMBER_NAME_CHECKED(UAndroidRuntimeSettings, bBuildForES2)), GetDefaultConfigFilename());
+	}
+}
+
+void UAndroidRuntimeSettings::PostInitProperties()
+{
+	Super::PostInitProperties();
+
+	// If the config has an AdMobAdUnitID then we migrate it on load and clear the value
+	if (!AdMobAdUnitID.IsEmpty())
+	{
+		AdMobAdUnitIDs.Add(AdMobAdUnitID);
+		AdMobAdUnitID.Empty();
+		UpdateDefaultConfigFile();
 	}
 }
 #endif

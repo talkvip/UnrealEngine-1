@@ -18,6 +18,10 @@
 extern UNREALED_API UEditorEngine* GEditor;
 #endif // WITH_EDITOR
 
+#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+bool UEnvQueryManager::bAllowEQSTimeSlicing = true;
+#endif
+
 DEFINE_LOG_CATEGORY(LogEQS);
 
 DEFINE_STAT(STAT_AI_EQS_Tick);
@@ -265,13 +269,26 @@ void UEnvQueryManager::Tick(float DeltaTime)
 
 				TSharedPtr<FEnvQueryInstance>& QueryInstance = RunningQueriesCopy[Index];
 
-				QueryInstance->ExecuteOneStep(TimeLeft);
+#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+				if (!bAllowEQSTimeSlicing)
+				{
+					// Passing in -1 causes QueryInstance to set its Deadline to -1, which in turn causes it to 
+					// never fail based on time input.  (In fact, it's odd that we use FLT_MAX in RunInstantQuery(),
+					// since that could simply use -1. as well.)  Note: "-1." to explicitly specify that it's a double.
+					QueryInstance->ExecuteOneStep(-1.);
+				}
+				else
+#endif
+				{
+					QueryInstance->ExecuteOneStep(TimeLeft);
+				}
 
 				if (QueryInstance->IsFinished())
 				{
+					// Always log that we executed total execution time at the end of the query.
 					if (QueryInstance->GetTotalExecutionTime() > ExecutionTimeWarningSeconds)
 					{
-						UE_LOG(LogEQS, Error, TEXT("Finished query %s over execution time warning. %s"), *QueryInstance->QueryName, *QueryInstance->GetExecutionTimeDescription());
+						UE_LOG(LogEQS, Warning, TEXT("Finished query %s over execution time warning. %s"), *QueryInstance->QueryName, *QueryInstance->GetExecutionTimeDescription());
 					}
 
 					RunningQueriesCopy.RemoveAt(Index, 1, /*bAllowShrinking=*/false);
@@ -280,13 +297,18 @@ void UEnvQueryManager::Tick(float DeltaTime)
 					LoggedExecutionTimeWarning = false;
 				}
 
-				if (!LoggedExecutionTimeWarning && (QueryInstance->GetTotalExecutionTime() > ExecutionTimeWarningSeconds))
+				if (!QueryInstance->HasLoggedTimeLimitWarning() && (QueryInstance->GetTotalExecutionTime() > ExecutionTimeWarningSeconds))
 				{
-					UE_LOG(LogEQS, Error, TEXT("Query %s over execution time warning. %s"), *QueryInstance->QueryName, *QueryInstance->GetExecutionTimeDescription());
-					LoggedExecutionTimeWarning = true;
+					UE_LOG(LogEQS, Warning, TEXT("Query %s over execution time warning. %s"), *QueryInstance->QueryName, *QueryInstance->GetExecutionTimeDescription());
+					QueryInstance->SetHasLoggedTimeLimitWarning();
 				}
 
-				TimeLeft -= (FPlatformTime::Seconds() - StartTime);
+#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+				if (bAllowEQSTimeSlicing)
+#endif
+				{
+					TimeLeft -= (FPlatformTime::Seconds() - StartTime);
+				}
 			}
 		}
 	}
@@ -306,7 +328,7 @@ void UEnvQueryManager::Tick(float DeltaTime)
 #endif // USE_EQS_DEBUGGER
 
 				QueryInstance->FinishDelegate.ExecuteIfBound(QueryInstance);
-				RunningQueries.RemoveAtSwap(Index, 1, /*bAllowShrinking=*/false);
+				RunningQueries.RemoveAt(Index, 1, /*bAllowShrinking=*/false);
 
 				--FinishedQueriesCount;
 			}
@@ -477,14 +499,23 @@ TSharedPtr<FEnvQueryInstance> UEnvQueryManager::CreateQueryInstance(const UEnvQu
 			InstanceTemplate = &InstanceCache[Idx].Instance;
 		}
 
-		for (int32 OptionIndex = 0; OptionIndex < LocalTemplate->Options.Num(); OptionIndex++)
+		// NOTE: We must iterate over this from 0->Num because we are copying the options from the template into the
+		// instance, and order matters!  Since we also may need to remove invalid or null options, we must decrement
+		// the iteration pointer when doing so to avoid problems.
+		for (int32 OptionIndex = 0; OptionIndex < LocalTemplate->Options.Num(); ++OptionIndex)
 		{
 			UEnvQueryOption* MyOption = LocalTemplate->Options[OptionIndex];
-			if (MyOption == NULL || MyOption->Generator == NULL)
+			if (MyOption == nullptr ||
+				MyOption->Generator == nullptr ||
+				MyOption->Generator->ItemType == nullptr)
 			{
-				UE_LOG(LogEQS, Error, TEXT("Trying to spawn a query with broken Template (empty generator): %s, option %d"),
+				UE_LOG(LogEQS, Error, TEXT("Trying to spawn a query with broken Template (generator:%s itemType:%s): %s, option %d"),
+					MyOption ? (MyOption->Generator ? TEXT("ok") : TEXT("MISSING")) : TEXT("N/A"),
+					(MyOption && MyOption->Generator) ? (MyOption->Generator->ItemType ? TEXT("ok") : TEXT("MISSING")) : TEXT("N/A"),
 					*GetNameSafe(LocalTemplate), OptionIndex);
 
+				LocalTemplate->Options.RemoveAt(OptionIndex, 1, false);
+				--OptionIndex; // See note at top of for loop.  We cannot iterate backwards here.
 				continue;
 			}
 
@@ -504,12 +535,22 @@ TSharedPtr<FEnvQueryInstance> UEnvQueryManager::CreateQueryInstance(const UEnvQu
 					UE_LOG(LogEQS, Warning, TEXT("Query [%s] can't use test [%s] in option %d [%s], removing it"),
 						*GetNameSafe(LocalTemplate), *GetNameSafe(TestOb), OptionIndex, *MyOption->Generator->OptionName);
 
-					SortedTests.RemoveAt(TestIndex);
+					SortedTests.RemoveAt(TestIndex, 1, false);
 				}
 				else if (HighestCost < TestOb->Cost)
 				{
 					HighestCost = TestOb->Cost;
 				}
+			}
+
+			if (SortedTests.Num() == 0)
+			{
+				UE_LOG(LogEQS, Warning, TEXT("Query [%s] doesn't have any tests in option %d [%s]"),
+					*GetNameSafe(LocalTemplate), OptionIndex, *MyOption->Generator->OptionName);
+
+				LocalTemplate->Options.RemoveAt(OptionIndex, 1, false);
+				--OptionIndex; // See note at top of for loop.  We cannot iterate backwards here.
+				continue;
 			}
 
 			LocalOption->Tests.Reset(SortedTests.Num());
@@ -522,7 +563,7 @@ TSharedPtr<FEnvQueryInstance> UEnvQueryManager::CreateQueryInstance(const UEnvQu
 			// use locally referenced duplicates
 			SortedTests = LocalOption->Tests;
 
-			if (SortedTests.Num())
+			if (SortedTests.Num() && LocalGenerator->bAutoSortTests)
 			{
 				switch (RunMode)
 				{
@@ -647,6 +688,21 @@ UEnvQueryInstanceBlueprintWrapper* UEnvQueryManager::RunEQSQuery(UObject* WorldC
 	}
 	
 	return QueryInstanceWrapper;
+}
+
+//----------------------------------------------------------------------//
+// Exec functions (i.e. console commands)
+//----------------------------------------------------------------------//
+void UEnvQueryManager::SetAllowTimeSlicing(bool bAllowTimeSlicing)
+{
+#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+	bAllowEQSTimeSlicing = bAllowTimeSlicing;
+
+	UE_LOG(LogEQS, Log, TEXT("Set allow time slicing to %s."),
+			bAllowEQSTimeSlicing ? TEXT("true") : TEXT("false"));
+#else
+	UE_LOG(LogEQS, Log, TEXT("Time slicing cannot be disabled in Test or Shipping builds.  SetAllowTimeSlicing does nothing."));
+#endif
 }
 
 //----------------------------------------------------------------------//

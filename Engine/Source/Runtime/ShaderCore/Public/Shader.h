@@ -120,9 +120,9 @@ public:
 	FORCEINLINE const FVertexShaderRHIParamRef GetVertexShader()
 	{
 		checkSlow(Target.Frequency == SF_Vertex);
-		if(!IsInitialized())
+		if (!IsInitialized())
 		{
-			InitializeVertexShaderRHI();
+			InitializeShaderRHI();
 		}
 		return VertexShader;
 	}
@@ -130,20 +130,52 @@ public:
 	FORCEINLINE const FPixelShaderRHIParamRef GetPixelShader()
 	{
 		checkSlow(Target.Frequency == SF_Pixel);
-		if(!IsInitialized())
+		if (!IsInitialized())
 		{
-			InitializePixelShaderRHI();
+			InitializeShaderRHI();
 		}
 		return PixelShader;
 	}
 	/** @return the shader's hull shader */
-	const FHullShaderRHIRef& GetHullShader();
+	FORCEINLINE const FHullShaderRHIParamRef GetHullShader()
+	{
+		checkSlow(Target.Frequency == SF_Hull);
+		if (!IsInitialized())
+		{
+			InitializeShaderRHI();
+		}
+		return HullShader;
+	}
 	/** @return the shader's domain shader */
-	const FDomainShaderRHIRef& GetDomainShader();
+	FORCEINLINE const FDomainShaderRHIParamRef GetDomainShader()
+	{
+		checkSlow(Target.Frequency == SF_Domain);
+		if (!IsInitialized())
+		{
+			InitializeShaderRHI();
+		}
+		return DomainShader;
+	}
 	/** @return the shader's geometry shader */
-	const FGeometryShaderRHIRef& GetGeometryShader();
+	FORCEINLINE const FGeometryShaderRHIParamRef GetGeometryShader()
+	{
+		checkSlow(Target.Frequency == SF_Geometry);
+		if (!IsInitialized())
+		{
+			InitializeShaderRHI();
+		}
+		return GeometryShader;
+	}
 	/** @return the shader's compute shader */
-	const FComputeShaderRHIRef& GetComputeShader();
+	FORCEINLINE const FComputeShaderRHIParamRef GetComputeShader()
+	{
+		checkSlow(Target.Frequency == SF_Compute);
+		if (!IsInitialized())
+		{
+			InitializeShaderRHI();
+		}
+		return ComputeShader;
+	}
 
 	SHADERCORE_API FShaderResourceId GetId() const;
 
@@ -211,11 +243,8 @@ private:
 	/** A 'canary' used to detect when a stale shader resource is being rendered with. */
 	uint32 Canary;
 
-	/** Initialize the vertex shader RHI resource. */
-	void InitializeVertexShaderRHI();
-
-	/** Initialize the pixel shader RHI resource. */
-	void InitializePixelShaderRHI();
+	/** Initialize the shader RHI resources. */
+	void InitializeShaderRHI();
 
 	/** Tracks loaded shader resources by id. */
 	static TMap<FShaderResourceId, FShaderResource*> ShaderResourceIdMap;
@@ -502,22 +531,22 @@ public:
 		return Resource->GetPixelShader();
 	}
 	/** @return the shader's hull shader */
-	const FHullShaderRHIRef& GetHullShader()
+	inline const FHullShaderRHIParamRef GetHullShader()
 	{
 		return Resource->GetHullShader();
 	}
 	/** @return the shader's domain shader */
-	const FDomainShaderRHIRef& GetDomainShader()
+	inline const FDomainShaderRHIParamRef GetDomainShader()
 	{
 		return Resource->GetDomainShader();
 	}
 	/** @return the shader's geometry shader */
-	const FGeometryShaderRHIRef& GetGeometryShader()
+	inline const FGeometryShaderRHIParamRef GetGeometryShader()
 	{
 		return Resource->GetGeometryShader();
 	}
 	/** @return the shader's compute shader */
-	const FComputeShaderRHIRef& GetComputeShader()
+	inline const FComputeShaderRHIParamRef GetComputeShader()
 	{
 		return Resource->GetComputeShader();
 	}
@@ -1212,6 +1241,30 @@ public:
 	TShaderMapRef(const TShaderMap<typename ShaderType::ShaderMetaType>* ShaderIndex):
 	 Shader(ShaderIndex->template GetShader<ShaderType>()) // gcc3 needs the template quantifier so it knows the < is not a less-than
 	{}
+	FORCEINLINE ShaderType* operator->() const
+	{
+		return Shader;
+	}
+	FORCEINLINE ShaderType* operator*() const
+	{
+		return Shader;
+	}
+private:
+	ShaderType* Shader;
+};
+
+/** A reference to an optional shader, initialized with a shader type from a shader map if it is available or nullptr if it is not. */
+template<typename ShaderType>
+class TOptionalShaderMapRef
+{
+public:
+	TOptionalShaderMapRef(const TShaderMap<typename ShaderType::ShaderMetaType>* ShaderIndex):
+	Shader((ShaderType*)ShaderIndex->GetShader(&ShaderType::StaticType)) // gcc3 needs the template quantifier so it knows the < is not a less-than
+	{}
+	FORCEINLINE bool IsValid() const
+	{
+		return Shader != nullptr;
+	}
 	FORCEINLINE ShaderType* operator->() const
 	{
 		return Shader;

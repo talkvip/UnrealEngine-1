@@ -32,6 +32,9 @@ static FVector2D GetMenuOffsetForPlacement(const FGeometry& AllottedGeometry, EM
 		case MenuPlacement_MenuLeft:
 			return FVector2D(-PopupSizeLocalSpace.X, 0.0f);
 			break;
+		case MenuPlacement_Center:
+			return FVector2D( -( ( PopupSizeLocalSpace.X / 2 ) - ( AllottedGeometry.GetLocalSize().X / 2 ) ), -( ( PopupSizeLocalSpace.Y / 2 ) - ( AllottedGeometry.GetLocalSize().Y / 2 ) ) );
+			break;
 		default:
 			ensureMsgf( false, TEXT("Unhandled placement mode: %d"), PlacementMode );
 			return FVector2D::ZeroVector;
@@ -239,12 +242,12 @@ int32 SMenuAnchor::OnPaint( const FPaintArgs& Args, const FGeometry& AllottedGeo
 
 bool SMenuAnchor::IsOpenAndReusingWindow() const
 {
-	return MethodInUse.IsSet() && MethodInUse.GetValue() == EPopupMethod::UseCurrentWindow;
+	return MethodInUse.IsSet() && MethodInUse.GetPopupMethod() == EPopupMethod::UseCurrentWindow;
 }
 
 bool SMenuAnchor::IsOpenViaCreatedWindow() const
 {
-	return MethodInUse.IsSet() && MethodInUse.GetValue() == EPopupMethod::CreateNewWindow;
+	return MethodInUse.IsSet() && MethodInUse.GetPopupMethod() == EPopupMethod::CreateNewWindow;
 }
 
 void SMenuAnchor::SetContent(TSharedRef<SWidget> InContent)
@@ -262,18 +265,18 @@ void SMenuAnchor::SetMenuContent(TSharedRef<SWidget> InMenuContent)
 	WrappedContent = InMenuContent;	// wrapping, if any will happen when the menu is opened
 }
 
-EPopupMethod QueryPopupMethod(const FWidgetPath& PathToQuery)
+FPopupMethodReply QueryPopupMethod(const FWidgetPath& PathToQuery)
 {
 	for (int32 WidgetIndex = PathToQuery.Widgets.Num() - 1; WidgetIndex >= 0; --WidgetIndex)
 	{
-		TOptional<EPopupMethod> PopupMethod = PathToQuery.Widgets[WidgetIndex].Widget->OnQueryPopupMethod();
-		if (PopupMethod.IsSet())
+		FPopupMethodReply PopupMethod = PathToQuery.Widgets[WidgetIndex].Widget->OnQueryPopupMethod();
+		if (PopupMethod.IsEventHandled())
 		{
-			return PopupMethod.GetValue();
+			return PopupMethod;
 		}
 	}
 
-	return EPopupMethod::CreateNewWindow;
+	return FPopupMethodReply::UseMethod(EPopupMethod::CreateNewWindow);
 }
 
 
@@ -343,14 +346,14 @@ void SMenuAnchor::SetIsOpen( bool InIsOpen, const bool bFocusMenu )
 					}
 
 					MethodInUse = Method.IsSet()
-						? Method.GetValue()
+						? FPopupMethodReply::UseMethod(Method.GetValue())
 						: QueryPopupMethod(MyWidgetPath);
 
-					if (MethodInUse == EPopupMethod::CreateNewWindow)
+					if (MethodInUse.GetPopupMethod() == EPopupMethod::CreateNewWindow)
 					{
 						// Open the pop-up
 						const bool bIsCollapsedByParent = false;	// don't auto-close child menus when the parent gets focus
-						TSharedPtr<IMenu> NewMenu = FSlateApplication::Get().PushMenu(AsShared(), MyWidgetPath, MenuContentRef, NewPosition, TransitionEffect, bFocusMenu, SummonLocationSize, MethodInUse, bIsCollapsedByParent);
+						TSharedPtr<IMenu> NewMenu = FSlateApplication::Get().PushMenu(AsShared(), MyWidgetPath, MenuContentRef, NewPosition, TransitionEffect, bFocusMenu, SummonLocationSize, MethodInUse.GetPopupMethod(), bIsCollapsedByParent);
 
 						PopupMenuPtr = NewMenu;
 						check(NewMenu.IsValid() && NewMenu->GetOwnedWindow().IsValid());
@@ -361,7 +364,7 @@ void SMenuAnchor::SetIsOpen( bool InIsOpen, const bool bFocusMenu )
 					{
 						// We are re-using the current window instead of creating a new one.
 						// The popup will be presented via an overlay service.
-						ensure(MethodInUse == EPopupMethod::UseCurrentWindow);
+						ensure(MethodInUse.GetPopupMethod() == EPopupMethod::UseCurrentWindow);
 						TSharedRef<SWindow> PopupWindow = MyWidgetPath.GetWindow();
 						PopupWindowPtr = PopupWindow;
 
@@ -374,7 +377,7 @@ void SMenuAnchor::SetIsOpen( bool InIsOpen, const bool bFocusMenu )
 
 						const bool bIsCollapsedByParent = false;	// don't auto-close child menus when the parent gets focus
 						TSharedPtr<IMenu> NewMenu = FSlateApplication::Get().PushHostedMenu(
-							SharedThis, MyWidgetPath, SharedThis, MenuContentRef, WrappedContent, TransitionEffect, bIsCollapsedByParent);
+							SharedThis, MyWidgetPath, SharedThis, MenuContentRef, WrappedContent, TransitionEffect, MethodInUse.GetShouldThrottle(), bIsCollapsedByParent);
 
 						PopupMenuPtr = NewMenu;
 						check(NewMenu.IsValid());
@@ -404,7 +407,7 @@ void SMenuAnchor::SetIsOpen( bool InIsOpen, const bool bFocusMenu )
 			else
 			{
 				PopupWindowPtr.Reset();
-				MethodInUse.Reset();
+				MethodInUse = FPopupMethodReply::Unhandled();
 			}
 		}
 	}
@@ -413,7 +416,7 @@ void SMenuAnchor::SetIsOpen( bool InIsOpen, const bool bFocusMenu )
 void SMenuAnchor::OnMenuClosed(TSharedRef<IMenu> InMenu)
 {
 	bDismissedThisTick = true;
-	MethodInUse = TOptional<EPopupMethod>();
+	MethodInUse = FPopupMethodReply::Unhandled();
 	PopupMenuPtr.Reset();
 	PopupWindowPtr.Reset();
 
@@ -492,5 +495,5 @@ SMenuAnchor::~SMenuAnchor()
 	// We no longer have a popup open, so reset all the tracking state associated.
 	PopupMenuPtr.Reset();
 	PopupWindowPtr.Reset();
-	MethodInUse.Reset();
+	MethodInUse = FPopupMethodReply::Unhandled();
 }

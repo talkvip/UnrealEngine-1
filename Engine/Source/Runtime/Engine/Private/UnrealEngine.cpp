@@ -105,7 +105,22 @@
 #include "JsonInternationalizationArchiveSerializer.h"
 #include "JsonInternationalizationManifestSerializer.h"
 
+#if PLATFORM_COMPILER_HAS_VARIADIC_TEMPLATES
+#include "IMessagingRpcModule.h"
+#include "IMessageRpcClient.h"
+#include "IPortalRpcModule.h"
+#include "IPortalRpcLocator.h"
+#include "IPortalServicesModule.h"
+#include "IPortalServiceLocator.h"
+#include "TypeContainer.h"
+#endif
+
 #include "GameFramework/OnlineSession.h"
+#include "ABTesting.h"
+
+#if WITH_EDITOR
+#include "Editor/UnrealEd/Public/Animation/AnimationRecorder.h"
+#endif
 
 #include "InstancedReferenceSubobjectHelper.h"
 
@@ -150,13 +165,29 @@ ENGINE_API uint32 GGPUFrameTime = 0;
 FSystemResolution GSystemResolution;
 
 /** Threshold for a frame to be considered a hitch (in seconds. */
-static TAutoConsoleVariable<float> GHitchThresholdCVar(
+static FAutoConsoleVariableRef GHitchThresholdCVar(
 	TEXT("t.HitchThreshold"),
 	GHitchThreshold,
 	TEXT("Time in seconds that is considered a hitch by \"stat dumphitches\"")
 	);
 
-static TAutoConsoleVariable<int32> CVarAllowOneFrameThreadLag(
+// The maximum threshold for an 'OK' frame time in miliseconds (*cosmetic only* and used for fps/stat display, should not be used in scalability code)
+// Values above this will be red, values between this and the acceptable limit will be yellow, and values below will be green.
+static TAutoConsoleVariable<float> GUnacceptableFrameTimeThresholdCVar(
+	TEXT("t.UnacceptableFrameTimeThreshold"),
+	50.0f,
+	TEXT("The frame time theshold for what is considered completely unacceptable; values above this will be drawn as red\n")
+	TEXT(" default: 50.0 ms"));
+
+// The target threshold for frame time in miliseconds (*cosmetic only* and used for fps/stat display, should not be used in scalability code)
+// Values below this will be green, values between this and the unacceptable threshold will be yellow, and values above that will be red
+TAutoConsoleVariable<float> GTargetFrameTimeThresholdCVar(
+	TEXT("t.TargetFrameTimeThreshold"),
+	33.9f,
+	TEXT("The target frame time; values below this will be drawn in green, values above will be yellow or red depending on the severity\n")
+	TEXT(" default: 33.9 ms"));
+
+TAutoConsoleVariable<int32> CVarAllowOneFrameThreadLag(
 	TEXT("r.OneFrameThreadLag"),
 	1,
 	TEXT("Whether to allow the rendering thread to lag one frame behind the game thread (0: disabled, otherwise enabled)")
@@ -171,13 +202,6 @@ static FAutoConsoleVariable CVarSystemResolution(
 	TEXT("     1920x1080wf for windowed fullscreen\n")
 	TEXT("     1920x1080wm for windowed mirror")
 	);
-
-static TAutoConsoleVariable<float> CVarDepthOfFieldNearBlurSizeThreshold(
-	TEXT("r.DepthOfFieldNearBlurSizeThreshold"),
-	0.01f,
-	TEXT("Sets the minimum near blur size before the effect is forcably disabled. Currently only affects Gaussian DOF.\n")
-	TEXT(" (default = 0.01f)"),
-	ECVF_RenderThreadSafe);
 
 #if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
 static TAutoConsoleVariable<float> CVarSetOverrideFPS(
@@ -234,12 +258,11 @@ FCachedSystemScalabilityCVars::FCachedSystemScalabilityCVars()
 	: bInitialized(false)
 	, DetailMode(-1)
 	, MaterialQualityLevel(EMaterialQualityLevel::Num)
-	, MaxAnisotropy(-1)
 	, MaxShadowResolution(-1)
 	, ViewDistanceScale(-1)
 	, ViewDistanceScaleSquared(-1)
-	, GaussianDOFNearThreshold(-1)
 	, SimpleDynamicLighting(-1)
+	, MaxAnisotropy(-1)
 {
 
 }
@@ -269,10 +292,6 @@ void ScalabilityCVarsSinkCallback()
 		static const auto ViewDistanceScale = ConsoleMan.FindTConsoleVariableDataFloat(TEXT("r.ViewDistanceScale"));
 		LocalScalabilityCVars.ViewDistanceScale = FMath::Clamp(ViewDistanceScale->GetValueOnGameThread(), 0.0f, 1.0f);
 		LocalScalabilityCVars.ViewDistanceScaleSquared = FMath::Square(LocalScalabilityCVars.ViewDistanceScale);
-	}
-
-	{
-		LocalScalabilityCVars.GaussianDOFNearThreshold = CVarDepthOfFieldNearBlurSizeThreshold.GetValueOnGameThread();
 	}
 
 	{
@@ -389,6 +408,7 @@ void RefreshSamplerStatesCallback()
 		static const auto CVar = IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.MaxAnisotropy"));
 		int32 MaxAnisotropy = CVar->GetValueOnGameThread();
 		// compare against the default so with that number we avoid RefreshSamplerStates() calls on startup
+		// todo: This can be improved since we now have many defaults (see BaseScalability.ini)
 		static int32 LastMaxAnisotropy = 4;
 
 		if(LastMaxAnisotropy != MaxAnisotropy)
@@ -752,12 +772,13 @@ void UEngine::Init(IEngineLoop* InEngineLoop)
 		FSlateApplication& CurrentSlateApp = FSlateApplication::Get();
 		CurrentSlateApp.InitializeSound( TSharedRef<FSlateSoundDevice>( new FSlateSoundDevice() ) );
 
-
+#if !UE_BUILD_SHIPPING
 		// Create test windows (if we were asked to do that)
 		if( FParse::Param( FCommandLine::Get(), TEXT("SlateDebug") ) )
 		{
 			RestoreSlateTestSuite();
 		}
+#endif // #if !UE_BUILD_SHIPPING
 	}
 
 	// Assign thumbnail compressor/decompressor
@@ -886,6 +907,14 @@ void UEngine::Init(IEngineLoop* InEngineLoop)
 	// Initialise buffer visualization system data
 	GetBufferVisualizationData().Initialize();
 
+#if PLATFORM_COMPILER_HAS_VARIADIC_TEMPLATES
+	// Initialize Portal services
+	if (!IsRunningCommandlet())
+	{
+		InitializePortalServices();
+	}
+#endif
+
 	// Connect the engine analytics provider
 	FEngineAnalytics::Initialize();
 
@@ -987,6 +1016,7 @@ void UEngine::PreExit()
 		// Resume the thread to avoid a deadlock while waiting for finish.
 		ScreenSaverInhibitor->Suspend( false );
 		delete ScreenSaverInhibitor;
+		ScreenSaverInhibitor = nullptr;
 	}
 
 	delete ScreenSaverInhibitorRunnable;
@@ -995,10 +1025,16 @@ void UEngine::PreExit()
 	{
 		auto SavedStereo = StereoRenderingDevice;
 		auto SavedHMD = HMDDevice;
+		auto SavedViewExtentions = ViewExtensions;
 		{
 			FSuspendRenderingThread Suspend(false);
 			StereoRenderingDevice.Reset();
 			HMDDevice.Reset();
+			for (auto& ViewExt : ViewExtensions)
+			{
+				ViewExt.Reset();
+			}
+			ViewExtensions.Empty();
 		}
 		// shutdown will occur here.
 	}
@@ -1026,339 +1062,21 @@ void UEngine::TickDeferredCommands()
 	DeferredCommands.RemoveAt(0, DeferredCommandsCount);
 }
 
-#if !UE_BUILD_SHIPPING
-
-static TAutoConsoleVariable<int32> CVarABTestHistory(
-	TEXT("abtest.HistoryNum"),
-	1000,
-	TEXT("Number of history frames to use for stats."));
-
-static TAutoConsoleVariable<int32> CVarABTestReportNum(
-	TEXT("abtest.ReportNum"),
-	100,
-	TEXT("Number of frames between reports."));
-
-static TAutoConsoleVariable<int32> CVarABTestCoolDown(
-	TEXT("abtest.CoolDown"),
-	3,
-	TEXT("Number of frames to discard data after each command to cover threading."));
-
-static TAutoConsoleVariable<int32> CVarABTestMinFramesPerTrial(
-	TEXT("abtest.MinFramesPerTrial"),
-	5,
-	TEXT("The number of frames to run a given command before swithing; this is randomized."));
-
-static TAutoConsoleVariable<int32> CVarABTestNumResamples(
-	TEXT("abtest.NumResamples"),
-	256,
-	TEXT("The number of resamples to use to determine confidence."));
-
-struct FABTest
+void PumpABTest()
 {
-	FRandomStream Stream;
-	bool bABTestActive;
-	FString ABTestCmds[2];
-	int32 ABTestNumSamples;
-	int32 RemainingCoolDown;
-	int32 CurrentTest;
-	int32 RemainingTrial;
-	int32 RemainingPrint;
-	int32 SampleIndex;
-
-	int32 HistoryNum;
-	int32 ReportNum;
-	int32 CoolDown;
-	int32 MinFramesPerTrial;
-	int32 NumResamples;
-
-	struct FSample
+#if ENABLE_ABTEST
+	const TCHAR* Command = FABTest::Get().TickAndGetCommand();
+	if (Command)
 	{
-		uint32 Micros;
-		int32 TestIndex;
-		TBitArray<> InResamples;
-	};
-
-	TArray<FSample> Samples;
-	TArray<uint32> ResampleAccumulators;
-	TArray<uint32> ResampleCount;
-	uint32 Totals[2];
-	uint32 Counts[2];
-
-
-	FABTest()
-		: Stream(9567)
-		, bABTestActive(false)
-		, ABTestNumSamples(0)
-		, RemainingCoolDown(0)
-		, CurrentTest(0)
-		, RemainingTrial(0)
-		, RemainingPrint(0)
-		, SampleIndex(0)
-		, HistoryNum(0)
-		, ReportNum(0)
-		, CoolDown(0)
-		, MinFramesPerTrial(0)
-		, NumResamples(0)
-	{
+		GEngine->Exec(nullptr, Command, *GLog);
 	}
-
-	void Tick()
-	{
-		static double LastTime = 0;
-		if (bABTestActive && RemainingCoolDown)
-		{
-			RemainingCoolDown--;
-		}
-		else if (bABTestActive)
-		{
-			float Delta = FPlatformTime::Seconds() - LastTime;
-			check(Delta > 0);
-			FSample* Sample = nullptr;
-			if (ABTestNumSamples < HistoryNum)
-			{
-				check(ABTestNumSamples == Samples.Num());
-				Sample = new (Samples) FSample();
-			}
-			else
-			{
-				Sample = &Samples[ABTestNumSamples % HistoryNum];
-
-				// remove the old data
-				check(Totals[Sample->TestIndex] > Sample->Micros);
-				Totals[Sample->TestIndex] -= Sample->Micros;
-				check(Counts[Sample->TestIndex]);
-				Counts[Sample->TestIndex]--;
-				check(Sample->InResamples.Num() == NumResamples);
-				for (TConstSetBitIterator<> CurIndexIt(Sample->InResamples); CurIndexIt; ++CurIndexIt)
-				{
-					int32 ResampleIndex = CurIndexIt.GetIndex();
-					check(ResampleAccumulators[ResampleIndex] > Sample->Micros);
-					ResampleAccumulators[ResampleIndex] -= Sample->Micros;
-					check(ResampleCount[ResampleIndex]);
-					ResampleCount[ResampleIndex]--;
-				}
-			}
-			ABTestNumSamples++;
-			Sample->Micros = uint32(Delta * 1000000.0f);
-			check(Sample->Micros);
-			Sample->TestIndex = CurrentTest;
-			Totals[Sample->TestIndex] += Sample->Micros;
-			Counts[Sample->TestIndex]++;
-			Sample->InResamples.Empty(NumResamples);
-			for (int32 ResampleIndex = 0; ResampleIndex < NumResamples; ResampleIndex++)
-			{
-				bool In = Stream.FRand() > 0.5f;
-				Sample->InResamples.Add(In);
-				if (In)
-				{
-					ResampleAccumulators[ResampleIndex] += Sample->Micros;
-					ResampleCount[ResampleIndex]++;
-				}
-			}
-			check(RemainingPrint);
-			if (!--RemainingPrint)
-			{
-				if (Counts[0] && Counts[1])
-				{
-					UE_LOG(LogConsoleResponse, Display, TEXT("      %7.4fms  (%4d samples)  A = '%s'"), float(Totals[0]) / float(Counts[0]) / 1000.0f, Counts[0], *ABTestCmds[0]);
-					UE_LOG(LogConsoleResponse, Display, TEXT("      %7.4fms  (%4d samples)  B = '%s'"), float(Totals[1]) / float(Counts[1]) / 1000.0f, Counts[1], *ABTestCmds[1]);
-
-					float Diff = (float(Totals[0]) / float(Counts[0]) / 1000.0f) - (float(Totals[1]) / float(Counts[1]) / 1000.0f);
-					bool bAIsFaster = false;
-					if (Diff < 0.0f)
-					{
-						Diff *= -1.0f;
-						bAIsFaster = true;
-					}
-					static TArray<float> Scores;
-					Scores.Reset();
-					uint32 TotalFrame = Totals[0] + Totals[1];
-					uint32 TotalCount = Counts[0] + Counts[1];
-					for (int32 ResampleIndex = 0; ResampleIndex < NumResamples; ResampleIndex++)
-					{
-						check(TotalFrame > ResampleAccumulators[ResampleIndex]);
-						uint32 Opposite = TotalFrame - ResampleAccumulators[ResampleIndex];
-						check(TotalCount > ResampleCount[ResampleIndex]);
-						uint32 OppositeCount = TotalCount - ResampleCount[ResampleIndex];
-
-						// this ABS here gives us better data but makes it one sided, so the 90% confidence interval is at index 80/100 etc
-						// it is legit because we could have easily done the inverse permutation
-						float SampleDiff = FMath::Abs(((ResampleAccumulators[ResampleIndex]) / float(ResampleCount[ResampleIndex]) / 1000.0f) - (float(Opposite) / float(OppositeCount) / 1000.0f));
-						Scores.Add(SampleDiff);
-
-					}
-					Scores.Sort();
-					int32 Conf = NumResamples;
-					for (int32 Trial = 0; Trial < NumResamples; Trial++)
-					{
-						if (Scores[Trial] > Diff)
-						{
-							Conf = Trial;
-							break;
-						}
-					}
-
-					float fConf = 1.0f - (0.5f + float(Conf) / float(NumResamples) / 2.0f);
-
-					if (bAIsFaster)
-					{
-						UE_LOG(LogConsoleResponse, Display, TEXT("      A is %7.4fms faster than B;  %3.0f%% chance this is noise."), Diff, fConf * 100.0f);
-					}
-					else
-					{
-						UE_LOG(LogConsoleResponse, Display, TEXT("      B is %7.4fms faster than A;  %3.0f%% chance this is noise."), Diff, fConf * 100.0f);
-					}
-
-					UE_LOG(LogConsoleResponse, Display, TEXT("----------------"));
-				}
-				else
-				{
-					UE_LOG(LogConsoleResponse, Display, TEXT("No Samples?"));
-				}
-				RemainingPrint = ReportNum;
-			}
-			check(RemainingTrial);
-			if (!--RemainingTrial)
-			{
-				SwitchTest(1 - CurrentTest);
-			}
-		}
-		LastTime = FPlatformTime::Seconds();
-	}
-
-	static FABTest& Get()
-	{
-		static FABTest Singleton;
-		return Singleton;
-	}
-	static void ABTestCmdFunc(const TArray<FString>& Args)
-	{
-		FString ABTestCmds[2];
-		if (Args.Num() == 1 && Args[0].Compare(FString(TEXT("stop")), ESearchCase::IgnoreCase) == 0)
-		{
-			Get().Stop();
-			return;
-		}
-		if (Args.Num() == 3 && !Args[0].StartsWith(TEXT("\"")))
-		{
-			ABTestCmds[0] = Args[0].TrimQuotes() + TEXT(" ") + Args[1].TrimQuotes();
-			ABTestCmds[1] = Args[0].TrimQuotes() + TEXT(" ") + Args[2].TrimQuotes();
-		}
-		else if (Args.Num() > 2 && Args[0].StartsWith(TEXT("\"")))
-		{
-			FString Work;
-			int32 Test = 0;
-			for (int32 Index = 0; Index < Args.Num(); Index++)
-			{
-				Work += Args[Index];
-				if (Work.Len() > 2 && Work.StartsWith(TEXT("\"")) && Work.EndsWith(TEXT("\"")))
-				{
-					ABTestCmds[Test++] = Work.TrimQuotes();
-					Work.Empty();
-					if (Test > 1)
-					{
-						break;
-					}
-				}
-				else if (Index + 1 < Args.Num())
-				{
-					Work += TEXT(" ");
-				}
-			}
-		}
-		else if (Args.Num() == 2)
-		{
-			ABTestCmds[0] = Args[0].TrimQuotes();
-			ABTestCmds[1] = Args[1].TrimQuotes();
-		}
-		else
-		{
-			UE_LOG(LogConsoleResponse, Display, TEXT("abtest command requires two (quoted) arguments or three args or 'stop'."));
-			UE_LOG(LogConsoleResponse, Display, TEXT("Example: abtest \"r.MyCVar 0\" \"r.MyCVar 1\""));
-			UE_LOG(LogConsoleResponse, Display, TEXT("Example: abtest r.MyCVar 0 1"));
-			return;
-		}
-		Get().Start(ABTestCmds);
-	}
-
-	void Stop()
-	{
-		UE_LOG(LogConsoleResponse, Display, TEXT("Stopping AB test."));
-		bABTestActive = false;
-	}
-	
-	void Start(FString* InABTestCmds)
-	{
-		ABTestCmds[0] = InABTestCmds[0];
-		ABTestCmds[1] = InABTestCmds[1];
-
-		HistoryNum = CVarABTestHistory.GetValueOnGameThread();
-		ReportNum = CVarABTestReportNum.GetValueOnGameThread();
-		CoolDown = CVarABTestCoolDown.GetValueOnGameThread();
-		MinFramesPerTrial = CVarABTestMinFramesPerTrial.GetValueOnGameThread();
-		NumResamples = CVarABTestNumResamples.GetValueOnGameThread();
-
-		Samples.Empty(HistoryNum);
-		ResampleAccumulators.Empty(NumResamples);
-		ResampleAccumulators.AddZeroed(NumResamples);
-		ResampleCount.Empty(NumResamples);
-		ResampleCount.AddZeroed(NumResamples);
-		ABTestNumSamples = 0;
-		Totals[0] = 0;
-		Totals[1] = 0;
-		Counts[0] = 0;
-		Counts[1] = 0;
-		RemainingPrint = ReportNum;
-
-		bABTestActive = true;
-		Get().SwitchTest(0);
-		UE_LOG(LogConsoleResponse, Display, TEXT("abtest started with A = '%s' and B = '%s'"), *ABTestCmds[0], *ABTestCmds[1]);
-	}
-
-	void SwitchTest(int32 Index)
-	{
-		RemainingCoolDown = CoolDown;
-		CurrentTest = Index;
-		RemainingTrial = Stream.RandRange(MinFramesPerTrial, MinFramesPerTrial * 3);
-		check(RemainingTrial);
-		GEngine->Exec(nullptr, *ABTestCmds[CurrentTest], *GLog);
-	}
-
-	static void StaticTick()
-	{
-		Get().Tick();
-	}
-	static bool IsActive()
-	{
-		return Get().bABTestActive;
-	}
-};
-
-static FAutoConsoleCommand ABTestCmd(
-	TEXT("abtest"),
-	TEXT("Provide two console commands or 'stop' to stop the abtest. Frames are timed with the two options, logging results over time."),
-	FConsoleCommandWithArgsDelegate::CreateStatic(&FABTest::ABTestCmdFunc)
-	);
-
-#else
-
-struct FABTest
-{
-	FORCEINLINE static void StaticTick()
-	{
-	}
-	FORCEINLINE static bool IsActive()
-	{
-		return false;
-	}
-};
-
 #endif
-
+}
 
 void UEngine::UpdateTimeAndHandleMaxTickRate()
 {
-	FABTest::StaticTick();
+	PumpABTest();
+
 	// start at now minus a bit so we don't get a zero delta.
 	static double LastTime = FPlatformTime::Seconds() - 0.0001;
 	static bool bTimeWasManipulated = false;
@@ -1407,7 +1125,7 @@ void UEngine::UpdateTimeAndHandleMaxTickRate()
 		UpdateRunningAverageDeltaTime(DeltaTime);
 
 		// Get max tick rate based on network settings and current delta time.
-		const float MaxTickRate	= FABTest::IsActive() ? 0.0f : GetMaxTickRate( DeltaTime );
+		const float MaxTickRate = FABTest::StaticIsActive() ? 0.0f : GetMaxTickRate(DeltaTime);
 		float WaitTime		= 0;
 		// Convert from max FPS to wait time.
 		if( MaxTickRate > 0 )
@@ -1650,18 +1368,18 @@ void UEngine::InitializeObjectReferences()
 	if (AllowDebugViewmodes())
 	{
 		// Materials that are needed in-game if debug viewmodes are allowed
-		LoadSpecialMaterial(WireframeMaterialName.ToString(), WireframeMaterial, true);
-		LoadSpecialMaterial(LevelColorationLitMaterialName.ToString(), LevelColorationLitMaterial, true);
-		LoadSpecialMaterial(LevelColorationUnlitMaterialName.ToString(), LevelColorationUnlitMaterial, true);
-		LoadSpecialMaterial(LightingTexelDensityName.ToString(), LightingTexelDensityMaterial, false);
-		LoadSpecialMaterial(ShadedLevelColorationLitMaterialName.ToString(), ShadedLevelColorationLitMaterial, true);
-		LoadSpecialMaterial(ShadedLevelColorationUnlitMaterialName.ToString(), ShadedLevelColorationUnlitMaterial, true);
-		LoadSpecialMaterial(VertexColorMaterialName.ToString(), VertexColorMaterial, false);
-		LoadSpecialMaterial(VertexColorViewModeMaterialName_ColorOnly.ToString(), VertexColorViewModeMaterial_ColorOnly, false);
-		LoadSpecialMaterial(VertexColorViewModeMaterialName_AlphaAsColor.ToString(), VertexColorViewModeMaterial_AlphaAsColor, false);
-		LoadSpecialMaterial(VertexColorViewModeMaterialName_RedOnly.ToString(), VertexColorViewModeMaterial_RedOnly, false);
-		LoadSpecialMaterial(VertexColorViewModeMaterialName_GreenOnly.ToString(), VertexColorViewModeMaterial_GreenOnly, false);
-		LoadSpecialMaterial(VertexColorViewModeMaterialName_BlueOnly.ToString(), VertexColorViewModeMaterial_BlueOnly, false);
+		LoadSpecialMaterial(WireframeMaterialName, WireframeMaterial, true);
+		LoadSpecialMaterial(LevelColorationLitMaterialName, LevelColorationLitMaterial, true);
+		LoadSpecialMaterial(LevelColorationUnlitMaterialName, LevelColorationUnlitMaterial, true);
+		LoadSpecialMaterial(LightingTexelDensityName, LightingTexelDensityMaterial, false);
+		LoadSpecialMaterial(ShadedLevelColorationLitMaterialName, ShadedLevelColorationLitMaterial, true);
+		LoadSpecialMaterial(ShadedLevelColorationUnlitMaterialName, ShadedLevelColorationUnlitMaterial, true);
+		LoadSpecialMaterial(VertexColorMaterialName, VertexColorMaterial, false);
+		LoadSpecialMaterial(VertexColorViewModeMaterialName_ColorOnly, VertexColorViewModeMaterial_ColorOnly, false);
+		LoadSpecialMaterial(VertexColorViewModeMaterialName_AlphaAsColor, VertexColorViewModeMaterial_AlphaAsColor, false);
+		LoadSpecialMaterial(VertexColorViewModeMaterialName_RedOnly, VertexColorViewModeMaterial_RedOnly, false);
+		LoadSpecialMaterial(VertexColorViewModeMaterialName_GreenOnly, VertexColorViewModeMaterial_GreenOnly, false);
+		LoadSpecialMaterial(VertexColorViewModeMaterialName_BlueOnly, VertexColorViewModeMaterial_BlueOnly, false);
 	}
 
 	// Materials that may or may not be needed when debug viewmodes are disabled but haven't been fixed up yet
@@ -1853,6 +1571,34 @@ void UEngine::InitializeObjectReferences()
 	UISettings->ForceLoadResources();
 }
 
+#if PLATFORM_COMPILER_HAS_VARIADIC_TEMPLATES
+void UEngine::InitializePortalServices()
+{
+	// Initialize Portal services
+	PortalRpcClient = FModuleManager::LoadModuleChecked<IMessagingRpcModule>("MessagingRpc").CreateRpcClient();
+	{
+		// @todo gmp: catch timeouts?
+	}
+
+	PortalRpcLocator = FModuleManager::LoadModuleChecked<IPortalRpcModule>("PortalRpc").CreateLocator();
+	{
+		PortalRpcLocator->OnServerLocated().BindLambda([=]() { PortalRpcClient->Connect(PortalRpcLocator->GetServerAddress()); });
+		PortalRpcLocator->OnServerLost().BindLambda([=]() { PortalRpcClient->Disconnect(); });
+	}
+
+	ServiceDependencies = MakeShareable(new FTypeContainer);
+	{
+		ServiceDependencies->RegisterInstance<IMessageRpcClient>(PortalRpcClient.ToSharedRef());
+	}
+
+	ServiceLocator = FModuleManager::LoadModuleChecked<IPortalServicesModule>("PortalServices").CreateLocator(ServiceDependencies.ToSharedRef());
+	{
+		// @todo add any Engine specific Portal services here
+		ServiceLocator->Configure(TEXT("IPortalApplicationWindow"), TEXT("*"), "PortalProxies");
+	}
+}
+#endif
+
 //
 // Exit the engine.
 //
@@ -1883,8 +1629,8 @@ void UEngine::Serialize(FArchive& Ar)
 		// Only use the main audio device when counting memory
 		if (FAudioDevice* AudioDevice = GetMainAudioDevice())
 		{
-			AudioDevice->CountBytes(Ar);
-		}
+		AudioDevice->CountBytes(Ar);
+	}
 	}
 }
 
@@ -2048,10 +1794,10 @@ bool UEngine::InitializeAudioDeviceManager()
 					FAudioDevice* NewAudioDevice = AudioDeviceManager->CreateAudioDevice(MainAudioDeviceHandle, true);
 					if (NewAudioDevice)
 					{
-						AudioDeviceManager->SetActiveDevice(MainAudioDeviceHandle);
-					}
-					else
-					{
+							AudioDeviceManager->SetActiveDevice(MainAudioDeviceHandle);
+						}
+						else
+						{
 						ShutdownAudioDeviceManager();
 					}
 				}
@@ -2459,30 +2205,26 @@ struct FItem
 	int32 Count;
 	SIZE_T Num;
 	SIZE_T Max;
-	/** Resource size of the object and all of its references, the 'old-style'. */
-	SIZE_T ResourceSize;
 	/** Only exclusive resource size, the truer resource size. */
 	SIZE_T TrueResourceSize;
 
 	FItem( UClass* InClass=NULL )
-	: Class(InClass), Count(0), Num(0), Max(0), ResourceSize(0), TrueResourceSize(0)
+	: Class(InClass), Count(0), Num(0), Max(0), TrueResourceSize(0)
 	{}
 
-	FItem( UClass* InClass, int32 InCount, SIZE_T InNum, SIZE_T InMax, SIZE_T InResourceSize, SIZE_T InTrueResourceSize ) :
+	FItem( UClass* InClass, int32 InCount, SIZE_T InNum, SIZE_T InMax, SIZE_T InTrueResourceSize ) :
 		Class( InClass ),
 		Count( InCount ),
 		Num( InNum ), 
 		Max( InMax ), 
-		ResourceSize( InResourceSize ), 
 		TrueResourceSize( InTrueResourceSize )
 	{}
 
-	void Add( FArchiveCountMem& Ar, SIZE_T InResourceSize, SIZE_T InTrueResourceSize )
+	void Add( FArchiveCountMem& Ar, SIZE_T InTrueResourceSize )
 	{
 		Count++;
 		Num += Ar.GetNum();
 		Max += Ar.GetMax();
-		ResourceSize += InResourceSize;
 		TrueResourceSize += InTrueResourceSize;
 	}
 };
@@ -2490,15 +2232,17 @@ struct FItem
 struct FSubItem
 {
 	UObject* Object;
+	/** Size of the object, counting containers as current usage */
 	SIZE_T Num;
+	/** Size of the object, counting containers as total allocated (max usage) */
 	SIZE_T Max;
 	/** Resource size of the object and all of its references, the 'old-style'. */
 	SIZE_T ResourceSize;
 	/** Only exclusive resource size, the truer resource size. */
 	SIZE_T TrueResourceSize;
 
-	FSubItem( UObject* InObject, SIZE_T InNum, SIZE_T InMax, SIZE_T InResourceSize, SIZE_T InTrueResourceSize )
-	: Object( InObject ), Num( InNum ), Max( InMax ), ResourceSize( InResourceSize ), TrueResourceSize( InTrueResourceSize )
+	FSubItem( UObject* InObject, SIZE_T InNum, SIZE_T InMax, SIZE_T InTrueResourceSize )
+	: Object( InObject ), Num( InNum ), Max( InMax ), TrueResourceSize( InTrueResourceSize )
 	{}
 };
 
@@ -2958,6 +2702,16 @@ bool UEngine::Exec( UWorld* InWorld, const TCHAR* Cmd, FOutputDevice& Ar )
 		GNetworkProfiler.Exec( InWorld, Cmd, Ar );
 	}
 #endif
+#if WITH_EDITOR
+	else if (FParse::Command(&Cmd, TEXT("RecordAnimation")))
+	{
+		return HandleRecordAnimationCommand(InWorld, Cmd, Ar);
+	}
+	else if (FParse::Command(&Cmd, TEXT("StopRecordingAnimation")))
+	{
+		return HandleStopRecordAnimationCommand(InWorld, Cmd, Ar);
+	}
+#endif
 	else 
 	{
 		return false;
@@ -2991,7 +2745,7 @@ bool UEngine::HandleStopMovieCaptureCommand( const TCHAR* Cmd, FOutputDevice& Ar
 bool UEngine::HandleGameVerCommand( const TCHAR* Cmd, FOutputDevice& Ar )
 {
 	FString VersionString = FString::Printf(TEXT("GameVersion Branch: %s, Configuration: %s, Version: %s, CommandLine: %s"), 
-		*FApp::GetBranchName(), EBuildConfigurations::ToString(FApp::GetBuildConfiguration()), *GEngineVersion.ToString(), FCommandLine::Get());
+		*FApp::GetBranchName(), EBuildConfigurations::ToString(FApp::GetBuildConfiguration()), *FEngineVersion::Current().ToString(), FCommandLine::Get());
 
 	Ar.Logf( *VersionString );
 	FPlatformMisc::ClipboardCopy( *VersionString );
@@ -4075,6 +3829,7 @@ bool UEngine::HandleMemReportCommand( const TCHAR* Cmd, FOutputDevice& Ar, UWorl
 
 bool UEngine::HandleMemReportDeferredCommand( const TCHAR* Cmd, FOutputDevice& Ar, UWorld* InWorld )
 {
+#if ALLOW_DEBUG_FILES
 	const bool bPerformSlowCommands = FParse::Param( Cmd, TEXT("FULL") );
 	const bool bLogOutputToFile = !FParse::Param( Cmd, TEXT("LOG") );
 
@@ -4087,7 +3842,8 @@ bool UEngine::HandleMemReportDeferredCommand( const TCHAR* Cmd, FOutputDevice& A
 	FlushRenderingCommands();
 
 	FOutputDevice* ReportAr = &Ar;
-	FOutputDeviceFile* FileAr = NULL;
+	FArchive* FileAr = nullptr;
+	FOutputDeviceArchiveWrapper* FileArWrapper = nullptr;
 	FString FilenameFull;
 	
 	if (bLogOutputToFile)
@@ -4097,8 +3853,10 @@ bool UEngine::HandleMemReportDeferredCommand( const TCHAR* Cmd, FOutputDevice& A
 
 		const FString Filename = CreateProfileFilename( TEXT(".memreport"), true );
 		FilenameFull = PathName + Filename;
-		FileAr = new FOutputDeviceFile(*FilenameFull);
-		ReportAr = FileAr;
+	
+		FileAr = IFileManager::Get().CreateDebugFileWriter(*FilenameFull);
+		FileArWrapper = new FOutputDeviceArchiveWrapper(FileAr);
+		ReportAr = FileArWrapper;
 
 		UE_LOG(LogEngine, Log, TEXT("MemReportDeferred: saving to %s"), *FilenameFull);		
 	}
@@ -4131,14 +3889,13 @@ bool UEngine::HandleMemReportDeferredCommand( const TCHAR* Cmd, FOutputDevice& A
 		}
 	}
 
-	if (FileAr)
+	if (FileArWrapper != nullptr)
 	{
-		FileAr->TearDown();
-		// This no longer seems to work in UE4
-		// SendDataToPCViaUnrealConsole( TEXT("UE_PROFILER!MEMREPORT:"), *(FilenameFull) );
-
+		FileArWrapper->TearDown();
+		delete FileArWrapper;
 		delete FileAr;
 	}
+#endif
 
 	return true;
 }
@@ -4535,6 +4292,18 @@ bool UEngine::HandleMemCommand( const TCHAR* Cmd, FOutputDevice& Ar )
 // debug flag to allocate memory every frame, to trigger an OOM condition
 static bool GDebugAllocMemEveryFrame = false;
 
+/** Helper function to cause a stack overflow crash */
+FORCENOINLINE static void StackOverflowFunction(int32* DummyArg)
+{
+	int32 StackArray[8196];
+	FMemory::Memset(StackArray, 0, sizeof(StackArray));
+	if (StackArray[0] == 0)
+	{
+		UE_LOG(LogEngine, VeryVerbose, TEXT("StackOverflowFunction(%d)"), DummyArg ? DummyArg[0] : 0);
+		StackOverflowFunction(StackArray);
+	}
+}
+
 bool UEngine::HandleDebugCommand( const TCHAR* Cmd, FOutputDevice& Ar )
 {
 	if( FParse::Command(&Cmd,TEXT("RENDERCRASH")) )
@@ -4567,6 +4336,18 @@ bool UEngine::HandleDebugCommand( const TCHAR* Cmd, FOutputDevice& Ar )
 			UE_LOG( LogEngine, Warning, TEXT( "Printed warning to log." ) );
 			LowLevelFatalError( TEXT( "FError::LowLevelFatal test" ) ); 
 		} );
+		return true;
+	}
+	if (FParse::Command(&Cmd, TEXT("RENDERENSURE")))
+	{
+		ENQUEUE_UNIQUE_RENDER_COMMAND(CauseRenderThreadEnsure,
+		{
+			UE_LOG(LogEngine, Warning, TEXT("Printed warning to log."));
+			if (!ensure(0))
+			{
+				UE_LOG(LogEngine, Warning, TEXT("Ensure condition failed (this is the expected behavior)."));
+			}
+		});
 		return true;
 	}
 	if( FParse::Command(&Cmd,TEXT("THREADCRASH")) )
@@ -4710,18 +4491,20 @@ bool UEngine::HandleDebugCommand( const TCHAR* Cmd, FOutputDevice& Ar )
 	else if( FParse::Command( &Cmd, TEXT("ENSURE") ) )
 	{
 		UE_LOG(LogEngine, Warning, TEXT("Printed warning to log.") );
-		if( !ensure( 0 ) )
+		if (!ensure(0))
 		{
-			return true;
+			UE_LOG(LogEngine, Warning, TEXT("Ensure condition failed (this is the expected behavior)."));
 		}
+		return true;
 	}
 	else if( FParse::Command( &Cmd, TEXT("ENSUREALWAYS") ) )
 	{
 		UE_LOG(LogEngine, Warning, TEXT("Printed warning to log.") );
 		if( !ensureAlways( 0 ) )
 		{
-			return true;
+			UE_LOG(LogEngine, Warning, TEXT("Ensure condition failed (this is the expected behavior)."));
 		}
+		return true;
 	}
 	else if( FParse::Command( &Cmd, TEXT( "FATAL" ) ) )
 	{
@@ -4783,6 +4566,12 @@ bool UEngine::HandleDebugCommand( const TCHAR* Cmd, FOutputDevice& Ar )
 	{
 		Ar.Log( TEXT("Will continuously allocate 1MB per frame until we hit OOM") );
 		GDebugAllocMemEveryFrame = true;
+		return true;
+	}
+	else if (FParse::Command(&Cmd, TEXT("STACKOVERFLOW")))
+	{
+		Ar.Log(TEXT("Inifnite recursion to cause stack overflow"));
+		StackOverflowFunction(nullptr);
 		return true;
 	}
 
@@ -5170,27 +4959,23 @@ bool UEngine::HandleObjCommand( const TCHAR* Cmd, FOutputDevice& Ar )
 			for( UObject*& RefObj : ReferencedObjects )
 			{
 				FArchiveCountMem Count( RefObj );
-				// Get the 'old-style' resource size and the truer resource size
-				const SIZE_T ResourceSize = It->GetResourceSize( EResourceSizeMode::Inclusive );
 				const SIZE_T TrueResourceSize = It->GetResourceSize( EResourceSizeMode::Exclusive );
-				ThisObject.Add( Count, ResourceSize, TrueResourceSize );
+				ThisObject.Add( Count, TrueResourceSize );
 			}
 
 			FItem& ClassObjects = ObjectsByClass.FindOrAdd( ThisObject.Class );
 			ClassObjects.Count++;
 			ClassObjects.Num += ThisObject.Num;
 			ClassObjects.Max += ThisObject.Max;
-			ClassObjects.ResourceSize += ThisObject.ResourceSize;
 			ClassObjects.TrueResourceSize += ThisObject.TrueResourceSize;
 		}
 
 		ObjectsByClass.ValueSort( FCompareByInclusiveSize() );
 
-		UE_LOG( LogEngine, Log, TEXT("%32s, %6s %6s %6s %6s, %6s"), 
+		UE_LOG( LogEngine, Log, TEXT("%32s, %6s %6s %6s, %6s"), 
 			TEXT("Class"),
 			TEXT("IncMax"),
 			TEXT("IncNum"),
-			TEXT("ResInc"),
 			TEXT("ResExc"),
 			TEXT("Count") );
 
@@ -5206,15 +4991,14 @@ bool UEngine::HandleObjCommand( const TCHAR* Cmd, FOutputDevice& Ar )
 				Culled.Count += ClassObjects.Count;
 				Culled.Num += ClassObjects.Num;
 				Culled.Max += ClassObjects.Max;
-				Culled.ResourceSize += ClassObjects.ResourceSize;
 				Culled.TrueResourceSize += ClassObjects.TrueResourceSize;
 			}
 			else
 			{
-				UE_LOG( LogEngine, Log, TEXT("%32s, %6s %6s %6s %6s, %6i"), 
+				UE_LOG( LogEngine, Log, TEXT("%32s, %6s %6s %6s, %6i"), 
 					*Class->GetName(), 
 					*FHierarchy::Size(ClassObjects.Max), *FHierarchy::Size(ClassObjects.Num), 
-					*FHierarchy::Size(ClassObjects.ResourceSize), *FHierarchy::Size(ClassObjects.TrueResourceSize),
+					*FHierarchy::Size(ClassObjects.TrueResourceSize),
 					ClassObjects.Count 
 					);
 
@@ -5223,26 +5007,25 @@ bool UEngine::HandleObjCommand( const TCHAR* Cmd, FOutputDevice& Ar )
 			Total.Count += ClassObjects.Count;
 			Total.Num += ClassObjects.Num;
 			Total.Max += ClassObjects.Max;
-			Total.ResourceSize += ClassObjects.ResourceSize;
 			Total.TrueResourceSize += ClassObjects.TrueResourceSize;
 		}
 
 		if( Culled.Count > 0 )
 		{
 			UE_LOG( LogEngine, Log, TEXT("") );
-			UE_LOG( LogEngine, Log, TEXT("%32s, %6s %6s %6s %6s, %6i"), 
+			UE_LOG( LogEngine, Log, TEXT("%32s, %6s %6s %6s, %6i"), 
 				TEXT("(Culled)"), 
 				*FHierarchy::Size(Culled.Max), *FHierarchy::Size(Culled.Num), 
-				*FHierarchy::Size(Culled.ResourceSize), *FHierarchy::Size(Culled.TrueResourceSize),
+				*FHierarchy::Size(Culled.TrueResourceSize),
 				Culled.Count 
 				);
 		}
 
 		UE_LOG( LogEngine, Log, TEXT("") );
-		UE_LOG( LogEngine, Log, TEXT("%32s, %6s %6s %6s %6s, %6i"), 
+		UE_LOG( LogEngine, Log, TEXT("%32s, %6s %6s %6s, %6i"), 
 			TEXT("Total"), 
 			*FHierarchy::Size(Total.Max), *FHierarchy::Size(Total.Num), 
-			*FHierarchy::Size(Total.ResourceSize), *FHierarchy::Size(Total.TrueResourceSize),
+			*FHierarchy::Size(Total.TrueResourceSize),
 			Total.Count 
 			);
 		UE_LOG( LogEngine, Log, TEXT("**********************************************") );
@@ -5275,10 +5058,8 @@ bool UEngine::HandleObjCommand( const TCHAR* Cmd, FOutputDevice& Ar )
 		for( FObjectIterator It; It; ++It )
 		{
 			FArchiveCountMem Count( *It );
-			// Get the 'old-style' resource size and the truer resource size
-			const SIZE_T ResourceSize = It->GetResourceSize(EResourceSizeMode::Inclusive);
 			const SIZE_T TrueResourceSize = It->GetResourceSize(EResourceSizeMode::Exclusive);
-			Objects.Add(*It, FSubItem(*It, Count.GetNum(), Count.GetMax(), ResourceSize, TrueResourceSize));
+			Objects.Add(*It, FSubItem(*It, Count.GetNum(), Count.GetMax(), TrueResourceSize));
 			Classes.AddClassInstance(*It);
 			Outers.AddOuter(*It);
 			Flat.AddFlat(*It);
@@ -5307,9 +5088,8 @@ bool UEngine::HandleObjCommand( const TCHAR* Cmd, FOutputDevice& Ar )
 		Ar.Log( TEXT("Objects:") );
 		Ar.Log( TEXT("") );
 
-		UClass*   CheckType     = NULL;
-		UClass*   MetaClass		= NULL;
-		const bool bExportToFile = FParse::Param(Cmd,TEXT("FILE"));
+		UClass* CheckType = NULL;
+		UClass* MetaClass = NULL;
 
 		// allow checking for any Outer, not just a UPackage
 		UObject* CheckOuter = NULL;
@@ -5371,7 +5151,7 @@ bool UEngine::HandleObjCommand( const TCHAR* Cmd, FOutputDevice& Ar )
 					continue;
 				}
 
-				if ( bOnlyListGCObjects && GetUObjectArray().IsDisregardForGC(*It) )
+				if ( bOnlyListGCObjects && GUObjectArray.IsDisregardForGC(*It) )
 				{
 					continue;
 				}
@@ -5417,8 +5197,6 @@ bool UEngine::HandleObjCommand( const TCHAR* Cmd, FOutputDevice& Ar )
 
 				FArchiveCountMem Count( *It );
 
-				// Get the 'old-style' resource size and the truer resource size
-				const SIZE_T ResourceSize = It->GetResourceSize(EResourceSizeMode::Inclusive);
 				const SIZE_T TrueResourceSize = It->GetResourceSize(EResourceSizeMode::Exclusive);
 
 				int32 i;
@@ -5456,10 +5234,10 @@ bool UEngine::HandleObjCommand( const TCHAR* Cmd, FOutputDevice& Ar )
 
 				if( bShowDetailedObjectInfo )
 				{
-					new(Objects)FSubItem( *It, Count.GetNum(), Count.GetMax(), ResourceSize, TrueResourceSize );
+					new(Objects)FSubItem( *It, Count.GetNum(), Count.GetMax(), TrueResourceSize );
 				}
-				List[i].Add( Count, ResourceSize, TrueResourceSize );
-				Total.Add( Count, ResourceSize, TrueResourceSize );
+				List[i].Add( Count, TrueResourceSize );
+				Total.Add( Count, TrueResourceSize );
 			}
 		}
 
@@ -5482,28 +5260,15 @@ bool UEngine::HandleObjCommand( const TCHAR* Cmd, FOutputDevice& Ar )
 			};
 			Objects.Sort( FCompareFSubItem( bAlphaSort ) );
 
-			Ar.Logf( TEXT("%140s % 10s % 10s % 10s % 10s"), TEXT("Object"), TEXT("NumKBytes"), TEXT("MaxKBytes"), TEXT("ResKBytes"), TEXT("ExclusiveResKBytes") );
+			Ar.Logf( TEXT("%140s, % 10s, % 10s, % 10s"), TEXT("Object"), TEXT("NumKBytes"), TEXT("MaxKBytes"), TEXT("ExclusiveResKBytes") );
 
-			for( int32 ObjIndex=0; ObjIndex<Objects.Num(); ObjIndex++ )
+			for (const FSubItem& ObjItem : Objects)
 			{
-				const FSubItem& ObjItem = Objects[ObjIndex];
-
-				///MSSTART DAN PRICE MICROSOFT Mar 12th, 2007 export object data to a file
-				if(bExportToFile)
-				{
-					FString Path = TEXT("./ObjExport");
-					FString MungedPath = ObjItem.Object->GetOutermost()->GetName();
-					MungedPath.ReplaceInline(TEXT("/"), TEXT("_"));
-					const FString Filename = Path /  + TEXT(".") + MungedPath / ObjItem.Object->GetName() + TEXT(".t3d");
-					Ar.Logf( TEXT("%s"),*Filename);
-					UExporter::ExportToFile(ObjItem.Object, NULL, *Filename, 1, 0);
-				}					
-				//MSEND
-
-				Ar.Logf( TEXT("%140s % 10iK % 10iK % 10iK % 10iK"), *ObjItem.Object->GetFullName(), (int32)ObjItem.Num / 1024, (int32)ObjItem.Max / 1024, (int32)ObjItem.ResourceSize / 1024, (int32)ObjItem.TrueResourceSize / 1024 );
+				Ar.Logf(TEXT("%140s, % 10.2f, % 10.2f, % 10.2f"), *ObjItem.Object->GetFullName(), ObjItem.Num / 1024.0f, ObjItem.Max / 1024.0f, ObjItem.TrueResourceSize / 1024.0f);
 			}
-			Ar.Log( TEXT("") );
+			Ar.Log(TEXT(""));
 		}
+
 		if( List.Num() )
 		{
 			struct FCompareFItem
@@ -5519,15 +5284,15 @@ bool UEngine::HandleObjCommand( const TCHAR* Cmd, FOutputDevice& Ar )
 				}
 			};
 			List.Sort( FCompareFItem( bAlphaSort, bCountSort ) );
-			Ar.Logf(TEXT(" %100s % 6s % 10s % 10s % 10s % 10s"), TEXT("Class"), TEXT("Count"), TEXT("NumKBytes"), TEXT("MaxKBytes"), TEXT("ResKBytes"), TEXT("ExclusiveResKBytes") );
+			Ar.Logf(TEXT(" %100s, % 6s, % 10s, % 10s, % 10s"), TEXT("Class"), TEXT("Count"), TEXT("NumKBytes"), TEXT("MaxKBytes"), TEXT("ExclusiveResKBytes") );
 
 			for( int32 i=0; i<List.Num(); i++ )
 			{
-				Ar.Logf(TEXT(" %100s % 6i % 10iK % 10iK % 10iK % 10iK"), *List[i].Class->GetName(), (int32)List[i].Count, (int32)(List[i].Num/1024), (int32)(List[i].Max/1024), (int32)(List[i].ResourceSize/1024), (int32)(List[i].TrueResourceSize/1024) );
+				Ar.Logf(TEXT(" %100s, % 6i, % 10.2f, % 10.2f, % 10.2f"), *List[i].Class->GetName(), (int32)List[i].Count, List[i].Num / 1024.0f, List[i].Max / 1024.0f, List[i].TrueResourceSize / 1024.0f);
 			}
 			Ar.Log( TEXT("") );
 		}
-		Ar.Logf( TEXT("%i Objects (%.3fM / %.3fM / %.3fM / %.3fM)"), Total.Count, (float)Total.Num/1024.0/1024.0, (float)Total.Max/1024.0/1024.0, (float)Total.ResourceSize/1024.0/1024.0, (float)Total.TrueResourceSize/1024.0/1024.0 );
+		Ar.Logf( TEXT("%i Objects (%.3fM / %.3fM / %.3fM)"), Total.Count, (float)Total.Num/1024.0/1024.0, (float)Total.Max/1024.0/1024.0, (float)Total.TrueResourceSize/1024.0/1024.0 );
 		return true;
 
 	}
@@ -6017,6 +5782,111 @@ bool UEngine::HandleGammaCommand( const TCHAR* Cmd, FOutputDevice& Ar )
 	return true;
 }
 
+bool UEngine::HandleRecordAnimationCommand(UWorld* InWorld, const TCHAR* InStr, FOutputDevice& Ar)
+{
+#if WITH_EDITOR
+	const TCHAR* Str = InStr;
+	// parse actor name
+	TCHAR ActorName[128];
+	AActor* FoundActor = nullptr;
+	if (FParse::Token(Str, ActorName, ARRAY_COUNT(ActorName), 0))
+	{
+		FString const ActorNameStr = FString(ActorName);
+		for (ULevel const* Level : InWorld->GetLevels())
+		{
+			if (Level)
+			{
+				for (AActor* Actor : Level->Actors)
+				{
+					if (Actor)
+					{
+						if (Actor->GetName() == ActorNameStr)
+						{
+							FoundActor = Actor;
+							break;
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if (FoundActor)
+	{
+		USkeletalMeshComponent* const SkelComp = FoundActor->FindComponentByClass<USkeletalMeshComponent>();
+		if (SkelComp)
+		{
+			TCHAR AssetPath[256];
+			FParse::Token(Str, AssetPath, ARRAY_COUNT(AssetPath), 0);
+			FString const AssetName = FPackageName::GetLongPackageAssetName(AssetPath);
+			return FAnimationRecorderManager::Get().RecordAnimation(FoundActor, SkelComp, AssetPath, AssetName);
+		}
+	}
+#endif		// WITH_EDITOR
+
+	return false;
+}
+
+bool UEngine::HandleStopRecordAnimationCommand(UWorld* InWorld, const TCHAR* InStr, FOutputDevice& Ar)
+{
+#if WITH_EDITOR
+	const TCHAR* Str = InStr;
+
+	// parse actor name
+	TCHAR ActorName[128];
+	AActor* FoundActor = nullptr;
+	bool bStopAll = false;
+	if (FParse::Token(Str, ActorName, ARRAY_COUNT(ActorName), 0))
+	{
+		FString const ActorNameStr = FString(ActorName);
+
+		if (ActorNameStr.ToLower() == TEXT("all"))
+		{
+			bStopAll = true;
+		}
+		else if (InWorld)
+		{
+			// search for the actor by name
+			for (ULevel* Level : InWorld->GetLevels())
+			{
+				if (Level)
+				{
+					for (AActor* Actor : Level->Actors)
+					{
+						if (Actor)
+						{
+							if (Actor->GetName() == ActorNameStr)
+							{
+								FoundActor = Actor;
+								break;
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if (bStopAll)
+	{
+		FAnimationRecorderManager::Get().StopRecordingAllAnimations();
+		return true;
+	}
+	else if (FoundActor)
+	{
+		USkeletalMeshComponent* const SkelComp = FoundActor->FindComponentByClass<USkeletalMeshComponent>();
+		if (SkelComp)
+		{
+			FAnimationRecorderManager::Get().StopRecordingAnimation(FoundActor, SkelComp);
+			return true;
+		}
+	}
+#endif		// WITH_EDITOR
+
+	return false;
+}
+
+
 /**
  * Computes a color to use for property coloration for the given object.
  *
@@ -6487,23 +6357,23 @@ void UEngine::UpdateRunningAverageDeltaTime(float DeltaTime, bool bAllowFrameRat
 	{
 		// Smooth the framerate if wanted. The code uses a simplistic running average. Other approaches, like reserving
 		// a percentage of time, ended up creating negative feedback loops in conjunction with GPU load and were abandonend.
-		if( DeltaTime < 0.0f )
-		{
+			if( DeltaTime < 0.0f )
+			{
 #if PLATFORM_ANDROID
-			UE_LOG(LogEngine, Warning, TEXT("Detected negative delta time - ignoring"));
-			DeltaTime = 0.01;
+				UE_LOG(LogEngine, Warning, TEXT("Detected negative delta time - ignoring"));
+				DeltaTime = 0.01;
 #elif (UE_BUILD_SHIPPING && WITH_EDITOR)
-			// End users don't have access to the secure parts of UDN. The localized string points to the release notes,
-			// which should include a link to the AMD CPU drivers download site.
-			UE_LOG(LogEngine, Fatal, TEXT("%s"), TEXT("CPU time drift detected! Please consult release notes on how to address this."));
+				// End users don't have access to the secure parts of UDN. The localized string points to the release notes,
+				// which should include a link to the AMD CPU drivers download site.
+				UE_LOG(LogEngine, Fatal, TEXT("%s"), TEXT("CPU time drift detected! Please consult release notes on how to address this."));
 #else
-			// Send developers to the support list thread.
-			UE_LOG(LogEngine, Fatal, TEXT("Negative delta time! Please see https://udn.epicgames.com/lists/showpost.php?list=ue3bugs&id=4364"));
+				// Send developers to the support list thread.
+				UE_LOG(LogEngine, Fatal, TEXT("Negative delta time! Please see https://udn.epicgames.com/lists/showpost.php?list=ue3bugs&id=4364"));
 #endif
-		}
+			}
 
-		// Keep track of running average over 300 frames, clamping at min of 5 FPS for individual delta times.
-		RunningAverageDeltaTime = FMath::Lerp<float>( RunningAverageDeltaTime, FMath::Min<float>( DeltaTime, 0.2f ), 1 / 300.f );
+			// Keep track of running average over 300 frames, clamping at min of 5 FPS for individual delta times.
+			RunningAverageDeltaTime = FMath::Lerp<float>( RunningAverageDeltaTime, FMath::Min<float>( DeltaTime, 0.2f ), 1 / 300.f );
 	}
 }
 
@@ -6515,19 +6385,19 @@ float UEngine::GetMaxTickRate(float DeltaTime, bool bAllowFrameRateSmoothing) co
 
 	if (bAllowFrameRateSmoothing && IsAllowedFramerateSmoothing())
 	{
-		// Work in FPS domain as that is what the function will return.
-		MaxTickRate = 1.f / RunningAverageDeltaTime;
+			// Work in FPS domain as that is what the function will return.
+			MaxTickRate = 1.f / RunningAverageDeltaTime;
 
-		// Clamp FPS into ini defined min/ max range.
-		if (SmoothedFrameRateRange.HasLowerBound())
-		{
-			MaxTickRate = FMath::Max( MaxTickRate, SmoothedFrameRateRange.GetLowerBoundValue() );
+			// Clamp FPS into ini defined min/ max range.
+			if (SmoothedFrameRateRange.HasLowerBound())
+			{
+				MaxTickRate = FMath::Max( MaxTickRate, SmoothedFrameRateRange.GetLowerBoundValue() );
+			}
+			if (SmoothedFrameRateRange.HasUpperBound())
+			{
+				MaxTickRate = FMath::Min( MaxTickRate, SmoothedFrameRateRange.GetUpperBoundValue() );
+			}
 		}
-		if (SmoothedFrameRateRange.HasUpperBound())
-		{
-			MaxTickRate = FMath::Min( MaxTickRate, SmoothedFrameRateRange.GetUpperBoundValue() );
-		}
-	}
 
 	if (CVarCauseHitches.GetValueOnGameThread())
 	{
@@ -6576,6 +6446,11 @@ void UEngine::SetMaxFPS(const int32 MaxFPS)
 void UEngine::EnableScreenSaver( bool bEnable )
 {
 #if PLATFORM_DESKTOP
+	if (GIsRequestingExit)
+	{
+		return;
+	}
+
 	TCHAR EnvVariable[32];
 	FPlatformMisc::GetEnvironmentVariable(TEXT("UE-DisallowScreenSaverInhibitor"), EnvVariable, ARRAY_COUNT(EnvVariable));
 	const bool bDisallowScreenSaverInhibitor = FString(EnvVariable).ToBool();
@@ -6805,7 +6680,7 @@ void UEngine::PerformanceCapture(const FString& CaptureName)
 	PathName = FPaths::AutomationDir() + PathName;
 	FPaths::MakePathRelativeTo(PathName,*FPaths::RootDir());
 	
-	FString ScreenshotName = FString::Printf(TEXT("%s%d.png"), *PathName, GEngineVersion.GetChangelist());
+	FString ScreenshotName = FString::Printf(TEXT("%s%d.png"), *PathName, FEngineVersion::Current().GetChangelist());
 	
 	const bool bShowUI = false;
 	const bool bAddFilenameSuffix = false;
@@ -7256,6 +7131,14 @@ void UEngine::SetAverageUnitTimes(float FrameTime, float RenderThreadTime, float
 	}
 }
 
+FColor UEngine::GetFrameTimeDisplayColor(float FrameTimeMS) const
+{
+	const float UnacceptableTime = GUnacceptableFrameTimeThresholdCVar.GetValueOnGameThread();
+	const float TargetTime = GTargetFrameTimeThresholdCVar.GetValueOnGameThread();
+
+	return (FrameTimeMS > UnacceptableTime) ? FColor::Red : ((FrameTimeMS > TargetTime) ? FColor::Yellow : FColor::Green);
+}
+
 bool UEngine::ShouldThrottleCPUUsage() const
 {
 	return false;
@@ -7326,6 +7209,20 @@ void DrawStatsHUD( UWorld* World, FViewport* Viewport, FCanvas* Canvas, UCanvas*
 				MessageY += 20;
 			}
 			
+#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+			if (FPlatformProperties::SupportsTextureStreaming() && IStreamingManager::Get().IsTextureStreamingEnabled())
+			{
+				auto MemOver = IStreamingManager::Get().GetTextureStreamingManager().GetMemoryOverBudget();
+				if (MemOver > 0)
+				{
+					SmallTextItem.SetColor(FLinearColor::Red);
+					SmallTextItem.Text = FText::FromString(FString::Printf(TEXT("TEXTURE STREAMING POOL OVER %0.2f MB"), (float)MemOver / 1024.0f / 1024.0f));
+					Canvas->DrawItem(SmallTextItem, FVector2D(MessageX, MessageY));
+					MessageY += 20;
+				}
+			}
+#endif
+
 			// check navmesh
 #if WITH_EDITOR
 			const bool bIsNavigationAutoUpdateEnabled = UNavigationSystem::GetIsNavigationAutoUpdateEnabled();
@@ -7549,19 +7446,19 @@ void DrawStatsHUD( UWorld* World, FViewport* Viewport, FCanvas* Canvas, UCanvas*
 		for (const FDebugClass& DebugClass : DebugClasses)
 		{
 			if (DebugClass.Class)
-			{
+		{
 				TArray<UObject*> DebugObjectsOfClass;
 				const bool bIncludeDerivedClasses = true;
 				GetObjectsOfClass(DebugClass.Class, DebugObjectsOfClass, bIncludeDerivedClasses);
 				for (UObject* Obj : DebugObjectsOfClass)
-				{
+			{
 					if (!Obj)
-					{
-						continue;
-					}
+				{
+					continue;
+				}
 
 					if (Obj->GetWorld() && Obj->GetWorld() != World)
-					{
+				{
 						continue;
 					}
 
@@ -9620,13 +9517,14 @@ bool UEngine::LoadMap( FWorldContext& WorldContext, FURL URL, class UPendingNetG
 		WorldContext.World()->FlushLevelStreaming(EFlushLevelStreamingType::Visibility);
 	}
 	
-	UNavigationSystem::InitializeForWorld(WorldContext.World(), FNavigationSystemRunMode::GameMode);
-	
 	// Note that AI system will be created only if ai-system-creation conditions are met
 	WorldContext.World()->CreateAISystem();
 
 	// Initialize gameplay for the level.
 	WorldContext.World()->InitializeActorsForPlay(URL);		
+
+	// calling it after InitializeActorsForPlay has been called to have all potential bounding boxed initialized
+	UNavigationSystem::InitializeForWorld(WorldContext.World(), FNavigationSystemRunMode::GameMode);
 
 	// Remember the URL. Put this before spawning player controllers so that
 	// a player controller can get the map name during initialization and
@@ -9684,7 +9582,7 @@ bool UEngine::LoadMap( FWorldContext& WorldContext, FURL URL, class UPendingNetG
 			const TCHAR* DemoRecName = URL.GetOption( TEXT( "DemoRec=" ), NULL );
 
 			// Record the demo, optionally with the specified custom name.
-			WorldContext.OwningGameInstance->StartRecordingReplay( FString(DemoRecName), WorldContext.World()->GetMapName() );
+			WorldContext.OwningGameInstance->StartRecordingReplay( FString(DemoRecName), WorldContext.World()->GetMapName(), URL.Op );
 		}
 	}
 
@@ -10625,19 +10523,19 @@ bool UEngine::CommitMapChange( FWorldContext &Context )
 		if (Context.PendingLevelStreamingStatusUpdates.Num() > 0)
 		{
 			for (const FLevelStreamingStatus& PendingUpdate : Context.PendingLevelStreamingStatusUpdates)
-			{
+				{
 				ULevelStreaming** Found = Context.World()->StreamingLevels.FindByPredicate([&](ULevelStreaming* Level){
 					return Level && Level->GetWorldAssetPackageFName() == PendingUpdate.PackageName;
 				});
 
 				if (Found)
-				{
+					{
 					(*Found)->bShouldBeLoaded  = PendingUpdate.bShouldBeLoaded;
 					(*Found)->bShouldBeVisible = PendingUpdate.bShouldBeVisible;
 					(*Found)->LevelLODIndex    = PendingUpdate.LODIndex;
-				}
-				else
-				{
+						}
+						else
+						{
 					UE_LOG(LogStreaming, Log, TEXT("Unable to find streaming object %s"), *PendingUpdate.PackageName.ToString());
 				}
 			}
@@ -11310,11 +11208,12 @@ int32 UEngine::RenderStatFPS(UWorld* World, FViewport* Viewport, FCanvas* Canvas
 	// Pick a larger font on console.
 	UFont* Font = FPlatformProperties::SupportsWindowedMode() ? GetSmallFont() : GetMediumFont();
 
-	// Choose the counter color based on the average framerate.
-	FColor FPSColor = GAverageFPS < 20.0f ? FColor::Red : (GAverageFPS < 29.5f ? FColor::Yellow : FColor::Green);
+	// Choose the counter color based on the average frame time.
+	const FColor FPSColor = GetFrameTimeDisplayColor(GAverageMS);
 
 	// Start drawing the various counters.
 	const int32 RowHeight = FMath::TruncToInt(Font->GetMaxCharHeight() * 1.1f);
+
 	// Draw the FPS counter.
 	Canvas->DrawShadowedString(
 		X,
@@ -11478,13 +11377,14 @@ int32 UEngine::RenderStatLevels(UWorld* World, FViewport* Viewport, FCanvas* Can
 	{
 		// First entry - always persistent level
 		FString MapName	= SubLevelsStatusList[0].PackageName.ToString();
+		UPackage* LevelPackage = FindObjectFast<UPackage>(NULL, SubLevelsStatusList[0].PackageName);
 		if (SubLevelsStatusList[0].bPlayerInside)
 		{
-			MapName = *FString::Printf( TEXT("->  %s"), *MapName );
+			MapName = *FString::Printf(TEXT("->  %s - %4.1f sec"), *MapName, LevelPackage->GetLoadTime());
 		}
 		else
 		{
-			MapName = *FString::Printf( TEXT("    %s"), *MapName );
+			MapName = *FString::Printf(TEXT("    %s - %4.1f sec"), *MapName, LevelPackage->GetLoadTime());
 		}
 
 		Canvas->DrawShadowedString(X, Y, *MapName, GetSmallFont(), FColor(127, 127, 127));
@@ -11766,6 +11666,116 @@ bool UEngine::ToggleStatRaw(UWorld* World, FCommonViewportClient* ViewportClient
 }
 #endif
 
+
+static uint64 TaskThread = 0xFFFFFFFFFFFFFFFF;
+static uint64 GameThread = 0xFFFFFFFFFFFFFFFF;
+static uint64 RenderThread = 0xFFFFFFFFFFFFFFFF;
+static uint64 RHIThread = 0xFFFFFFFFFFFFFFFF;
+FThreadSafeCounter StallForTaskThread;
+
+void SetAffinityOnThread()
+{
+	if (IsInActualRenderingThread())
+	{
+		FPlatformProcess::SetThreadAffinityMask(RenderThread);
+		UE_LOG(LogConsoleResponse, Display, TEXT("RT     %016llX"), RenderThread);
+	}
+	else if (IsInRHIThread())
+	{
+		FPlatformProcess::SetThreadAffinityMask(RHIThread);
+		UE_LOG(LogConsoleResponse, Display, TEXT("RHI    %016llX"), RHIThread);
+	}
+	else if (IsInGameThread())
+	{
+		FPlatformProcess::SetThreadAffinityMask(GameThread);
+		UE_LOG(LogConsoleResponse, Display, TEXT("GT     %016llX"), GameThread);
+	}
+	else // assume task thread
+	{
+		int32 TaskThreadIndex = int32(FTaskGraphInterface::Get().GetCurrentThreadIfKnown()) - int32(ENamedThreads::ActualRenderingThread) - 1;
+		FPlatformProcess::SetThreadAffinityMask(TaskThread);
+		UE_LOG(LogConsoleResponse, Display, TEXT("Task%2d %016llX"), TaskThreadIndex, TaskThread);
+		StallForTaskThread.Decrement();
+		// we wait for the others to finish here so that we do all task threads
+		while (StallForTaskThread.GetValue())
+		{
+			FPlatformProcess::Sleep(.0001f);
+		}
+	}
+}
+
+
+static void SetupThreadAffinity(const TArray<FString>& Args)
+{
+	static bool LoadedDefaults = false;
+	if (!LoadedDefaults || (Args.Num() && Args[0] == TEXT("default")))
+	{
+		LoadedDefaults = true;
+		TaskThread = FPlatformAffinity::GetTaskGraphThreadMask();
+		GameThread = FPlatformAffinity::GetMainGameMask();
+		RenderThread = FPlatformAffinity::GetRenderingThreadMask();
+		RHIThread = FPlatformAffinity::GetRHIThreadMask();
+	}
+	for (int32 Index = 0; Index + 1 < Args.Num(); Index += 2)
+	{
+		uint64 Aff = FParse::HexNumber(*Args[Index + 1]); // this is only 32 bits
+		if (!Aff)
+		{
+			UE_LOG(LogConsoleResponse, Display, TEXT("Parsed 0 for affinity, using 0xFFFFFFFFFFFFFFFF instead"));
+			Aff = 0xFFFFFFFFFFFFFFFF;
+		}
+		if (Args[Index] == TEXT("GT"))
+		{
+			GameThread = Aff;
+		}
+		else if (Args[Index] == TEXT("RT"))
+		{
+			RenderThread = Aff;
+		}
+		else if (Args[Index] == TEXT("RHI"))
+		{
+			RHIThread = Aff;
+		}
+		else if (Args[Index] == TEXT("Task"))
+		{
+			TaskThread = Aff;
+		}
+		else
+		{
+			UE_LOG(LogConsoleResponse, Display, TEXT("Unrecognized thread name %s"), *Args[Index]);
+		}
+	}
+
+	StallForTaskThread.Reset();
+	StallForTaskThread.Add(FTaskGraphInterface::Get().GetNumWorkerThreads());
+
+	for (int32 Index = 0; Index < FTaskGraphInterface::Get().GetNumWorkerThreads(); Index++)
+	{
+		FSimpleDelegateGraphTask::CreateAndDispatchWhenReady(
+			FSimpleDelegateGraphTask::FDelegate::CreateStatic(&SetAffinityOnThread),
+			TStatId(), NULL, ENamedThreads::AnyThread);
+	}
+	FSimpleDelegateGraphTask::CreateAndDispatchWhenReady(
+		FSimpleDelegateGraphTask::FDelegate::CreateStatic(&SetAffinityOnThread),
+		TStatId(), NULL, ENamedThreads::RenderThread);
+	if (GRHIThread)
+	{
+		FSimpleDelegateGraphTask::CreateAndDispatchWhenReady(
+			FSimpleDelegateGraphTask::FDelegate::CreateStatic(&SetAffinityOnThread),
+			TStatId(), NULL, ENamedThreads::RHIThread);
+	}
+	check(IsInGameThread());
+	SetAffinityOnThread();
+	FlushRenderingCommands();
+	GLog->FlushThreadedLogs();
+}
+
+static FAutoConsoleCommand SetupThreadAffinityCmd(
+	TEXT("SetThreadAffinity"),
+	TEXT("Sets the thread affinity. A single arg of default resets the thread affinity, otherwise pairs of args [GT|RT|RHI|Task] [Hex affinity] sets the affinity."),
+	FConsoleCommandWithArgsDelegate::CreateStatic(&SetupThreadAffinity)
+	);
+
 // REVERB
 #if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
 int32 UEngine::RenderStatReverb(UWorld* World, FViewport* Viewport, FCanvas* Canvas, int32 X, int32 Y, const FVector* ViewLocation, const FRotator* ViewRotation)
@@ -11891,7 +11901,8 @@ int32 UEngine::RenderStatSoundWaves(UWorld* World, FViewport* Viewport, FCanvas*
 
 			ActiveSounds.Add(WaveInstance->ActiveSound);
 
-			AActor* SoundOwner = WaveInstance->ActiveSound->AudioComponent.IsValid() ? WaveInstance->ActiveSound->AudioComponent->GetOwner() : NULL;
+			UAudioComponent* AudioComponent = WaveInstance->ActiveSound->GetAudioComponent();
+			AActor* SoundOwner = AudioComponent ? AudioComponent->GetOwner() : nullptr;
 			USoundClass* SoundClass = WaveInstance->SoundClass;
 
 			FString TheString = *FString::Printf(TEXT("%4i.    %6.2f  %s   Owner: %s   SoundClass: %s"),
@@ -12374,5 +12385,7 @@ int32 UEngine::RenderStatSlateBatches(UWorld* World, FViewport* Viewport, FCanva
 	return Y;
 }
 #endif
+
+ENGINE_API UGameplayTagsManager* GGameplayTagsManager = nullptr;
 
 #undef LOCTEXT_NAMESPACE

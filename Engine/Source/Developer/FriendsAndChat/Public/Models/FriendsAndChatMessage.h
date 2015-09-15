@@ -15,7 +15,9 @@ namespace EMessageType
 		JoinGame,
 		// Invite someone to join your game
 		GameInvite,
-		// Invite someone to be a friend
+		// Friend request sent to somebody
+		FriendInviteSent,
+		// Friend invite received
 		FriendInvite,
 		// Request accepted
 		FriendAccepted,
@@ -170,13 +172,25 @@ public:
 	}
 
 	/**
-	* Set a button style.
-	*
-	* @param ButtonStyle The button callback.
-	*/
+	 * Set a button style.
+	 *
+	 * @param ButtonStyle The button callback.
+	 */
 	void SetButtonStyle(FName ButtonStyle)
 	{
 		ButtonStyles.Add(ButtonStyle);
+	}
+
+	
+	/**
+	 * Set a button response type.
+	 * Purely for the games that need to know the button types
+	 *
+	 * @param InType button response type
+	 */
+	void SetButtonResponseType(EResponseType::Type InType)
+	{
+		ButtonResponseTypes.Add(InType);
 	}
 
 	/**
@@ -296,6 +310,17 @@ public:
 	}
 
 	/**
+	* Get button response types.
+	*
+	* @return The button callback array.
+	*/
+	const TArray<EResponseType::Type>& GetButtonResponseTypes() const
+	{
+		return ButtonResponseTypes;
+	}
+
+
+	/**
 	* Get button styles.
 	*
 	* @return The button style array.
@@ -315,6 +340,9 @@ private:
 
 	// Holds the button callbacks
 	TArray< FOnClicked > ButtonCallbacks;
+
+	// Used to determine the response associated with a button
+	TArray< EResponseType::Type > ButtonResponseTypes;
 
 	// Holds the button styles
 	TArray< FName > ButtonStyles;

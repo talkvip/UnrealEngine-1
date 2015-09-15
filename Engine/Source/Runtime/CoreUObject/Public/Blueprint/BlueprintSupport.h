@@ -63,6 +63,49 @@ private:
 
 	FScopedClassDependencyGather();
 };
+
+/**
+* Stores info about BPCG, UDS, UDE, etc,, converted into native code.
+* Native entities (generated from BP items) have "ReplaceConverted" with original object path.
+* This path is used to fix linker.
+*/
+struct COREUOBJECT_API FReplaceConvertedAssetManager : public FGCObject
+{
+private:
+	TMap<FString, UObject*> ReplaceMap;
+	bool bIsEnabled;
+
+	FReplaceConvertedAssetManager();
+
+	void GatherOriginalPathsOfConvertedAssets();
+
+public:
+
+	static FReplaceConvertedAssetManager& Get();
+
+	void SetEnabled(bool InEnabled)
+	{
+		bIsEnabled = InEnabled;
+		if (bIsEnabled)
+		{
+			GatherOriginalPathsOfConvertedAssets();
+		}
+	}
+
+	bool IsEnabled()
+	{
+		return bIsEnabled;
+	}
+
+	virtual void AddReferencedObjects(FReferenceCollector& Collector) override;
+
+	UPackage* FindPackageReplacement(const FString& OriginalPathName) const;
+
+	UObject* FindReplacement(const FString& OriginalPathName) const;
+
+	static void OnModulesChanged(FName ModuleThatChanged, EModuleChangeReason ReasonForChange);
+};
+
 #endif //WITH_EDITOR
 
 /** 
@@ -112,4 +155,44 @@ private:
 	UClass* ResolvingClass;
 	/** Tracks sub-classes that have had their CDO deferred as a result of the super not being fully serialized */
 	TMultiMap<UClass*, UClass*> SuperClassMap;
+};
+
+
+/**
+ *	Stores info about dependencies of native classes converted from BPs
+ */
+struct COREUOBJECT_API FConvertedBlueprintsDependencies
+{
+	typedef void(*GetDependenciesNamesFunc)(TArray<FName>&);
+
+private:
+
+	TMap<FName, GetDependenciesNamesFunc> ClassNameToGetter;
+
+public:
+
+#if WITH_EDITOR
+
+	typedef UField*(*StaticCreateClassFunc)();
+
+	TArray<StaticCreateClassFunc> CreateClassFunctions;
+
+	void RegisterClass(StaticCreateClassFunc CreateClass)
+	{
+		CreateClassFunctions.Add(CreateClass);
+	}
+
+#endif //WITH_EDITOR
+
+	static FConvertedBlueprintsDependencies& Get();
+
+	bool AnyClassRegistered() const
+	{
+		return ClassNameToGetter.Num() > 0;
+	}
+
+	void RegisterClass(FName ClassName, GetDependenciesNamesFunc GetAssets);
+
+	/** Get all assets paths necessary for the class with the given class name and all converted classes that dependencies. */
+	void GetAssets(FName ClassName, TArray<FName>& OutPackagePaths) const;
 };

@@ -23,7 +23,7 @@
 =============================================================================*/
 
 #include "VertexFactoryCommon.usf"
-#include "GpuSkinCacheCommon.usf"
+#include "GpuSkinCommon.usf"
 
 #ifndef GPUSKIN_MORPH_BLEND
 #define GPUSKIN_MORPH_BLEND 0
@@ -640,7 +640,7 @@ FMaterialTessellationParameters GetMaterialTessellationParameters(FVertexFactory
 	Result.TangentToWorldPreScale = 1;
 
 
-	Result.WorldPosition = CameraLocalWorldPosition + View.ViewOrigin.xyz;
+	Result.WorldPosition = CameraLocalWorldPosition + View.WorldCameraOrigin;
 
 	return Result;
 }

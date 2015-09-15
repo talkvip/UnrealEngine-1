@@ -392,7 +392,7 @@ public:
 				const FArrangedWidget& CurWidget = ArrangedChildren[ ChildIndex ];
 				FSlateRect ChildClipRect = MyClippingRect.IntersectionWith(CurWidget.Geometry.GetClippingRect());
 
-				if( ChildClipRect.GetSize().Size() > 0 )
+				if( ChildClipRect.GetSize().SizeSquared() > 0.f )
 				{
 					const FSlateRect ClipRect = Children[ ChildIndex ].Zone == ENodeZone::Center ? ChildClipRect : MyClippingRect;
 					const int32 CurWidgetsMaxLayerId = CurWidget.Widget->Paint( Args.WithNewParent( this ), CurWidget.Geometry, ClipRect, OutDrawElements, LayerId, InWidgetStyle, ShouldBeEnabled( bParentEnabled ));
@@ -778,7 +778,7 @@ protected:
 	 * Get the bounds of the given node
 	 * @return True if successful
 	 */
-	bool GetBoundsForNode(const UObject* InNode, /*out*/ FVector2D& MinCorner, /*out*/ FVector2D& MaxCorner, float Padding = 0.0f);
+	bool GetBoundsForNode(const UObject* InNode, /*out*/ FVector2D& MinCorner, /*out*/ FVector2D& MaxCorner, float Padding = 0.0f) const;
 
 	/**
 	 * Get the bounds of the selected nodes 

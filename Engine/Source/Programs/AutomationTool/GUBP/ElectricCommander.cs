@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Xml;
+using AutomationTool;
 using UnrealBuildTool;
 
 namespace AutomationTool
@@ -27,7 +28,7 @@ namespace AutomationTool
 			}
 			else
 			{
-				CommandUtils.ERunOptions Opts = CommandUtils.ERunOptions.Default;
+				CommandUtils.ERunOptions Opts = CommandUtils.ERunOptions.Default | CommandUtils.ERunOptions.SpewIsVerbose;
 				if (bQuiet)
 				{
 					Opts = (Opts & ~CommandUtils.ERunOptions.AllowSpew) | CommandUtils.ERunOptions.NoLoggingOfRunCommand;
@@ -186,7 +187,7 @@ namespace AutomationTool
 		{
 			try
 			{
-				CommandUtils.LogConsole("Updating node props for node {0}", NodeToDo.Name);
+				CommandUtils.Log("Updating node props for node {0}", NodeToDo.Name);
 				RunECTool(String.Format("setProperty \"/myWorkflow/FailEmails/{0}\" \"{1}\"", NodeToDo.Name, String.Join(" ", NodeToDo.RecipientsForFailureEmails)), true);
 			}
 			catch (Exception Ex)
@@ -199,7 +200,7 @@ namespace AutomationTool
 		{
 			try
 			{
-				CommandUtils.LogConsole("Updating duration prop for node {0}", NodeToDo.Name);
+				CommandUtils.Log("Updating duration prop for node {0}", NodeToDo.Name);
 				RunECTool(String.Format("setProperty \"/myWorkflow/NodeDuration/{0}\" \"{1}\"", NodeToDo.Name, BuildDuration.ToString()));
 				RunECTool(String.Format("setProperty \"/myJobStep/NodeDuration\" \"{0}\"", BuildDuration.ToString()));
 			}
@@ -210,9 +211,9 @@ namespace AutomationTool
 			}
 		}
 
-		public void SaveStatus(BuildNode NodeToDo, string Suffix, string NodeStoreName, bool bSaveSharedTempStorage, string GameNameIfAny, string JobStepIDForFailure = null)
+        public void SaveStatus(TempStorageNodeInfo TempStorageNodeInfo, bool bSaveSharedTempStorage, string JobStepIDForFailure = null)
 		{
-			string Contents = "Just a status record: " + Suffix;
+			string Contents = "Just a status record: " + TempStorageNodeInfo.NodeStorageName;
 			if (!String.IsNullOrEmpty(JobStepIDForFailure) && CommandUtils.IsBuildMachine)
 			{
 				try
@@ -225,10 +226,10 @@ namespace AutomationTool
 					CommandUtils.LogWarning(LogUtils.FormatException(Ex));
 				}
 			}
-			string RecordOfSuccess = CommandUtils.CombinePaths(CommandUtils.CmdEnv.LocalRoot, "Engine", "Saved", "Logs", NodeToDo.Name + Suffix +".log");
+			string RecordOfSuccess = CommandUtils.CombinePaths(CommandUtils.CmdEnv.LocalRoot, "Engine", "Saved", "Logs", TempStorageNodeInfo.NodeStorageName +".log");
 			CommandUtils.CreateDirectory(Path.GetDirectoryName(RecordOfSuccess));
-			CommandUtils.WriteAllText(RecordOfSuccess, Contents);		
-			TempStorage.StoreToTempStorage(CommandUtils.CmdEnv, NodeStoreName + Suffix, new List<string> { RecordOfSuccess }, !bSaveSharedTempStorage, GameNameIfAny);		
+			CommandUtils.WriteAllText(RecordOfSuccess, Contents);
+            TempStorage.StoreToTempStorage(TempStorageNodeInfo, new List<string> { RecordOfSuccess }, !bSaveSharedTempStorage, CommandUtils.CmdEnv.LocalRoot);		
 		}
 
 		public void UpdateEmailProperties(BuildNode NodeToDo, int LastSucceededCL, string FailedString, string FailCauserEMails, string EMailNote, bool SendSuccessForGreenAfterRed)
@@ -255,10 +256,10 @@ namespace AutomationTool
 			}
 		}
 
-		public void DoCommanderSetup(IEnumerable<BuildNode> AllNodes, IEnumerable<AggregateNode> AllAggregates, List<BuildNode> OrdereredToDo, List<BuildNode> SortedNodes, int TimeIndex, int TimeQuantum, bool bSkipTriggers, bool bFake, bool bFakeEC, string CLString, TriggerNode ExplicitTrigger, List<TriggerNode> UnfinishedTriggers, string FakeFail)
+        public void DoCommanderSetup(IEnumerable<BuildNode> AllNodes, IEnumerable<AggregateNode> AllAggregates, List<BuildNode> OrderedToDo, List<BuildNode> SortedNodes, int TimeIndex, int TimeQuantum, bool bSkipTriggers, bool bFake, bool bFakeEC, TriggerNode ExplicitTrigger, List<TriggerNode> UnfinishedTriggers)
 		{
 			// Check there's some nodes in the graph
-			if (OrdereredToDo.Count == 0)
+			if (OrderedToDo.Count == 0)
 			{
 				throw new AutomationException("No nodes to do!");
 			}
@@ -266,7 +267,7 @@ namespace AutomationTool
 			// Make sure everything before the explicit trigger is completed.
 			if (ExplicitTrigger != null)
 			{
-				foreach (BuildNode NodeToDo in OrdereredToDo)
+				foreach (BuildNode NodeToDo in OrderedToDo)
 				{
 					if (!NodeToDo.IsComplete && NodeToDo != ExplicitTrigger && !NodeToDo.DependsOn(ExplicitTrigger)) // if something is already finished, we don't put it into EC
 					{
@@ -276,13 +277,13 @@ namespace AutomationTool
 			}
 
 			// Update all the EC properties, and the branch definition files
-			WriteProperties(AllNodes, AllAggregates, OrdereredToDo, SortedNodes, TimeIndex, TimeQuantum);
+			WriteProperties(AllNodes, AllAggregates, OrderedToDo, SortedNodes, TimeIndex, TimeQuantum);
 
 			// Write all the job setup
-			WriteJobSteps(OrdereredToDo, bSkipTriggers);
+			WriteJobSteps(OrderedToDo, bSkipTriggers);
 		}
 
-		private void WriteProperties(IEnumerable<BuildNode> AllNodes, IEnumerable<AggregateNode> AllAggregates, List<BuildNode> OrdereredToDo, List<BuildNode> SortedNodes, int TimeIndex, int TimeQuantum)
+		private void WriteProperties(IEnumerable<BuildNode> AllNodes, IEnumerable<AggregateNode> AllAggregates, List<BuildNode> OrderedToDo, List<BuildNode> SortedNodes, int TimeIndex, int TimeQuantum)
 		{
 			List<AggregateNode> SeparatePromotables = FindPromotables(AllAggregates);
 			Dictionary<BuildNode, List<AggregateNode>> DependentPromotions = FindDependentPromotables(AllNodes, SeparatePromotables);
@@ -308,7 +309,7 @@ namespace AutomationTool
 				ECProps.Add(string.Format("PossiblePromotables/{0}={1}", Node.Name, ""));
 			}
 
-			foreach (BuildNode NodeToDo in OrdereredToDo)
+			foreach (BuildNode NodeToDo in OrderedToDo)
 			{
 				if (!NodeToDo.IsComplete) // if something is already finished, we don't put it into EC  
 				{
@@ -327,17 +328,17 @@ namespace AutomationTool
 			CommandUtils.WriteAllLines(BranchJobDefFile, ECProps.ToArray());
 			RunECTool(String.Format("setProperty \"/myJob/BranchJobDefFile\" \"{0}\"", BranchJobDefFile.Replace("\\", "\\\\")));
 
-			bool bHasTests = OrdereredToDo.Any(x => x.IsTest);
+			bool bHasTests = OrderedToDo.Any(x => x.IsTest);
 			RunECTool(String.Format("setProperty \"/myWorkflow/HasTests\" \"{0}\"", bHasTests));
 		}
 
-		private void WriteJobSteps(List<BuildNode> OrdereredToDo, bool bSkipTriggers)
+		private void WriteJobSteps(List<BuildNode> OrderedToDo, bool bSkipTriggers)
 		{
 			BuildNode LastSticky = null;
 			bool HitNonSticky = false;
 			bool bHaveECNodes = false;
 			// sticky nodes are ones that we run on the main agent. We run then first and they must not be intermixed with parallel jobs
-			foreach (BuildNode NodeToDo in OrdereredToDo)
+			foreach (BuildNode NodeToDo in OrderedToDo)
 			{
 				if (!NodeToDo.IsComplete) // if something is already finished, we don't put it into EC
 				{
@@ -358,7 +359,7 @@ namespace AutomationTool
 			}
 
 			List<JobStep> Steps = new List<JobStep>();
-			using (CommandUtils.TelemetryStopwatch PerlOutputStopwatch = new CommandUtils.TelemetryStopwatch("PerlOutput"))
+			using (TelemetryStopwatch PerlOutputStopwatch = new TelemetryStopwatch("PerlOutput"))
 			{
 				string ParentPath = Command.ParseParamValue("ParentPath");
 
@@ -376,7 +377,7 @@ namespace AutomationTool
 
 				Dictionary<string, List<BuildNode>> AgentGroupChains = new Dictionary<string, List<BuildNode>>();
 				List<BuildNode> StickyChain = new List<BuildNode>();
-				foreach (BuildNode NodeToDo in OrdereredToDo)
+				foreach (BuildNode NodeToDo in OrderedToDo)
 				{
 					if (!NodeToDo.IsComplete) // if something is already finished, we don't put it into EC  
 					{
@@ -401,7 +402,7 @@ namespace AutomationTool
 						}
 					}
 				}
-				foreach (BuildNode NodeToDo in OrdereredToDo)
+				foreach (BuildNode NodeToDo in OrderedToDo)
 				{
 					if (!NodeToDo.IsComplete) // if something is already finished, we don't put it into EC  
 					{
@@ -431,11 +432,11 @@ namespace AutomationTool
 						bool DoParallel = !Sticky || NodeToDo.IsParallelAgentShareEditor;
 
 						List<BuildNode> UncompletedEcDeps = new List<BuildNode>();
-						foreach (BuildNode Dep in NodeToDo.AllDirectDependencies)
+						foreach (BuildNode Dep in FindDirectOrderDependencies(NodeToDo))
 						{
-							if (!Dep.IsComplete && OrdereredToDo.Contains(Dep)) // if something is already finished, we don't put it into EC
+							if (!Dep.IsComplete && OrderedToDo.Contains(Dep)) // if something is already finished, we don't put it into EC
 							{
-								if (OrdereredToDo.IndexOf(Dep) > OrdereredToDo.IndexOf(NodeToDo))
+								if (OrderedToDo.IndexOf(Dep) > OrderedToDo.IndexOf(NodeToDo))
 								{
 									throw new AutomationException("Topological sort error, node {0} has a dependency of {1} which sorted after it.", NodeToDo.Name, Dep.Name);
 								}
@@ -443,7 +444,7 @@ namespace AutomationTool
 							}
 						}
 
-						string PreCondition = GetPreConditionForNode(OrdereredToDo, ParentPath, bHasNoop, AgentGroupChains, StickyChain, NodeToDo, UncompletedEcDeps);
+						string PreCondition = GetPreConditionForNode(OrderedToDo, ParentPath, bHasNoop, AgentGroupChains, StickyChain, NodeToDo, UncompletedEcDeps);
 						string RunCondition = GetRunConditionForNode(UncompletedEcDeps, ParentPath);
 
 						// Create the job steps for this node
@@ -564,7 +565,7 @@ namespace AutomationTool
 			}
 		}
 
-		private string GetPreConditionForNode(List<BuildNode> OrdereredToDo, string PreconditionParentPath, bool bHasNoop, Dictionary<string, List<BuildNode>> AgentGroupChains, List<BuildNode> StickyChain, BuildNode NodeToDo, List<BuildNode> UncompletedEcDeps)
+		private string GetPreConditionForNode(List<BuildNode> OrderedToDo, string PreconditionParentPath, bool bHasNoop, Dictionary<string, List<BuildNode>> AgentGroupChains, List<BuildNode> StickyChain, BuildNode NodeToDo, List<BuildNode> UncompletedEcDeps)
 		{
 			List<BuildNode> PreConditionUncompletedEcDeps = new List<BuildNode>();
 			if(NodeToDo.AgentSharingGroup == "")
@@ -584,11 +585,11 @@ namespace AutomationTool
 					// to avoid idle agents (and also EC doesn't actually reserve our agent!), we promote all dependencies to the first one
 					foreach (BuildNode Chain in MyChain)
 					{
-						foreach (BuildNode Dep in Chain.AllDirectDependencies)
+						foreach (BuildNode Dep in FindDirectOrderDependencies(Chain))
 						{
-							if (!Dep.IsComplete && OrdereredToDo.Contains(Dep)) // if something is already finished, we don't put it into EC
+							if (!Dep.IsComplete && OrderedToDo.Contains(Dep)) // if something is already finished, we don't put it into EC
 							{
-								if (OrdereredToDo.IndexOf(Dep) > OrdereredToDo.IndexOf(Chain))
+								if (OrderedToDo.IndexOf(Dep) > OrderedToDo.IndexOf(Chain))
 								{
 									throw new AutomationException("Topological sort error, node {0} has a dependency of {1} which sorted after it.", Chain.Name, Dep.Name);
 								}
@@ -614,11 +615,11 @@ namespace AutomationTool
 				}
 				else
 				{
-					foreach (BuildNode Dep in NodeToDo.AllDirectDependencies)
+					foreach (BuildNode Dep in FindDirectOrderDependencies(NodeToDo))
 					{
-						if (!Dep.IsComplete && OrdereredToDo.Contains(Dep)) // if something is already finished, we don't put it into EC
+						if (!Dep.IsComplete && OrderedToDo.Contains(Dep)) // if something is already finished, we don't put it into EC
 						{
-							if (OrdereredToDo.IndexOf(Dep) > OrdereredToDo.IndexOf(NodeToDo))
+							if (OrderedToDo.IndexOf(Dep) > OrderedToDo.IndexOf(NodeToDo))
 							{
 								throw new AutomationException("Topological sort error, node {0} has a dependency of {1} which sorted after it.", NodeToDo.Name, Dep.Name);
 							}
@@ -647,6 +648,16 @@ namespace AutomationTool
 				PreCondition = String.Format("\"\\$\" . \"[/javascript if({0}) true;]\"", String.Join(" && ", JobStepNames.Select(x => String.Format("getProperty('{0}/status') == 'completed'", x))));
 			}
 			return PreCondition;
+		}
+
+		private static HashSet<BuildNode> FindDirectOrderDependencies(BuildNode Node)
+		{
+			HashSet<BuildNode> DirectDependencies = new HashSet<BuildNode>(Node.OrderDependencies);
+			foreach(BuildNode OrderDependency in Node.OrderDependencies)
+			{
+				DirectDependencies.ExceptWith(OrderDependency.OrderDependencies);
+			}
+			return DirectDependencies;
 		}
 
 		private static string GetNodeForAllNodesProperty(BuildNode Node, int TimeQuantum)
@@ -712,7 +723,7 @@ namespace AutomationTool
 			Dictionary<BuildNode, List<AggregateNode>> DependentPromotions = NodesToDo.ToDictionary(x => x, x => new List<AggregateNode>());
 			foreach (AggregateNode SeparatePromotion in SeparatePromotions)
 			{
-				BuildNode[] Dependencies = SeparatePromotion.Dependencies.SelectMany(x => x.AllIndirectDependencies).Distinct().ToArray();
+				BuildNode[] Dependencies = SeparatePromotion.Dependencies.SelectMany(x => x.OrderDependencies).Distinct().ToArray();
 				foreach (BuildNode Dependency in Dependencies)
 				{
 					DependentPromotions[Dependency].Add(SeparatePromotion);
@@ -765,7 +776,7 @@ namespace AutomationTool
 				}
 
 				// Build a list of ordering dependencies, putting all Mac nodes after Windows nodes with the same names.
-				Dictionary<BuildNode, List<BuildNode>> NodeDependencies = new Dictionary<BuildNode,List<BuildNode>>(Nodes.ToDictionary(x => x, x => x.AllDirectDependencies.ToList()));
+				Dictionary<BuildNode, List<BuildNode>> NodeDependencies = new Dictionary<BuildNode,List<BuildNode>>(Nodes.ToDictionary(x => x, x => x.OrderDependencies.ToList()));
 				foreach(KeyValuePair<string, List<BuildNode>> DisplayGroup in DisplayGroups)
 				{
 					List<BuildNode> GroupNodes = DisplayGroup.Value;
@@ -882,7 +893,7 @@ public class TestECJobErrorParse : BuildCommand
 {
     public override void ExecuteBuild()
     {
-		LogConsole("*********************** TestECJobErrorParse");
+		Log("*********************** TestECJobErrorParse");
 
         string Filename = CombinePaths(@"P:\Builds\UE4\GUBP\++depot+UE4-2104401-RootEditor_Failed\Engine\Saved\Logs", "RootEditor_Failed.log");
         var Errors = ECJobPropsUtils.ErrorsFromProps(Filename);

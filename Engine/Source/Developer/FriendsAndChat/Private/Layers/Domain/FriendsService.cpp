@@ -36,6 +36,9 @@ public:
 
 	virtual void Login() override
 	{
+		// Clear existing delegates
+		Logout();
+
 		OnQueryRecentPlayersCompleteDelegate = FOnQueryRecentPlayersCompleteDelegate::CreateRaw(this, &FFriendsServiceImpl::OnQueryRecentPlayersComplete);
 		OnFriendsListChangedDelegate = FOnFriendsChangeDelegate::CreateSP(this, &FFriendsServiceImpl::OnFriendsListChanged);
 		OnDeleteFriendCompleteDelegate = FOnDeleteFriendCompleteDelegate::CreateSP(this, &FFriendsServiceImpl::OnDeleteFriendComplete);
@@ -387,7 +390,7 @@ private:
 		TArray< TSharedRef<FOnlineFriend> > Friends;
 		bool bReadyToChangeState = true;
 
-		if (OSSScheduler->GetFriendsInterface()->GetFriendsList(LocalControllerIndex, ListName, Friends))
+		if (OSSScheduler.IsValid() && OSSScheduler->IsLoggedIn() && OSSScheduler->GetFriendsInterface()->GetFriendsList(LocalControllerIndex, ListName, Friends))
 		{
 			if (Friends.Num() > 0)
 			{
@@ -400,7 +403,7 @@ private:
 						{
 							ExistingFriend->SetOnlineFriend(Friend);
 						}
-						PendingFriendsList.Add(ExistingFriend);
+						PendingFriendsList.AddUnique(ExistingFriend);
 					}
 					else
 					{
@@ -466,7 +469,7 @@ private:
 				}
 				else
 				{
-					UE_LOG(LogOnline, Log, TEXT("PlayerId=%s not found"), *UserIds[UserIdx]->ToDebugString());
+					UE_LOG(LogOnline, Verbose, TEXT("PlayerId=%s not found"), *UserIds[UserIdx]->ToDebugString());
 				}
 			}
 
@@ -664,6 +667,8 @@ private:
 					FOnSendInviteComplete Delegate = FOnSendInviteComplete::CreateSP(this, &FFriendsServiceImpl::OnSendInviteComplete);
 					OSSScheduler->GetFriendsInterface()->SendInvite(LocalControllerIndex, PendingOutgoingFriendRequests[Index].Get(), EFriendsLists::ToString(EFriendsLists::Default), Delegate);
 					OnAddToast().Broadcast(LOCTEXT("FriendRequestSent", "Request Sent"));
+
+					NotificationService->SendFriendInviteSentNotification(DisplayName);
 				}
 			}
 			else
@@ -682,6 +687,7 @@ private:
 			RequestListRefresh();
 			SetState(EFriendsAndManagerState::Idle);
 		}
+
 	}
 
 	void OnFriendsListChanged()

@@ -13,6 +13,32 @@
 #include "Engine/SkeletalMesh.h"
 #include "AnimationAsset.generated.h"
 
+namespace MarkerIndexSpecialValues
+{
+	enum Type
+	{
+		Unitialized = -2,
+		AnimationBoundary = -1,
+	};
+};
+
+struct FMarkerPair
+{
+	int32 MarkerIndex;
+	float TimeToMarker;
+
+	FMarkerPair() : MarkerIndex(MarkerIndexSpecialValues::Unitialized) {}
+};
+
+struct FMarkerTickRecord
+{
+	//Current Position in marker space, equivalent to TimeAccumulator
+	FMarkerPair PreviousMarker;
+	FMarkerPair NextMarker;
+
+	bool IsValid() const { return PreviousMarker.MarkerIndex != MarkerIndexSpecialValues::Unitialized && NextMarker.MarkerIndex != MarkerIndexSpecialValues::Unitialized; }
+};
+
 /** Transform definition */
 USTRUCT(BlueprintType)
 struct FBlendSampleData
@@ -27,6 +53,11 @@ struct FBlendSampleData
 
 	UPROPERTY()
 	float Time;
+
+	UPROPERTY()
+	float PreviousTime;
+
+	FMarkerTickRecord MarkerTickRecord;
 
 	// transient perbone interpolation data
 	TArray<float> PerBoneBlendData;
@@ -54,6 +85,8 @@ struct FBlendSampleData
 	{
 		return FMath::Clamp<float>(TotalWeight, 0.f, 1.f);
 	}
+
+	static void ENGINE_API NormalizeDataWeight(TArray<FBlendSampleData>& SampleDataList);
 };
 
 USTRUCT()
@@ -142,6 +175,32 @@ struct FAnimExtractContext
 	}
 };
 
+//Represent a current play position in an animation
+//based on sync markers
+struct FMarkerSyncAnimPosition
+{
+	/** The marker we have passed*/
+	FName PreviousMarkerName;
+
+	/** The marker we are heading towards */
+	FName NextMarkerName;
+
+	/** Value between 0 and 1 representing where we are:
+	0   we are at PreviousMarker
+	1   we are at NextMarker
+	0.5 we are half way between the two */
+	float PositionBetweenMarkers;
+
+	/** Is this a valid Marker Sync Position */
+	bool IsValid() const { return !(PreviousMarkerName == NAME_None && NextMarkerName == NAME_None); }
+};
+
+struct FPassedMarker
+{
+	FName PassedMarkerName;
+
+	float DeltaTimeWhenPassed;
+};
 
 /**
  * Information about an animation asset that needs to be ticked
@@ -161,12 +220,72 @@ struct FAnimTickRecord
 	float PlayRateMultiplier;
 	float EffectiveBlendWeight;
 	bool bLooping;
+	
+	bool bCanUseMarkerSync;
+	
+	FMarkerTickRecord MarkerTickRecord;
+
+	void* SourceNodeRef; //Used to find last frames TickRecord
 
 public:
 	FAnimTickRecord()
+		: bCanUseMarkerSync(false)
+		, SourceNodeRef(nullptr)
 	{
 	}
 };
+
+class FMarkerTickContext
+{
+public:
+	FMarkerTickContext(const TArray<FName>& ValidMarkerNames) : ValidMarkers(ValidMarkerNames) {}
+	FMarkerTickContext() {}
+
+	void SetMarkerSyncStartPosition(const FMarkerSyncAnimPosition& SyncPosition)
+	{
+		MarkerSyncStartPostion = SyncPosition;
+	}
+
+	void SetMarkerSyncEndPosition(const FMarkerSyncAnimPosition& SyncPosition)
+	{
+		MarkerSyncEndPostion = SyncPosition;
+	}
+
+	const FMarkerSyncAnimPosition& GetMarkerSyncStartPosition() const
+	{
+		return MarkerSyncStartPostion;
+	}
+
+	const FMarkerSyncAnimPosition& GetMarkerSyncEndPosition() const
+	{
+		return MarkerSyncEndPostion;
+	}
+
+	const TArray<FName>& GetValidMarkerNames() const
+	{
+		return ValidMarkers;
+	}
+
+	bool IsMarkerSyncStartValid() const
+	{
+		return !(MarkerSyncStartPostion.PreviousMarkerName == NAME_None && MarkerSyncStartPostion.NextMarkerName == NAME_None);
+	}
+
+	TArray<FPassedMarker> MarkersPassedThisTick;
+
+private:
+	// Structure representing our sync position based on markers before tick
+	// This is used to allow new animations to play from the right marker position
+	FMarkerSyncAnimPosition MarkerSyncStartPostion;
+
+	// Structure representing our sync position based on markers after tick
+	FMarkerSyncAnimPosition MarkerSyncEndPostion;
+
+
+	// Valid marker names for this sync group
+	TArray<FName> ValidMarkers;
+};
+
 
 UENUM()
 namespace EAnimGroupRole
@@ -195,9 +314,19 @@ public:
 
 	// The current group leader
 	int32 GroupLeaderIndex;
+
+	// Valid marker names for this sync group
+	TArray<FName> ValidMarkers;
+
+	// Can we use sync markers for ticking this sync group
+	bool bCanUseMarkerSync;
+
+	FMarkerTickContext MarkerTickContext;
+
 public:
 	FAnimGroupInstance()
 		: GroupLeaderIndex(INDEX_NONE)
+		, bCanUseMarkerSync(false)
 	{
 	}
 
@@ -205,35 +334,15 @@ public:
 	{
 		GroupLeaderIndex = INDEX_NONE;
 		ActivePlayers.Empty(ActivePlayers.Num());
+		bCanUseMarkerSync = false;
 	}
 
 	// Checks the last tick record in the ActivePlayers array to see if it's a better leader than the current candidate.
 	// This should be called once for each record added to ActivePlayers, after the record is setup.
-	void TestTickRecordForLeadership(EAnimGroupRole::Type MembershipType)
-	{
-		int32 TestIndex = ActivePlayers.Num() - 1;
-		const FAnimTickRecord& Candidate = ActivePlayers[TestIndex];
-		
-		switch (MembershipType)
-		{
-		case EAnimGroupRole::CanBeLeader:
-			// Set it if we're better than the current leader (or if there is no leader yet)
-			if ((GroupLeaderIndex == INDEX_NONE) || (ActivePlayers[GroupLeaderIndex].EffectiveBlendWeight < Candidate.EffectiveBlendWeight))
-			{
-				// This is a better leader
-				GroupLeaderIndex = TestIndex;
-			}
-			break;
-		case EAnimGroupRole::AlwaysLeader:
-			// Always set the leader index
-			GroupLeaderIndex = TestIndex;
-			break;
-		default:
-		case EAnimGroupRole::AlwaysFollower:
-			// Never set the leader index; the actual tick code will handle the case of no leader by using the first element in the array
-			break;
-		}
-	}
+	ENGINE_API void TestTickRecordForLeadership(EAnimGroupRole::Type MembershipType);
+
+	// Called after all tick records have been added but before assets are actually ticked
+	ENGINE_API void Finalize(const TArray<FName>& PreviousValidMarkers, int32 PreviousGroupLeader);
 };
 
 /** Utility struct to accumulate root motion. */
@@ -346,11 +455,26 @@ struct FRootMotionMovementParams
 struct FAnimAssetTickContext
 {
 public:
-	FAnimAssetTickContext(float InDeltaTime, ERootMotionMode::Type InRootMotionMode)
+	FAnimAssetTickContext(float InDeltaTime, ERootMotionMode::Type InRootMotionMode, bool bInOnlyOneAnimationInGroup, const TArray<FName>& ValidMarkerNames)
+		: RootMotionMode(InRootMotionMode)
+		, MarkerTickContext(ValidMarkerNames)
+		, DeltaTime(InDeltaTime)
+		, LeaderDelta(0.f)
+		, AnimLengthRatio(0.0f)
+		, bIsMarkerPositionValid(ValidMarkerNames.Num() > 0)
+		, bIsLeader(true)
+		, bOnlyOneAnimationInGroup(bInOnlyOneAnimationInGroup)
+	{
+	}
+
+	FAnimAssetTickContext(float InDeltaTime, ERootMotionMode::Type InRootMotionMode, bool bInOnlyOneAnimationInGroup)
 		: RootMotionMode(InRootMotionMode)
 		, DeltaTime(InDeltaTime)
-		, SyncPoint(0.0f)
+		, LeaderDelta(0.f)
+		, AnimLengthRatio(0.0f)
+		, bIsMarkerPositionValid(false)
 		, bIsLeader(true)
+		, bOnlyOneAnimationInGroup(bInOnlyOneAnimationInGroup)
 	{
 	}
 	
@@ -371,16 +495,31 @@ public:
 		return DeltaTime;
 	}
 
-	void SetSyncPoint(float NormalizedTime)
+	void SetLeaderDelta(float InLeaderDelta)
 	{
-		SyncPoint = NormalizedTime;
+		LeaderDelta = InLeaderDelta;
+	}
+
+	float GetLeaderDelta() const
+	{
+		return LeaderDelta;
+	}
+
+	void SetAnimationPositionRatio(float NormalizedTime)
+	{
+		AnimLengthRatio = NormalizedTime;
 	}
 
 	// Returns the synchronization point (normalized time; only legal to call if ticking a follower)
-	float GetSyncPoint() const
+	float GetAnimationPositionRatio() const
 	{
 		checkSlow(!bIsLeader);
-		return SyncPoint;
+		return AnimLengthRatio;
+	}
+
+	bool CanUseMarkerPosition() const
+	{
+		return bIsMarkerPositionValid;
 	}
 
 	void ConvertToFollower()
@@ -393,19 +532,32 @@ public:
 		return IsLeader();
 	}
 
+	bool IsSingleAnimationContext() const
+	{
+		return bOnlyOneAnimationInGroup;
+	}
+
 	//Root Motion accumulated from this tick context
 	FRootMotionMovementParams RootMotionMovementParams;
 
 	// The root motion mode of the owning AnimInstance
 	ERootMotionMode::Type RootMotionMode;
 
+	FMarkerTickContext MarkerTickContext;
+
 private:
 	float DeltaTime;
 
-	// The structure used to pass synchronization state between members of a sync group
-	float SyncPoint;
+	float LeaderDelta;
+
+	// Float in 0 - 1 range representing how far through an animation we are
+	float AnimLengthRatio;
+
+	bool bIsMarkerPositionValid;
 
 	bool bIsLeader;
+
+	bool bOnlyOneAnimationInGroup;
 };
 
 USTRUCT()
@@ -454,7 +606,7 @@ public:
 	 * @param InstanceOwner	AnimInstance playing this asset
 	 * @param Context		The tick context (leader/follower, delta time, sync point, etc...)
 	 */
-	virtual void TickAssetPlayerInstance(const FAnimTickRecord& Instance, class UAnimInstance* InstanceOwner, FAnimAssetTickContext& Context) const {}
+	virtual void TickAssetPlayerInstance(FAnimTickRecord& Instance, class UAnimInstance* InstanceOwner, FAnimAssetTickContext& Context) const {}
 	// this is used in editor only when used for transition getter
 	// this doesn't mean max time. In Sequence, this is SequenceLength,
 	// but for BlendSpace CurrentTime is normalized [0,1], so this is 1
@@ -494,7 +646,12 @@ public:
 
 	ENGINE_API void SetPreviewMesh(USkeletalMesh* PreviewMesh);
 	ENGINE_API USkeletalMesh* GetPreviewMesh();
+
+	ENGINE_API virtual int32 GetMarkerUpdateCounter() const { return 0; }
 #endif //WITH_EDITOR
+
+	/** Return a list of unique marker names for blending compatibility */
+	ENGINE_API virtual TArray<FName>* GetUniqueMarkerNames() { return NULL; }
 
 #if WITH_EDITORONLY_DATA
 	/** Information for thumbnail rendering */

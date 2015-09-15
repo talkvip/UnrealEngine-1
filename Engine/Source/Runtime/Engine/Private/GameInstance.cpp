@@ -12,6 +12,7 @@
 #include "OnlineSubsystem.h"
 #include "OnlineSessionInterface.h"
 #include "GameFramework/OnlineSession.h"
+#include "GameFramework/PlayerState.h"
 
 #if WITH_EDITOR
 #include "UnrealEd.h"
@@ -241,10 +242,11 @@ bool UGameInstance::StartPIEGameInstance(ULocalPlayer* LocalPlayer, bool bInSimu
 		// Make sure "always loaded" sub-levels are fully loaded
 		PlayWorld->FlushLevelStreaming(EFlushLevelStreamingType::Visibility);
 
-		UNavigationSystem::InitializeForWorld(PlayWorld, LocalPlayers.Num() > 0 ? FNavigationSystemRunMode::PIEMode : FNavigationSystemRunMode::SimulationMode);
 		PlayWorld->CreateAISystem();
 
 		PlayWorld->InitializeActorsForPlay(URL);
+		// calling it after InitializeActorsForPlay has been called to have all potential bounding boxed initialized
+		UNavigationSystem::InitializeForWorld(PlayWorld, LocalPlayers.Num() > 0 ? FNavigationSystemRunMode::PIEMode : FNavigationSystemRunMode::SimulationMode);
 
 		// @todo, just use WorldContext.GamePlayer[0]?
 		if (LocalPlayer)
@@ -582,6 +584,48 @@ APlayerController* UGameInstance::GetFirstLocalPlayerController() const
 	return nullptr;
 }
 
+APlayerController* UGameInstance::GetPrimaryPlayerController() const
+{
+	UWorld* World = GetWorld();
+	check(World);
+
+	APlayerController* PrimaryController = nullptr;
+	for (FConstPlayerControllerIterator Iterator = World->GetPlayerControllerIterator(); Iterator; ++Iterator)
+	{
+		APlayerController* NextPlayer = Cast<APlayerController>(*Iterator);
+		if (NextPlayer && NextPlayer->PlayerState && NextPlayer->PlayerState->UniqueId.IsValid() && NextPlayer->IsPrimaryPlayer())
+		{
+			PrimaryController = NextPlayer;
+			break;
+		}
+	}
+
+	return PrimaryController;
+}
+
+TSharedPtr<const FUniqueNetId> UGameInstance::GetPrimaryPlayerUniqueId() const
+{
+	ULocalPlayer* PrimaryLP = nullptr;
+
+	TArray<ULocalPlayer*>::TConstIterator LocalPlayerIt = GetLocalPlayerIterator();
+	for (; LocalPlayerIt && *LocalPlayerIt; ++LocalPlayerIt)
+	{
+		PrimaryLP = *LocalPlayerIt;
+		if (PrimaryLP && PrimaryLP->PlayerController && PrimaryLP->PlayerController->IsPrimaryPlayer())
+		{
+			break;
+		}
+	}
+
+	TSharedPtr<const FUniqueNetId> LocalUserId = nullptr;
+	if (PrimaryLP)
+	{
+		LocalUserId = PrimaryLP->GetPreferredUniqueNetId();
+	}
+
+	return LocalUserId;
+}
+
 ULocalPlayer* UGameInstance::FindLocalPlayerFromControllerId(const int32 ControllerId) const
 {
 	for (ULocalPlayer * LP : LocalPlayers)
@@ -696,7 +740,7 @@ void UGameInstance::OnSessionUserInviteAccepted(const bool bWasSuccess, const in
 	}
 }
 
-void UGameInstance::StartRecordingReplay(const FString& Name, const FString& FriendlyName)
+void UGameInstance::StartRecordingReplay(const FString& Name, const FString& FriendlyName, const TArray<FString>& AdditionalOptions)
 {
 	if ( FParse::Param( FCommandLine::Get(),TEXT( "NOREPLAYS" ) ) )
 	{
@@ -720,6 +764,11 @@ void UGameInstance::StartRecordingReplay(const FString& Name, const FString& Fri
 	// replace the current URL's map with a demo extension
 	DemoURL.Map = DemoName;
 	DemoURL.AddOption( *FString::Printf( TEXT( "DemoFriendlyName=%s" ), *FriendlyName ) );
+
+	for (const FString& Option : AdditionalOptions)
+	{
+		DemoURL.AddOption(*Option);
+	}
 
 	CurrentWorld->DestroyDemoNetDriver();
 

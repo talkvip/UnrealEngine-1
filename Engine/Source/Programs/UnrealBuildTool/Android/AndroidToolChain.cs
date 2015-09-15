@@ -31,9 +31,9 @@ namespace UnrealBuildTool
 
 		static private Dictionary<string, string[]> LibrariesToSkip = new Dictionary<string, string[]> {
 			{ "-armv7", new string[] { } }, 
-			{ "-arm64", new string[] { "nvToolsExt", "oculus", "vrapi", "gpg", } }, 
-			{ "-x86",   new string[] { "nvToolsExt", "oculus", "vrapi", } }, 
-			{ "-x64",   new string[] { "nvToolsExt", "oculus", "vrapi", "gpg", } }, 
+			{ "-arm64", new string[] { "nvToolsExt", "nvToolsExtStub", "oculus", "vrapi", "gpg", } }, 
+			{ "-x86",   new string[] { "nvToolsExt", "nvToolsExtStub", "oculus", "vrapi", } }, 
+			{ "-x64",   new string[] { "nvToolsExt", "nvToolsExtStub", "oculus", "vrapi", "gpg", } }, 
 		};
 
 		static private Dictionary<string, string[]> ModulesToSkip = new Dictionary<string, string[]> {
@@ -46,7 +46,7 @@ namespace UnrealBuildTool
 		public static void ParseArchitectures()
 		{
 			// look in ini settings for what platforms to compile for
-			ConfigCacheIni Ini = new ConfigCacheIni(UnrealTargetPlatform.Android, "Engine", UnrealBuildTool.GetUProjectPath());
+			ConfigCacheIni Ini = ConfigCacheIni.CreateConfigCacheIni(UnrealTargetPlatform.Android, "Engine", UnrealBuildTool.GetUProjectPath());
             Arches = new List<string>();
 			bool bBuild = true;
 			if (Ini.GetBool("/Script/AndroidRuntimeSettings.AndroidRuntimeSettings", "bBuildForArmV7", out bBuild) && bBuild)
@@ -143,10 +143,26 @@ namespace UnrealBuildTool
 			return GPUArchitectures;
 		}
 
+		static public int GetNdkApiLevelInt(int MinNdk = 19)
+		{
+			string NDKVersion = AndroidToolChain.GetNdkApiLevel();
+			int NDKVersionInt = MinNdk;
+			if (NDKVersion.Contains("-"))
+			{
+				int Version;
+				if (int.TryParse(NDKVersion.Substring(NDKVersion.LastIndexOf('-') + 1), out Version))
+				{
+					if (Version > NDKVersionInt)
+						NDKVersionInt = Version;
+				}
+			}
+			return NDKVersionInt;
+		}
+
 		static public string GetNdkApiLevel()
 		{
 			// ask the .ini system for what version to use
-			ConfigCacheIni Ini = new ConfigCacheIni(UnrealTargetPlatform.Android, "Engine", UnrealBuildTool.GetUProjectPath());
+			ConfigCacheIni Ini = ConfigCacheIni.CreateConfigCacheIni(UnrealTargetPlatform.Android, "Engine", UnrealBuildTool.GetUProjectPath());
 			string NDKLevel;
 			Ini.GetString("/Script/AndroidPlatformEditor.AndroidSDKSettings", "NDKAPILevel", out NDKLevel);
 
@@ -550,7 +566,7 @@ namespace UnrealBuildTool
 				Result += " -Wl,--fix-cortex-a8";		// required to route around a CPU bug in some Cortex-A8 implementations
 			}
 
-			if (ClangVersionFloat >= 3.6f)
+			if (BuildConfiguration.bUseUnityBuild && ClangVersionFloat >= 3.6f)
 			{
 				Result += " -fuse-ld=gold";				// ld.gold is available in r10e (clang 3.6)
 			}
@@ -691,11 +707,88 @@ namespace UnrealBuildTool
 			if (ModuleName.Equals("Launch"))
 			{
 				SourceFiles.Add(FileItem.GetItemByPath(Environment.GetEnvironmentVariable("NDKROOT") + "/sources/android/native_app_glue/android_native_app_glue.c"));
-				SourceFiles.Add(FileItem.GetItemByPath(Environment.GetEnvironmentVariable("NDKROOT") + "/sources/android/cpufeatures/cpu-features.c"));
+
+				// Newer NDK cpu_features.c uses getauxval() which causes a SIGSEGV in libhoudini.so (ARM on Intel translator) in older versions of Houdini
+				// so we patch the file to use alternative methods of detecting CPU features if libhoudini.so is detected
+				// The basis for this patch is from here: https://android-review.googlesource.com/#/c/110650/
+				String CpuFeaturesPath = Environment.GetEnvironmentVariable("NDKROOT") + "/sources/android/cpufeatures/";
+				String CpuFeaturesPatchedFile = CpuFeaturesPath + "cpu-features-patched.c";
+				if (!File.Exists(CpuFeaturesPatchedFile))
+				{
+					// Either make a copy or patch it
+					String[] CpuFeaturesLines = File.ReadAllLines(CpuFeaturesPath + "cpu-features.c");
+
+					// Look for get_elf_hwcap_from_getauxval in the file
+					bool NeedsPatch = false;
+					int LineIndex;
+					for (LineIndex = 0; LineIndex < CpuFeaturesLines.Length; ++LineIndex)
+					{
+						if (CpuFeaturesLines[LineIndex].Contains("get_elf_hwcap_from_getauxval"))
+						{
+							NeedsPatch = true;
+
+							// Make sure it doesn't already have the patch (r10c and 10d have it already, but removed in 10e)
+							for (int LineIndex2 = LineIndex; LineIndex2 < CpuFeaturesLines.Length; ++LineIndex2)
+							{
+								if (CpuFeaturesLines[LineIndex2].Contains("has_houdini_binary_translator(void)"))
+								{
+									NeedsPatch = false;
+									break;
+								}
+							}
+							break;
+						}
+					}
+
+					// Apply patch or write unchanged
+					if (NeedsPatch)
+					{
+						List<string> CpuFeaturesList = new List<string>(CpuFeaturesLines);
+
+						// Skip down to section to add Houdini check function for arm
+						while (!CpuFeaturesList[++LineIndex].StartsWith("#if defined(__arm__)")) ;
+						CpuFeaturesList.Insert(++LineIndex, "/* Check Houdini Binary Translator is installed on the system.");
+						CpuFeaturesList.Insert(++LineIndex, " *");
+						CpuFeaturesList.Insert(++LineIndex, " * If this function returns 1, get_elf_hwcap_from_getauxval() function");
+						CpuFeaturesList.Insert(++LineIndex, " * will causes SIGSEGV while calling getauxval() function.");
+						CpuFeaturesList.Insert(++LineIndex, " */");
+						CpuFeaturesList.Insert(++LineIndex, "static int");
+						CpuFeaturesList.Insert(++LineIndex, "has_houdini_binary_translator(void) {");
+						CpuFeaturesList.Insert(++LineIndex, "    int found = 0;");
+						CpuFeaturesList.Insert(++LineIndex, "    if (access(\"/system/lib/libhoudini.so\", F_OK) != -1) {");
+						CpuFeaturesList.Insert(++LineIndex, "        D(\"Found Houdini binary translator\\n\");");
+						CpuFeaturesList.Insert(++LineIndex, "        found = 1;");
+						CpuFeaturesList.Insert(++LineIndex, "    }");
+						CpuFeaturesList.Insert(++LineIndex, "    return found;");
+						CpuFeaturesList.Insert(++LineIndex, "}");
+						CpuFeaturesList.Insert(++LineIndex, "");
+
+						// Add the Houdini check call
+						while (!CpuFeaturesList[++LineIndex].Contains("/* Extract the list of CPU features from ELF hwcaps */")) ;
+						CpuFeaturesList.Insert(LineIndex++, "        /* Check Houdini binary translator is installed */");
+						CpuFeaturesList.Insert(LineIndex++, "        int has_houdini = has_houdini_binary_translator();");
+						CpuFeaturesList.Insert(LineIndex++, "");
+
+						// Make the get_elf_hwcap_from_getauxval() calls conditional
+						while (!CpuFeaturesList[++LineIndex].Contains("hwcaps = get_elf_hwcap_from_getauxval(AT_HWCAP);")) ;
+						CpuFeaturesList.Insert(LineIndex++, "        if (!has_houdini) {");
+						CpuFeaturesList.Insert(++LineIndex, "        }");
+						while (!CpuFeaturesList[++LineIndex].Contains("hwcaps2 = get_elf_hwcap_from_getauxval(AT_HWCAP2);")) ;
+						CpuFeaturesList.Insert(LineIndex++, "        if (!has_houdini) {");
+						CpuFeaturesList.Insert(++LineIndex, "        }");
+
+						File.WriteAllLines(CpuFeaturesPatchedFile, CpuFeaturesList.ToArray());
+					}
+					else
+					{
+						File.WriteAllLines(CpuFeaturesPatchedFile, CpuFeaturesLines);
+					}
+				}
+				SourceFiles.Add(FileItem.GetItemByPath(CpuFeaturesPatchedFile));
 			}
 		}
 
-		static void GenerateEmptyLinkFunctionsForRemovedModules(List<FileItem> SourceFiles, string ModuleName, string OutputDirectory)
+		static void GenerateEmptyLinkFunctionsForRemovedModules(List<FileItem> SourceFiles, string ModuleName, DirectoryReference OutputDirectory)
 		{
 			// Only add to UELinkerFixups module
 			if (!ModuleName.Equals("Launch"))
@@ -704,10 +797,10 @@ namespace UnrealBuildTool
 			}
 
 			string LinkerExceptionsName = "../UELinkerExceptions";
-			string LinkerExceptionsCPPFilename = Path.Combine(OutputDirectory, LinkerExceptionsName + ".cpp");
+			FileReference LinkerExceptionsCPPFilename = FileReference.Combine(OutputDirectory, LinkerExceptionsName + ".cpp");
 
 			// Create the cpp filename
-			if (!File.Exists(LinkerExceptionsCPPFilename))
+			if (!LinkerExceptionsCPPFilename.Exists())
 			{
 				// Create a dummy file in case it doesn't exist yet so that the module does not complain it's not there
 				ResponseFile.Create(LinkerExceptionsCPPFilename, new List<string>());
@@ -734,9 +827,9 @@ namespace UnrealBuildTool
 
 			// Determine if the file changed. Write it if it either doesn't exist or the contents are different.
 			bool bShouldWriteFile = true;
-			if (File.Exists(LinkerExceptionsCPPFilename))
+			if (LinkerExceptionsCPPFilename.Exists())
 			{
-				string[] ExistingExceptionText = File.ReadAllLines(LinkerExceptionsCPPFilename);
+				string[] ExistingExceptionText = File.ReadAllLines(LinkerExceptionsCPPFilename.FullName);
 				string JoinedNewContents = string.Join("", Result.ToArray());
 				string JoinedOldContents = string.Join("", ExistingExceptionText);
 				bShouldWriteFile = (JoinedNewContents != JoinedOldContents);
@@ -748,7 +841,7 @@ namespace UnrealBuildTool
 				ResponseFile.Create(LinkerExceptionsCPPFilename, Result);
 			}
 
-			SourceFiles.Add(FileItem.GetItemByPath(LinkerExceptionsCPPFilename));
+			SourceFiles.Add(FileItem.GetItemByFileReference(LinkerExceptionsCPPFilename));
 		}
 
 		// cache the location of NDK tools
@@ -761,6 +854,21 @@ namespace UnrealBuildTool
 		static string ArPathArm64;
 		static string ArPathx86;
 		static string ArPathx64;
+
+		static public string GetStripExecutablePath(string UE4Arch)
+		{
+			string StripPath;
+
+			switch (UE4Arch)
+			{
+				case "-armv7": StripPath = ArPathArm; break;
+				case "-arm64": StripPath = ArPathArm64; break;
+				case "-x86": StripPath = ArPathx86; break;
+				case "-x64": StripPath = ArPathx64; break;
+				default: StripPath = ArPathArm; break;
+			}
+			return StripPath.Replace("-ar", "-strip");
+		}
 
 		static private bool bHasPrintedApiLevel = false;
 		public override CPPOutput CompileCPPFiles(UEBuildTarget Target, CPPEnvironment CompileEnvironment, List<FileItem> SourceFiles, string ModuleName)
@@ -909,8 +1017,8 @@ namespace UnrealBuildTool
 						if (CompileEnvironment.Config.PrecompiledHeaderAction == PrecompiledHeaderAction.Create)
 						{
 							// Add the precompiled header file to the produced item list.
-							FileItem PrecompiledHeaderFile = FileItem.GetItemByPath(
-								Path.Combine(
+							FileItem PrecompiledHeaderFile = FileItem.GetItemByFileReference(
+								FileReference.Combine(
 									CompileEnvironment.Config.OutputDirectory,
 									Path.GetFileName(InlineArchName(SourceFile.AbsolutePath, Arch, GPUArchitecture) + PCHExtension)
 									)
@@ -934,10 +1042,10 @@ namespace UnrealBuildTool
 							var ObjectFileExtension = UEBuildPlatform.BuildPlatformDictionary[UnrealTargetPlatform.Android].GetBinaryExtension(UEBuildBinaryType.Object);
 
 							// Add the object file to the produced item list.
-							FileItem ObjectFile = FileItem.GetItemByPath(
-								InlineArchName( Path.Combine(
+							FileItem ObjectFile = FileItem.GetItemByFileReference(
+								FileReference.Combine(
 									CompileEnvironment.Config.OutputDirectory,
-									Path.GetFileName(SourceFile.AbsolutePath) + ObjectFileExtension), Arch, GPUArchitecture
+									InlineArchName(Path.GetFileName(SourceFile.AbsolutePath) + ObjectFileExtension, Arch, GPUArchitecture)
 									)
 								);
 							CompileAction.ProducedItems.Add(ObjectFile);
@@ -965,10 +1073,10 @@ namespace UnrealBuildTool
 						}
 
 						// Create the response file
-						string ResponseFileName = CompileAction.ProducedItems[0].AbsolutePath + ".response";
-						string ResponseArgument = string.Format("@\"{0}\"", ResponseFile.Create(ResponseFileName, new List<string> { AllArguments }));
+						FileReference ResponseFileName = CompileAction.ProducedItems[0].Reference + ".response";
+						string ResponseArgument = string.Format("@\"{0}\"", ResponseFile.Create(ResponseFileName, new List<string> { AllArguments }).FullName);
 
-						CompileAction.WorkingDirectory = Path.GetFullPath(".");
+						CompileAction.WorkingDirectory = UnrealBuildTool.EngineSourceDirectory.FullName;
 						CompileAction.CommandPath = ClangPath;
 						CompileAction.CommandArguments = ResponseArgument;
 						CompileAction.StatusDescription = string.Format("{0} [{1}-{2}]", Path.GetFileName(SourceFile.AbsolutePath), Arch.Replace("-", ""), GPUArchitecture.Replace("-", ""));
@@ -1026,14 +1134,14 @@ namespace UnrealBuildTool
 
 					// Android will have an array of outputs
 					if (LinkEnvironment.Config.OutputFilePaths.Count < OutputPathIndex ||
-						!Path.GetFileNameWithoutExtension(LinkEnvironment.Config.OutputFilePaths[OutputPathIndex]).EndsWith(Arch + GPUArchitecture))
+						!LinkEnvironment.Config.OutputFilePaths[OutputPathIndex].GetFileNameWithoutExtension().EndsWith(Arch + GPUArchitecture))
 					{
 						throw new BuildException("The OutputFilePaths array didn't match the Arches array in AndroidToolChain.LinkAllFiles");
 					}
 
 					// Create an action that invokes the linker.
 					Action LinkAction = new Action(ActionType.Link);
-					LinkAction.WorkingDirectory = Path.GetFullPath(".");
+					LinkAction.WorkingDirectory = UnrealBuildTool.EngineSourceDirectory.FullName;
 
 					if (LinkEnvironment.Config.bIsBuildingLibrary)
 					{
@@ -1053,14 +1161,14 @@ namespace UnrealBuildTool
 
 					string LinkerPath = LinkAction.WorkingDirectory;
 
-					LinkAction.WorkingDirectory = LinkEnvironment.Config.IntermediateDirectory;
+					LinkAction.WorkingDirectory = LinkEnvironment.Config.IntermediateDirectory.FullName;
 
 					// Get link arguments.
 					LinkAction.CommandArguments = LinkEnvironment.Config.bIsBuildingLibrary ? GetArArguments(LinkEnvironment) : GetLinkArguments(LinkEnvironment, Arch);
 
 					// Add the output file as a production of the link action.
 					FileItem OutputFile;
-					OutputFile = FileItem.GetItemByPath(LinkEnvironment.Config.OutputFilePaths[OutputPathIndex]);
+					OutputFile = FileItem.GetItemByFileReference(LinkEnvironment.Config.OutputFilePaths[OutputPathIndex]);
 					Outputs.Add(OutputFile);
 					LinkAction.ProducedItems.Add(OutputFile);
 					LinkAction.StatusDescription = string.Format("{0}", Path.GetFileName(OutputFile.AbsolutePath));
@@ -1086,7 +1194,7 @@ namespace UnrealBuildTool
 						{
 							string AbsolutePath = InputFile.AbsolutePath.Replace("\\", "/");
 
-							AbsolutePath = AbsolutePath.Replace(LinkEnvironment.Config.IntermediateDirectory.Replace("\\", "/"), "");
+							AbsolutePath = AbsolutePath.Replace(LinkEnvironment.Config.IntermediateDirectory.FullName.Replace("\\", "/"), "");
 							AbsolutePath = AbsolutePath.TrimStart(new char[] { '/' });
 
 							InputFileNames.Add(string.Format("\"{0}\"", AbsolutePath));
@@ -1094,7 +1202,7 @@ namespace UnrealBuildTool
 						}
 					}
 
-					string ResponseFileName = GetResponseFileName(LinkEnvironment, OutputFile);
+					FileReference ResponseFileName = GetResponseFileName(LinkEnvironment, OutputFile);
 					LinkAction.CommandArguments += string.Format(" @\"{0}\"", ResponseFile.Create(ResponseFileName, InputFileNames));
 
 					// libs don't link in other libs
@@ -1149,20 +1257,20 @@ namespace UnrealBuildTool
 			return Outputs.ToArray();
 		}
 
-		public override void AddFilesToReceipt(TargetReceipt Receipt, UEBuildBinary Binary)
+		public override void ModifyBuildProducts(UEBuildBinary Binary, Dictionary<FileReference, BuildProductType> BuildProducts)
 		{
 			// the binary will have all of the .so's in the output files, we need to trim down to the shared apk (which is what needs to go into the manifest)
 			if (Binary.Config.Type != UEBuildBinaryType.StaticLibrary)
 			{
-				foreach (string BinaryPath in Binary.Config.OutputFilePaths)
+				foreach (FileReference BinaryPath in Binary.Config.OutputFilePaths)
 				{
-					string ApkFile = Path.ChangeExtension(BinaryPath, ".apk");
-					Receipt.AddBuildProduct(ApkFile, BuildProductType.Executable);
+					FileReference ApkFile = BinaryPath.ChangeExtension(".apk");
+					BuildProducts.Add(ApkFile, BuildProductType.Executable);
 				}
 			}
 		}
 
-		public override void CompileCSharpProject(CSharpEnvironment CompileEnvironment, string ProjectFileName, string DestinationFile)
+		public override void CompileCSharpProject(CSharpEnvironment CompileEnvironment, FileReference ProjectFileName, FileReference DestinationFile)
 		{
             throw new BuildException("Android cannot compile C# files");
 		}

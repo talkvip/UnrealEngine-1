@@ -155,9 +155,11 @@ USceneCaptureComponent::USceneCaptureComponent(const FObjectInitializer& ObjectI
 	MaxViewDistanceOverride = -1;
 
 	// Disable features that are not desired when capturing the scene
-	ShowFlags.MotionBlur = 0; // motion blur doesn't work correctly with scene captures.
-	ShowFlags.SeparateTranslucency = 0;
-	ShowFlags.HMDDistortion = 0;
+	ShowFlags.SetMotionBlur(0); // motion blur doesn't work correctly with scene captures.
+	ShowFlags.SetSeparateTranslucency(0);
+	ShowFlags.SetHMDDistortion(0);
+
+    CaptureStereoPass = EStereoscopicPass::eSSP_FULL;
 }
 
 void USceneCaptureComponent::PostLoad()
@@ -278,6 +280,7 @@ USceneCaptureComponent2D::USceneCaptureComponent2D(const FObjectInitializer& Obj
 	CaptureSource = SCS_SceneColorHDR;
 	// default to full blend weight..
 	PostProcessBlendWeight = 1.0f;
+	CaptureStereoPass = EStereoscopicPass::eSSP_FULL;
 }
 
 void USceneCaptureComponent2D::OnRegister()

@@ -211,7 +211,7 @@ public:
 	 * @param View - The view to determine relevance for.
 	 * @return The relevance of the primitive's elements to the view.
 	 */
-	ENGINE_API virtual FPrimitiveViewRelevance GetViewRelevance(const FSceneView* View);
+	ENGINE_API virtual FPrimitiveViewRelevance GetViewRelevance(const FSceneView* View) const;
 
 	/** Callback from the renderer to gather simple lights that this proxy wants renderered. */
 	virtual void GatherSimpleLights(const FSceneViewFamily& ViewFamily, FSimpleLightArray& OutParticleLights) const {}
@@ -483,6 +483,12 @@ public:
 	 * @param InOffset - The delta to shift by
 	 */
 	ENGINE_API virtual void ApplyWorldOffset(FVector InOffset);
+
+	/**
+	 * Applies a "late in the frame" adjustment to the proxy's existing transform
+	 * @param LateUpdateTransform - The post-transform to be applied to the LocalToWorld matrix
+	 */
+	ENGINE_API virtual void ApplyLateUpdateTransform(const FMatrix& LateUpdateTransform);
 
 	/**
 	 * Updates the primitive proxy's uniform buffer.

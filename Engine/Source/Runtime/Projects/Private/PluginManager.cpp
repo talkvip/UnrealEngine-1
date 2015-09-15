@@ -142,13 +142,6 @@ void FPluginManager::DiscoverAllPlugins()
 {
 	ensure( AllPlugins.Num() == 0 );		// Should not have already been initialized!
 	ReadAllPlugins(AllPlugins);
-
-	// Add the plugin binaries directory
-	for(const TSharedRef<FPlugin>& Plugin: AllPlugins)
-	{
-		const FString PluginBinariesPath = FPaths::Combine(*FPaths::GetPath(Plugin->FileName), TEXT("Binaries"), FPlatformProcess::GetBinariesSubdirectory());
-		FModuleManager::Get().AddBinariesDirectory(*PluginBinariesPath, Plugin->LoadedFrom == EPluginLoadedFrom::GameProject);
-	}
 }
 
 void FPluginManager::ReadAllPlugins(TArray<TSharedRef<FPlugin>>& Plugins)
@@ -305,30 +298,6 @@ bool FPluginManager::ConfigureEnabledPlugins()
 						}
 					}
 				}
-#if !IS_MONOLITHIC
-				// Only check this when in a non-monolithic build where modules could be in separate binaries
-				else if (Plugin.bEnabled && Project->Modules.Num() == 0)
-				{
-					// Content only project - check whether any plugins are incompatible and offer to disable instead of trying to build them later
-					TSharedPtr<FPlugin> PluginInstance = FindPluginInstance(Plugin.Name);
-					TArray<FString> IncompatibleFiles;
-					if (!FModuleDescriptor::CheckModuleCompatibility(PluginInstance->Descriptor.Modules, PluginInstance->LoadedFrom == EPluginLoadedFrom::GameProject, IncompatibleFiles))
-					{
-						// Ask whether to disable plugin if incompatible
-						FText Caption(LOCTEXT("IncompatiblePluginCaption", "Plugin missing or incompatible"));
-						if (FMessageDialog::Open(EAppMsgType::YesNo, FText::Format(LOCTEXT("IncompatiblePluginText", "Missing or incompatible modules in {0} plugin - would you like to disable it? You will no longer be able to open any assets created using it."), FText::FromString(Plugin.Name)), &Caption) == EAppReturnType::No)
-						{
-							return false;
-						}
-
-						FText FailReason;
-						if (!IProjectManager::Get().SetPluginEnabled(*Plugin.Name, false, FailReason))
-						{
-							FMessageDialog::Open(EAppMsgType::Ok, FailReason);
-						}
-					}
-				}
-#endif //!IS_MONOLITHIC
 			}
 		}
 
@@ -360,7 +329,35 @@ bool FPluginManager::ConfigureEnabledPlugins()
 		{
 			if (Plugin->bEnabled)
 			{
-				// Build the list of content folders
+				// Add the plugin binaries directory
+				const FString PluginBinariesPath = FPaths::Combine(*FPaths::GetPath(Plugin->FileName), TEXT("Binaries"), FPlatformProcess::GetBinariesSubdirectory());
+				FModuleManager::Get().AddBinariesDirectory(*PluginBinariesPath, Plugin->LoadedFrom == EPluginLoadedFrom::GameProject);
+
+#if !IS_MONOLITHIC
+				// Only check this when in a non-monolithic build where modules could be in separate binaries
+				if (Project != NULL && Project->Modules.Num() == 0)
+				{
+					// Content only project - check whether any plugins are incompatible and offer to disable instead of trying to build them later
+					TArray<FString> IncompatibleFiles;
+					if (!FModuleDescriptor::CheckModuleCompatibility(Plugin->Descriptor.Modules, Plugin->LoadedFrom == EPluginLoadedFrom::GameProject, IncompatibleFiles))
+					{
+						// Ask whether to disable plugin if incompatible
+						FText Caption(LOCTEXT("IncompatiblePluginCaption", "Plugin missing or incompatible"));
+						if (FMessageDialog::Open(EAppMsgType::YesNo, FText::Format(LOCTEXT("IncompatiblePluginText", "Missing or incompatible modules in {0} plugin - would you like to disable it? You will no longer be able to open any assets created using it."), FText::FromString(Plugin->Name)), &Caption) == EAppReturnType::No)
+						{
+							return false;
+						}
+
+						FText FailReason;
+						if (!IProjectManager::Get().SetPluginEnabled(*Plugin->Name, false, FailReason))
+						{
+							FMessageDialog::Open(EAppMsgType::Ok, FailReason);
+						}
+					}
+				}
+#endif //!IS_MONOLITHIC
+
+			// Build the list of content folders
 				if (Plugin->Descriptor.bCanContainContent)
 				{
 					if (auto EngineConfigFile = GConfig->Find(GEngineIni, false))
@@ -393,7 +390,7 @@ bool FPluginManager::ConfigureEnabledPlugins()
 		IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
 		for(TSharedRef<IPlugin> Plugin: GetEnabledPlugins())
 		{
-			if(Plugin->CanContainContent() && ensure(RegisterMountPointDelegate.IsBound()))
+			if (Plugin->CanContainContent() && ensure(RegisterMountPointDelegate.IsBound()))
 			{
 				FString ContentDir = Plugin->GetContentDir();
 				RegisterMountPointDelegate.Execute(Plugin->GetMountedAssetPath(), ContentDir);

@@ -8,7 +8,6 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogUObjectHash, Log, All);
 
-DECLARE_STATS_GROUP(TEXT("UObject Hash"), STATGROUP_UObjectHash, STATCAT_Advanced);
 DECLARE_CYCLE_STAT(TEXT("StaticFindObjectFastInternal"), STAT_Hash_StaticFindObjectFastInternal, STATGROUP_UObjectHash);
 DECLARE_CYCLE_STAT( TEXT( "StaticFindObjectFastExplicit" ), STAT_Hash_StaticFindObjectFastExplicit, STATGROUP_UObjectHash );
 DECLARE_CYCLE_STAT( TEXT( "GetObjectsWithOuter" ), STAT_Hash_GetObjectsWithOuter, STATGROUP_UObjectHash );
@@ -16,6 +15,13 @@ DECLARE_CYCLE_STAT( TEXT( "FindObjectWithOuter" ), STAT_Hash_FindObjectWithOuter
 DECLARE_CYCLE_STAT( TEXT( "GetObjectsOfClass" ), STAT_Hash_GetObjectsOfClass, STATGROUP_UObjectHash );
 DECLARE_CYCLE_STAT( TEXT( "HashObject" ), STAT_Hash_HashObject, STATGROUP_UObjectHash );
 DECLARE_CYCLE_STAT( TEXT( "UnhashObject" ), STAT_Hash_UnhashObject, STATGROUP_UObjectHash );
+
+#if UE_GC_TRACK_OBJ_AVAILABLE
+DEFINE_STAT( STAT_Hash_NumObjects );
+#endif
+
+// Global UObject array instance
+FUObjectArray GUObjectArray;
 
 /**
  * This implementation will use more space than the UE3 implementation. The goal was to make UObjects smaller to save L2 cache space. 
@@ -303,13 +309,6 @@ public:
 #endif
 	}
 };
-
-FUObjectArray& GetUObjectArray()
-{
-	static FUObjectArray GlobalUObjectArray;
-	return GlobalUObjectArray;
-}
-
 
 /**
  * Calculates the object's hash just using the object's name index
@@ -619,7 +618,7 @@ void GetObjectsWithOuter(const class UObjectBase* Outer, TArray<UObject *>& Resu
 				Results.Add(Object);
 			}
 		}
-		int32 MaxResults = GetUObjectArray().GetObjectArrayNum();
+		int32 MaxResults = GUObjectArray.GetObjectArrayNum();
 		while (StartNum != Results.Num() && bIncludeNestedObjects)
 		{
 			int32 RangeStart = StartNum;
@@ -785,7 +784,7 @@ void GetObjectsOfClass(UClass* ClassToLookFor, TArray<UObject *>& Results, bool 
 
 	GetObjectsOfClassThreadSafe( FUObjectHashTables::Get(), ClassesToSearch, Results, ExclusionFlags );
 
-	check( Results.Num() <= GetUObjectArray().GetObjectArrayNum() ); // otherwise we have a cycle in the outer chain, which should not be possible
+	check( Results.Num() <= GUObjectArray.GetObjectArrayNum() ); // otherwise we have a cycle in the outer chain, which should not be possible
 }
 
 void ForEachObjectOfClass(UClass* ClassToLookFor, TFunctionRef<void (UObject*)> Operation, bool bIncludeDerivedClasses, EObjectFlags AdditionalExcludeFlags)
@@ -849,7 +848,7 @@ void GetDerivedClasses(UClass* ClassToLookFor, TArray<UClass *>& Results, bool b
 
 void AllocateUObjectIndexForCurrentThread(UObjectBase* Object)
 {
-	GetUObjectArray().AllocateUObjectIndex(Object);
+	GUObjectArray.AllocateUObjectIndex(Object);
 }
 
 void HashObject(UObjectBase* Object)

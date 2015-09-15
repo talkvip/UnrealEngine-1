@@ -55,6 +55,15 @@ ISlateAtlasProvider* FSlateRenderer::GetFontAtlasProvider()
 	return nullptr;
 }
 
+TSharedRef<FSlateRenderDataHandle, ESPMode::ThreadSafe> FSlateRenderer::CacheElementRenderData(const ILayoutCache* Cacher, FSlateWindowElementList& ElementList)
+{
+	return MakeShareable(new FSlateRenderDataHandle(Cacher, this));
+}
+
+void FSlateRenderer::ReleaseCachingResourcesFor(const ILayoutCache* Cacher)
+{
+
+}
 
 /* Global functions
  *****************************************************************************/

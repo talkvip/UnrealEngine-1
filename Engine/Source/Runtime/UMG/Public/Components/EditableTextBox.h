@@ -7,8 +7,8 @@
 /**
  * Allows the user to type in custom text.  Only permits a single line of text to be entered.
  * 
- * ● No Children
- * ● Text Entry
+ * * No Children
+ * * Text Entry
  */
 UCLASS(meta=(DisplayName="Text Box"))
 class UMG_API UEditableTextBox : public UWidget
@@ -128,17 +128,17 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Widget")
 	void ClearError();
 
-	// UWidget interface
+	//~ Begin UWidget Interface
 	virtual void SynchronizeProperties() override;
-	// End of UWidget interface
+	//~ End UWidget Interface
 
-	// UVisual interface
+	//~ Begin UVisual Interface
 	virtual void ReleaseSlateResources(bool bReleaseChildren) override;
-	// End of UVisual interface
+	//~ End UVisual Interface
 
-	// Begin UObject interface
+	//~ Begin UObject Interface
 	virtual void PostLoad() override;
-	// End of UObject interface
+	//~ End UObject Interface
 
 #if WITH_EDITOR
 	virtual const FSlateBrush* GetEditorIcon() override;
@@ -146,7 +146,7 @@ public:
 #endif
 
 protected:
-	// UWidget interface
+	//~ Begin UWidget Interface
 	virtual TSharedRef<SWidget> RebuildWidget() override;
 	// End of UWidget
 

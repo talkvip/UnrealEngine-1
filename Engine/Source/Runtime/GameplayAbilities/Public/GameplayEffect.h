@@ -224,7 +224,7 @@ public:
 	 * 
 	 * @return True if the calculation was successful, false if it was not
 	 */
-	bool AttemptCalculateMagnitude(const FGameplayEffectSpec& InRelevantSpec, OUT float& OutCalculatedMagnitude) const;
+	bool AttemptCalculateMagnitude(const FGameplayEffectSpec& InRelevantSpec, OUT float& OutCalculatedMagnitude, bool WarnIfSetByCallerFail=true, float DefaultSetbyCaller=0.f) const;
 
 	/** Attempts to recalculate the magnitude given a changed aggregator. This will only recalculate if we are a modifier that is linked (non snapshot) to the given aggregator. */
 	bool AttemptRecalculateMagnitudeFromDependentChange(const FGameplayEffectSpec& InRelevantSpec, OUT float& OutCalculatedMagnitude, const FAggregator* ChangedAggregator) const;
@@ -509,6 +509,20 @@ enum class EGameplayEffectStackingPeriodPolicy : uint8
 	NeverReset,
 };
 
+/** Enumeration of policies for dealing gameplay effect stacks that expire (in duration based effects). */
+UENUM()
+enum class EGameplayEffectStackingExpirationPolicy : uint8
+{
+	/** The entire stack is cleared when the active gameplay effect expires  */
+	ClearEntireStack,
+
+	/** The current stack count will be decremented by 1 and the duration refreshed. The GE is not "reapplied", just continues to exist with one less stacks. */
+	RemoveSingleStackAndRefreshDuration,
+
+	/** The duration of the gameplay effect is refreshed. This essentially makes the effect infinite in duration. This can be used to manually handle stack decrements via XXX callback */
+	RefreshDuration,
+};
+
 /**
  * UGameplayEffect
  *	The GameplayEffect definition. This is the data asset defined in the editor that drives everything.
@@ -690,6 +704,10 @@ public:
 	/** Policy for how the effect period should be reset (or not) while stacking */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = Stacking)
 	EGameplayEffectStackingPeriodPolicy StackPeriodResetPolicy;
+
+	/** Policy for how to handle duration expiring on this gameplay effect */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = Stacking)
+	EGameplayEffectStackingExpirationPolicy StackExpirationPolicy;
 
 	// ----------------------------------------------------------------------
 	//	Granted abilities
@@ -969,9 +987,6 @@ struct GAMEPLAYABILITIES_API FGameplayEffectSpec
 	/** Adds a new modified attribute struct, will always add so check to see if it exists first */
 	FGameplayEffectModifiedAttribute* AddModifiedAttribute(const FGameplayAttribute& Attribute);
 
-	/** Deletes any modified attributes that aren't needed. Call before replication */
-	void PruneModifiedAttributes();
-
 	/**
 	 * Helper function to attempt to calculate the duration of the spec from its GE definition
 	 * 
@@ -1006,7 +1021,7 @@ struct GAMEPLAYABILITIES_API FGameplayEffectSpec
 	void SetSetByCallerMagnitude(FName DataName, float Magnitude);
 
 	/** Returns the magnitude of a SetByCaller modifier. Will return 0.f and Warn if the magnitude has not been set. */
-	float GetSetByCallerMagnitude(FName DataName) const;
+	float GetSetByCallerMagnitude(FName DataName, bool WarnIfNotFound=true, float DefaultIfNotFound=0.f) const;
 
 	void SetLevel(float InLevel);
 
@@ -1139,6 +1154,8 @@ struct GAMEPLAYABILITIES_API FGameplayEffectSpecForRPC
 
 	FGameplayEffectSpecForRPC(const FGameplayEffectSpec& InSpec);
 
+	void InitFromSpec(const FGameplayEffectSpec& InSpec);
+
 	/** GameplayEfect definition. The static data that this spec points to. */
 	UPROPERTY()
 	const UGameplayEffect* Def;
@@ -1268,7 +1285,9 @@ struct GAMEPLAYABILITIES_API FActiveGameplayEffect : public FFastArraySerializer
 
 	bool IsPendingRemove;
 
-	FOnActiveGameplayEffectRemoved	OnRemovedDelegate;
+	FOnActiveGameplayEffectRemoved OnRemovedDelegate;
+
+	FOnActiveGameplayEffectStackChange OnStackChangeDelegate;
 
 	FTimerHandle PeriodHandle;
 
@@ -1302,13 +1321,17 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Query)
 	FActiveGameplayEffectQueryCustomMatch_Dynamic CustomMatchDelegate_BP;
 
-	/** Query that is matched against InheritableOwnedTagsContainer */
+	/** Query that is matched against tags this GE gives */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Query)
 	FGameplayTagQuery OwningTagQuery;
 
-	/** Query that is matched against InheritableGameplayEffectTags */
+	/** Query that is matched against tags this GE has */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Query)
 	FGameplayTagQuery EffectTagQuery;
+
+	/** Query that is matched against tags the source of this GE has */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Query)
+	FGameplayTagQuery SourceTagQuery;
 
 	/** Matches on GameplayEffects which modify given attribute. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Query)
@@ -1335,12 +1358,24 @@ public:
 
 	/** Creates an effect query that will match if there are any common tags between the given tags and an ActiveGameplayEffect's owning tags */
 	static FGameplayEffectQuery MakeQuery_MatchAnyOwningTags(const FGameplayTagContainer& InTags);
+	/** Creates an effect query that will match if all of the given tags are in the ActiveGameplayEffect's owning tags */
 	static FGameplayEffectQuery MakeQuery_MatchAllOwningTags(const FGameplayTagContainer& InTags);
+	/** Creates an effect query that will match if there are no common tags between the given tags and an ActiveGameplayEffect's owning tags */
 	static FGameplayEffectQuery MakeQuery_MatchNoOwningTags(const FGameplayTagContainer& InTags);
 	
+	/** Creates an effect query that will match if there are any common tags between the given tags and an ActiveGameplayEffect's tags */
 	static FGameplayEffectQuery MakeQuery_MatchAnyEffectTags(const FGameplayTagContainer& InTags);
+	/** Creates an effect query that will match if all of the given tags are in the ActiveGameplayEffect's tags */
 	static FGameplayEffectQuery MakeQuery_MatchAllEffectTags(const FGameplayTagContainer& InTags);
+	/** Creates an effect query that will match if there are no common tags between the given tags and an ActiveGameplayEffect's tags */
 	static FGameplayEffectQuery MakeQuery_MatchNoEffectTags(const FGameplayTagContainer& InTags);
+
+	/** Creates an effect query that will match if there are any common tags between the given tags and an ActiveGameplayEffect's source tags */
+	static FGameplayEffectQuery MakeQuery_MatchAnySourceTags(const FGameplayTagContainer& InTags);
+	/** Creates an effect query that will match if all of the given tags are in the ActiveGameplayEffect's source tags */
+	static FGameplayEffectQuery MakeQuery_MatchAllSourceTags(const FGameplayTagContainer& InTags);
+	/** Creates an effect query that will match if there are no common tags between the given tags and an ActiveGameplayEffect's source tags */
+	static FGameplayEffectQuery MakeQuery_MatchNoSourceTags(const FGameplayTagContainer& InTags);
 };
 
 /**
@@ -1564,7 +1599,7 @@ struct GAMEPLAYABILITIES_API FActiveGameplayEffectsContainer : public FFastArray
 
 	DEPRECATED(4.9, "FActiveGameplayEffectQuery is deprecated, use FGameplayEffectQuery instead")
 	void RemoveActiveEffects(const FActiveGameplayEffectQuery Query, int32 StacksToRemove);
-	void RemoveActiveEffects(const FGameplayEffectQuery Query, int32 StacksToRemove);
+	void RemoveActiveEffects(const FGameplayEffectQuery& Query, int32 StacksToRemove);
 
 	/**
 	 * Get the count of the effects matching the specified query (including stack count)
@@ -1672,6 +1707,8 @@ private:
 	/** Internal helper function to apply expiration effects from a removed/expired gameplay effect spec */
 	void InternalApplyExpirationEffects(const FGameplayEffectSpec& ExpiringSpec, bool bPrematureRemoval);
 
+	void RestartActiveGameplayEffectDuration(FActiveGameplayEffect& ActiveGameplayEffect);
+
 	// -------------------------------------------------------------------------------------------
 
 	TMap<FGameplayAttribute, FAggregatorRef>		AttributeAggregatorMap;
@@ -1691,7 +1728,7 @@ private:
 
 	void OnMagnitudeDependencyChange(FActiveGameplayEffectHandle Handle, const FAggregator* ChangedAgg);
 
-	void OnStackCountChange(FActiveGameplayEffect& ActiveEffect);
+	void OnStackCountChange(FActiveGameplayEffect& ActiveEffect, int32 OldStackCount);
 
 	void UpdateAllAggregatorModMagnitudes(FActiveGameplayEffect& ActiveEffect);
 
@@ -1707,7 +1744,7 @@ private:
 	bool HandleActiveGameplayEffectStackOverflow(const FActiveGameplayEffect& ActiveStackableGE, const FGameplayEffectSpec& OldSpec, const FGameplayEffectSpec& OverflowingSpec);
 
 	/** After application has gone through, give stacking rules a chance to do something as the source of the gameplay effect (E.g., remove an old version) */
-	void ApplyStackingLogicPostApplyAsSource(UAbilitySystemComponent* Target, const FGameplayEffectSpec& SpecApplied, FActiveGameplayEffectHandle ActiveHandle);
+	virtual void ApplyStackingLogicPostApplyAsSource(UAbilitySystemComponent* Target, const FGameplayEffectSpec& SpecApplied, FActiveGameplayEffectHandle ActiveHandle) { }
 
 	mutable int32 ScopedLockCount;
 	int32 PendingRemoves;

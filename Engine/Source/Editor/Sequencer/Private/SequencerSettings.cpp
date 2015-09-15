@@ -6,6 +6,8 @@ USequencerSettings::USequencerSettings( const FObjectInitializer& ObjectInitiali
 	: Super( ObjectInitializer )
 {
 	bAutoKeyEnabled = false;
+	bKeyAllEnabled = false;
+	bKeyInterpPropertiesOnly = false;
 	bShowFrameNumbers = true;
 	bShowRangeSlider = false;
 	bLockInOutToStartEndRange = false;
@@ -20,7 +22,7 @@ USequencerSettings::USequencerSettings( const FObjectInitializer& ObjectInitiali
 	CurveValueSnapInterval = 10.0f;
 	bSnapCurveValueToInterval = true;
 	bIsUsingCleanView = false;
-	bAutoScrollEnabled = true;
+	bAutoScrollEnabled = false;
 	bShowCurveEditor = false;
 	bShowCurveEditorCurveToolTips = true;
 }
@@ -35,6 +37,34 @@ void USequencerSettings::SetAutoKeyEnabled(bool InbAutoKeyEnabled)
 	if ( bAutoKeyEnabled != InbAutoKeyEnabled )
 	{
 		bAutoKeyEnabled = InbAutoKeyEnabled;
+		SaveConfig();
+	}
+}
+
+bool USequencerSettings::GetKeyAllEnabled() const
+{
+	return bKeyAllEnabled;
+}
+
+void USequencerSettings::SetKeyAllEnabled(bool InbKeyAllEnabled)
+{
+	if ( bKeyAllEnabled != InbKeyAllEnabled )
+	{
+		bKeyAllEnabled = InbKeyAllEnabled;
+		SaveConfig();
+	}
+}
+
+bool USequencerSettings::GetKeyInterpPropertiesOnly() const
+{
+	return bKeyInterpPropertiesOnly;
+}
+
+void USequencerSettings::SetKeyInterpPropertiesOnly(bool InbKeyInterpPropertiesOnly)
+{
+	if ( bKeyInterpPropertiesOnly != InbKeyInterpPropertiesOnly )
+	{
+		bKeyInterpPropertiesOnly = InbKeyInterpPropertiesOnly;
 		SaveConfig();
 	}
 }
@@ -295,6 +325,7 @@ USequencerSettings::FOnShowCurveEditorChanged& USequencerSettings::GetOnShowCurv
 ULevelEditorSequencerSettings::ULevelEditorSequencerSettings( const FObjectInitializer& ObjectInitializer )
 	: Super( ObjectInitializer )
 {
+	bKeyInterpPropertiesOnly = true;
 	TimeSnapInterval = 0.041667f;
 	bShowRangeSlider = true;
 	bLockInOutToStartEndRange = true;

@@ -7,10 +7,12 @@
 #include "Runtime/Engine/Classes/Particles/Color/ParticleModuleColorScaleOverLife.h"
 #include "Runtime/Engine/Classes/Particles/Collision/ParticleModuleCollision.h"
 #include "Runtime/Engine/Classes/Particles/Spawn/ParticleModuleSpawn.h"
+#include "Runtime/Engine/Classes/Particles/Spawn/ParticleModuleSpawnPerUnit.h"
 #include "Runtime/Engine/Classes/Particles/TypeData/ParticleModuleTypeDataRibbon.h"
 #include "Runtime/Engine/Classes/Particles/TypeData/ParticleModuleTypeDataBeam2.h"
 #include "Runtime/Engine/Classes/Particles/TypeData/ParticleModuleTypeDataAnimTrail.h"
 #include "Runtime/AssetRegistry/Public/AssetRegistryModule.h"
+#include "CollectionManagerModule.h"
 #include "Particles/ParticleLODLevel.h"
 #include "Distributions/DistributionFloatConstant.h"
 #include "Distributions/DistributionVectorConstant.h"
@@ -35,6 +37,8 @@ int32 UParticleSystemAuditCommandlet::Main(const FString& Params)
 	// Add a timestamp to the folder
 	AuditOutputFolder /= FDateTime::Now().ToString();
 
+	FParse::Value(*Params, TEXT("FilterCollection="), FilterCollection);
+
 	ProcessParticleSystems();
 	DumpResults();
 
@@ -47,8 +51,16 @@ bool UParticleSystemAuditCommandlet::ProcessParticleSystems()
 	IAssetRegistry& AssetRegistry = AssetRegistryModule.Get();
 	AssetRegistry.SearchAllAssets(true);
 
+	FARFilter Filter;
+	Filter.ClassNames.Add(UParticleSystem::StaticClass()->GetFName());
+	if (!FilterCollection.IsEmpty())
+	{
+		FCollectionManagerModule& CollectionManagerModule = FCollectionManagerModule::GetModule();
+		CollectionManagerModule.Get().GetObjectsInCollection(FName(*FilterCollection), ECollectionShareType::CST_All, Filter.ObjectPaths, ECollectionRecursionFlags::SelfAndChildren);
+	}
+
 	TArray<FAssetData> AssetList;
-	AssetRegistry.GetAssetsByClass(UParticleSystem::StaticClass()->GetFName(), AssetList);
+	AssetRegistry.GetAssets(Filter, AssetList);
 
 	double StartProcessParticleSystemsTime = FPlatformTime::Seconds();
 
@@ -100,6 +112,7 @@ bool UParticleSystemAuditCommandlet::ProcessParticleSystems()
 			bool bMissingMaterial = false;
 			bool bHasHighSpawnRateOrBurst = false;
 			bool bHasRibbonTrailOrBeam = false;
+			bool bHasSpawnPerUnit = false;
 			for (int32 EmitterIdx = 0; EmitterIdx < PSys->Emitters.Num(); EmitterIdx++)
 			{
 				UParticleEmitter* Emitter = PSys->Emitters[EmitterIdx];
@@ -159,6 +172,10 @@ bool UParticleSystemAuditCommandlet::ProcessParticleSystems()
 										}
 									}
 								}
+								else if (Cast<UParticleModuleSpawnPerUnit>(Module) != nullptr)
+								{
+									bHasSpawnPerUnit = true;
+								}
 							}
 						}
 					}
@@ -204,8 +221,8 @@ bool UParticleSystemAuditCommandlet::ProcessParticleSystems()
 				ParticleSystemsWithSingleLOD.Add(PSys->GetPathName());
 			}
 
-			// Note all non-fixed bound PSystems, unless there is a ribbon, trail, or beam emitter...
-			if (PSys->bUseFixedRelativeBoundingBox == false && !bHasRibbonTrailOrBeam)
+			// Note all non-fixed bound PSystems, unless there is a ribbon, trail, or beam emitter, OR if we have a SpawnPerUnit module since it is often used in tail effects...
+			if (PSys->bUseFixedRelativeBoundingBox == false && !bHasRibbonTrailOrBeam && !bHasSpawnPerUnit)
 			{
 				ParticleSystemsWithoutFixedBounds.Add(PSys->GetPathName());
 			}

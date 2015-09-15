@@ -3,11 +3,23 @@
 #include "GeometryCacheModulePrivatePCH.h"
 #include "GeometryCacheTrackTransformAnimation.h"
 #include "GeometryCacheTrackFlipbookAnimation.h"
+#include "EditorFramework/AssetImportData.h"
 
 UGeometryCache::UGeometryCache(const FObjectInitializer& ObjectInitializer /*= FObjectInitializer::Get()*/) : UObject(ObjectInitializer)
 {
 	NumTransformAnimationTracks = 0;
 	NumVertexAnimationTracks = 0;
+}
+
+void UGeometryCache::PostInitProperties()
+{
+#if WITH_EDITORONLY_DATA
+	if (!HasAnyFlags(RF_ClassDefaultObject))
+	{
+		AssetImportData = NewObject<UAssetImportData>(this, TEXT("AssetImportData"));
+	}
+#endif
+	Super::PostInitProperties();
 }
 
 void UGeometryCache::Serialize(FArchive& Ar)
@@ -58,7 +70,7 @@ void UGeometryCache::GetAssetRegistryTags(TArray<FAssetRegistryTag>& OutTags) co
 #if WITH_EDITORONLY_DATA
 	if (AssetImportData)
 	{
-		OutTags.Add(FAssetRegistryTag(SourceFileTagName(), AssetImportData->ToJson(), FAssetRegistryTag::TT_Hidden));
+		OutTags.Add(FAssetRegistryTag(SourceFileTagName(), AssetImportData->GetSourceData().ToJson(), FAssetRegistryTag::TT_Hidden));
 	}
 #endif
 

@@ -177,17 +177,17 @@ namespace UnrealBuildTool
 	public class CPPEnvironmentConfiguration : NativeBuildEnvironmentConfiguration
 	{
 		/** The directory to put the output object/debug files in. */
-		public string OutputDirectory = null;
+		public DirectoryReference OutputDirectory = null;
 
 		/** The directory to shadow source files in for syncing to remote compile servers */
-		public string LocalShadowDirectory = null;
+		public DirectoryReference LocalShadowDirectory = null;
 
 		/** PCH header file name as it appears in an #include statement in source code (might include partial, or no relative path.)
 		    This is needed by some compilers to use PCH features. */
 		public string PCHHeaderNameInCode;
 
 		/** The name of the header file which is precompiled. */
-		public string PrecompiledHeaderIncludeFilename = null;
+		public FileReference PrecompiledHeaderIncludeFilename = null;
 
 		/** Whether the compilation should create, use, or do nothing with the precompiled header. */
 		public PrecompiledHeaderAction PrecompiledHeaderAction = PrecompiledHeaderAction.None;
@@ -209,8 +209,12 @@ namespace UnrealBuildTool
         /** If true and unity builds are enabled, this module will build without unity. */
         public bool bFasterWithoutUnity = false;
 
-        /** Overrides BuildConfiguration.MinFilesUsingPrecompiledHeader if non-zero. */
-        public int MinFilesUsingPrecompiledHeaderOverride = 0;
+		/** The number of source files in this module before unity build will be activated for that module.  If set to
+		    anything besides -1, will override the default setting which is controlled by MinGameModuleSourceFilesForUnityBuild */
+		public int MinSourceFilesForUnityBuildOverride = 0;
+
+		/** Overrides BuildConfiguration.MinFilesUsingPrecompiledHeader if non-zero. */
+		public int MinFilesUsingPrecompiledHeaderOverride = 0;
 
 		/**  Module uses a #import so must be built locally when compiling with SN-DBS */
 		public bool bBuildLocallyWithSNDBS = false;
@@ -278,6 +282,7 @@ namespace UnrealBuildTool
 			bUseRTTI                               = InCopyEnvironment.bUseRTTI;
 			bUseAVX                                = InCopyEnvironment.bUseAVX;
 			bFasterWithoutUnity                    = InCopyEnvironment.bFasterWithoutUnity;
+			MinSourceFilesForUnityBuildOverride	   = InCopyEnvironment.MinSourceFilesForUnityBuildOverride;
 			MinFilesUsingPrecompiledHeaderOverride = InCopyEnvironment.MinFilesUsingPrecompiledHeaderOverride;
 			bBuildLocallyWithSNDBS				   = InCopyEnvironment.bBuildLocallyWithSNDBS;
 			bEnableExceptions                      = InCopyEnvironment.bEnableExceptions;

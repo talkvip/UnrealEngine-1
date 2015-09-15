@@ -26,10 +26,14 @@ namespace UnrealBuildTool.IOS
 		{
 			Log.TraceInformation("Deploying now!");
 
-			string IntermediateDirectory = InTarget.AppName + "/Intermediate/Build/Mac/" + InTarget.AppName + "/" + InTarget.Configuration;
-			if (!Directory.Exists("../../" + IntermediateDirectory))
+			string IntermediateDirectory = InTarget.EngineIntermediateDirectory.FullName;
+			if (!Directory.Exists(IntermediateDirectory))
 			{
-				IntermediateDirectory = "Engine/Intermediate/Build/Mac/" + InTarget.AppName + "/" + InTarget.Configuration;
+				IntermediateDirectory = Path.GetFullPath("../../" + InTarget.AppName + "/Intermediate/Build/Mac/" + InTarget.AppName + "/" + InTarget.Configuration);
+				if (!Directory.Exists(IntermediateDirectory))
+				{
+					IntermediateDirectory = Path.GetFullPath("../../Engine/Intermediate/Build/Mac/" + InTarget.AppName + "/" + InTarget.Configuration);
+				}
 			}
 
 			MacToolChain Toolchain = UEToolChain.GetPlatformToolChain(CPPTargetPlatform.Mac) as MacToolChain;
@@ -39,7 +43,7 @@ namespace UnrealBuildTool.IOS
 
 			string RemoteWorkingDir = "";
 
-			bool bIsStaticLibrary = InTarget.OutputPath.EndsWith(".a");
+			bool bIsStaticLibrary = InTarget.OutputPath.HasExtension(".a");
 
 			if (BuildHostPlatform.Current.Platform != UnrealTargetPlatform.Mac)
 			{
@@ -48,13 +52,13 @@ namespace UnrealBuildTool.IOS
 					// Copy the command scripts to the intermediate on the target Mac.
 					string RemoteFixDylibDepsScript = Toolchain.ConvertPath(Path.GetFullPath(FixDylibDepsScript));
 					RemoteFixDylibDepsScript = RemoteFixDylibDepsScript.Replace("../../../../", "../../");
-					RPCUtilHelper.CopyFile("../../" + FixDylibDepsScript, RemoteFixDylibDepsScript, true);
+					RPCUtilHelper.CopyFile(Path.GetFullPath(FixDylibDepsScript), RemoteFixDylibDepsScript, true);
 
 					if (!InTarget.GlobalLinkEnvironment.Config.bIsBuildingConsoleApplication)
 					{
 						string RemoteFinalizeAppBundleScript = Toolchain.ConvertPath(Path.GetFullPath(FinalizeAppBundleScript));
 						RemoteFinalizeAppBundleScript = RemoteFinalizeAppBundleScript.Replace("../../../../", "../../");
-						RPCUtilHelper.CopyFile("../../" + FinalizeAppBundleScript, RemoteFinalizeAppBundleScript, true);
+						RPCUtilHelper.CopyFile(Path.GetFullPath(FinalizeAppBundleScript), RemoteFinalizeAppBundleScript, true);
 					}
 
 
@@ -95,7 +99,7 @@ namespace UnrealBuildTool.IOS
 
 					try
 					{
-						string BinaryDir = Path.GetDirectoryName(InTarget.OutputPath) + "\\";
+						string BinaryDir = InTarget.OutputPath.Directory + "\\";
 						if (BinaryDir.EndsWith(InTarget.AppName + "\\Binaries\\Mac\\") && InTarget.TargetType != TargetRules.TargetType.Game)
 						{
 							BinaryDir = BinaryDir.Replace(InTarget.TargetType.ToString(), "Game");
@@ -106,7 +110,7 @@ namespace UnrealBuildTool.IOS
 						
 						// Get the app bundle's name
 						string AppFullName = InTarget.AppName;
-						if (InTarget.Configuration != UnrealTargetConfiguration.Development)
+						if (InTarget.Configuration != InTarget.Rules.UndecoratedConfiguration)
 						{
 							AppFullName += "-" + InTarget.Platform.ToString();
 							AppFullName += "-" + InTarget.Configuration.ToString();

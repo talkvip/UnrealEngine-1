@@ -47,6 +47,13 @@ void UDestructibleMesh::PostLoad()
 		FSkeletalMeshLODInfo& ThisLODInfo = LODInfo[LodIndex];
 		FStaticLODModel& ThisLODModel = ImportedResource->LODModels[LodIndex];
 
+		// Check that we list the root bone as an active bone.
+		if(!ThisLODModel.ActiveBoneIndices.Contains(0))
+		{
+			ThisLODModel.ActiveBoneIndices.Add(0);
+			ThisLODModel.ActiveBoneIndices.Sort();
+		}
+
 		for (int32 ChunkIndex = 0; ChunkIndex < ThisLODModel.Chunks.Num(); ++ChunkIndex)
 		{
 			if (ThisLODModel.Chunks[ChunkIndex].BoneMap.Num() > MaxGPUSkinBones)
@@ -640,9 +647,9 @@ ENGINE_API bool UDestructibleMesh::BuildFromStaticMesh( UStaticMesh& StaticMesh 
 	SourceStaticMesh = &StaticMesh;
 
 	SourceSMImportTimestamp = FDateTime::MinValue();
-	if ( StaticMesh.AssetImportData && StaticMesh.AssetImportData->GetSourceFileData().Num() == 1 )
+	if ( StaticMesh.AssetImportData && StaticMesh.AssetImportData->SourceData.SourceFiles.Num() == 1 )
 	{
-		SourceSMImportTimestamp = StaticMesh.AssetImportData->GetSourceFileData()[0].Timestamp;
+		SourceSMImportTimestamp = StaticMesh.AssetImportData->SourceData.SourceFiles[0].Timestamp;
 	}
 
 #if WITH_APEX

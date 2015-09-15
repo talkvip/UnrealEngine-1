@@ -2,6 +2,7 @@
 
 #include "SequencerWidgetsPrivatePCH.h"
 #include "STimeRangeSlider.h"
+#include "STimeRange.h"
 #include "SlateStyle.h"
 #include "EditorStyle.h"
 
@@ -12,9 +13,10 @@ namespace TimeRangeSliderConstants
 	const int32 HandleSize = 14;
 }
 
-void STimeRangeSlider::Construct( const FArguments& InArgs, TSharedRef<ITimeSliderController> InTimeSliderController)
+void STimeRangeSlider::Construct( const FArguments& InArgs, TSharedRef<ITimeSliderController> InTimeSliderController, TSharedPtr<STimeRange> InTimeRange)
 {
 	TimeSliderController = InTimeSliderController;
+	TimeRange = InTimeRange;
 	LastViewRange = TimeSliderController.Get()->GetViewRange();
 
 	ResetState();
@@ -74,6 +76,16 @@ int32 STimeRangeSlider::OnPaint( const FPaintArgs& Args, const FGeometry& Allott
 	static const FName SelectionColorName("SelectionColor");
 	FLinearColor SelectionColor = FEditorStyle::GetSlateColor(SelectionColorName).GetColor(FWidgetStyle());
 
+	// Draw the handle box
+	FSlateDrawElement::MakeBox( 
+		OutDrawElements,
+		LayerId, 
+		AllottedGeometry.ToPaintGeometry(FVector2D(HandleOffset, 0.0f), FVector2D(RightHandleOffset-LeftHandleOffset-TimeRangeSliderConstants::HandleSize, TimeRangeSliderConstants::HandleSize)),
+		RangeHandle,
+		MyClippingRect,
+		ESlateDrawEffect::None,
+		(bHandleDragged || bHandleHovered) ? SelectionColor : FLinearColor::Gray);
+
 	// Draw the left handle box
 	FSlateDrawElement::MakeBox( 
 		OutDrawElements,
@@ -93,16 +105,6 @@ int32 STimeRangeSlider::OnPaint( const FPaintArgs& Args, const FGeometry& Allott
 		MyClippingRect,
 		ESlateDrawEffect::None,
 		(bRightHandleDragged || bRightHandleHovered) ? SelectionColor : FLinearColor::Gray);
-
-	// Draw the handle box
-	FSlateDrawElement::MakeBox( 
-		OutDrawElements,
-		LayerId, 
-		AllottedGeometry.ToPaintGeometry(FVector2D(HandleOffset, 0.0f), FVector2D(RightHandleOffset-LeftHandleOffset-TimeRangeSliderConstants::HandleSize, TimeRangeSliderConstants::HandleSize)),
-		RangeHandle,
-		MyClippingRect,
-		ESlateDrawEffect::None,
-		(bHandleDragged || bHandleHovered) ? SelectionColor : FLinearColor::Gray);
 
 	SCompoundWidget::OnPaint(Args, AllottedGeometry, MyClippingRect, OutDrawElements, LayerId, InWidgetStyle, ShouldBeEnabled( bParentEnabled ));
 
@@ -178,6 +180,14 @@ FReply STimeRangeSlider::OnMouseMove( const FGeometry& MyGeometry, const FPointe
 				float NewIn = MouseDownViewRange.GetLowerBoundValue() + DragDelta;
 				TRange<float> ClampRange = TimeSliderController.Get()->GetClampRange();
 				NewIn = FMath::Clamp(NewIn, ClampRange.GetLowerBoundValue(), ClampRange.GetUpperBoundValue());
+				if (NewIn > TimeSliderController.Get()->GetViewRange().GetUpperBoundValue())
+				{
+					if (TimeRange.IsValid())
+					{
+						NewIn = TimeSliderController.Get()->GetViewRange().GetUpperBoundValue() - TimeRange.Pin()->GetTimeSnapInterval();
+					}
+				}
+
 				TimeSliderController.Get()->SetViewRange(NewIn, TimeSliderController.Get()->GetViewRange().GetUpperBoundValue(), EViewRangeInterpolation::Immediate);
 			}
 		}
@@ -188,6 +198,14 @@ FReply STimeRangeSlider::OnMouseMove( const FGeometry& MyGeometry, const FPointe
 				float NewOut = MouseDownViewRange.GetUpperBoundValue() + DragDelta;
 				TRange<float> ClampRange = TimeSliderController.Get()->GetClampRange();
 				NewOut = FMath::Clamp(NewOut, ClampRange.GetLowerBoundValue(), ClampRange.GetUpperBoundValue());
+				if (NewOut < TimeSliderController.Get()->GetViewRange().GetLowerBoundValue())
+				{
+					if (TimeRange.IsValid())
+					{
+						NewOut = TimeSliderController.Get()->GetViewRange().GetLowerBoundValue() + TimeRange.Pin()->GetTimeSnapInterval();
+					}
+				}
+
 				TimeSliderController.Get()->SetViewRange(TimeSliderController.Get()->GetViewRange().GetLowerBoundValue(), NewOut, EViewRangeInterpolation::Immediate);
 			}
 		}

@@ -14,6 +14,7 @@
 
 // Forward declarations.
 class FPostprocessContext;
+struct FILCUpdatePrimTaskData;
 
 /** Information about a visible light which is specific to the view it's visible in. */
 class FVisibleLightViewInfo
@@ -826,7 +827,7 @@ protected:
 	void ComputeViewVisibility(FRHICommandListImmediate& RHICmdList);
 
 	/** Performs once per frame setup after to visibility determination. */
-	void PostVisibilityFrameSetup();
+	void PostVisibilityFrameSetup(FILCUpdatePrimTaskData& OutILCTaskData);
 
 	void GatherDynamicMeshElements(
 		TArray<FViewInfo>& InViews, 
@@ -856,7 +857,9 @@ protected:
 	void OnStartFrame();
 
 	/** Renders the scene's distortion */
-	void RenderDistortion(FRHICommandListImmediate& RHICmdList);	
+	void RenderDistortion(FRHICommandListImmediate& RHICmdList);
+
+	static int32 GetRefractionQuality(const FSceneViewFamily& ViewFamily);
 };
 
 
@@ -885,11 +888,20 @@ protected:
 	/** Renders the opaque base pass for forward shading. */
 	void RenderForwardShadingBasePass(FRHICommandListImmediate& RHICmdList);
 
-	/** Projects any shadow depth images into the scene. (modulated shadows) */
+	/** Render modulated shadow projections in to the scene, loops over any unrendered shadows until all are processed.*/
 	void RenderModulatedShadowProjections(FRHICommandListImmediate& RHICmdList);
 
+	/** Render shadow depths to the depth texture.*/
+	void RenderModulatedShadowDepthMaps(FRHICommandListImmediate& RHICmdList);
+	
+	/** Projects any existing depth images into the scene.*/
+	void RenderAllocatedModulatedShadowProjections(FRHICommandListImmediate& RHICmdList);
+	
 	/** Makes a copy of scene alpha so PC can emulate ES2 framebuffer fetch. */
 	void CopySceneAlpha(FRHICommandListImmediate& RHICmdList, const FViewInfo& View);
+
+	/** Resolves scene depth in case hardware does not support reading depth in the shader */
+	void ConditionalResolveSceneDepth(FRHICommandListImmediate& RHICmdList);
 
 	/** Renders decals. */
 	void RenderDecals(FRHICommandListImmediate& RHICmdList);
@@ -911,6 +923,7 @@ protected:
 	  */
 	bool RenderShadowDepthMap(FRHICommandListImmediate& RHICmdList, const FLightSceneInfo* LightSceneInfo);
 
-	/** Helper function to determine if a shadow should be cast **/
-	bool IsProjectedShadowPotentiallyVisible(const FProjectedShadowInfo* ProjectedShadowInfo) const;
+private:
+	bool bModulatedShadowsInUse;
+	bool bCSMShadowsInUse;
 };

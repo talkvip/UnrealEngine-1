@@ -55,7 +55,7 @@ FPrimitiveSceneProxy* UCapsuleComponent::CreateSceneProxy()
 			}
 		}
 
-		virtual FPrimitiveViewRelevance GetViewRelevance(const FSceneView* View) override
+		virtual FPrimitiveViewRelevance GetViewRelevance(const FSceneView* View) const override
 		{
 			const bool bVisible = !bDrawOnlyIfSelected || IsSelected();
 			FPrimitiveViewRelevance Result;
@@ -109,8 +109,17 @@ void UCapsuleComponent::Serialize(FArchive& Ar)
 			CapsuleHeight_DEPRECATED = 0.0f;
 		}
 	}
+}
 
-	CapsuleHalfHeight = FMath::Max3(0.f, CapsuleHalfHeight, CapsuleRadius);
+void UCapsuleComponent::PostLoad()
+{
+	Super::PostLoad();
+
+	// Ensure this value is clamped only in the case where we're not re-running construction scripts.
+	if(!GIsReconstructingBlueprintInstances)
+	{
+		CapsuleHalfHeight = FMath::Max3(0.f, CapsuleHalfHeight, CapsuleRadius);
+	}
 }
 
 #if WITH_EDITOR

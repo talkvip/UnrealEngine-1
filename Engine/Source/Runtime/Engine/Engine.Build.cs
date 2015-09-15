@@ -38,6 +38,21 @@ public class Engine : ModuleRules
 			PrivateIncludePathModuleNames.AddRange(new string[] { "TaskGraph" });
 		}
 
+		if (Target.Configuration != UnrealTargetConfiguration.Shipping)
+		{
+			PrivateIncludePathModuleNames.AddRange(
+				new string[] {
+					"SlateReflector",
+				}
+			);
+
+			DynamicallyLoadedModuleNames.AddRange(
+				new string[] {
+					"SlateReflector",
+				}
+			);
+		}
+
 		PublicDependencyModuleNames.AddRange(
 			new string[] {
 				"Core",
@@ -65,7 +80,6 @@ public class Engine : ModuleRules
                 "AppFramework",
 				"Networking",
 				"Sockets",
-				"SlateReflector",
 				"Landscape",
                 "UMG",
 				"Projects",
@@ -74,6 +88,18 @@ public class Engine : ModuleRules
                 "PacketHandler"
 			}
         );
+
+        if (Target.Platform != UnrealTargetPlatform.XboxOne)
+        {
+            // these modules require variadic templates
+            PrivateDependencyModuleNames.AddRange(
+                new string[] {
+                    "MessagingRpc",
+                    "PortalRpc",
+                    "PortalServices",
+                }
+            );
+        }
 
         CircularlyReferencedDependentModules.Add("AIModule");
 		CircularlyReferencedDependentModules.Add("Landscape");
@@ -111,7 +137,7 @@ public class Engine : ModuleRules
 			);
 		}
 
-		if (Target.Type == TargetRules.TargetType.Server)
+		if (Target.Type == TargetRules.TargetType.Server || Target.Type == TargetRules.TargetType.Editor)
 		{
 			PrivateDependencyModuleNames.Add("PerfCounters");
 		}

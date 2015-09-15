@@ -478,6 +478,10 @@ struct FClothingAssetData
 	 * Num of this array means LOD number of clothing physical meshes 
 	 */
 	TArray<FClothVisualizationInfo> ClothVisualizationInfos;
+
+	/** Apex stores only the bones that cloth needs. We need a mapping from apex bone index to UE bone index. */
+	TArray<int32> ApexToUnrealBoneMapping;
+
 	/** currently mapped morph target name */
 	FName PreparedMorphTargetName;
 
@@ -494,7 +498,7 @@ struct FClothingAssetData
 	SIZE_T GetResourceSize() const;
 };
 
-// Material interface for USkeletalMesh - contains a material and a shadow casting flag
+//~ Begin Material Interface for USkeletalMesh - contains a material and a shadow casting flag
 USTRUCT()
 struct FSkeletalMaterial
 {
@@ -607,7 +611,7 @@ public:
 #if WITH_EDITORONLY_DATA
 
 	/** Importing data and options used for this mesh */
-	UPROPERTY(EditAnywhere, Instanced, Category = Reimport)
+	UPROPERTY(VisibleAnywhere, Instanced, Category = ImportSettings)
 	class UAssetImportData* AssetImportData;
 
 	/** Path to the resource used to construct this skeletal mesh */
@@ -655,9 +659,10 @@ public:
 	TArray<FMatrix> RefBasesInvMatrix;    
 
 #if WITH_EDITORONLY_DATA
-	/** The section currently selected in the Editor. */
+	/** The section currently selected in the Editor. Used for highlighting */
 	UPROPERTY(transient)
 	int32 SelectedEditorSection;
+
 	/** The section currently selected for clothing. need to remember this index for reimporting cloth */
 	UPROPERTY(transient)
 	int32 SelectedClothingSection;
@@ -729,7 +734,7 @@ public:
 	 */
 	ENGINE_API uint32 GetVertexBufferFlags() const;
 
-	// Begin UObject interface.
+	//~ Begin UObject Interface.
 #if WITH_EDITOR
 	virtual void PreEditChange(UProperty* PropertyAboutToChange) override;
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
@@ -740,13 +745,14 @@ public:
 	virtual bool IsReadyForFinishDestroy() override;
 	virtual void PreSave() override;
 	virtual void Serialize(FArchive& Ar) override;
-	virtual void PostLoad() override;	
+	virtual void PostInitProperties() override;
+	virtual void PostLoad() override;
 	virtual void GetAssetRegistryTags(TArray<FAssetRegistryTag>& OutTags) const override;
 	virtual FString GetDesc() override;
 	virtual FString GetDetailedInfoInternal() const override;
 	virtual SIZE_T GetResourceSize(EResourceSizeMode::Type Mode) override;
 	static void AddReferencedObjects(UObject* InThis, FReferenceCollector& Collector);
-	// End UObject interface.
+	//~ End UObject Interface.
 
 	/** Setup-only routines - not concerned with the instance. */
 
@@ -872,21 +878,21 @@ public:
 #endif
 	
 
-	// Begin Interface_CollisionDataProvider Interface
+	//~ Begin Interface_CollisionDataProvider Interface
 	virtual bool GetPhysicsTriMeshData(struct FTriMeshCollisionData* CollisionData, bool InUseAllTriData) override;
 	virtual bool ContainsPhysicsTriMeshData(bool InUseAllTriData) const override;
 	virtual bool WantsNegXTriMesh() override
 	{
 		return true;
 	}
-	// End Interface_CollisionDataProvider Interface
+	//~ End Interface_CollisionDataProvider Interface
 
-	// Begin IInterface_AssetUserData Interface
+	//~ Begin IInterface_AssetUserData Interface
 	virtual void AddAssetUserData(UAssetUserData* InUserData) override;
 	virtual void RemoveUserDataOfClass(TSubclassOf<UAssetUserData> InUserDataClass) override;
 	virtual UAssetUserData* GetAssetUserDataOfClass(TSubclassOf<UAssetUserData> InUserDataClass) override;
 	virtual const TArray<UAssetUserData*>* GetAssetUserDataArray() const override;
-	// End IInterface_AssetUserData Interface
+	//~ End IInterface_AssetUserData Interface
 
 private:
 

@@ -129,6 +129,11 @@ struct FRenderingCompositePassContext
 		return ViewPortRect.Min != ViewPortRect.Max;
 	}
 
+	bool HasHmdMesh() const
+	{
+		return bHasHmdMesh;
+	}
+
 	ERHIFeatureLevel::Type GetFeatureLevel() const { return FeatureLevel; }
 	EShaderPlatform GetShaderPlatform() const { return GShaderPlatformForFeatureLevel[FeatureLevel]; }
 	TShaderMap<FGlobalShaderType>* GetShaderMap() const { check(ShaderMap); return ShaderMap; }
@@ -154,6 +159,9 @@ private:
 	TShaderMap<FGlobalShaderType>* ShaderMap;
 	// to ensure we only process the graph once
 	bool bWasProcessed;
+	// updated once a frame in Process()
+	// If true there's a custom mesh to use instead of a full screen quad when rendering post process passes.
+	bool bHasHmdMesh;
 };
 
 // ---------------------------------------------------------------------------
@@ -256,6 +264,9 @@ struct FRenderingCompositePass
 
 	/** */
 	virtual void Release() = 0;
+
+	/** can be called after RecursivelyGatherDependencies to detect if the node is reference by any other node - if not we don't need to run it */
+	bool WasComputeOutputDescCalled() const { return bComputeOutputDescWasCalled; }
 
 protected:
 

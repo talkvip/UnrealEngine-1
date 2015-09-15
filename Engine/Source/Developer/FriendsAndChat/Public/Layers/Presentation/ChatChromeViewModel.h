@@ -8,14 +8,22 @@ class FChatChromeViewModel
 public:
 
 	virtual void AddTab(const TSharedRef<class IChatTabViewModel>& Tab) = 0;
-	virtual void ActivateTab(const TSharedRef<class IChatTabViewModel>& Tab) = 0;
+	virtual void ActivateTab(const TSharedRef<class IChatTabViewModel>& Tab, bool GiveFocus = false) = 0;
 	virtual TSharedPtr<class IChatTabViewModel> GetActiveTab() const = 0;
 	virtual TArray<TSharedRef<IChatTabViewModel>>& GetVisibleTabs() = 0;
 	virtual TArray<TSharedRef<IChatTabViewModel>>& GetAllTabs() = 0;
 	virtual bool IsFading() const = 0;
 	virtual bool IsActive() const = 0;
 	virtual EVisibility GetHeaderVisibility() const = 0;
+	virtual EVisibility GetChatWindowVisibility() const = 0;
+	virtual EVisibility GetChatMinimizedVisibility() const = 0;
+	virtual EVisibility GetMinimizedButtonVisibility() const = 0;
 	virtual TSharedPtr<class FChatSettingsViewModel> GetChatSettingsViewModel() = 0;
+	virtual bool DisplayChatSettings() const = 0;
+	virtual void ToggleChatMinimized() = 0;
+	virtual bool IsMinimizeEnabled() const = 0;
+	virtual bool IsChatMinimized() const = 0;
+	virtual TSharedRef<FChatChromeViewModel> Clone(TSharedRef<class IChatDisplayService> ChatDisplayService, TSharedRef<class IChatSettingsService> InChatSettingsService, TArray<TSharedRef<ICustomSlashCommand> >* CustomSlashCommands) = 0;
 
 	virtual ~FChatChromeViewModel() {}
 
@@ -37,5 +45,6 @@ public:
  */
 FACTORY(TSharedRef< FChatChromeViewModel >, FChatChromeViewModel,
 	const TSharedRef<class FFriendsNavigationService>& NavigationService,
+	const TSharedRef<class FGameAndPartyService>& GamePartyService,
 	const TSharedRef<class IChatDisplayService> & ChatDisplayService,
 	const TSharedRef<class IChatSettingsService>& ChatSettingsService);

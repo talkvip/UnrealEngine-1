@@ -7,6 +7,7 @@
 #include "RendererPrivate.h"
 #include "RenderingCompositionGraph.h"
 #include "HighResScreenshot.h"
+#include "IHeadMountedDisplay.h"
 
 void ExecuteCompositionGraphDebug();
 
@@ -123,6 +124,7 @@ FRenderingCompositePassContext::FRenderingCompositePassContext(FRHICommandListIm
 	, FeatureLevel(View.GetFeatureLevel())
 	, ShaderMap(InView.ShaderMap)
 	, bWasProcessed(false)
+	, bHasHmdMesh(false)
 {
 	check(!IsViewportValid());
 }
@@ -134,10 +136,18 @@ FRenderingCompositePassContext::~FRenderingCompositePassContext()
 
 void FRenderingCompositePassContext::Process(FRenderingCompositePass* Root, const TCHAR *GraphDebugName)
 {
-	// call this method only once afetr the graph is finished
+	// call this method only once after the graph is finished
 	check(!bWasProcessed);
 
 	bWasProcessed = true;
+
+	// query if we have a custom HMD post process mesh to use
+	static const auto* const HiddenAreaMaskCVar = IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("vr.HiddenAreaMask"));
+	bHasHmdMesh = (HiddenAreaMaskCVar != nullptr &&
+		HiddenAreaMaskCVar->GetValueOnRenderThread() == 1 &&
+		GEngine &&
+		GEngine->HMDDevice.IsValid() &&
+		GEngine->HMDDevice->HasVisibleAreaMesh());
 
 	if(Root)
 	{
@@ -159,21 +169,23 @@ void FRenderingCompositePassContext::Process(FRenderingCompositePass* Root, cons
 
 		bool bNewOrder = CVarCompositionGraphOrder.GetValueOnRenderThread() != 0;
 
+		Graph.RecursivelyGatherDependencies(Root);
+
 		if(bNewOrder)
 		{
+			// process in the order the nodes have been created (for more control), unless the dependencies require it differently
 			for (FRenderingCompositePass* Node : Graph.Nodes)
 			{
-				Graph.RecursivelyGatherDependencies(Node);
-			}
-
-			for (FRenderingCompositePass* Node : Graph.Nodes)
-			{
-				Graph.RecursivelyProcess(Node, *this);
+				// only if this is true the node is actually needed - no need to compute it when it's not needed
+				if(Node->WasComputeOutputDescCalled())
+				{
+					Graph.RecursivelyProcess(Node, *this);
+				}
 			}
 		}
 		else
 		{
-			Graph.RecursivelyGatherDependencies(Root);
+			// process in the order of the dependencies, starting from the root (without processing unreferenced nodes)
 			Graph.RecursivelyProcess(Root, *this);
 		}
 
@@ -681,19 +693,19 @@ void FPostProcessPassParameters::Bind(const FShaderParameterMap& ParameterMap)
 	}
 }
 
-void FPostProcessPassParameters::SetPS(const FPixelShaderRHIParamRef& ShaderRHI, const FRenderingCompositePassContext& Context, FSamplerStateRHIParamRef Filter, bool bWhiteIfNoTexture, FSamplerStateRHIParamRef* FilterOverrideArray)
+void FPostProcessPassParameters::SetPS(const FPixelShaderRHIParamRef& ShaderRHI, const FRenderingCompositePassContext& Context, FSamplerStateRHIParamRef Filter, EFallbackColor FallbackColor, FSamplerStateRHIParamRef* FilterOverrideArray)
 {
-	Set(ShaderRHI, Context, Filter, bWhiteIfNoTexture, FilterOverrideArray);
+	Set(ShaderRHI, Context, Filter, FallbackColor, FilterOverrideArray);
 }
 
-void FPostProcessPassParameters::SetCS(const FComputeShaderRHIParamRef& ShaderRHI, const FRenderingCompositePassContext& Context, FSamplerStateRHIParamRef Filter, bool bWhiteIfNoTexture, FSamplerStateRHIParamRef* FilterOverrideArray)
+void FPostProcessPassParameters::SetCS(const FComputeShaderRHIParamRef& ShaderRHI, const FRenderingCompositePassContext& Context, FSamplerStateRHIParamRef Filter, EFallbackColor FallbackColor, FSamplerStateRHIParamRef* FilterOverrideArray)
 {
-	Set(ShaderRHI, Context, Filter, bWhiteIfNoTexture, FilterOverrideArray);
+	Set(ShaderRHI, Context, Filter, FallbackColor, FilterOverrideArray);
 }
 
-void FPostProcessPassParameters::SetVS(const FVertexShaderRHIParamRef& ShaderRHI, const FRenderingCompositePassContext& Context, FSamplerStateRHIParamRef Filter, bool bWhiteIfNoTexture, FSamplerStateRHIParamRef* FilterOverrideArray)
+void FPostProcessPassParameters::SetVS(const FVertexShaderRHIParamRef& ShaderRHI, const FRenderingCompositePassContext& Context, FSamplerStateRHIParamRef Filter, EFallbackColor FallbackColor, FSamplerStateRHIParamRef* FilterOverrideArray)
 {
-	Set(ShaderRHI, Context, Filter, bWhiteIfNoTexture, FilterOverrideArray);
+	Set(ShaderRHI, Context, Filter, FallbackColor, FilterOverrideArray);
 }
 
 template< typename ShaderRHIParamRef >
@@ -701,7 +713,7 @@ void FPostProcessPassParameters::Set(
 	const ShaderRHIParamRef& ShaderRHI,
 	const FRenderingCompositePassContext& Context,
 	FSamplerStateRHIParamRef Filter,
-	bool bWhiteIfNoTexture,
+	EFallbackColor FallbackColor,
 	FSamplerStateRHIParamRef* FilterOverrideArray)
 {
 	// assuming all outputs have the same size
@@ -770,6 +782,17 @@ void FPostProcessPassParameters::Set(
 									((float)ContextViewportRect.Max.X/SceneRTSize.X), 
 									((float)ContextViewportRect.Max.Y/SceneRTSize.Y) );
 
+	IPooledRenderTarget* FallbackTexture = 0;
+	
+	switch(FallbackColor)
+	{
+		case eFC_0000: FallbackTexture = GSystemTextures.BlackDummy; break;
+		case eFC_0001: FallbackTexture = GSystemTextures.BlackAlphaOneDummy; break;
+		case eFC_1111: FallbackTexture = GSystemTextures.WhiteDummy; break;
+		default:
+			ensure(!"Unhandled enum in EFallbackColor");
+	}
+
 	// ePId_Input0, ePId_Input1, ...
 	for(uint32 Id = 0; Id < (uint32)ePId_Input_MAX; ++Id)
 	{
@@ -821,11 +844,9 @@ void FPostProcessPassParameters::Set(
 		}
 		else
 		{
-			IPooledRenderTarget* Texture = bWhiteIfNoTexture ? GSystemTextures.WhiteDummy : GSystemTextures.BlackDummy;
-
 			// if the input is not there but the shader request it we give it at least some data to avoid d3ddebug errors and shader permutations
 			// to make features optional we use default black for additive passes without shader permutations
-			SetTextureParameter(RHICmdList, ShaderRHI, PostprocessInputParameter[Id], PostprocessInputParameterSampler[Id], LocalFilter, Texture->GetRenderTargetItem().TargetableTexture);
+			SetTextureParameter(RHICmdList, ShaderRHI, PostprocessInputParameter[Id], PostprocessInputParameterSampler[Id], LocalFilter, FallbackTexture->GetRenderTargetItem().TargetableTexture);
 
 			FVector4 Dummy(1, 1, 1, 1);
 			SetShaderValue(RHICmdList, ShaderRHI, PostprocessInputSizeParameter[Id], Dummy);
@@ -841,7 +862,7 @@ void FPostProcessPassParameters::Set(
 		const ShaderRHIParamRef& ShaderRHI,				\
 		const FRenderingCompositePassContext& Context,	\
 		FSamplerStateRHIParamRef Filter,				\
-		bool bWhiteIfNoTexture,							\
+		EFallbackColor FallbackColor,					\
 		FSamplerStateRHIParamRef* FilterOverrideArray	\
 	);
 

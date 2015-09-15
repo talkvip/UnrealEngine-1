@@ -71,7 +71,7 @@ FString UKismetSystemLibrary::GetClassDisplayName(UClass* Class)
 
 FString UKismetSystemLibrary::GetEngineVersion()
 {
-	return GEngineVersion.ToString();
+	return FEngineVersion::Current().ToString();
 }
 
 FString UKismetSystemLibrary::GetGameName()
@@ -3030,17 +3030,37 @@ void UKismetSystemLibrary::LaunchURL(const FString& URL)
 	}
 }
 
+bool UKismetSystemLibrary::CanLaunchURL(const FString& URL)
+{
+	if (!URL.IsEmpty())
+	{
+		return FPlatformProcess::CanLaunchURL(*URL);
+	}
+
+	return false;
+}
 void UKismetSystemLibrary::CollectGarbage()
 {
 	GEngine->DeferredCommands.Add(TEXT("obj gc"));
 }
 
-void UKismetSystemLibrary::ShowAdBanner(bool bShowOnBottomOfScreen)
+void UKismetSystemLibrary::ShowAdBanner(int32 AdIdIndex, bool bShowOnBottomOfScreen)
 {
 	if (IAdvertisingProvider* Provider = FAdvertising::Get().GetDefaultProvider())
 	{
-		Provider->ShowAdBanner(bShowOnBottomOfScreen);
+		Provider->ShowAdBanner(bShowOnBottomOfScreen, AdIdIndex);
 	}
+}
+
+int32 UKismetSystemLibrary::GetAdIDCount()
+{
+	uint32 AdIDCount = 0;
+	if (IAdvertisingProvider* Provider = FAdvertising::Get().GetDefaultProvider())
+	{
+		AdIDCount = Provider->GetAdIDCount();
+	}
+
+	return AdIDCount;
 }
 
 void UKismetSystemLibrary::HideAdBanner()

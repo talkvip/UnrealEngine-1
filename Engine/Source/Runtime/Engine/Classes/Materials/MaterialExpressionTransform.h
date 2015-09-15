@@ -17,8 +17,11 @@ enum EMaterialVectorCoordTransformSource
 	/** World space */
 	TRANSFORMSOURCE_World UMETA(DisplayName="World Space"),
 	
-	/** View space */
+	/** View space (differs from camera space in the shadow passes) */
 	TRANSFORMSOURCE_View UMETA(DisplayName="View Space"),
+
+	/** Camera space */
+	TRANSFORMSOURCE_Camera  UMETA(DisplayName="Camera Space"),
 
 	TRANSFORMSOURCE_MAX,
 };
@@ -35,9 +38,12 @@ enum EMaterialVectorCoordTransform
 	/** World space */
 	TRANSFORM_World UMETA(DisplayName="World Space"),
 	
-	/** View space */
+	/** View space (differs from camera space in the shadow passes) */
 	TRANSFORM_View UMETA(DisplayName="View Space"),
 
+	/** Camera space */
+	TRANSFORM_Camera  UMETA(DisplayName="Camera Space"),
+	
 	TRANSFORM_MAX,
 };
 
@@ -59,10 +65,10 @@ class UMaterialExpressionTransform : public UMaterialExpression
 	TEnumAsByte<enum EMaterialVectorCoordTransform> TransformType;
 
 
-	// Begin UMaterialExpression Interface
+	//~ Begin UMaterialExpression Interface
 	virtual int32 Compile(class FMaterialCompiler* Compiler, int32 OutputIndex, int32 MultiplexIndex) override;
 	virtual void GetCaption(TArray<FString>& OutCaptions) const override;
-	// End UMaterialExpression Interface
+	//~ End UMaterialExpression Interface
 };
 
 

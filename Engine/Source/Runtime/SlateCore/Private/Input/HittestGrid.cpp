@@ -117,7 +117,7 @@ struct FHittestGrid::FCachedWidget
 	FGeometry CachedGeometry;
 	// @todo umg : ideally this clipping rect is optional and we only have them on a small number of widgets.
 	FSlateRect ClippingRect;
-	TArray<int32> Children;
+	TArray<int32, TInlineAllocator<16> > Children;
 	int32 ParentIndex;
 };
 
@@ -159,8 +159,7 @@ TArray<FWidgetAndPointer> FHittestGrid::GetBubblePath(FVector2D DesktopSpaceCoor
 		const FIntPoint LRIndex = GetCellCoordinate(CursorPositionInGrid + RadiusVector);
 
 		//first, find all the overlapping cells
-		TArray<FIntPoint> CellIndexes;
-		CellIndexes.Reserve(16);
+		TArray<FIntPoint, TInlineAllocator<16>> CellIndexes;
 
 		for (int32 YIndex = ULIndex.Y; YIndex <= LRIndex.Y; ++YIndex)
 		{
@@ -228,7 +227,7 @@ void FHittestGrid::ClearGridForNewFrame( const FSlateRect& HittestArea )
 	GridOrigin = HittestArea.GetTopLeft();
 	const FVector2D GridSize = HittestArea.GetSize();
 	NumCells = FIntPoint( FMath::CeilToInt(GridSize.X / CellSize.X), FMath::CeilToInt(GridSize.Y / CellSize.Y) );
-	WidgetsCachedThisFrame->Empty(WidgetsCachedThisFrame->Num());
+	WidgetsCachedThisFrame->Reset();
 
 	const int32 NewTotalCells = NumCells.X * NumCells.Y;
 	if (NewTotalCells != Cells.Num())

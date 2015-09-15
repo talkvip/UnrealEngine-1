@@ -392,7 +392,7 @@ void FRichCurve::DeleteKey(FKeyHandle InKeyHandle)
 	}
 }
 
-FKeyHandle FRichCurve::UpdateOrAddKey(float InTime, float InValue)
+FKeyHandle FRichCurve::UpdateOrAddKey(float InTime, float InValue, const bool bUnwindRotation)
 {
 	// Search for a key that already exists at the time and if found, update its value
 	for( int32 KeyIndex = 0; KeyIndex < Keys.Num(); ++KeyIndex )
@@ -414,7 +414,7 @@ FKeyHandle FRichCurve::UpdateOrAddKey(float InTime, float InValue)
 	}
 
 	// A key wasnt found, add it now
-	return AddKey( InTime, InValue );
+	return AddKey( InTime, InValue, bUnwindRotation );
 }
 
 FKeyHandle FRichCurve::SetKeyTime( FKeyHandle KeyHandle, float NewTime )
@@ -489,6 +489,12 @@ float FRichCurve::GetKeyValue(FKeyHandle KeyHandle) const
 void FRichCurve::ShiftCurve(float DeltaTime)
 {
 	TSet<FKeyHandle> KeyHandles;
+	for (auto It = KeyHandlesToIndices.CreateIterator(); It; ++It)
+	{
+		FKeyHandle& KeyHandle = It.Key();
+		KeyHandles.Add(KeyHandle);
+	}
+
 	ShiftCurve(DeltaTime, KeyHandles);
 }
 
@@ -507,6 +513,12 @@ void FRichCurve::ShiftCurve(float DeltaTime, TSet<FKeyHandle>& KeyHandles)
 void FRichCurve::ScaleCurve(float ScaleOrigin, float ScaleFactor)
 {
 	TSet<FKeyHandle> KeyHandles;
+	for (auto It = KeyHandlesToIndices.CreateIterator(); It; ++It)
+	{
+		FKeyHandle& KeyHandle = It.Key();
+		KeyHandles.Add(KeyHandle);
+	}
+
 	ScaleCurve(ScaleOrigin, ScaleFactor, KeyHandles);
 }
 
@@ -944,19 +956,20 @@ void FRichCurve::RemapTimeValue(float& InTime, float& CycleValueOffset) const
 	}
 }
 
-float FRichCurve::Eval(float InTime, float DefaultValue) const
+float FRichCurve::Eval(float InTime, float InDefaultValue) const
 {
 	// Remap time if extrapolation is present and compute offset value to use if cycling 
 	float CycleValueOffset = 0;
 	RemapTimeValue(InTime, CycleValueOffset);
 
 	const int32 NumKeys = Keys.Num();
-	float InterpVal = DefaultValue;
+
+	// If the default value hasn't been initialized, use the incoming default value
+	float InterpVal = DefaultValue == MAX_flt ? InDefaultValue : DefaultValue;
 
 	if (NumKeys == 0)
 	{
-		// If no keys in curve, return the Default value we passed in.
-		InterpVal = DefaultValue;
+		// If no keys in curve, return the Default value.
 	} 
 	else if (NumKeys < 2 || (InTime <= Keys[0].Time))
 	{
@@ -1087,9 +1100,6 @@ bool FRichCurve::operator==(const FRichCurve& Curve) const
 UCurveBase::UCurveBase(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 {
-#if WITH_EDITORONLY_DATA
-	AssetImportData = CreateEditorOnlyDefaultSubobject<UAssetImportData>(TEXT("AssetImportData"));
-#endif
 }
 
 #if WITH_EDITORONLY_DATA
@@ -1097,10 +1107,20 @@ void UCurveBase::GetAssetRegistryTags(TArray<FAssetRegistryTag>& OutTags) const
 {
 	if (AssetImportData)
 	{
-		OutTags.Add(FAssetRegistryTag(SourceFileTagName(), AssetImportData->ToJson(), FAssetRegistryTag::TT_Hidden));
+		OutTags.Add(FAssetRegistryTag(SourceFileTagName(), AssetImportData->GetSourceData().ToJson(), FAssetRegistryTag::TT_Hidden));
 	}
 
 	Super::GetAssetRegistryTags(OutTags);
+}
+
+void UCurveBase::PostInitProperties()
+{
+	if (!HasAnyFlags(RF_ClassDefaultObject))
+	{
+		AssetImportData = NewObject<UAssetImportData>(this, TEXT("AssetImportData"));
+	}
+
+	Super::PostInitProperties();
 }
 
 void UCurveBase::PostLoad()
@@ -1110,7 +1130,7 @@ void UCurveBase::PostLoad()
 	{
 		FAssetImportInfo Info;
 		Info.Insert(FAssetImportInfo::FSourceFile(ImportPath_DEPRECATED));
-		AssetImportData->CopyFrom(Info);
+		AssetImportData->SourceData = MoveTemp(Info);
 	}
 }
 #endif
@@ -1260,12 +1280,14 @@ bool FIntegralCurve::IsKeyHandleValid(FKeyHandle KeyHandle) const
 	return bValid;
 }
 
-int32 FIntegralCurve::Evaluate(float Time, int32 DefaultValue) const
+int32 FIntegralCurve::Evaluate(float Time, int32 InDefaultValue) const
 {
-	int32 ReturnVal = DefaultValue;
+	// If the default value hasn't been initialized, use the incoming default value
+	int32 ReturnVal = DefaultValue == MAX_int32 ? InDefaultValue : DefaultValue;
+
 	if( Keys.Num() == 0 )
 	{
-		ReturnVal = DefaultValue;
+		// If no keys in curve, return the Default value.
 	}
 	else if( Keys.Num() < 2 || Time < Keys[0].Time )
 	{
@@ -1384,6 +1406,12 @@ float FIntegralCurve::GetKeyTime(FKeyHandle KeyHandle) const
 void FIntegralCurve::ShiftCurve(float DeltaTime)
 {
 	TSet<FKeyHandle> KeyHandles;
+	for (auto It = KeyHandlesToIndices.CreateIterator(); It; ++It)
+	{
+		FKeyHandle& KeyHandle = It.Key();
+		KeyHandles.Add(KeyHandle);
+	}
+
 	ShiftCurve(DeltaTime, KeyHandles);
 }
 
@@ -1402,6 +1430,12 @@ void FIntegralCurve::ShiftCurve(float DeltaTime, TSet<FKeyHandle>& KeyHandles)
 void FIntegralCurve::ScaleCurve(float ScaleOrigin, float ScaleFactor)
 {
 	TSet<FKeyHandle> KeyHandles;
+	for (auto It = KeyHandlesToIndices.CreateIterator(); It; ++It)
+	{
+		FKeyHandle& KeyHandle = It.Key();
+		KeyHandles.Add(KeyHandle);
+	}
+
 	ScaleCurve(ScaleOrigin, ScaleFactor, KeyHandles);
 }
 

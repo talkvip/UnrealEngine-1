@@ -10,6 +10,7 @@
 #include "AssetRegistryModule.h"
 #include "Animation/AnimSequence.h"
 #include "Animation/Rig.h"
+#include "Animation/BlendProfile.h"
 #include "MessageLog.h"
 
 #define LOCTEXT_NAMESPACE "Skeleton"
@@ -38,7 +39,7 @@ FArchive& operator<<(FArchive& Ar, FReferencePose & P)
 	Ar << P.ReferencePose;
 #if WITH_EDITORONLY_DATA
 	//TODO: we should use strip flags but we need to rev the serialization version
-	if (!Ar.IsCooking() && !Ar.IsFilterEditorOnly())
+	if (!Ar.IsCooking())
 	{
 		Ar << P.ReferenceMesh;
 	}
@@ -262,13 +263,21 @@ bool USkeleton::IsCompatibleMesh(const USkeletalMesh* InSkelMesh) const
 	// first ensure the parent exists for each bone
 	for (int32 MeshBoneIndex=0; MeshBoneIndex<NumBones; MeshBoneIndex++)
 	{
+		FName MeshBoneName = MeshRefSkel.GetBoneName(MeshBoneIndex);
 		// See if Mesh bone exists in Skeleton.
-		int32 SkeletonBoneIndex = SkeletonRefSkel.FindBoneIndex( MeshRefSkel.GetBoneName(MeshBoneIndex) );
+		int32 SkeletonBoneIndex = SkeletonRefSkel.FindBoneIndex( MeshBoneName );
 
 		// if found, increase num of bone matches count
 		if( SkeletonBoneIndex != INDEX_NONE )
 		{
 			++NumOfBoneMatches;
+
+			// follow the parent chain to verify the chain is same
+			if(!DoesParentChainMatch(SkeletonBoneIndex, InSkelMesh))
+			{
+				UE_LOG(LogAnimation, Warning, TEXT("%s : Hierarchy does not match."), *MeshBoneName.ToString());
+				return false;
+			}
 		}
 		else
 		{
@@ -281,7 +290,8 @@ bool USkeleton::IsCompatibleMesh(const USkeletalMesh* InSkelMesh) const
 				if ( ParentMeshBoneIndex != INDEX_NONE )
 				{
 					// @TODO: make sure RefSkeleton's root ParentIndex < 0 if not, I'll need to fix this by checking TreeBoneIdx
-					SkeletonBoneIndex = SkeletonRefSkel.FindBoneIndex(MeshRefSkel.GetBoneName(ParentMeshBoneIndex));
+					FName ParentBoneName = MeshRefSkel.GetBoneName(ParentMeshBoneIndex);
+					SkeletonBoneIndex = SkeletonRefSkel.FindBoneIndex(ParentBoneName);
 				}
 
 				// root is reached
@@ -298,12 +308,14 @@ bool USkeleton::IsCompatibleMesh(const USkeletalMesh* InSkelMesh) const
 			// still no match, return false, no parent to look for
 			if( SkeletonBoneIndex == INDEX_NONE )
 			{
+				UE_LOG(LogAnimation, Warning, TEXT("%s : Missing joint on skeleton.  Make sure to assign to the skeleeton."), *MeshBoneName.ToString());
 				return false;
 			}
 
 			// second follow the parent chain to verify the chain is same
 			if( !DoesParentChainMatch(SkeletonBoneIndex, InSkelMesh) )
 			{
+				UE_LOG(LogAnimation, Warning, TEXT("%s : Hierarchy does not match."), *MeshBoneName.ToString());
 				return false;
 			}
 		}
@@ -380,16 +392,6 @@ int32 USkeleton::BuildLinkup(const USkeletalMesh* InSkelMesh)
 				FMessageDialog::Open(EAppMsgType::Ok, FText::Format(LOCTEXT("SkeletonBuildLinkupMissingBones", "The Skeleton {0}, is missing bones that SkeletalMesh {1} needs. They will be added now. Please save the Skeleton!"), FText::FromString(GetNameSafe(this)), FText::FromString(GetNameSafe(InSkelMesh))));
 				bDismissedMessage = true;
 			}
-
-			static FName NAME_LoadErrors("LoadErrors");
-			FMessageLog LoadErrors(NAME_LoadErrors);
-
-			TSharedRef<FTokenizedMessage> Message = LoadErrors.Info();
-			Message->AddToken(FTextToken::Create(LOCTEXT("SkeletonBuildLinkupMissingBones1", "The Skeleton ")));
-			Message->AddToken(FAssetNameToken::Create(GetPathName(), FText::FromString( GetNameSafe(this) ) ));
-			Message->AddToken(FTextToken::Create(LOCTEXT("SkeletonBuildLinkupMissingBones2", " is missing bones that SkeletalMesh ")));
-			Message->AddToken(FAssetNameToken::Create(InSkelMesh->GetPathName(), FText::FromString( GetNameSafe(InSkelMesh) )));
-			Message->AddToken(FTextToken::Create(LOCTEXT("SkeletonBuildLinkupMissingBones3", "  needs. They will be added now. Please save the Skeleton!")));
 
 			// Re-add all SkelMesh bones to the Skeleton.
 			MergeAllBonesToBoneTree(InSkelMesh);
@@ -1288,6 +1290,29 @@ void USkeleton::GetAssetRegistryTags(TArray<FAssetRegistryTag>& OutTags) const
 	FString RigFullName = (RigConfig.Rig)? RigConfig.Rig->GetFullName() : TEXT("");
 
 	OutTags.Add(FAssetRegistryTag(USkeleton::RigTag, RigFullName, FAssetRegistryTag::TT_Hidden));
+}
+
+UBlendProfile* USkeleton::CreateNewBlendProfile(const FName& InProfileName)
+{
+	Modify();
+	UBlendProfile* NewProfile = NewObject<UBlendProfile>(this, InProfileName, RF_Public);
+	BlendProfiles.Add(NewProfile);
+
+	return NewProfile;
+}
+
+UBlendProfile* USkeleton::GetBlendProfile(const FName& InProfileName)
+{
+	UBlendProfile** FoundProfile = BlendProfiles.FindByPredicate([InProfileName](const UBlendProfile* Profile)
+	{
+		return Profile->GetName() == InProfileName.ToString();
+	});
+
+	if(FoundProfile)
+	{
+		return *FoundProfile;
+	}
+	return nullptr;
 }
 
 #endif //WITH_EDITOR

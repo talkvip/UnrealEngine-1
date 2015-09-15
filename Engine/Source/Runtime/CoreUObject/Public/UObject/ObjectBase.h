@@ -50,11 +50,11 @@ enum ELoadFlags
 	LOAD_AllowDll					= 0x00000020,	// Allow plain DLLs.
 //	LOAD_Unused						= 0x00000040
 	LOAD_NoVerify					= 0x00000080,   // Don't verify imports yet.
-//	LOAD_Unused						= 0x00000100,
+	LOAD_IsVerifying			= 0x00000100,		// Is verifying imports
 //	LOAD_Unused						= 0x00000200,
 //	LOAD_Unused						= 0x00000400,
 //	LOAD_Unused						= 0x00000800,
-//	LOAD_Unused						= 0x00001000,
+	LOAD_DisableDependencyPreloading = 0x00001000,	// Bypass dependency preloading system
 	LOAD_Quiet						= 0x00002000,   // No log warnings.
 	LOAD_FindIfFail					= 0x00004000,	// Tries FindObject if a linker cannot be obtained (e.g. package is currently being compiled)
 	LOAD_MemoryReader				= 0x00008000,	// Loads the file into memory and serializes from there.
@@ -91,7 +91,7 @@ enum EPackageFlags
 	PKG_ServerSideOnly				= 0x00000004,   // Only needed on the server side.
 	PKG_CompiledIn					= 0x00000010,   // This package is from "compiled in" classes.
 	PKG_ForDiffing					= 0x00000020,	// This package was loaded just for the purposes of diff'ing
-//	PKG_Unused						= 0x00000040
+	PKG_EditorOnly					= 0x00000040, // This is editor-only package (for example: editor module script package)
 //  PKG_Unused						= 0x00000080,
 //	PKG_Unused						= 0x00000100,
 //	PKG_Unused						= 0x00000200,
@@ -107,7 +107,7 @@ enum EPackageFlags
 	PKG_DisallowLazyLoading			= 0x00080000,	// Set if the archive serializing this package cannot use lazy loading
 	PKG_PlayInEditor				= 0x00100000,	// Set if the package was created for the purpose of PIE
 	PKG_ContainsScript				= 0x00200000,	// Package is allowed to contain UClass objects
-	PKG_ProcessingDependencies		= 0x00400000,
+//	PKG_Unused						= 0x00400000,
 //	PKG_Unused						= 0x00800000,
 //	PKG_Unused						= 0x01000000,	
 	PKG_StoreCompressed				= 0x02000000,	// Package is being stored compressed, requires archive support for compression
@@ -396,6 +396,9 @@ typedef uint64 EClassCastFlags;
 #define CPF_PersistentInstance				DECLARE_UINT64(0x0002000000000000)		// A object referenced by the property is duplicated like a component. (Each actor should have an own instance.)
 #define CPF_UObjectWrapper					DECLARE_UINT64(0x0004000000000000)		// Property was parsed as a wrapper class like TSubobjectOf<T>, FScriptInterface etc., rather than a USomething*
 #define CPF_HasGetValueTypeHash				DECLARE_UINT64(0x0008000000000000)		// This property can generate a meaningful hash value.
+#define CPF_NativeAccessSpecifierPublic		DECLARE_UINT64(0x0010000000000000)		// Public native access specifier
+#define CPF_NativeAccessSpecifierProtected	DECLARE_UINT64(0x0020000000000000)		// Protected native access specifier
+#define CPF_NativeAccessSpecifierPrivate	DECLARE_UINT64(0x0040000000000000)		// Private native access specifier
 
 #define CPF_NonPIETransient \
 	EMIT_DEPRECATED_WARNING_MESSAGE("CPF_NonPIETransient is deprecated. Please use CPF_NonPIEDuplicateTransient instead.") \
@@ -403,6 +406,8 @@ typedef uint64 EClassCastFlags;
 
 /** @name Combinations flags */
 //@{
+#define CPF_NativeAccessSpecifiers	(CPF_NativeAccessSpecifierPublic | CPF_NativeAccessSpecifierProtected | CPF_NativeAccessSpecifierPrivate)
+
 #define CPF_ParmFlags				(CPF_Parm | CPF_OutParm | CPF_ReturnParm | CPF_ReferenceParm | CPF_ConstParm)
 #define CPF_PropagateToArrayInner	(CPF_ExportObject | CPF_PersistentInstance | CPF_InstancedReference | CPF_ContainsInstancedReference | CPF_Config | CPF_EditConst | CPF_Deprecated | CPF_EditorOnly | CPF_AutoWeak | CPF_UObjectWrapper )
 #define CPF_PropagateToMapValue		(CPF_ExportObject | CPF_PersistentInstance | CPF_InstancedReference | CPF_ContainsInstancedReference | CPF_Config | CPF_EditConst | CPF_Deprecated | CPF_EditorOnly | CPF_AutoWeak | CPF_UObjectWrapper | CPF_Edit )
@@ -464,6 +469,7 @@ enum EObjectFlags
 	RF_Async = 0x00800000, ///< Object exists only on a different thread than the game thread.
 	RF_StrongRefOnFrame			= 0x01000000,	///< References to this object from persistent function frame are handled as strong ones.
 	RF_NoStrongReference		= 0x02000000,  ///< The object is not referenced by any strong reference. The flag is used by GC.
+	RF_Dynamic = 0x04000000, // Field Only. Dynamic field - doesn't get constructed during static initialization, can be constructed multiple times
 };
 
 	// Special all and none masks
@@ -968,7 +974,7 @@ namespace UM
 		/// [ClassMetadata] Specifies that this class is an acceptable base class for creating blueprints.
 		IsBlueprintBase,
 
-		/// [ClassMetadata] Comma delimited list of blueprint events that are not be allowed to be overriden in classes of this type
+		/// [ClassMetadata] Comma delimited list of blueprint events that are not be allowed to be overridden in classes of this type
 		KismetHideOverrides,
 
 		/// [ClassMetadata] Specifies interfaces that are not compatible with the class.
@@ -1442,11 +1448,20 @@ public: \
 		if (!PrivateStaticClass) \
 		{ \
 			/* this could be handled with templates, but we want it external to avoid code bloat */ \
-			GetPrivateStaticClassBody<TClass>( \
+			GetPrivateStaticClassBody( \
 				Package, \
 				(TCHAR*)TEXT(#TClass) + 1 + ((StaticClassFlags & CLASS_Deprecated) ? 11 : 0), \
 				PrivateStaticClass, \
-				StaticRegisterNatives##TClass \
+				StaticRegisterNatives##TClass, \
+				sizeof(TClass), \
+				TClass::StaticClassFlags, \
+				TClass::StaticClassCastFlags(), \
+				TClass::StaticConfigName(), \
+				(UClass::ClassConstructorType)InternalConstructor<TClass>, \
+				(UClass::ClassVTableHelperCtorCallerType)InternalVTableHelperCtorCaller<TClass>, \
+				&TClass::AddReferencedObjects, \
+				&TClass::Super::StaticClass, \
+				&TClass::WithinClass::StaticClass \
 			); \
 		} \
 		return PrivateStaticClass; \
@@ -1472,11 +1487,39 @@ public: \
 		check(Class->GetClass()); \
 		return Class; \
 	} \
-	static FCompiledInDefer Z_CompiledInDefer_UClass_##TClass(Z_Construct_UClass_##TClass, TEXT(#TClass));
+	static FCompiledInDefer Z_CompiledInDefer_UClass_##TClass(Z_Construct_UClass_##TClass, &TClass::StaticClass, TEXT(#TClass), false);
 
 #define IMPLEMENT_CORE_INTRINSIC_CLASS(TClass, TSuperClass, InitCode) \
 	IMPLEMENT_INTRINSIC_CLASS(TClass, COREUOBJECT_API, TSuperClass, COREUOBJECT_API, InitCode)
 
+// Register a dynamic class (created at runtime, not startup).
+#define IMPLEMENT_DYNAMIC_CLASS(TClass, TClassCrc) \
+	UClass* TClass::GetPrivateStaticClass(const TCHAR* Package) \
+	{ \
+		UPackage* PrivateStaticClassOuter = CastChecked<UPackage>(StaticFindObjectFast(UPackage::StaticClass(), nullptr, Package)); \
+		UClass* PrivateStaticClass = Cast<UClass>(StaticFindObjectFast(UClass::StaticClass(), PrivateStaticClassOuter, (TCHAR*)TEXT(#TClass) + 1)); \
+		if (!PrivateStaticClass) \
+		{ \
+			/* this could be handled with templates, but we want it external to avoid code bloat */ \
+			GetPrivateStaticClassBody( \
+			Package, \
+			(TCHAR*)TEXT(#TClass) + 1 + ((StaticClassFlags & CLASS_Deprecated) ? 11 : 0), \
+			PrivateStaticClass, \
+			StaticRegisterNatives##TClass, \
+			sizeof(TClass), \
+			TClass::StaticClassFlags, \
+			TClass::StaticClassCastFlags(), \
+			TClass::StaticConfigName(), \
+			(UClass::ClassConstructorType)InternalConstructor<TClass>, \
+			(UClass::ClassVTableHelperCtorCallerType)InternalVTableHelperCtorCaller<TClass>, \
+			&TClass::AddReferencedObjects, \
+			&TClass::Super::StaticClass, \
+			&TClass::WithinClass::StaticClass, \
+			true \
+			); \
+		} \
+		return PrivateStaticClass; \
+	}
 
 /*-----------------------------------------------------------------------------
 	ERenameFlags.

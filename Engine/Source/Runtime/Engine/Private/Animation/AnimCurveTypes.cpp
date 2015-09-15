@@ -290,8 +290,10 @@ void FRawCurveTracks::Serialize(FArchive& Ar)
 		}
 	}
 #endif // WITH_EDITORONLY_DATA
-
-	SortFloatCurvesByUID();
+	if (Ar.IsLoading())
+	{
+		SortFloatCurvesByUID();
+	}
 }
 
 void FRawCurveTracks::UpdateLastObservedNames(FSmartNameMapping* NameMapping, ESupportedCurveType SupportedCurveType /*= FloatType*/)
@@ -460,10 +462,34 @@ void FBlendedCurve::Blend(const FBlendedCurve& A, const FBlendedCurve& B, float 
 		for(int32 CurveId=0; CurveId<A.Elements.Num(); ++CurveId)
 		{
 			Elements[CurveId].Value = FMath::Lerp(A.Elements[CurveId].Value, B.Elements[CurveId].Value, Alpha); 
-			Elements[CurveId].Flags |= (A.Elements[CurveId].Flags | B.Elements[CurveId].Flags);
+			Elements[CurveId].Flags |= (B.Elements[CurveId].Flags);
 		}
 	}
 
+	ValidateCurve(this);
+}
+
+void FBlendedCurve::BlendWith(const FBlendedCurve& Other, float Alpha)
+{
+	check(Num()==Other.Num());
+	if(FMath::Abs(Alpha) <= ZERO_ANIMWEIGHT_THRESH)
+	{
+		return;
+	}
+	else if(FMath::Abs(Alpha - 1.0f) <= ZERO_ANIMWEIGHT_THRESH)
+	{
+		// if blend is all the way for child2, then just copy its bone atoms
+		Override(Other);
+	}
+	else
+	{
+		for(int32 CurveId=0; CurveId<Elements.Num(); ++CurveId)
+		{
+			Elements[CurveId].Value = FMath::Lerp(Elements[CurveId].Value, Other.Elements[CurveId].Value, Alpha);
+			Elements[CurveId].Flags |= (Other.Elements[CurveId].Flags);
+		}
+	}
+	 
 	ValidateCurve(this);
 }
 
@@ -520,7 +546,8 @@ void FBlendedCurve::Override(const FBlendedCurve& CurveToOverrideFrom, float Wei
 void FBlendedCurve::Override(const FBlendedCurve& CurveToOverrideFrom)
 {
 	InitFrom(CurveToOverrideFrom);
-	Elements = CurveToOverrideFrom.Elements;
+	Elements.Reset();
+	Elements.Append(CurveToOverrideFrom.Elements);
 
 	ValidateCurve(this);
 }
@@ -530,7 +557,7 @@ void FBlendedCurve::InitFrom(const USkeleton* Skeleton)
 	if(const FSmartNameMapping* Mapping = Skeleton->SmartNames.GetContainer(USkeleton::AnimCurveMappingName))
 	{
 		Mapping->FillUidArray(UIDList);
-		Elements.Empty(UIDList.Num());
+		Elements.Reset();
 		Elements.AddZeroed(UIDList.Num());
 	}
 
@@ -546,10 +573,15 @@ FBlendedCurve::FBlendedCurve(const class UAnimInstance* AnimInstance)
 
 void FBlendedCurve::CopyFrom(const FBlendedCurve& CurveToCopyFrom)
 {
-	UIDList = CurveToCopyFrom.UIDList;
-	Elements = CurveToCopyFrom.Elements;
-	bInitialized = true;
-	ValidateCurve(this);
+	if (&CurveToCopyFrom != this)
+	{
+		UIDList.Reset();
+		UIDList.Append(CurveToCopyFrom.UIDList);
+		Elements.Reset();
+		Elements.Append(CurveToCopyFrom.Elements);
+		bInitialized = true;
+		ValidateCurve(this);
+	}
 }
 
 void FBlendedCurve::MoveFrom(FBlendedCurve& CurveToMoveFrom)
@@ -569,7 +601,15 @@ void FBlendedCurve::Combine(const FBlendedCurve& CurveToCombine)
 
 	for(int32 CurveId=0; CurveId<CurveToCombine.Elements.Num(); ++CurveId)
 	{
-		Elements[CurveId].Value = FMath::Max(Elements[CurveId].Value, CurveToCombine.Elements[CurveId].Value);
+		// if target value is non zero, we accpet target's value
+		// originally this code was doing max, but that doesn't make sense since the values can be negative
+		// we could try to pick non-zero, but if target value is non-zero, I think we should accept that value 
+		// if source is non zero, it will be overriden
+		if (CurveToCombine.Elements[CurveId].Value != 0.f)
+		{
+			Elements[CurveId].Value = CurveToCombine.Elements[CurveId].Value; 
+		}
+
 		Elements[CurveId].Flags |= CurveToCombine.Elements[CurveId].Flags;
 	}
 

@@ -31,15 +31,18 @@ TArray<UMovieSceneSection*> MovieSceneHelpers::GetTraversedSections( const TArra
 
 UMovieSceneSection* MovieSceneHelpers::FindSectionAtTime( const TArray<UMovieSceneSection*>& Sections, float Time )
 {
-	if( Sections.Num() == 1 )
+	for( int32 SectionIndex = 0; SectionIndex < Sections.Num(); ++SectionIndex )
 	{
-		return Sections[0];
-	}
-	else
-	{
-		return MovieSceneHelpers::FindNearestSectionAtTime( Sections, Time );
+		UMovieSceneSection* Section = Sections[SectionIndex];
+
+		//@todo Sequencer - There can be multiple sections overlapping in time. Returning instantly does not account for that.
+		if( Section->IsTimeWithinSection( Time ) && Section->IsActive() )
+		{
+			return Section;
+		}
 	}
 
+	return NULL;
 }
 
 
@@ -56,28 +59,31 @@ UMovieSceneSection* MovieSceneHelpers::FindNearestSectionAtTime( const TArray<UM
 	{
 		UMovieSceneSection* Section = Sections[SectionIndex];
 
-		//@todo Sequencer - There can be multiple sections overlapping in time. Returning instantly does not account for that.
-		if( Section->IsTimeWithinSection( Time ) )
+		if (Section->IsActive())
 		{
-			return Section;
-		}
-
-		float EndTime = Section->GetEndTime();
-		if (EndTime < Time)
-		{
-			float ClosestTime = Time - EndTime;
-			if (!ClosestSection || ClosestTime < ClosestSectionTime)
+			//@todo Sequencer - There can be multiple sections overlapping in time. Returning instantly does not account for that.
+			if( Section->IsTimeWithinSection( Time ) )
 			{
-				ClosestSection = Section;
-				ClosestSectionTime = ClosestTime;
+				return Section;
 			}
-		}
 
-		float StartTime = Section->GetStartTime();
-		if (!EarliestSection || StartTime < EarliestSectionTime)
-		{
-			EarliestSection = Section;
-			EarliestSectionTime = StartTime;
+			float EndTime = Section->GetEndTime();
+			if (EndTime < Time)
+			{
+				float ClosestTime = Time - EndTime;
+				if (!ClosestSection || ClosestTime < ClosestSectionTime)
+				{
+					ClosestSection = Section;
+					ClosestSectionTime = ClosestTime;
+				}
+			}
+
+			float StartTime = Section->GetStartTime();
+			if (!EarliestSection || StartTime < EarliestSectionTime)
+			{
+				EarliestSection = Section;
+				EarliestSectionTime = StartTime;
+			}
 		}
 	}
 
@@ -125,17 +131,6 @@ FTrackInstancePropertyBindings::FTrackInstancePropertyBindings( FName InProperty
 		FunctionName = FName(*FunctionString);
 	}
 }
-
-
-void FTrackInstancePropertyBindings::CallFunction( UObject* InRuntimeObject, void* FunctionParams )
-{
-	FPropertyAndFunction PropAndFunction = RuntimeObjectToFunctionMap.FindRef(InRuntimeObject);
-	if(PropAndFunction.Function)
-	{
-		InRuntimeObject->ProcessEvent(PropAndFunction.Function, FunctionParams);
-	}
-}
-
 
 FTrackInstancePropertyBindings::FPropertyAddress FTrackInstancePropertyBindings::FindPropertyRecursive( const UObject* Object, void* BasePointer, UStruct* InStruct, TArray<FString>& InPropertyNames, uint32 Index ) const
 {
@@ -195,16 +190,8 @@ void FTrackInstancePropertyBindings::UpdateBindings( const TArray<UObject*>& InR
 		FPropertyAndFunction PropAndFunction;
 
 		PropAndFunction.Function = Object->FindFunction(FunctionName);
-		if(PropAndFunction.Function)
-		{
-			PropAndFunction.PropertyAddress = FindProperty( Object, PropertyPath );
-			RuntimeObjectToFunctionMap.Add(Object, PropAndFunction);
-		}
-		else
-		{
-			// Don't call potentially invalid functions
-			RuntimeObjectToFunctionMap.Remove(Object);
-		}
+		PropAndFunction.PropertyAddress = FindProperty( Object, PropertyPath );
+		RuntimeObjectToFunctionMap.Add(Object, PropAndFunction);
 	}
 }
 

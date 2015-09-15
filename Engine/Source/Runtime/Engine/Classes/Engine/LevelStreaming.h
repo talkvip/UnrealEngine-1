@@ -161,7 +161,7 @@ class ULevelStreaming : public UObject
 	UPROPERTY()
 	TArray<FString> Keywords;
 
-	// Begin UObject Interface
+	//~ Begin UObject Interface
 	virtual void PostLoad() override;
 	virtual void Serialize( FArchive& Ar ) override;
 #if WITH_EDITOR
@@ -170,7 +170,7 @@ class ULevelStreaming : public UObject
 	/** Remove duplicates in EditorStreamingVolumes list*/
 	void RemoveStreamingVolumeDuplicates();
 #endif
-	// End UObject Interface
+	//~ End UObject Interface
 
 	bool HasLoadedLevel() const
 	{
@@ -217,7 +217,7 @@ class ULevelStreaming : public UObject
 	FBox GetStreamingVolumeBounds();
 
 	/** Gets a pointer to the LoadedLevel value */
-	class ULevel* GetLoadedLevel() const {	return LoadedLevel; }
+	ENGINE_API class ULevel* GetLoadedLevel() const {	return LoadedLevel; }
 	
 	/** Sets the LoadedLevel value to NULL */
 	void ClearLoadedLevel() { SetLoadedLevel(nullptr); }
@@ -248,15 +248,15 @@ class ULevelStreaming : public UObject
 
 	/** Returns whether streaming level is visible */
 	UFUNCTION(BlueprintCallable, Category="Game")
-	bool IsLevelVisible() const;
+	ENGINE_API bool IsLevelVisible() const;
 
 	/** Returns whether streaming level is loaded */
 	UFUNCTION(BlueprintCallable, Category="Game")
-	bool IsLevelLoaded() const;
+	ENGINE_API bool IsLevelLoaded() const;
 
 	/** Returns whether level has streaming state change pending */
 	UFUNCTION(BlueprintCallable, Category="Game")
-	bool IsStreamingStatePending() const;
+	ENGINE_API bool IsStreamingStatePending() const;
 
 	/** Creates a new instance of this streaming level with a provided unique instance name */
 	UFUNCTION(BlueprintCallable, Category="Game")
@@ -266,7 +266,7 @@ class ULevelStreaming : public UObject
 	UFUNCTION(BlueprintPure, meta = (BlueprintInternalUseOnly = "true"))
 	ALevelScriptActor* GetLevelScriptActor();
 
-	//==============================================================================================
+	//~==============================================================================================
 	// Delegates
 	
 	/** Called when level is streamed in  */

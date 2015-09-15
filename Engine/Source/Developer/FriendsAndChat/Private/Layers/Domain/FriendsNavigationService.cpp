@@ -2,6 +2,7 @@
 
 #include "FriendsAndChatPrivatePCH.h"
 #include "FriendsNavigationService.h"
+#include "FriendsService.h"
 
 class FFriendsNavigationServiceImpl
 	: public FFriendsNavigationService
@@ -18,24 +19,45 @@ public:
 		OnChatChannelChanged().Broadcast(ChannelSelected);
 	}
 
-	virtual void SetOutgoingChatFriend(TSharedRef<IFriendItem> FriendItem) override
+	virtual void SetOutgoingChatFriend(TSharedRef<IFriendItem> FriendItem, bool SetChannel) override
 	{
-		OnChatFriendSelected().Broadcast(FriendItem);
+		if(FriendItem->GetInviteStatus() == EInviteStatus::Accepted)
+		{
+			if(SetChannel)
+			{
+				ChangeViewChannel(EChatMessageType::Whisper);
+			}
+			OnChatFriendSelected().Broadcast(FriendItem);
+		}
 	}
 
-	DECLARE_DERIVED_EVENT(FFriendsNavigationServiceImpl, FFriendsNavigationService::FViewChangedEvent, FViewChangedEvent);
+	virtual void SetOutgoingChatFriend(const FUniqueNetId& InUserID) override
+	{
+		TSharedPtr< IFriendItem > FoundFriend = FriendsService->FindUser(InUserID);
+		if(FoundFriend.IsValid())
+		{
+			SetOutgoingChatFriend(FoundFriend.ToSharedRef(), true);
+		}
+	}
+
+	virtual bool IsInGame() const override
+	{
+		return InGame;
+	}
+
+	DECLARE_DERIVED_EVENT(FFriendsNavigationServiceImpl, IFriendsNavigationService::FViewChangedEvent, FViewChangedEvent);
 	virtual FViewChangedEvent& OnChatViewChanged() override
 	{
 		return ViewChangedEvent;
 	}
 
-	DECLARE_DERIVED_EVENT(FFriendsNavigationServiceImpl, FFriendsNavigationService::FChannelChangedEvent, FChannelChangedEvent);
+	DECLARE_DERIVED_EVENT(FFriendsNavigationServiceImpl, IFriendsNavigationService::FChannelChangedEvent, FChannelChangedEvent);
 	virtual FChannelChangedEvent& OnChatChannelChanged() override
 	{
 		return ChannelChangedEvent;
 	}
 
-	DECLARE_DERIVED_EVENT(FFriendsNavigationServiceImpl, FFriendsNavigationService::FFriendSelectedEvent, FFriendSelectedEvent);
+	DECLARE_DERIVED_EVENT(FFriendsNavigationServiceImpl, IFriendsNavigationService::FFriendSelectedEvent, FFriendSelectedEvent);
 	virtual FFriendSelectedEvent& OnChatFriendSelected() override
 	{
 		return FriendSelectedEvent;
@@ -47,7 +69,9 @@ private:
 	{
 	}
 
-	FFriendsNavigationServiceImpl()
+	FFriendsNavigationServiceImpl(const TSharedRef<class FFriendsService>& InFriendsService, bool InIsInGame)
+		: FriendsService(InFriendsService)
+		, InGame(InIsInGame)
 	{}
 
 private:
@@ -55,12 +79,15 @@ private:
 	FChannelChangedEvent ChannelChangedEvent;
 	FFriendSelectedEvent FriendSelectedEvent;
 
+	TSharedRef<FFriendsService> FriendsService;
+	bool InGame;
+
 	friend FFriendsNavigationServiceFactory;
 };
 
-TSharedRef< FFriendsNavigationService > FFriendsNavigationServiceFactory::Create()
+TSharedRef< FFriendsNavigationService > FFriendsNavigationServiceFactory::Create(const TSharedRef<class FFriendsService>& FriendsService, bool InIsInGame)
 {
-	TSharedRef< FFriendsNavigationServiceImpl > Service = MakeShareable(new FFriendsNavigationServiceImpl());
+	TSharedRef< FFriendsNavigationServiceImpl > Service = MakeShareable(new FFriendsNavigationServiceImpl(FriendsService, InIsInGame));
 	Service->Initialize();
 	return Service;
 }

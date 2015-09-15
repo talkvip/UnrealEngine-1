@@ -30,6 +30,15 @@ namespace UnrealBuildTool
         public static bool bForceUnityBuild;
 
 		/// <summary>
+		/// An experimental new feature that, when enabled, will try to determine source files that you are actively iteratively changing, 
+		/// and break those files out of their unity blobs so that you can compile them as individual translation units, much faster than 
+		/// recompiling the entire unity blob each time.
+		/// IMPORTANT: This feature is not complete yet!  Currently, it requires source files to be read-only that you aren't actively working with!
+		/// </summary>
+		[XmlConfig]
+		public static bool bUseAdaptiveUnityBuild;
+
+		/// <summary>
 		/// The number of source files in a game module before unity build will be activated for that module.  This
 		/// allows small game modules to have faster iterative compile times for single files, at the expense of slower full
 		/// rebuild times.  This setting can be overridden by the bFasterWithoutUnity option in a module's Build.cs file.
@@ -48,6 +57,20 @@ namespace UnrealBuildTool
 		/// </summary>
 		[XmlConfig]
 		public static bool bUseFastMonoCalls;
+
+        /// <summary>
+        /// New Xbox driver supports a "fast semantics" context type. This switches it on for the immediate context
+        /// EXPERIMENTAL - WILL CAUSE RENDERING ISSUES AND/OR CRASHES AT PRESENT!
+        /// </summary>
+        [XmlConfig]
+        public static bool bUseFastSemanticsImmediateContext;
+
+        /// <summary>
+        /// New Xbox driver supports a "fast semantics" context type. This switches it on for the deferred contexts
+        /// EXPERIMENTAL - WILL CAUSE RENDERING ISSUES AND/OR CRASHES AT PRESENT!
+        /// </summary>
+        [XmlConfig]
+        public static bool bUseFastSemanticsDeferredContexts;
 
         /// Async Compute context support. Requires Mono and Fastcalls
         /// </summary>
@@ -230,7 +253,13 @@ namespace UnrealBuildTool
 		/// </summary>
 		[XmlConfig]
 		public static bool bOmitFramePointers;
-        
+
+		/// <summary>
+		/// What level of logging we wish to show
+		/// </summary>
+		[XmlConfig]
+		public static string LogLevel;
+
 		/// <summary>
 		/// Processor count multiplier for local execution. Can be below 1 to reserve CPU for other tasks.
 		/// </summary>
@@ -343,7 +372,7 @@ namespace UnrealBuildTool
 		public static bool bEnableCodeAnalysis;
 
 		/// <summary>
-		/// Enables "Shared PCHs", an experimental feature which may significantly speed up compile times by attempting to
+		/// Enables "Shared PCHs", a feature which significantly speeds up compile times by attempting to
 		/// share certain PCH files between modules that UBT detects is including those PCH's header files
 		/// </summary>
 		[XmlConfig]
@@ -370,6 +399,12 @@ namespace UnrealBuildTool
 		/// </summary>
 		[XmlConfig]
 		public static bool bDebugBuildsActuallyUseDebugCRT;
+
+        /// <summary>
+        /// True if Development and Release builds should use the release configuration of PhysX/APEX.
+        /// </summary>
+        [XmlConfig]
+        public static bool bUseShippingPhysXLibraries;
 
 		/// <summary>
 		/// Tells the UBT to check if module currently being built is violating EULA.
@@ -420,10 +455,28 @@ namespace UnrealBuildTool
 		public static bool bAllowDistccLocalFallback;
 
 		/// <summary>
+		/// When true enable verbose distcc output to aid debugging.
+		/// </summary>
+		[XmlConfig]
+		public static bool bVerboseDistccOutput;
+
+		/// <summary>
 		/// Path to the Distcc & DMUCS executables.
 		/// </summary>
 		[XmlConfig]
 		public static string DistccExecutablesPath;
+
+		/// <summary>
+		/// DMUCS coordinator hostname or IP address.
+		/// </summary>
+		[XmlConfig]
+		public static string DMUCSCoordinator;
+
+		/// <summary>
+		/// The DMUCS distinguishing property value to request for compile hosts.
+		/// </summary>
+		[XmlConfig]
+		public static string DMUCSDistProp;
 
 		/// <summary>
 		/// Run UnrealCodeAnalyzer instead of regular compilation. Requires setting UCA mode by bUCACheckUObjectThreadSafety or bUCACheckPCHFiles.
@@ -495,6 +548,8 @@ namespace UnrealBuildTool
 			bSupportEditAndContinue = false;
 			bUseActionHistory = true;
 
+			LogLevel = "Log";
+
 			// Incremental linking can yield faster iteration times when making small changes
 			// NOTE: We currently don't use incremental linking because it tends to behave a bit buggy on some computers (PDB-related compile errors)
 			bUseIncrementalLinking = false;
@@ -512,6 +567,10 @@ namespace UnrealBuildTool
 			// changes, consider turning this off.  In some cases, unity builds can cause linker errors after iterative changes to files, because
 			// the synthesized file names for unity code files may change between builds.
 			bUseUnityBuild = true;
+
+			// This experimental feature may help to improve iterative compile times when working on code, but is
+			// disabled by default until we test it sufficiently
+			bUseAdaptiveUnityBuild = false;
 
 			bForceUnityBuild = false;
 
@@ -550,12 +609,21 @@ namespace UnrealBuildTool
             bUseFastMonoCalls = true;
             bUseAsyncComputeContext = bUseFastMonoCalls;
 
+            // Switches for fast semantics D3D contexts
+            // EXPERIMENTAL - WILL CAUSE RENDERING ISSUES AND/OR CRASHES AT PRESENT!
+            bUseFastSemanticsImmediateContext = false;
+            bUseFastSemanticsDeferredContexts = false;
+
 			// By default we use the Release C++ Runtime (CRT), even when compiling Debug builds.  This is because the Debug C++
 			// Runtime isn't very useful when debugging Unreal Engine projects, and linking against the Debug CRT libraries forces
 			// our third party library dependencies to also be compiled using the Debug CRT (and often perform more slowly.)  Often
 			// it can be inconvenient to require a separate copy of the debug versions of third party static libraries simply
 			// so that you can debug your program's code.
 			bDebugBuildsActuallyUseDebugCRT = false;
+
+            // By default we use the Profile PhysX/APEX binaries.
+            // We do this in order to keep all configurations the same for behavior consistency. Profile gives some nice debug tools and warnings so we use it instead of Release
+            bUseShippingPhysXLibraries = false;
 
 			// set up some paths
 			BaseIntermediateFolder = "Intermediate/Build/";
@@ -567,14 +635,19 @@ namespace UnrealBuildTool
 			// Enables support for fast include dependency scanning, as well as gathering data for 'UBT Makefiles', then quickly
 			// assembling builds in subsequent runs using data in those cached makefiles
 			// NOTE: This feature is new and has a number of known issues (search the code for '@todo ubtmake')
-			bUseUBTMakefiles = !Utils.IsRunningOnMono;	// @todo ubtmake: Needs support for Mac
+			bUseUBTMakefiles = true;
 
 			// Distcc requires some setup - so by default disable it so we don't break local or remote building
 			bAllowDistcc = false;
 			bAllowDistccLocalFallback = true;
+			bVerboseDistccOutput = false;
 
 			// The normal Posix place to install distcc/dmucs would be /usr/local so start there
 			DistccExecutablesPath = "/usr/local/bin";
+
+			// The standard coordinator is localhost and the default distprop is empty
+			DMUCSCoordinator = "localhost";
+			DMUCSDistProp = "";
 
 			// By default compile code instead of analyzing it.
 			bRunUnrealCodeAnalyzer = false;
@@ -594,6 +667,31 @@ namespace UnrealBuildTool
 				if (System.IO.Directory.Exists (MacDistccExecutablesPath)) 
 				{
 					DistccExecutablesPath = MacDistccExecutablesPath;
+				}
+
+				if (System.IO.File.Exists (UserDir + "/Library/Preferences/com.marksatt.DistCode.plist"))
+				{
+					using (System.Diagnostics.Process DefaultsProcess = new System.Diagnostics.Process())
+					{
+						try
+						{
+							DefaultsProcess.StartInfo.FileName = "/usr/bin/defaults";
+							DefaultsProcess.StartInfo.CreateNoWindow = true;
+							DefaultsProcess.StartInfo.UseShellExecute = false;
+							DefaultsProcess.StartInfo.RedirectStandardOutput = true;
+							DefaultsProcess.StartInfo.Arguments = "read com.marksatt.DistCode DistProp";
+							DefaultsProcess.Start();
+							string Output = DefaultsProcess.StandardOutput.ReadToEnd();
+							DefaultsProcess.WaitForExit();
+							if(DefaultsProcess.ExitCode == 0)
+							{
+								DMUCSDistProp = Output;
+							}
+						}
+						catch (Exception)
+						{
+						}
+					}
 				}
 			}
 		}

@@ -106,7 +106,7 @@ public:
 	 * Allows us to only see this Actor in the Editor, and not in the actual game.
 	 * @see SetActorHiddenInGame()
 	 */
-	UPROPERTY(EditAnywhere, Category=Rendering, BlueprintReadOnly, replicated, meta=(DisplayName = "Actor Hidden In Game", SequencerTrackClass = "MovieSceneVisibilityTrack"))
+	UPROPERTY(Interp, EditAnywhere, Category=Rendering, BlueprintReadOnly, replicated, meta=(DisplayName = "Actor Hidden In Game", SequencerTrackClass = "MovieSceneVisibilityTrack"))
 	uint32 bHidden:1;
 
 	/** If true, when the actor is spawned it will be sent to the client but receive no further replication updates from the server afterwards. */
@@ -175,9 +175,20 @@ public:
 	/** True if this actor is currently running user construction script (used to defer component registration) */
 	uint32 bRunningUserConstructionScript:1;
 
+	/**
+	 * Whether we allow this Actor to tick before it receives the BeginPlay event.
+	 * Normally we don't tick actors until after BeginPlay; this setting allows this behavior to be overridden.
+	 * This Actor must be able to tick for this setting to be relevant.
+	 */
+	UPROPERTY(EditDefaultsOnly, Category="Tick")
+	uint32 bAllowTickBeforeBeginPlay:1;
+
 private:
 	/** Whether FinishSpawning has been called for this Actor.  If it has not, the Actor is in a mal-formed state */
 	uint32 bHasFinishedSpawning:1;
+
+	/** Whether we've tried to register tick functions. Reset when they are unregistered. */
+	uint32 bTickFunctionsRegistered : 1;
 
 	/**
 	 * Enables any collision on this actor.
@@ -185,6 +196,9 @@ private:
 	 */
 	UPROPERTY()
 	uint32 bActorEnableCollision:1;
+
+	/** Flag indicating we have checked initial simulating physics state to sync networked proxies to the server. */
+	uint32 bNetCheckedInitialPhysicsState:1;
 
 protected:
 	/**
@@ -523,7 +537,7 @@ public:
 	UPROPERTY(transient)
 	uint64 HiddenEditorViews;
 
-	//==============================================================================================
+	//~==============================================================================================
 	// Delegates
 	
 	/** Called when the actor is damaged in any way. */
@@ -631,7 +645,7 @@ public:
 	AController* GetInstigatorController() const;
 
 
-	//=============================================================================
+	//~=============================================================================
 	// General functions.
 
 	/**
@@ -764,6 +778,10 @@ public:
 	/** Returns the distance from this Actor to OtherActor. */
 	UFUNCTION(BlueprintCallable, Category = "Utilities|Transformation")
 	float GetDistanceTo(const AActor* OtherActor) const;
+
+	/** Returns the squared distance from this Actor to OtherActor. */
+	UFUNCTION(BlueprintCallable, Category = "Utilities|Transformation")
+	float GetSquaredDistanceTo(const AActor* OtherActor) const;
 
 	/** Returns the distance from this Actor to OtherActor, ignoring Z. */
 	UFUNCTION(BlueprintCallable, Category = "Utilities|Transformation")
@@ -1047,7 +1065,7 @@ public:
 	 */
 	void DetachSceneComponentsFromParent(class USceneComponent* InParentComponent, bool bMaintainWorldPosition = true);
 
-	//==============================================================================
+	//~==============================================================================
 	// Tags
 
 	/** See if this actor contains the supplied tag */
@@ -1055,7 +1073,7 @@ public:
 	bool ActorHasTag(FName Tag) const;
 
 
-	//==============================================================================
+	//~==============================================================================
 	// Misc Blueprint support
 
 	/** 
@@ -1096,7 +1114,7 @@ public:
 	UFUNCTION(BlueprintCallable, meta=(DeprecatedFunction, DeprecationMessage="Use PrimitiveComponent.CreateAndSetMaterialInstanceDynamic instead.", BlueprintProtected = "true"), Category="Rendering|Material")
 	class UMaterialInstanceDynamic* MakeMIDForMaterial(class UMaterialInterface* Parent);
 
-	//=============================================================================
+	//~=============================================================================
 	// AI functions.
 	
 	/**
@@ -1113,7 +1131,7 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="AI", meta=(BlueprintProtected = "true"))
 	void MakeNoise(float Loudness=1.f, APawn* NoiseInstigator=NULL, FVector NoiseLocation=FVector::ZeroVector, float MaxRange = 0.f, FName Tag = NAME_None);
 
-	//=============================================================================
+	//~=============================================================================
 	// Blueprint
 	
 	/** Event when play begins for this actor. */
@@ -1305,13 +1323,14 @@ public:
 	UPROPERTY(BlueprintAssignable, Category="Game")
 	FActorEndPlaySignature OnEndPlay;
 	
-	// Begin UObject Interface
+	//~ Begin UObject Interface
 	virtual bool CheckDefaultSubobjectsInternal() override;
 	virtual void PostInitProperties() override;
 	virtual bool Modify( bool bAlwaysMarkDirty=true ) override;
 	virtual void ProcessEvent( UFunction* Function, void* Parameters ) override;
 	virtual int32 GetFunctionCallspace( UFunction* Function, void* Parameters, FFrame* Stack ) override;
 	virtual bool CallRemoteFunction( UFunction* Function, void* Parameters, FOutParmRec* OutParms, FFrame* Stack ) override;
+	virtual void Serialize(FArchive& Ar) override;
 	virtual void PostLoad() override;
 	virtual void PostLoadSubobjects( FObjectInstancingGraph* OuterInstanceGraph ) override;
 	virtual void BeginDestroy() override;
@@ -1372,7 +1391,7 @@ public:
 	/** @return true if the component is allowed to re-register its components when modified.  False for CDOs or PIE instances. */
 	bool ReregisterComponentsWhenModified() const;
 #endif // WITH_EDITOR
-	// End UObject Interface
+	//~ End UObject Interface
 
 #if WITH_EDITOR
 	virtual void PostEditMove(bool bFinished);
@@ -1397,7 +1416,7 @@ public:
 		return false;
 	}
 
-	/**
+	/*~
 	 * Returns location of the RootComponent 
 	 * this is a template for no other reason than to delay compilation until USceneComponent is defined
 	 */ 
@@ -1407,7 +1426,7 @@ public:
 		return (RootComponent != nullptr) ? RootComponent->GetComponentLocation() : FVector(0.f,0.f,0.f);
 	}
 
-	/**
+	/*~
 	 * Returns rotation of the RootComponent 
 	 * this is a template for no other reason than to delay compilation until USceneComponent is defined
 	 */ 
@@ -1417,7 +1436,7 @@ public:
 		return (RootComponent != nullptr) ? RootComponent->GetComponentRotation() : FRotator(0.f,0.f,0.f);
 	}
 
-	/**
+	/*~
 	 * Returns scale of the RootComponent 
 	 * this is a template for no other reason than to delay compilation until USceneComponent is defined
 	 */ 
@@ -1427,7 +1446,7 @@ public:
 		return (RootComponent != nullptr) ? RootComponent->GetComponentScale() : FVector(1.f,1.f,1.f);
 	}
 
-	/**
+	/*~
 	 * Returns quaternion of the RootComponent
 	 * this is a template for no other reason than to delay compilation until USceneComponent is defined
 	 */ 
@@ -1673,6 +1692,13 @@ public:
 	virtual void OnActorChannelOpen(class FInBunch& InBunch, class UNetConnection* Connection) {};
 
 	/**
+	 * Used by the net connection to determine if a net owning actor should switch to using the shortened timeout value
+	 * 
+	 * @return true to switch from InitialConnectTimeout to ConnectionTimeout values on the net driver
+	 */
+	virtual bool UseShortConnectTimeout() const { return false; }
+
+	/**
 	 * SerializeNewActor has just been called on the actor before network replication (server side)
 	 * @param OutBunch Bunch containing serialized contents of actor prior to replication
 	 */
@@ -1686,6 +1712,9 @@ public:
 
 	/** Swaps Role and RemoteRole if client */
 	void ExchangeNetRoles(bool bRemoteOwner);
+
+	/** The replay system calls this to hack the Role and RemoteRole while recording replays on a client. Only call this if you know what you're doing! */
+	void SwapRolesForReplay();
 
 	/**
 	 * When called, will call the virtual call chain to register all of the tick functions for both the actor and optionally all components
@@ -1760,6 +1789,12 @@ public:
 	/** Update and smooth simulated physic state, replaces PostNetReceiveLocation() and PostNetReceiveVelocity() */
 	virtual void PostNetReceivePhysicState();
 
+protected:
+	/** Sync IsSimulatingPhysics() with ReplicatedMovement.bRepPhysics */
+	void SyncReplicatedPhysicsSimulation();
+
+public:
+
 	/** 
 	 * Set the owner of this Actor, used primarily for network replication. 
 	 * @param NewOwner	The Actor whom takes over ownership of this Actor
@@ -1825,7 +1860,7 @@ public:
 	 *	Function called every frame on this Actor. Override this function to implement custom logic to be executed every frame.
 	 *	Note that Tick is disabled by default, and you will need to check PrimaryActorTick.bCanEverTick is set to true to enable it.
 	 *
-	 *	@param	DeltaSeconds	Game time elapsed since last call to Tick
+	 *	@param	DeltaSeconds	Game time elapsed during last frame modified by the time dilation
 	 */
 	virtual void Tick( float DeltaSeconds );
 
@@ -1903,6 +1938,14 @@ public:
 	 * @return NetConnection to the client or server for this actor
 	 */
 	virtual class UNetConnection* GetNetConnection() const;
+
+	/**
+	 * Called by DestroyActor(), gives actors a chance to op out of actor destruction
+	 * Used by network code to have the net connection timeout/cleanup first
+	 *
+	 * @return true if DestroyActor() should not continue with actor destruction, false otherwise
+	 */
+	virtual bool DestroyNetworkActorHandled();
 
 	/**
 	 * Gets the net mode for this actor, indicating whether it is a client or server (including standalone/not networked).
@@ -2202,7 +2245,7 @@ public:
 	 */
 	virtual void TornOff();
 
-	//=============================================================================
+	//~=============================================================================
 	// Collision functions.
  
 	/** 
@@ -2214,7 +2257,7 @@ public:
 	 */
 	virtual ECollisionResponse GetComponentsCollisionResponseToChannel(ECollisionChannel Channel) const;
 
-	//=============================================================================
+	//~=============================================================================
 	// Physics
 
 	/** Stop all simulation from all components in this actor */
@@ -2471,6 +2514,11 @@ private:
 	/** List of replicated components. */
 	TArray<UActorComponent*> ReplicatedComponents;
 
+#if WITH_EDITOR
+	/** Maps natively-constructed components to properties that reference them. */
+	TMultiMap<FName, UObjectProperty*> NativeConstructedComponentToPropertyMap;
+#endif
+
 public:
 
 	/** Array of ActorComponents that are created by blueprints and serialized per-instance. */
@@ -2497,7 +2545,7 @@ public:
 	const TArray<UActorComponent*>& GetInstanceComponents() const;
 
 public:
-	//=============================================================================
+	//~=============================================================================
 	// Navigation related functions
 	// 
 
@@ -2506,7 +2554,7 @@ public:
 	 */
 	virtual bool IsComponentRelevantForNavigation(UActorComponent* Component) const { return true; }
 
-	//=============================================================================
+	//~=============================================================================
 	// Debugging functions
 public:
 	/**
@@ -2526,17 +2574,6 @@ public:
 
 	/** Retrieves actor's name used for logging, or string "NULL" if Actor == NULL */
 	static FString GetDebugName(const AActor* Actor) { return Actor ? Actor->GetName() : TEXT("NULL"); }
-
-#if ENABLE_VISUAL_LOG
-	/** 
-	 *	Hook for Actors to supply visual logger with additional data.
-	 *	It's guaranteed that Snapshot != NULL
-	 */
-	virtual void GrabDebugSnapshot(struct FVisualLogEntry* Snapshot) const {}
-
-private:
-	friend class FVisualLog;
-#endif // ENABLE_VISUAL_LOG
 
 	//* Sets the friendly actor label and name */
 	void SetActorLabelInternal( const FString& NewActorLabelDirty, bool bMakeGloballyUniqueFName, bool bMarkDirty );

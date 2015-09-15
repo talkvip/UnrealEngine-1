@@ -65,6 +65,7 @@ void FSlateOpenGLRenderer::Initialize()
 	const uint32 TextureSize = 1024;
 
 	TextureManager = MakeShareable( new FSlateOpenGLTextureManager );
+	FSlateDataPayload::ResourceManager = TextureManager.Get();
 
 	FontCache = MakeShareable( new FSlateFontCache( MakeShareable( new FSlateOpenGLFontAtlasFactory ) ) );
 	FontMeasure = FSlateFontMeasure::Create( FontCache.ToSharedRef() );
@@ -129,7 +130,7 @@ void FSlateOpenGLRenderer::DrawWindows( FSlateDrawBuffer& InWindowDrawBuffer )
 			
 			FSlateBatchData& BatchData = ElementList.GetBatchData();
 
-			BatchData.CreateRenderBatches();
+			BatchData.CreateRenderBatches(ElementList.GetRootDrawLayer().GetElementBatchMap());
 
 			RenderingPolicy->UpdateVertexAndIndexBuffers( BatchData );
 
@@ -219,6 +220,11 @@ void FSlateOpenGLRenderer::ReleaseDynamicResource( const FSlateBrush& Brush )
 bool FSlateOpenGLRenderer::GenerateDynamicImageResource(FName ResourceName, uint32 Width, uint32 Height, const TArray< uint8 >& Bytes)
 {
 	return TextureManager->CreateDynamicTextureResource(ResourceName, Width, Height, Bytes) != NULL;
+}
+
+FSlateResourceHandle FSlateOpenGLRenderer::GetResourceHandle( const FSlateBrush& Brush )
+{
+	return TextureManager->GetResourceHandle( Brush );
 }
 
 void FSlateOpenGLRenderer::RemoveDynamicBrushResource( TSharedPtr<FSlateDynamicImageBrush> BrushToRemove )

@@ -1,0 +1,29 @@
+﻿INTSourceChangelist:2664711
+Availability:Docs
+Title:4.2 - Event Graph のセットアップ
+Crumbs: %ROOT%, Programming, Programming/Tutorials, Programming/Tutorials/FirstPersonShooter, Programming/Tutorials/FirstPersonShooter/4
+Description:First Person Shooter キャラクターの Event Graph をセットアップする方法を学びます。
+スキルレベル:初心者向け
+バージョン：4.9
+
+[VAR:Steps]
+[OBJECT:Navigation]
+	[PARAM:previous]
+		[前のステップ](Programming/Tutorials/FirstPersonShooter/4/1)
+	[/PARAM]
+	[PARAM:current]
+	[/PARAM]
+	[PARAM:home]
+		[セクション ホーム](Programming/Tutorials/FirstPersonShooter/4)
+	[/PARAM]
+	[PARAM:next]
+		[次のステップ](Programming/Tutorials/FirstPersonShooter/4/3)
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+%Steps%
+
+<!--TODO:Add tutorial steps here-->
+
+%Steps%

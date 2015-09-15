@@ -264,6 +264,20 @@ FText UK2Node_VariableGet::GetNodeTitle(ENodeTitleType::Type TitleType) const
 	for (int32 PinIndex = 0; PinIndex < Pins.Num(); ++PinIndex)
 	{
 		UEdGraphPin* Pin = Pins[PinIndex];
+
+		// The following code is to attempt to log info related to UE-19729
+		if (TitleType == ENodeTitleType::ListView)
+		{
+			if (UEdGraph* Graph = Cast<UEdGraph>(GetOuter()))
+			{
+				FString VariableName = GetVarNameString();
+				FString BlueprintPath = FBlueprintEditorUtils::FindBlueprintForGraph(Graph)->GetPathName();
+				FString SetupStyle = bIsPureGet? TEXT("pure") : TEXT("validated");
+				FString VariableResolves = (VariableReference.ResolveMember<UProperty>(GetBlueprintClassFromNode()) != nullptr)? TEXT("resolves") : TEXT("does not resolve");
+				checkf(Pin, TEXT("Get node for variable '%s' in Blueprint '%s' which is setup as %s and has %d pins. Variable %s"), *VariableName, *BlueprintPath, *SetupStyle, Pins.Num(), *VariableResolves);
+			}
+		}
+
 		if (Pin->Direction == EGPD_Output)
 		{
 			++NumOutputsFound;
@@ -444,5 +458,30 @@ void UK2Node_VariableGet::ExpandNode(class FKismetCompilerContext& CompilerConte
 		BreakAllNodeLinks();
 	}
 }
+
+void UK2Node_VariableGet::Serialize(FArchive& Ar)
+{
+	// The following code is to attempt to log info related to UE-19729
+	if (Ar.IsSaving() && Ar.IsPersistent())
+	{
+		uint32 PortFlagsToSkip = PPF_Duplicate | PPF_DuplicateForPIE;
+		if (!(Ar.GetPortFlags() & PortFlagsToSkip))
+		{
+			if (UEdGraph* Graph = Cast<UEdGraph>(GetOuter()))
+			{
+				if (UBlueprint* Blueprint = FBlueprintEditorUtils::FindBlueprintForGraph(Graph))
+				{
+					if (!Blueprint->bBeingCompiled)
+					{
+						// The following line may spur the crash noted in UE-19729 and will confirm that the crash happens before the FiB gather.
+						GetNodeTitle(ENodeTitleType::ListView);
+					}
+				}
+			}
+		}
+	}
+	Super::Serialize(Ar);
+}
+
 
 #undef LOCTEXT_NAMESPACE

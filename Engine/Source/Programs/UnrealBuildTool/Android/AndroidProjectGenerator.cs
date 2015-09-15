@@ -57,7 +57,7 @@ namespace UnrealBuildTool
 			if (NsightVersion.ProductMajorPart > 3)
 			{
 				// Mark as Nsight 3.1 (project will be updated)
-				NsightVersionCode = 10;
+				NsightVersionCode = 11;
 				NsightInstalled = true;
 			}
 			else if (NsightVersion.ProductMajorPart == 3)
@@ -69,7 +69,7 @@ namespace UnrealBuildTool
 				if (NsightVersion.ProductMinorPart >= 1)
 				{
 					// Nsight 3.1+ should be valid (will update project if newer)
-					NsightVersionCode = 10;
+					NsightVersionCode = 11;
 				}
 			}
 			else if (NsightVersion.ProductMajorPart == 2)
@@ -198,7 +198,7 @@ namespace UnrealBuildTool
 		 *	
 		 *	@return	string				The custom path lines for the project file; Empty string if it doesn't require one
 		 */
-		public override string GetVisualStudioPathsEntries(UnrealTargetPlatform InPlatform, UnrealTargetConfiguration InConfiguration, TargetRules.TargetType TargetType, string TargetRulesPath, string ProjectFilePath, string NMakeOutputPath)
+		public override string GetVisualStudioPathsEntries(UnrealTargetPlatform InPlatform, UnrealTargetConfiguration InConfiguration, TargetRules.TargetType TargetType, FileReference TargetRulesPath, FileReference ProjectFilePath, FileReference NMakeOutputPath)
 		{
 			if (!IsNsightInstalled())
 			{
@@ -212,18 +212,18 @@ namespace UnrealBuildTool
 			//       environment variable
 
 			//@todo android: clean up debug path generation
-			string GameName = Path.GetFileNameWithoutExtension(TargetRulesPath);
+			string GameName = TargetRulesPath.GetFileNameWithoutExtension();
 			GameName = Path.GetFileNameWithoutExtension(GameName);
 
 
 			// intermediate path for Engine or Game's intermediate
 			string IntermediateDirectoryPath;
-			IntermediateDirectoryPath = Path.GetDirectoryName(NMakeOutputPath) + "/../../Intermediate/Android/APK";
+			IntermediateDirectoryPath = Path.GetDirectoryName(NMakeOutputPath.FullName) + "/../../Intermediate/Android/APK";
 
 			// string for <OverrideAPKPath>
 			string APKPath = Path.Combine(
-				Path.GetDirectoryName(NMakeOutputPath),
-				Path.GetFileNameWithoutExtension(NMakeOutputPath) + "-armv7-es2.apk");
+				Path.GetDirectoryName(NMakeOutputPath.FullName),
+				Path.GetFileNameWithoutExtension(NMakeOutputPath.FullName) + "-armv7-es2.apk");
 
 			// string for <BuildXmlPath> and <AndroidManifestPath>
 			string BuildXmlPath = IntermediateDirectoryPath;

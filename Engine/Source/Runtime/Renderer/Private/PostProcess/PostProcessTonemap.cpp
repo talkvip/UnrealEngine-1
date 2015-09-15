@@ -79,6 +79,7 @@ static uint32 TonemapperConfBitmaskPC[7] = {
 	0,
 
 	TonemapperBloom + 
+	TonemapperVignette +
 	TonemapperGrainQuantization +
 	0,
 
@@ -97,6 +98,7 @@ static uint32 TonemapperConfBitmaskPC[7] = {
 	0,
 
 	TonemapperBloom + 
+	TonemapperVignette +
 	0,
 
 	//
@@ -515,6 +517,11 @@ static uint32 TonemapperGenerateBitmaskPC(const FViewInfo* RESTRICT View, bool b
 {
 	uint32 Bitmask = TonemapperGenerateBitmask(View, bGammaOnly, false);
 
+	// PC doesn't support these
+	Bitmask &= ~TonemapperContrast;
+	Bitmask &= ~TonemapperColorMatrix;
+	Bitmask &= ~TonemapperShadowTint;
+
 	// Must early exit if gamma only.
 	if(Bitmask == TonemapperGammaOnly) 
 	{
@@ -910,7 +917,7 @@ public:
 				TStaticSamplerState<SF_Bilinear, AM_Clamp, AM_Clamp, AM_Clamp, 0, 1>::GetRHI(),
 			};
 
-			PostprocessParameter.SetPS(ShaderRHI, Context, 0, false, Filters);
+			PostprocessParameter.SetPS(ShaderRHI, Context, 0, eFC_0000, Filters);
 		}
 			
 		SetShaderValue(Context.RHICmdList, ShaderRHI, OverlayColor, Context.View.OverlayColor);
@@ -1069,8 +1076,6 @@ static void SetShaderTempl(const FRenderingCompositePassContext& Context)
 
 void FRCPassPostProcessTonemap::Process(FRenderingCompositePassContext& Context)
 {
-	SCOPED_DRAW_EVENTF(Context.RHICmdList, PostProcessTonemap, TEXT("Tonemapper#%d%s"), ConfigIndexPC, bDoGammaOnly ? TEXT(" GammaOnly") : TEXT(""));
-
 	const FPooledRenderTargetDesc* InputDesc = GetInputDesc(ePId_Input0);
 
 	if(!InputDesc)
@@ -1082,6 +1087,8 @@ void FRCPassPostProcessTonemap::Process(FRenderingCompositePassContext& Context)
 	const FSceneView& View = Context.View;
 	const FSceneViewFamily& ViewFamily = *(View.Family);
 
+	SCOPED_DRAW_EVENTF(Context.RHICmdList, PostProcessTonemap, TEXT("Tonemapper#%d%s %dx%d"), ConfigIndexPC, bDoGammaOnly ? TEXT(" GammaOnly") : TEXT(""), View.ViewRect.Width(), View.ViewRect.Height());
+
 	FIntRect SrcRect = View.ViewRect;
 	FIntRect DestRect = View.ViewRect;
 	FIntPoint SrcSize = InputDesc->Extent;
@@ -1090,7 +1097,7 @@ void FRCPassPostProcessTonemap::Process(FRenderingCompositePassContext& Context)
 
 	
 	// Set the view family's render target/viewport.
-	SetRenderTarget(Context.RHICmdList, DestRenderTarget.TargetableTexture, FTextureRHIParamRef());
+	SetRenderTarget(Context.RHICmdList, DestRenderTarget.TargetableTexture, FTextureRHIParamRef(), ESimpleRenderTargetMode::EUninitializedColorAndDepth);
 
 	if( ViewFamily.RenderTarget->GetRenderTargetTexture() != DestRenderTarget.TargetableTexture )
 	{
@@ -1119,18 +1126,19 @@ void FRCPassPostProcessTonemap::Process(FRenderingCompositePassContext& Context)
 	}
 	FSceneRenderTargets& SceneContext = FSceneRenderTargets::Get(Context.RHICmdList);
 
-	// Draw a quad mapping scene color to the view's render target
 	TShaderMapRef<FPostProcessTonemapVS> VertexShader(Context.GetShaderMap());
 
-	DrawRectangle(
+	DrawPostProcessPass(
 		Context.RHICmdList,
 		0, 0,
 		View.ViewRect.Width(), View.ViewRect.Height(),
-		View.ViewRect.Min.X, View.ViewRect.Min.Y, 
+		View.ViewRect.Min.X, View.ViewRect.Min.Y,
 		View.ViewRect.Width(), View.ViewRect.Height(),
 		View.ViewRect.Size(),
 		SceneContext.GetBufferSizeXY(),
 		*VertexShader,
+		View.StereoPass,
+		Context.HasHmdMesh(),
 		EDRF_UseTriangleOptimization);
 
 	Context.RHICmdList.CopyToResolveTarget(DestRenderTarget.TargetableTexture, DestRenderTarget.ShaderResourceTexture, false, FResolveParams());
@@ -1174,7 +1182,7 @@ class FPostProcessTonemapPS_ES2 : public FGlobalShader
 	{
 		// This is only used on ES2.
 		// TODO: Make this only compile on PC/Mobile (and not console).
-		return true;
+		return !IsConsolePlatform(Platform);
 	}
 
 	static void ModifyCompilationEnvironment(EShaderPlatform Platform, FShaderCompilerEnvironment& OutEnvironment)
@@ -1361,7 +1369,7 @@ class FPostProcessTonemapVS_ES2 : public FGlobalShader
 
 	static bool ShouldCache(EShaderPlatform Platform)
 	{
-		return true;
+		return !IsConsolePlatform(Platform);
 	}
 
 	FPostProcessTonemapVS_ES2() { }

@@ -42,6 +42,12 @@ public:
 	/** Step to previous camera key */
 	TSharedPtr< FUICommandInfo > StepToPreviousCameraKey;
 
+	/** Expand nodes and descendants */
+	TSharedPtr< FUICommandInfo > ExpandNodesAndDescendants;
+
+	/** Collapse nodes and descendants */
+	TSharedPtr< FUICommandInfo > CollapseNodesAndDescendants;
+
 	/** Expand/collapse nodes */
 	TSharedPtr< FUICommandInfo > ToggleExpandCollapseNodes;
 
@@ -51,8 +57,26 @@ public:
 	/** Sets a key at the current time for the selected actor */
 	TSharedPtr< FUICommandInfo > SetKey;
 
+	/** Sets the interp tangent mode for the selected keys to auto */
+	TSharedPtr< FUICommandInfo > SetInterpolationCubicAuto;
+
+	/** Sets the interp tangent mode for the selected keys to user */
+	TSharedPtr< FUICommandInfo > SetInterpolationCubicUser;
+
+	/** Sets the interp tangent mode for the selected keys to break */
+	TSharedPtr< FUICommandInfo > SetInterpolationCubicBreak;
+
+	/** Sets the interp tangent mode for the selected keys to linear */
+	TSharedPtr< FUICommandInfo > SetInterpolationLinear;
+
+	/** Sets the interp tangent mode for the selected keys to constant */
+	TSharedPtr< FUICommandInfo > SetInterpolationConstant;
+
 	/** Turns auto keying on and off. */
 	TSharedPtr< FUICommandInfo > ToggleAutoKeyEnabled;
+
+	/** Turns key all on and off. */
+	TSharedPtr< FUICommandInfo > ToggleKeyAllEnabled;
 
 	/** Turns show frame numbers on and off. */
 	TSharedPtr< FUICommandInfo > ToggleShowFrameNumbers;
@@ -95,6 +119,9 @@ public:
 
 	/** Toggles whether or not the curve editor should be shown. */
 	TSharedPtr< FUICommandInfo > ToggleShowCurveEditor;
+
+	TSharedPtr< FUICommandInfo > MoveTool;
+	TSharedPtr< FUICommandInfo > MarqueeTool;
 
 	/**
 	 * Initialize commands

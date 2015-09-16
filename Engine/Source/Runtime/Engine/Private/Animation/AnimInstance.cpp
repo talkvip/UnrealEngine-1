@@ -362,6 +362,19 @@ void UAnimInstance::UpdateAnimationNode(float DeltaSeconds)
 	}
 }
 
+void UAnimInstance::UpdateMontage(float DeltaSeconds)
+{
+	// update montage weight
+	Montage_UpdateWeight(DeltaSeconds);
+
+	// update montage should run in game thread
+	// if we do multi threading, make sure this stays in game thread
+	Montage_Advance(DeltaSeconds);
+
+	// update montage eval data
+	UpdateMontageEvaluationData();
+}
+
 void UAnimInstance::UpdateAnimation(float DeltaSeconds)
 {
 	QUICK_SCOPE_CYCLE_COUNTER(STAT_UAnimInstance_UpdateAnimation);
@@ -399,6 +412,7 @@ void UAnimInstance::UpdateAnimation(float DeltaSeconds)
 
 	const TArray<FAnimGroupInstance>& PreviousSyncGroups = SyncGroupArrays[GetSyncGroupReadIndex()];
 
+	// clear previous frame data
 	{
 		QUICK_SCOPE_CYCLE_COUNTER(STAT_UAnimInstance_UpdateAnimation_MiscClear);
 		AnimNotifies.Reset();
@@ -413,6 +427,7 @@ void UAnimInstance::UpdateAnimation(float DeltaSeconds)
 		}
 	}
 
+	// update blueprint and native update
 	{
 		SCOPE_CYCLE_COUNTER(STAT_NativeUpdateAnimation);
 		NativeUpdateAnimation(DeltaSeconds);
@@ -422,11 +437,9 @@ void UAnimInstance::UpdateAnimation(float DeltaSeconds)
 		BlueprintUpdateAnimation(DeltaSeconds);
 	}
 
-	Montage_UpdateWeight(DeltaSeconds);
-
-	// update montage should run in game thread
-	// if we do multi threading, make sure this stays in game thread
-	Montage_Advance(DeltaSeconds);
+	// need to update montage BEFORE node update
+	// so that node knows where montage is
+	UpdateMontage(DeltaSeconds);
 
 	// update all nodes
 	UpdateAnimationNode(DeltaSeconds);
@@ -1404,6 +1417,8 @@ void UAnimInstance::GetSlotWeight(FName const& SlotNodeName, float& out_SlotNode
 #if DEBUGMONTAGEWEIGHT			
 			TotalDesiredWeight += MontageInstance->Blend.GetDesiredValue();
 #endif			
+			UE_LOG(LogAnimation, Verbose, TEXT("GetSlotWeight : Owner: %s, AnimMontage: %s,  (DesiredWeight:%0.2f, Weight:%0.2f)"),
+						*GetNameSafe(GetOwningActor()), *MontageInstance->Montage->GetName(), MontageInstance->GetDesiredWeight(), MontageInstance->GetWeight());
 		}
 	}
 
@@ -2114,6 +2129,8 @@ float UAnimInstance::Montage_Play(UAnimMontage* MontageToPlay, float InPlayRate/
 
 			OnMontageStarted.Broadcast(MontageToPlay);
 
+			UE_LOG(LogAnimation, Verbose, TEXT("Montage_Play: AnimMontage: %s,  (DesiredWeight:%0.2f, Weight:%0.2f)"),
+						*NewInstance->Montage->GetName(), NewInstance->GetDesiredWeight(), NewInstance->GetWeight());
 			return NewInstance->Montage->SequenceLength;
 		}
 		else
@@ -2788,8 +2805,12 @@ bool UAnimInstance::HasMarkerBeenHitThisFrame(FName SyncGroup, FName MarkerName)
 void UAnimInstance::UpdateMontageEvaluationData()
 {
 	MontageEvaluationData.Reset(MontageInstances.Num());
+	UE_LOG(LogAnimation, Verbose, TEXT("UpdateMontageEvaluationData Strting: Owner: %s"),	*GetNameSafe(GetOwningActor()));
+
 	for (FAnimMontageInstance* MontageInstance : MontageInstances)
 	{
+		// although montage can advance with 0.f weight, it is fine to filter by weight here
+		// because we don't want to evaluate them if 0 weight
 		if (MontageInstance->Montage && MontageInstance->GetWeight() > ZERO_ANIMWEIGHT_THRESH)
 		{
 			UE_LOG(LogAnimation, Verbose, TEXT("UpdateMontageEvaluationData : AnimMontage: %s,  (DesiredWeight:%0.2f, Weight:%0.2f)"),

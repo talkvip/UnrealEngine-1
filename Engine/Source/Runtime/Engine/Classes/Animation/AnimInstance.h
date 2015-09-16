@@ -819,9 +819,6 @@ public:
 	static void AddReferencedObjects(UObject* InThis, FReferenceCollector& Collector);
 	//~ End UObject Interface
 
-	// Updates the montage data used for evaluation based on the current playing montages
-	void UpdateMontageEvaluationData();
-
 	// Animation phase trigger
 	// start with initialize
 	// update happens in every tick
@@ -1010,8 +1007,14 @@ private:
 	/** Native state exit bindings */
 	TArray<FNativeStateBinding> NativeStateExitBindings;
 
+	// update montage
+	void UpdateMontage(float DeltaSeconds);
+
 protected:
 	/** Update all animation node */
 	virtual void UpdateAnimationNode(float DeltaSeconds);
+
+	// Updates the montage data used for evaluation based on the current playing montages
+	void UpdateMontageEvaluationData();
 };
 

@@ -117,7 +117,7 @@ public:
 	FORCEINLINE explicit FTransform(const FQuat& InRotation) 
 	{
 		// Rotation = InRotation
-		Rotation =  MakeVectorRegister( InRotation.X, InRotation.Y, InRotation.Z, InRotation.W );
+		Rotation =  VectorLoadAligned( &InRotation.X );
 		// Translation = {0,0,0,0)
 		Translation = VectorZero();
 		// Scale3D = {1,1,1,0);
@@ -135,7 +135,7 @@ public:
 	{
 		FQuat InQuatRotation = InRotation.Quaternion();
 		// Rotation = InRotation
-		Rotation =  MakeVectorRegister( InQuatRotation.X, InQuatRotation.Y, InQuatRotation.Z, InQuatRotation.W );
+		Rotation =  VectorLoadAligned( &InQuatRotation.X );
 		// Translation = {0,0,0,0)
 		Translation = VectorZero();
 		// Scale3D = {1,1,1,0);
@@ -154,7 +154,7 @@ public:
 	FORCEINLINE FTransform(const FQuat& InRotation, const FVector& InTranslation, const FVector& InScale3D = FVector(1.f)) 
 	{
 		// Rotation = InRotation
-		Rotation =  MakeVectorRegister( InRotation.X, InRotation.Y, InRotation.Z, InRotation.W );
+		Rotation =  VectorLoadAligned( &InRotation.X );
 		// Translation = InTranslation
 		Translation = MakeVectorRegister(InTranslation.X, InTranslation.Y, InTranslation.Z, 0.0f );
 		// Scale3D = InScale3D
@@ -189,13 +189,20 @@ public:
 	{
 		FQuat InQuatRotation = InRotation.Quaternion();
 		// Rotation = InRotation
-		Rotation =  MakeVectorRegister( InQuatRotation.X, InQuatRotation.Y, InQuatRotation.Z, InQuatRotation.W );
+		Rotation =  VectorLoadAligned( &InQuatRotation.X );
 		// Translation = InTranslation
 		Translation = MakeVectorRegister(InTranslation.X, InTranslation.Y, InTranslation.Z, 0.0f );
 		// Scale3D = InScale3D
 		Scale3D = MakeVectorRegister(InScale3D.X, InScale3D.Y, InScale3D.Z, 0.0f );
 
 		DiagnosticCheckNaN_All();
+	}
+
+	/**
+	 * Constructor with leaving uninitialized memory
+	 */
+	FORCEINLINE explicit FTransform(ENoInit) 
+	{
 	}
 
 	/**
@@ -541,7 +548,6 @@ public:
 	FORCEINLINE FVector		GetSafeScaleReciprocal(const FVector& InScale, float Tolerance=0.0f) const;
 
 
-	// temp function for easy conversion
 	FORCEINLINE FVector GetLocation() const
 	{
 		FVector OutTranslation;
@@ -656,13 +662,10 @@ private:
 	}
 
 	inline bool Private_Scale3DEquals( const VectorRegister& InScale3D, const ScalarRegister& Tolerance = ScalarRegister(GlobalVectorConstants::KindaSmallNumber)) const
-	{			
-		const VectorRegister ScaleDiff = VectorSubtract(Scale3D, InScale3D);		
-		// d = dot3(ScaleDiff.xyz, ScaleDiff.xyz), VectorRegister( d, d, d, d )
-		const VectorRegister SizeSquared = VectorDot3(ScaleDiff, ScaleDiff);		
-		const VectorRegister VectorToleranceSqaured = VectorMultiply(Tolerance.Value, Tolerance.Value);
-		//  !( (Scale3DX*Scale3D.X + Scale3D.Y*Scale3DY + Scale3DZ*Scale3D.Z) > Tolerance*Tolerance )
-		return !VectorAnyGreaterThan(SizeSquared, VectorToleranceSqaured);
+	{
+		// !( (FMath::Abs(X-V.X) > Tolerance) || (FMath::Abs(Y-V.Y) > Tolerance) || (FMath::Abs(Z-V.Z) > Tolerance) )
+		const VectorRegister ScaleDiff = VectorAbs(VectorSubtract(Scale3D, InScale3D));
+		return !VectorAnyGreaterThan(ScaleDiff, Tolerance.Value);
 	}
 
 public:
@@ -709,14 +712,14 @@ public:
 	inline bool Equals(const FTransform& Other, float Tolerance=KINDA_SMALL_NUMBER) const
 	{
 		const ScalarRegister ToleranceRegister(Tolerance);
-		return Private_RotationEquals(Other.Rotation, ToleranceRegister) && Private_TranslationEquals(Other.Translation, ToleranceRegister) && Private_Scale3DEquals(Other.Scale3D, ToleranceRegister);
+		return Private_TranslationEquals(Other.Translation, ToleranceRegister) && Private_RotationEquals(Other.Rotation, ToleranceRegister) && Private_Scale3DEquals(Other.Scale3D, ToleranceRegister);
 	}
 
 	// Test if rotation and translation components of the transforms are equal, within a tolerance.
 	inline bool EqualsNoScale(const FTransform& Other, float Tolerance=KINDA_SMALL_NUMBER) const
 	{
 		const ScalarRegister ToleranceRegister(Tolerance);
-		return Private_RotationEquals(Other.Rotation, ToleranceRegister) && Private_TranslationEquals(Other.Translation, ToleranceRegister);
+		return Private_TranslationEquals(Other.Translation, ToleranceRegister) && Private_RotationEquals(Other.Rotation, ToleranceRegister);
 	}
 
 	FORCEINLINE static void Multiply(FTransform* OutTransform, const FTransform* A, const FTransform* B);

@@ -322,6 +322,7 @@ void SSection::PaintKeys( const FGeometry& AllottedGeometry, const FSlateRect& M
 	{
 		// Get the key area at the same index of the section.  Each section in this widget has the same layout and the same number of key areas
 		TSharedPtr<IKeyArea> KeyArea = Element.GetKeyArea();
+		TArray<FKeyHandle> KeyHandles = KeyArea->GetUnsortedKeyHandles();
 
 		FGeometry KeyAreaGeometry = GetKeyAreaGeometry( Element, AllottedGeometry );
 
@@ -331,19 +332,20 @@ void SSection::PaintKeys( const FGeometry& AllottedGeometry, const FSlateRect& M
 
 		// Draw a box for the key area 
 		// @todo Sequencer - Allow the IKeyArea to do this
-		FSlateDrawElement::MakeBox( 
-			OutDrawElements,
-			LayerId,
-			KeyAreaGeometry.ToPaintGeometry(),
-			BackgroundBrush,
-			MyClippingRect,
-			DrawEffects,
-			FLinearColor( .1f, .1f, .1f, 0.7f ) ); 
-
+		if (KeyHandles.Num())
+		{
+			FSlateDrawElement::MakeBox( 
+				OutDrawElements,
+				LayerId,
+				KeyAreaGeometry.ToPaintGeometry(),
+				BackgroundBrush,
+				MyClippingRect,
+				DrawEffects,
+				FLinearColor( .1f, .1f, .1f, 0.7f ) ); 
+		}
 
 		int32 KeyLayer = LayerId + 1;
 
-		TArray<FKeyHandle> KeyHandles = KeyArea->GetUnsortedKeyHandles();
 		for( int32 KeyIndex = 0; KeyIndex < KeyHandles.Num(); ++KeyIndex )
 		{
 			FKeyHandle KeyHandle = KeyHandles[KeyIndex];
@@ -487,8 +489,10 @@ TSharedPtr<SWidget> SSection::OnSummonContextMenu( const FGeometry& MyGeometry, 
 	const bool bShouldCloseWindowAfterMenuSelection = true;
 	FMenuBuilder MenuBuilder(bShouldCloseWindowAfterMenuSelection, NULL);
 
+	bool bHasMenuItems = false;
 	if (Key.IsValid() || Sequencer.GetSelection().GetSelectedKeys().Num())
 	{
+		bHasMenuItems = true;
 		MenuBuilder.BeginSection("SequencerInterpolation", NSLOCTEXT("Sequencer", "KeyInterpolationMenu", "Key Interpolation"));
 		{
 			MenuBuilder.AddMenuEntry(
@@ -572,8 +576,9 @@ TSharedPtr<SWidget> SSection::OnSummonContextMenu( const FGeometry& MyGeometry, 
 		MenuBuilder.EndSection(); // SequencerKeys
 	}
 	
-	if (SceneSection != nullptr)
+	if (SceneSection != nullptr && Sequencer.GetSelection().IsSelected(SceneSection))
 	{
+		bHasMenuItems = true;
 		SectionInterface->BuildSectionContextMenu(MenuBuilder);
 
 		MenuBuilder.BeginSection("SequencerSections", NSLOCTEXT("Sequencer", "SectionsMenu", "Sections"));
@@ -621,7 +626,12 @@ TSharedPtr<SWidget> SSection::OnSummonContextMenu( const FGeometry& MyGeometry, 
 	
 	ResetState();
 
-	return MenuBuilder.MakeWidget();
+	if (bHasMenuItems)
+	{
+		return MenuBuilder.MakeWidget();
+	}
+
+	return TSharedPtr<SWidget>();
 }
 
 void SSection::AddExtrapolationMenu(FMenuBuilder& MenuBuilder, bool bPreInfinity)

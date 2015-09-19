@@ -73,7 +73,8 @@ void FBlueprintCompilerCppBackendBase::DeclareDelegates(UClass* SourceClass, TIn
 
 void FBlueprintCompilerCppBackendBase::GenerateCodeFromClass(UClass* SourceClass, TIndirectArray<FKismetFunctionContext>& Functions, bool bGenerateStubsOnly)
 {
-	auto CleanCppClassName = SourceClass->GetName();
+	// use GetBaseFilename() so that we can coordinate #includes and filenames
+	auto CleanCppClassName = FEmitHelper::GetBaseFilename(SourceClass);
 	CppClassName = FEmitHelper::GetCppName(SourceClass);
 	
 	FGatherConvertedClassDependencies Dependencies(SourceClass);
@@ -136,9 +137,10 @@ void FBlueprintCompilerCppBackendBase::GenerateCodeFromClass(UClass* SourceClass
 	{
 		Emit(Header, *FString::Printf(TEXT("\t%s(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get());\n\n"), *CppClassName));
 		Emit(Body, *FEmitDefaultValueHelper::GenerateConstructor(EmitterContext));
-	}
 
-	Emit(Header, TEXT("\n\tvirtual void PostLoadSubobjects(FObjectInstancingGraph* OuterInstanceGraph) override;\n"));
+		Emit(Header, TEXT("\n\tvirtual void PostLoadSubobjects(FObjectInstancingGraph* OuterInstanceGraph) override;\n"));
+		Emit(Header, TEXT("\n\tstatic void __StaticDependenciesAssets(TArray<FName>& OutPackagePaths);\n"));
+	}
 
 	for (int32 i = 0; i < Functions.Num(); ++i)
 	{
@@ -147,8 +149,6 @@ void FBlueprintCompilerCppBackendBase::GenerateCodeFromClass(UClass* SourceClass
 			ConstructFunction(Functions[i], EmitterContext, bGenerateStubsOnly);
 		}
 	}
-
-	Emit(Header, TEXT("\n\tstatic void __StaticDependenciesAssets(TArray<FName>& OutPackagePaths);\n"));
 
 	Emit(Header, *FBackendHelperUMG::WidgetFunctionsInHeader(SourceClass));
 
@@ -340,7 +340,8 @@ void FBlueprintCompilerCppBackendBase::ConstructFunction(FKismetFunctionContext&
 void FBlueprintCompilerCppBackendBase::GenerateCodeFromEnum(UUserDefinedEnum* SourceEnum)
 {
 	check(SourceEnum);
-	EmitFileBeginning(SourceEnum->GetName(), nullptr);
+	// use GetBaseFilename() so that we can coordinate #includes and filenames
+	EmitFileBeginning(FEmitHelper::GetBaseFilename(SourceEnum), nullptr);
 
 	Emit(Header, TEXT("UENUM(BlueprintType"));
 	EmitReplaceConvertedMetaData(SourceEnum);
@@ -377,7 +378,8 @@ void FBlueprintCompilerCppBackendBase::GenerateCodeFromStruct(UUserDefinedStruct
 	check(SourceStruct);
 
 	FGatherConvertedClassDependencies Dependencies(SourceStruct);
-	EmitFileBeginning(SourceStruct->GetName(), &Dependencies);
+	// use GetBaseFilename() so that we can coordinate #includes and filenames
+	EmitFileBeginning(FEmitHelper::GetBaseFilename(SourceStruct), &Dependencies);
 
 	const FString NewName = FEmitHelper::GetCppName(SourceStruct);
 	Emit(Header, TEXT("USTRUCT(BlueprintType"));

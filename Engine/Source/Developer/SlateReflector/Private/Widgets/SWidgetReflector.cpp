@@ -210,6 +210,11 @@ private:
 		{
 			bShowFocus = false;
 			SetUIMode(EWidgetReflectorUIMode::Live);
+			SInvalidationPanel::SetEnableWidgetCaching(false);
+		}
+		else
+		{
+			SInvalidationPanel::SetEnableWidgetCaching(true);
 		}
 
 		return FReply::Handled();
@@ -432,6 +437,32 @@ void SWidgetReflector::Construct( const FArguments& InArgs )
 					]
 				]
 
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.Padding(FMargin(5.0f, 0.0f))
+				[
+					SNew(SCheckBox)
+					.Style(FCoreStyle::Get(), "ToggleButtonCheckbox")
+					.IsChecked_Lambda([&]()
+					{
+						return SInvalidationPanel::GetEnableWidgetCaching() ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+					})
+					.OnCheckStateChanged_Lambda([&](const ECheckBoxState NewState)
+					{
+						SInvalidationPanel::SetEnableWidgetCaching(( NewState == ECheckBoxState::Checked ) ? true : false);
+					})
+					[
+						SNew(SBox)
+						.VAlign(VAlign_Center)
+						.HAlign(HAlign_Center)
+						.Padding(FMargin(4.0, 2.0))
+						[
+							SNew(STextBlock)
+							.Text(LOCTEXT("EnableWidgetCaching", "Widget Caching"))
+						]
+					]
+				]
+
 #if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
 				+SHorizontalBox::Slot()
 				.AutoWidth()
@@ -492,7 +523,7 @@ void SWidgetReflector::Construct( const FArguments& InArgs )
 				[
 					SNew(SCheckBox)
 					.Style( FCoreStyle::Get(), "ToggleButtonCheckbox" )
-					.IsEnabled(SLATE_STATS)
+					.IsEnabled(SLATE_STATS != 0)
 					.IsChecked_Static([]
 					{
 #if SLATE_STATS
@@ -611,8 +642,8 @@ TSharedRef<SDockTab> SWidgetReflector::SpawnWidgetHierarchyTab(const FSpawnTabAr
 						SNew(STextBlock)
 						.Text(LOCTEXT("ShowFocus", "Show Focus"))
 					]
-				]
-
+                ]
+				
 				+SHorizontalBox::Slot()
 				.AutoWidth()
 				.Padding(FMargin(5.0f, 0.0f))

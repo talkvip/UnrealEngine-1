@@ -175,7 +175,8 @@ public:
 
 struct FEmitHelper
 {
-	static FString GetCppName(const UField* Field);
+	// bUInterface - use interface with "U" prefix, by default there is "I" prefix
+	static FString GetCppName(const UField* Field, bool bUInterface = false);
 
 	static void ArrayToString(const TArray<FString>& Array, FString& OutString, const TCHAR* Separator);
 
@@ -218,6 +219,8 @@ struct FEmitHelper
 	static bool GenerateAutomaticCast(const FEdGraphPinType& LType, const FEdGraphPinType& RType, FString& OutCastBegin, FString& OutCastEnd);
 
 	static FString GenerateReplaceConvertedMD(UObject* Obj);
+
+	static FString GetBaseFilename(const UObject* AssetObj);
 };
 
 struct FEmitDefaultValueHelper

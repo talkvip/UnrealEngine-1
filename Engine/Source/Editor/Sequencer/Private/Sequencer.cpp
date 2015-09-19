@@ -710,6 +710,9 @@ void FSequencer::SetGlobalTimeDirectly( float NewTime )
 
 	RootMovieSceneSequenceInstance->Update( ScrubPosition, LastTime, *this );
 
+	// If realtime is off, this needs to be called to update the pivot location when scrubbing.
+	GUnrealEd->UpdatePivotLocationForSelection();
+
 	GEditor->RedrawLevelEditingViewports();
 }
 
@@ -1332,6 +1335,24 @@ void FSequencer::OnToggleAutoScroll()
 	Settings->SetAutoScrollEnabled(bAutoScrollEnabled);
 }
 
+void FSequencer::FindInContentBrowser()
+{
+	if (GetFocusedMovieSceneSequence())
+	{
+		TArray<UObject*> ObjectsToFocus;
+		ObjectsToFocus.Add(GetCurrentAsset());
+
+		GEditor->SyncBrowserToObjects(ObjectsToFocus);
+	}
+}
+
+UObject* FSequencer::GetCurrentAsset() const
+{
+	// For now we find the asset by looking at the root movie scene's outer.
+	// @todo: this may need refining if/when we support editing movie scene instances
+	return GetFocusedMovieSceneSequence()->GetMovieScene()->GetOuter();
+}
+
 void FSequencer::VerticalScroll(float ScrollAmountUnits)
 {
 	SequencerWidget->GetTreeView()->ScrollByDelta(ScrollAmountUnits);
@@ -1762,7 +1783,7 @@ void FSequencer::UpdatePreviewLevelViewportClientFromCameraCut( FLevelEditorView
 
 void FSequencer::SaveCurrentMovieScene()
 {
-	UPackage* MovieScenePackage = GetFocusedMovieSceneSequence()->GetOutermost();
+	UPackage* MovieScenePackage = GetCurrentAsset()->GetOutermost();
 
 	TArray<UPackage*> PackagesToSave;
 
@@ -2031,6 +2052,8 @@ void FSequencer::DeleteSelectedItems()
 {
 	if (Selection.GetActiveSelection() == FSequencerSelection::EActiveSelection::KeyAndSection)
 	{
+		FScopedTransaction DeleteKeysTransaction( NSLOCTEXT("Sequencer", "DeleteKeysAndSections_Transaction", "Delete Keys and Sections") );
+		
 		DeleteSelectedKeys();
 
 		DeleteSections(Selection.GetSelectedSections());
@@ -2191,21 +2214,21 @@ void FSequencer::ToggleExpandCollapseNodesAndDescendants()
 
 void FSequencer::SetKey()
 {
-	USelection* CurrentSelection = GEditor->GetSelectedActors();
-	TArray<UObject*> SelectedActors;
-	CurrentSelection->GetSelectedObjects( AActor::StaticClass(), SelectedActors );
-	for (TArray<UObject*>::TIterator It(SelectedActors); It; ++It)
+	TSet<TSharedPtr<IKeyArea> > KeyAreas;
+	for (auto OutlinerNode : Selection.GetSelectedOutlinerNodes())
 	{
-		// @todo Handle case of actors which aren't in sequencer yet
+		SequencerHelpers::GetAllKeyAreas(OutlinerNode, KeyAreas);
+	}
 
-		FGuid ObjectGuid = GetHandleToObject(*It);
-		for ( auto& TrackEditor : TrackEditors )
+	if (KeyAreas.Num() > 0)
+	{
+		FScopedTransaction SetKeyTransaction( NSLOCTEXT("Sequencer", "SetKey_Transaction", "Set Key") );
+	
+		for (auto KeyArea : KeyAreas)
 		{
-			// @todo Handle this shot track business better
-			if (TrackEditor != ShotTrackEditor.Pin())
-			{
-				TrackEditor->AddKey(ObjectGuid);
-			}
+			KeyArea->GetOwningSection()->Modify();
+	
+			KeyArea->AddKeyUnique(GetGlobalTime(), GetKeyInterpolation());
 		}
 	}
 }
@@ -2318,6 +2341,10 @@ void FSequencer::BindSequencerCommands()
 		FExecuteAction::CreateSP( this, &FSequencer::OnToggleAutoScroll ),
 		FCanExecuteAction::CreateLambda( []{ return true; } ),
 		FIsActionChecked::CreateSP( this, &FSequencer::GetAutoScrollEnabled ) );
+
+	SequencerCommandBindings->MapAction(
+		Commands.FindInContentBrowser,
+		FExecuteAction::CreateSP( this, &FSequencer::FindInContentBrowser ) );
 
 	SequencerCommandBindings->MapAction(
 		Commands.ToggleCleanView,

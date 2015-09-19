@@ -187,7 +187,7 @@ void FSessionManager::FindExpiredSessions(const FDateTime& Now)
 
 bool FSessionManager::IsValidOwner(const FString& Owner)
 {
-	if (Owner == FPlatformProcess::UserName(true))
+	if (Owner == FPlatformProcess::UserName(false))
 	{
 		return true;
 	}
@@ -229,7 +229,7 @@ void FSessionManager::SendPing()
 	if (MessageEndpoint.IsValid())
 	{
 		MessageEndpoint->Publish(new FEngineServicePing(), EMessageScope::Network);
-		MessageEndpoint->Publish(new FSessionServicePing(), EMessageScope::Network);
+		MessageEndpoint->Publish(new FSessionServicePing(FPlatformProcess::UserName(false)), EMessageScope::Network);
 	}
 
 	LastPingTime = FDateTime::UtcNow();
@@ -290,7 +290,15 @@ void FSessionManager::HandleSessionPongMessage(const FSessionServicePong& Messag
 
 	if (Session.IsValid())
 	{
-		Session->UpdateFromMessage(Message, Context);
+		if (Session->GetSessionOwner() != Message.SessionOwner)
+		{
+			Session->UpdateFromMessage(Message, Context);
+			SessionsUpdatedDelegate.Broadcast();
+		}
+		else
+		{
+			Session->UpdateFromMessage(Message, Context);
+		}
 	}
 	else
 	{

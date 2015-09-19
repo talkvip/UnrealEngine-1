@@ -393,6 +393,16 @@ protected:
 		return bAutoScrollEnabled;
 	}
 
+	/** 
+	 * Find the viewed actor animation asset in the content browser
+	 */
+	void FindInContentBrowser();
+
+	/**
+	 * Get the asset we're currently editing, if applicable
+	 */
+	UObject* GetCurrentAsset() const;
+
 protected:
 
 	/** Called via UEditorEngine::GetActorRecordingStateEvent to check to see whether we need to record actor state */

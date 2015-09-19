@@ -405,7 +405,8 @@ namespace AutomationTool
 			bool? FastCook = null,
 			bool? IgnoreCookErrors = null,
 			bool? CodeSign = null,
-			bool? UploadSymbols = null
+			bool? UploadSymbols = null,
+			string Provision = null
 			)
 		{
 			//
@@ -559,6 +560,7 @@ namespace AutomationTool
 			this.StageCommandline = ParseParamValueIfNotSpecified(Command, StageCommandline, "cmdline");
 			this.BundleName = ParseParamValueIfNotSpecified(Command, BundleName, "bundlename");
 			this.RunCommandline = ParseParamValueIfNotSpecified(Command, RunCommandline, "addcmdline");
+			this.RunCommandline = this.RunCommandline.Replace('\'', '\"'); // replace any single quotes with double quotes
 			this.Package = GetParamValueIfNotSpecified(Command, Package, this.Package, "package");
 			this.Deploy = GetParamValueIfNotSpecified(Command, Deploy, this.Deploy, "deploy");
 			this.IterativeDeploy = GetParamValueIfNotSpecified(Command, IterativeDeploy, this.IterativeDeploy, new string[] {"iterativedeploy", "iterate" } );
@@ -576,6 +578,8 @@ namespace AutomationTool
 			{
 				this.DeviceName = this.Device;
 			}
+
+			this.Provision = ParseParamValueIfNotSpecified(Command, Provision, "provision", String.Empty, true);
 
 			this.ServerDevice = ParseParamValueIfNotSpecified(Command, ServerDevice, "serverdevice", this.Device);
 			this.NullRHI = GetParamValueIfNotSpecified(Command, NullRHI, this.NullRHI, "nullrhi");
@@ -1282,6 +1286,11 @@ namespace AutomationTool
 		/// By default we don't code sign unless it is required or requested
 		/// </summary>
 		public bool bCodeSign = false;
+
+		/// <summary>
+		/// Provision to use
+		/// </summary>
+		public string Provision = null;
 
 		#endregion
 

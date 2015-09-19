@@ -3055,6 +3055,23 @@ FIndexRange*                    ParsedVarIndexRange
 		FError::Throwf(TEXT("Unknown access level"));
 	}
 
+	// Swallow inline keywords
+	if (VariableCategory == EVariableCategory::Return)
+	{
+		FToken InlineToken;
+		if (!GetIdentifier(InlineToken, true))
+		{
+			FError::Throwf(TEXT("%s: Missing variable type"), GetHintText(VariableCategory));
+		}
+
+		if (FCString::Strcmp(InlineToken.Identifier, TEXT("inline")) != 0
+			&& FCString::Strcmp(InlineToken.Identifier, TEXT("FORCENOINLINE")) != 0
+			&& FCString::Strncmp(InlineToken.Identifier, TEXT("FORCEINLINE"), 11) != 0)
+		{
+			UngetToken(InlineToken);
+		}
+	}
+
 	// Get variable type.
 	bool bUnconsumedStructKeyword = false;
 	bool bUnconsumedClassKeyword  = false;
@@ -5039,6 +5056,7 @@ void FHeaderParser::CompileInterfaceDeclaration(FClasses& AllClasses)
 	ClassData->SetPrologLine(PrologFinishLine);
 
 	// Register the metadata
+	AddModuleRelativePathToMetadata(InterfaceClass, MetaData);
 	AddMetaDataToClassData(InterfaceClass, MetaData);
 
 	// Handle the start of the rest of the interface

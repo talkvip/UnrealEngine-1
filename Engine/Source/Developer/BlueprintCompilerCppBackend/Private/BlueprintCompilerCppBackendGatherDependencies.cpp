@@ -2,6 +2,7 @@
 
 #include "BlueprintCompilerCppBackendModulePrivatePCH.h"
 #include "BlueprintCompilerCppBackendGatherDependencies.h"
+#include "BlueprintSupport.h"
 
 FGatherConvertedClassDependencies::FGatherConvertedClassDependencies(UStruct* InStruct) : OriginalStruct(InStruct)
 {
@@ -12,9 +13,7 @@ FGatherConvertedClassDependencies::FGatherConvertedClassDependencies(UStruct* In
 
 bool FGatherConvertedClassDependencies::WillClassBeConverted(const UBlueprintGeneratedClass* InClass) const
 {
-	// TODO:
-
-	return InClass && !InClass->HasAnyFlags(RF_ClassDefaultObject);
+	return FReplaceCookedBPGC::Get().CouldBeConverted(InClass);
 }
 
 void FGatherConvertedClassDependencies::DependenciesForHeader()
@@ -27,16 +26,19 @@ void FGatherConvertedClassDependencies::DependenciesForHeader()
 
 	for (auto Obj : ObjectsToCheck)
 	{
-		auto Property = Cast<UProperty>(Obj);
+		auto Property = Cast<const UProperty>(Obj);
 		auto OwnerProperty = IsValid(Property) ? Property->GetOwnerProperty() : nullptr;
 		const bool bIsParam = OwnerProperty && (0 != (OwnerProperty->PropertyFlags & CPF_Parm)) && OwnerProperty->IsIn(OriginalStruct);
 		const bool bIsMemberVariable = OwnerProperty && (OwnerProperty->GetOuter() == OriginalStruct);
 		if (bIsParam || bIsMemberVariable)
 		{
-			const UObjectProperty* ObjectProperty = Cast<UObjectProperty>(OwnerProperty);
-			if (ObjectProperty)
+			if (auto ObjectProperty = Cast<const UObjectPropertyBase>(Property))
 			{
 				DeclareInHeader.Add(ObjectProperty->PropertyClass);
+			}
+			else if (auto InterfaceProperty = Cast<const UInterfaceProperty>(Property))
+			{
+				IncludeInHeader.Add(InterfaceProperty->InterfaceClass);
 			}
 			else
 			{

@@ -2880,7 +2880,11 @@ void UParticleSystemComponent::OnRegister()
 			// Prevent attachment before Super::OnRegister() tries to attach us, since we only attach when activated.
 			if (AttachParent->AttachChildren.Contains(this))
 			{
-				DetachFromParent(/*bMaintainWorldPosition=*/ false, /*bCallModify=*/ false);
+				// Only detach if we are not about to auto attach to the same target, that would be wasteful.
+				if (!bAutoActivate || (AutoAttachLocationType != EAttachLocation::KeepRelativeOffset) || (AutoAttachSocketName != AttachSocketName) || (AutoAttachParent != AttachParent))
+				{
+					DetachFromParent(/*bMaintainWorldPosition=*/ false, /*bCallModify=*/ false);
+				}
 			}
 			else
 			{
@@ -3655,6 +3659,13 @@ public:
 	void DoTask(ENamedThreads::Type CurrentThread, const FGraphEventRef& MyCompletionGraphEvent)
 	{
 		Target->ComputeTickComponent_Concurrent();
+#if !WITH_EDITOR  // otherwise this is queued by the calling code because we need to be able to block and wait on it
+		{
+			QUICK_SCOPE_CYCLE_COUNTER(STAT_UParticleSystemComponent_QueueFinalize);
+			FGraphEventRef Finalize = TGraphTask<FParticleFinalizeTask>::CreateTask(nullptr, CurrentThread).ConstructAndDispatchWhenReady(Target);
+			MyCompletionGraphEvent->DontCompleteUntil(Finalize);
+		}
+#endif
 	}
 };
 
@@ -3838,13 +3849,17 @@ void UParticleSystemComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 		bAsyncDataCopyIsValid = true;
 		check(!bParallelRenderThreadUpdate);
 		AsyncComponentToWorld = ComponentToWorld;
-		AsyncInstanceParameters = InstanceParameters;
+		AsyncInstanceParameters.Reset();
+		AsyncInstanceParameters.Append(InstanceParameters);
 
 		{
 			QUICK_SCOPE_CYCLE_COUNTER(STAT_UParticleSystemComponent_QueueAsync);
 			AsyncWork = TGraphTask<FParticleAsyncTask>::CreateTask(nullptr, ENamedThreads::GameThread).ConstructAndDispatchWhenReady(this);
+#if !WITH_EDITOR  // we need to not complete until this is done because the game thread finalize task has not beed queued yet
+			ThisTickFunction->GetCompletionHandle()->DontCompleteUntil(AsyncWork);
+#endif
 		}
-
+#if WITH_EDITOR  // we need to queue this here because we need to be able to block and wait on it
 		{
 			QUICK_SCOPE_CYCLE_COUNTER(STAT_UParticleSystemComponent_QueueFinalize);
 			FGraphEventArray Prereqs;
@@ -3852,6 +3867,7 @@ void UParticleSystemComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 			FGraphEventRef Finalize = TGraphTask<FParticleFinalizeTask>::CreateTask(&Prereqs, ENamedThreads::GameThread).ConstructAndDispatchWhenReady(this);
 			ThisTickFunction->GetCompletionHandle()->DontCompleteUntil(Finalize);
 		}
+#endif
 	}
 }
 
@@ -4048,8 +4064,9 @@ void UParticleSystemComponent::FinalizeTickComponent()
 
 void UParticleSystemComponent::WaitForAsyncAndFinalize(EForceAsyncWorkCompletion Behavior) const
 {
-	if (!AsyncWork->IsComplete())
+	if (AsyncWork.GetReference() && !AsyncWork->IsComplete())
 	{
+#if WITH_EDITOR
 		check(IsInGameThread());
 		SCOPE_CYCLE_COUNTER(STAT_GTSTallTime);
 		double StartTime = FPlatformTime::Seconds();
@@ -4065,6 +4082,9 @@ void UParticleSystemComponent::WaitForAsyncAndFinalize(EForceAsyncWorkCompletion
 			}
 		}
 		const_cast<UParticleSystemComponent*>(this)->FinalizeTickComponent();
+#else
+		check(0);
+#endif
 	}
 }
 

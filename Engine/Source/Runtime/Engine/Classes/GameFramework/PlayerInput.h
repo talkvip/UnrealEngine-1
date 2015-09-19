@@ -115,7 +115,7 @@ struct FInputAxisConfigEntry
  *
  * @see https://docs.unrealengine.com/latest/INT/Gameplay/Input/index.html
  */
-USTRUCT()
+USTRUCT( BlueprintType )
 struct FInputActionKeyMapping
 {
 	GENERATED_USTRUCT_BODY()
@@ -183,7 +183,7 @@ struct FInputActionKeyMapping
  * 
  * @see https://docs.unrealengine.com/latest/INT/Gameplay/Input/index.html
 **/
-USTRUCT()
+USTRUCT( BlueprintType )
 struct FInputAxisKeyMapping
 {
 	GENERATED_USTRUCT_BODY()
@@ -255,6 +255,9 @@ public:
 	// Touch locations, from 0..1 (0,0 is top left, 1,1 is bottom right), the Z component is > 0 if the touch is currently held down
 	// @todo: We have 10 touches to match the number of Touch* entries in EKeys (not easy to make this an enum or define or anything)
 	FVector Touches[EKeys::NUM_TOUCH_KEYS];
+
+	/** Used to store paired touch locations for event ids during the frame and flushed when processed. */
+	TMap<uint32, FVector> TouchEventLocations;
 
 	// Mouse smoothing sample data
 	float ZeroTime[2];    /** How long received mouse movement has been zero. */

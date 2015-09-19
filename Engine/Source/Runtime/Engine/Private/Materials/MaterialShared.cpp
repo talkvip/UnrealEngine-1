@@ -900,6 +900,11 @@ bool FMaterialResource::IsDefaultMaterial() const
 	return Material->IsDefaultMaterial();
 }
 
+int32 FMaterialResource::GetNumCustomizedUVs() const
+{
+	return Material->NumCustomizedUVs;
+}
+
 void FMaterialResource::NotifyCompilationFinished()
 {
 	Material->NotifyCompilationFinished(this);
@@ -973,8 +978,14 @@ void FMaterialResource::GetRepresentativeShaderTypesAndDescriptions(TArray<FStri
 
 	if( IsUIMaterial() )
 	{
-		new(ShaderTypeNames) FString(TEXT("TSlateMaterialShaderPSDefaultfalse"));
-		new(ShaderTypeDescriptions) FString(TEXT("Default UI Shader"));
+		new(ShaderTypeNames)FString(TEXT("TSlateMaterialShaderPSDefaultfalse"));
+		new(ShaderTypeDescriptions)FString(TEXT("Default UI Pixel Shader"));
+
+		new(ShaderTypeNames) FString(TEXT("TSlateMaterialShaderVSfalse"));
+		new(ShaderTypeDescriptions) FString(TEXT("Default UI Vertex Shader"));
+
+		new(ShaderTypeNames)FString(TEXT("TSlateMaterialShaderVStrue"));
+		new(ShaderTypeDescriptions)FString(TEXT("Instanced UI Vertex Shader"));
 	}
 	else if (GetFeatureLevel() >= ERHIFeatureLevel::SM4)
 	{

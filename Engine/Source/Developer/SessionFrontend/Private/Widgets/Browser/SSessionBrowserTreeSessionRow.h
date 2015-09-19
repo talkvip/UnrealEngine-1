@@ -56,7 +56,7 @@ public:
 							.VAlign(VAlign_Center)
 							[
 								SNew(STextBlock)
-									.Text(SanitizeSessionName(Item->GetSessionInfo()))
+									.Text(this, &SSessionBrowserTreeSessionRow::HandleSessionNameText)
 									.Font(FEditorStyle::GetFontStyle("PropertyWindow.NormalFont"))
 							]
 					]
@@ -79,9 +79,9 @@ protected:
 		const FString& SessionOwner = SessionInfo->GetSessionOwner();
 
 		// return name of a launched session
-		if (!SessionInfo->IsStandalone() || !SessionName.IsEmpty())
+		if (!SessionName.IsEmpty())
 		{
-			if (SessionInfo->GetSessionOwner() != FPlatformProcess::UserName(true))
+			if (SessionInfo->GetSessionOwner() != FPlatformProcess::UserName(false))
 			{
 				return FText::Format(LOCTEXT("SessionNameFormat", "{0} - {1}"), FText::FromString(SessionName), FText::FromString(SessionOwner));
 			}
@@ -97,13 +97,13 @@ protected:
 		{
 			const ISessionInstanceInfoPtr& FirstInstance = Instances[0];
 
-			if ((Instances.Num() == 1) && (FirstInstance->GetInstanceId() == FApp::GetInstanceId()))
+			if ((Instances.Num() == 1) && FApp::IsThisInstance(FirstInstance->GetInstanceId()))
 			{
 				return LOCTEXT("ThisApplicationSessionText", "This Application");
 			}
 		}
 
-		if (SessionInfo->GetSessionOwner() != FPlatformProcess::UserName(true))
+		if (SessionInfo->GetSessionOwner() != FPlatformProcess::UserName(false))
 		{
 			return FText::Format(LOCTEXT("UnnamedSessionFormat", "Unnamed - {0}"), FText::FromString(SessionOwner));
 		}
@@ -166,6 +166,12 @@ private:
 		}
 
 		return ToolTipTextBuilder.ToText();
+	}
+
+	/** Callback for getting the name of the session. */
+	FText HandleSessionNameText() const
+	{
+		return SanitizeSessionName(Item->GetSessionInfo());
 	}
 
 private:

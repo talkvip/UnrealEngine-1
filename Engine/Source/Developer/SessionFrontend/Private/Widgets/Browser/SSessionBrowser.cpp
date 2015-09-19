@@ -170,7 +170,7 @@ void SSessionBrowser::FilterSessions()
 	for (auto& SessionInfo : AvailableSessions)
 	{
 		// process session
-		bool LocalOwner = SessionInfo->GetSessionOwner() == FPlatformProcess::UserName(true);
+		bool LocalOwner = SessionInfo->GetSessionOwner() == FPlatformProcess::UserName(false);
 
 		if (!SessionInfo->IsStandalone() && !LocalOwner)
 		{
@@ -196,7 +196,7 @@ void SSessionBrowser::FilterSessions()
 
 		if (LocalOwner)
 		{
-			if (Instances[0]->GetInstanceId() != FApp::GetInstanceId())
+			if (!FApp::IsThisInstance(Instances[0]->GetInstanceId()))
 			{
 				OwnerGroupItem->AddChild(SessionItem.ToSharedRef());
 				SessionItem->SetParent(OwnerGroupItem);
@@ -226,7 +226,7 @@ void SSessionBrowser::FilterSessions()
 			NewItemMap.Add(InstanceInfo->GetInstanceId(), InstanceItem);
 
 			// add instance to group or session
-			if (InstanceInfo->GetInstanceId() == FApp::GetInstanceId())
+			if (FApp::IsThisInstance(InstanceInfo->GetInstanceId()))
 			{
 				AppGroupItem->AddChild(InstanceItem.ToSharedRef());
 				InstanceItem->SetParent(AppGroupItem);
@@ -410,17 +410,20 @@ void SSessionBrowser::HandleSessionTreeViewSelectionChanged(const TSharedPtr<FSe
 	{
 		if (Item.IsValid())
 		{
-			const auto& InstanceInfo = StaticCastSharedPtr<FSessionBrowserInstanceTreeItem>(Item)->GetInstanceInfo();
-
-			if (InstanceInfo.IsValid())
+			if (Item->GetType() == ESessionBrowserTreeNodeType::Instance)
 			{
-				// special handling for local application
-				if (Item->GetParent() == AppGroupItem)
-				{
-					SessionManager->SelectSession(InstanceInfo->GetOwnerSession());
-				}
+				const auto& InstanceInfo = StaticCastSharedPtr<FSessionBrowserInstanceTreeItem>(Item)->GetInstanceInfo();
 
-				SessionManager->SetInstanceSelected(InstanceInfo.ToSharedRef(), true);
+				if (InstanceInfo.IsValid())
+				{
+					// special handling for local application
+					if (Item->GetParent() == AppGroupItem)
+					{
+						SessionManager->SelectSession(InstanceInfo->GetOwnerSession());
+					}
+
+					SessionManager->SetInstanceSelected(InstanceInfo.ToSharedRef(), true);
+				}
 			}
 		}
 		else
@@ -451,7 +454,7 @@ FReply SSessionBrowser::HandleTerminateSessionButtonClicked()
 
 		if (SelectedSession.IsValid())
 		{
-			if (SelectedSession->GetSessionOwner() == FPlatformProcess::UserName(true))
+			if (SelectedSession->GetSessionOwner() == FPlatformProcess::UserName(false))
 			{
 				SelectedSession->Terminate();
 			}

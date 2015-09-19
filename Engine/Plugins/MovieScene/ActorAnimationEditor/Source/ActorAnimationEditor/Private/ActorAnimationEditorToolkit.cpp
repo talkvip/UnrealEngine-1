@@ -66,7 +66,7 @@ FActorAnimationEditorToolkit::~FActorAnimationEditorToolkit()
 /* FActorAnimationEditorToolkit interface
  *****************************************************************************/
 
-void FActorAnimationEditorToolkit::Initialize( const EToolkitMode::Type Mode, const TSharedPtr<IToolkitHost>& InitToolkitHost, UActorAnimation* ActorAnimation, bool bEditWithinLevelEditor )
+void FActorAnimationEditorToolkit::Initialize( const EToolkitMode::Type Mode, const TSharedPtr<IToolkitHost>& InitToolkitHost, UActorAnimationInstance* InActorAnimationInstance, bool bEditWithinLevelEditor )
 {
 	// create tab layout
 	const TSharedRef<FTabManager::FLayout> StandaloneDefaultLayout = FTabManager::NewLayout("Standalone_ActorAnimationEditor")
@@ -80,10 +80,12 @@ void FActorAnimationEditorToolkit::Initialize( const EToolkitMode::Type Mode, co
 				)
 		);
 
+	ActorAnimationInstance = InActorAnimationInstance;
+
 	const bool bCreateDefaultStandaloneMenu = true;
 	const bool bCreateDefaultToolbar = false;
 
-	FAssetEditorToolkit::InitAssetEditor(Mode, InitToolkitHost, SequencerDefs::SequencerAppIdentifier, StandaloneDefaultLayout, bCreateDefaultStandaloneMenu, bCreateDefaultToolbar, ActorAnimation);
+	FAssetEditorToolkit::InitAssetEditor(Mode, InitToolkitHost, SequencerDefs::SequencerAppIdentifier, StandaloneDefaultLayout, bCreateDefaultStandaloneMenu, bCreateDefaultToolbar, ActorAnimationInstance);
 
 	// initialize sequencer
 	FSequencerViewParams ViewParams(TEXT("ActorAnimationEditorViewParams"));
@@ -94,7 +96,7 @@ void FActorAnimationEditorToolkit::Initialize( const EToolkitMode::Type Mode, co
 	FSequencerInitParams SequencerInitParams;
 	{
 		SequencerInitParams.ViewParams = ViewParams;
-		SequencerInitParams.RootSequence = ActorAnimation;
+		SequencerInitParams.RootSequence = ActorAnimationInstance;
 		SequencerInitParams.bEditWithinLevelEditor = bEditWithinLevelEditor;
 		SequencerInitParams.ToolkitHost = InitToolkitHost;
 	}
@@ -235,6 +237,8 @@ void FActorAnimationEditorToolkit::HandleAddMenuAddSlomoTrackExecute()
 
 void FActorAnimationEditorToolkit::HandleMapChanged(class UWorld* NewWorld, EMapChangeType MapChangeType)
 {
+	ActorAnimationInstance->SetContext(NewWorld);
+
 	Sequencer->NotifyMapChanged(NewWorld, MapChangeType);
 }
 
@@ -260,7 +264,7 @@ TSharedRef<SWidget> FActorAnimationEditorToolkit::HandleSequencerGetAddMenuConte
 	MenuBuilder.AddMenuEntry(
 		LOCTEXT("AddEventTrack", "Add Event Track"),
 		LOCTEXT("AddEventTooltip", "Adds a new event track that can trigger events on the timeline."),
-		FSlateIcon(),
+		FSlateIcon(Style->GetStyleSetName(), "ActorAnimationEditor.Tracks.Event"),
 		FUIAction(FExecuteAction::CreateRaw(this, &FActorAnimationEditorToolkit::HandleAddMenuAddEventTrackExecute))
 	);
 
@@ -268,7 +272,7 @@ TSharedRef<SWidget> FActorAnimationEditorToolkit::HandleSequencerGetAddMenuConte
 	MenuBuilder.AddMenuEntry(
 		LOCTEXT("AddShotTrack", "Add Shot Track"),
 		LOCTEXT("AddShotTooltip", "Adds a shot track, as well as a new shot at the current scrubber location if a camera is selected."),
-		FSlateIcon(),
+		FSlateIcon(Style->GetStyleSetName(), "ActorAnimationEditor.Tracks.Shot"),
 		FUIAction(FExecuteAction::CreateRaw(this, &FActorAnimationEditorToolkit::HandleAddMenuAddShotTrackExecute))
 	);
 
@@ -276,7 +280,7 @@ TSharedRef<SWidget> FActorAnimationEditorToolkit::HandleSequencerGetAddMenuConte
 	MenuBuilder.AddMenuEntry(
 		LOCTEXT("AddSlomoTrack", "Add Slomo Track"),
 		LOCTEXT("AddSlomoTooltip", "Adds a new slomo track that controls the playback speed of the sequence."),
-		FSlateIcon(),
+		FSlateIcon(Style->GetStyleSetName(), "ActorAnimationEditor.Tracks.Slomo"),
 		FUIAction(FExecuteAction::CreateRaw(this, &FActorAnimationEditorToolkit::HandleAddMenuAddSlomoTrackExecute))
 	);
 

@@ -264,9 +264,14 @@ public:
 	UPROPERTY(EditDefaultsOnly, ReplicatedUsing=OnRep_ReplicatedMovement, Category=Replication, AdvancedDisplay)
 	struct FRepMovement ReplicatedMovement;
 
+private:
 	/** Used for replicating attachment of this actor's RootComponent to another actor. */
 	UPROPERTY(Transient, replicatedUsing=OnRep_AttachmentReplication)
 	struct FRepAttachment AttachmentReplication;
+
+public:
+	/** Get read-only access to current AttachmentReplication. */
+	const struct FRepAttachment& GetAttachmentReplication() const { return AttachmentReplication; }
 
 	/** Called on client when updated AttachmentReplication value is received for this actor. */
 	UFUNCTION()
@@ -653,10 +658,21 @@ public:
 	 * @return The transform that transforms from actor space to world space.
 	 */
 	UFUNCTION(BlueprintCallable, meta=(DisplayName = "GetActorTransform"), Category="Utilities|Transformation")
-	FTransform GetTransform() const;
+	FTransform GetTransform() const
+	{
+		return ActorToWorld();
+	}
 
 	/** Get the local-to-world transform of the RootComponent. Identical to GetTransform(). */
-	FTransform ActorToWorld() const;
+	FORCEINLINE FTransform ActorToWorld() const
+	{
+		if( RootComponent != NULL )
+		{
+			return RootComponent->ComponentToWorld;
+		}
+		return FTransform::Identity;
+	}
+
 
 	/** Returns the location of the RootComponent of this Actor */
 	UFUNCTION(BlueprintCallable, meta=(DisplayName = "GetActorLocation", Keywords="position"), Category="Utilities|Transformation")

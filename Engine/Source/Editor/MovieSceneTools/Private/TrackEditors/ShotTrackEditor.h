@@ -9,13 +9,16 @@
 class FShotTrackEditor : public FMovieSceneTrackEditor
 {
 public:
+
 	/**
 	 * Constructor
 	 *
-	 * @param InSequencer	The sequencer instance to be used by this tool
+	 * @param InSequencer The sequencer instance to be used by this tool
 	 */
 	FShotTrackEditor( TSharedRef<ISequencer> InSequencer );
-	~FShotTrackEditor();
+
+	/** Virtual destructor. */
+	virtual ~FShotTrackEditor();
 
 	/**
 	 * Creates an instance of this class.  Called by a sequencer 
@@ -23,9 +26,12 @@ public:
 	 * @param OwningSequencer The sequencer instance to be used by this tool
 	 * @return The new instance of this class
 	 */
-	static TSharedRef<FMovieSceneTrackEditor> CreateTrackEditor( TSharedRef<ISequencer> OwningSequencer );
+	static TSharedRef<ISequencerTrackEditor> CreateTrackEditor( TSharedRef<ISequencer> OwningSequencer );
 
-	/** FMovieSceneTrackEditor Interface */
+public:
+
+	// ISequencerTrackEditor interface
+
 	virtual bool SupportsType( TSubclassOf<UMovieSceneTrack> Type ) const override;
 	virtual TSharedRef<ISequencerSection> MakeSectionInterface( UMovieSceneSection& SectionObject, UMovieSceneTrack* Track ) override;
 	virtual void AddKey(const FGuid& ObjectGuid, UObject* AdditionalAsset = NULL) override;
@@ -33,6 +39,7 @@ public:
 	virtual void BuildObjectBindingTrackMenu(FMenuBuilder& MenuBuilder, const FGuid& ObjectBinding, const UClass* ObjectClass) override;
 
 private:
+
 	/** Delegate for AnimatablePropertyChanged in AddKey */
 	void AddKeyInternal(float AutoKeyTime, const FGuid ObjectGuid);
 
@@ -44,7 +51,11 @@ private:
 
 	UFactory* GetAssetFactoryForNewShot( UClass* SequenceClass );
 
+	/** Callback for executing the "Add Shot" menu entry. */
+	void HandleAddShotMenuEntryExecute(FGuid CameraGuid);
+
 private:
+
 	/** The Thumbnail pool which draws all the viewport thumbnails for the director track */
 	TSharedPtr<class FShotThumbnailPool> ThumbnailPool;
 };
@@ -151,10 +162,6 @@ public:
 	virtual bool AreSectionsConnected() const override { return true; }
 	virtual void GenerateSectionLayout( class ISectionLayoutBuilder& LayoutBuilder ) const override {}
 	virtual FReply OnSectionDoubleClicked( const FGeometry& SectionGeometry, const FPointerEvent& MouseEvent ) override;
-	virtual void BuildSectionContextMenu(FMenuBuilder& MenuBuilder) override;
-
-	/** Filter to selected shot sections */
-	void FilterToSelectedShotSections(bool bZoomToShotBounds);
 
 	/** Gets the thumbnail width */
 	uint32 GetThumbnailWidth() const;

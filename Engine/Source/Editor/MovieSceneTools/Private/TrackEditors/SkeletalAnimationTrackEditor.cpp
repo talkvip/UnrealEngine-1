@@ -21,7 +21,6 @@
 #include "Animation/SkeletalMeshActor.h"
 
 
-
 namespace SkeletalAnimationEditorConstants
 {
 	// @todo Sequencer Allow this to be customizable
@@ -29,35 +28,40 @@ namespace SkeletalAnimationEditorConstants
 }
 
 
-
 FSkeletalAnimationSection::FSkeletalAnimationSection( UMovieSceneSection& InSection )
 	: Section( InSection )
 {
 }
 
+
 FSkeletalAnimationSection::~FSkeletalAnimationSection()
 {
 }
+
 
 UMovieSceneSection* FSkeletalAnimationSection::GetSectionObject()
 { 
 	return &Section;
 }
 
+
 FText FSkeletalAnimationSection::GetDisplayName() const
 {
 	return NSLOCTEXT("FAnimationSection", "AnimationSection", "Animation");
 }
+
 
 FText FSkeletalAnimationSection::GetSectionTitle() const
 {
 	return FText::FromString( Cast<UMovieSceneSkeletalAnimationSection>(&Section)->GetAnimSequence()->GetName() );
 }
 
+
 float FSkeletalAnimationSection::GetSectionHeight() const
 {
 	return (float)SkeletalAnimationEditorConstants::AnimationTrackHeight;
- }
+}
+
 
 int32 FSkeletalAnimationSection::OnPaintSection( const FGeometry& AllottedGeometry, const FSlateRect& SectionClippingRect, FSlateWindowElementList& OutDrawElements, int32 LayerId, bool bParentEnabled ) const
 {
@@ -125,24 +129,29 @@ int32 FSkeletalAnimationSection::OnPaintSection( const FGeometry& AllottedGeomet
 	return LayerId+3;
 }
 
+
 FSkeletalAnimationTrackEditor::FSkeletalAnimationTrackEditor( TSharedRef<ISequencer> InSequencer )
 	: FMovieSceneTrackEditor( InSequencer ) 
 {
 }
 
+
 FSkeletalAnimationTrackEditor::~FSkeletalAnimationTrackEditor()
 {
 }
 
-TSharedRef<FMovieSceneTrackEditor> FSkeletalAnimationTrackEditor::CreateTrackEditor( TSharedRef<ISequencer> InSequencer )
+
+TSharedRef<ISequencerTrackEditor> FSkeletalAnimationTrackEditor::CreateTrackEditor( TSharedRef<ISequencer> InSequencer )
 {
 	return MakeShareable( new FSkeletalAnimationTrackEditor( InSequencer ) );
 }
+
 
 bool FSkeletalAnimationTrackEditor::SupportsType( TSubclassOf<UMovieSceneTrack> Type ) const
 {
 	return Type == UMovieSceneSkeletalAnimationTrack::StaticClass();
 }
+
 
 TSharedRef<ISequencerSection> FSkeletalAnimationTrackEditor::MakeSectionInterface( UMovieSceneSection& SectionObject, UMovieSceneTrack* Track )
 {
@@ -152,6 +161,7 @@ TSharedRef<ISequencerSection> FSkeletalAnimationTrackEditor::MakeSectionInterfac
 
 	return NewSection;
 }
+
 
 void FSkeletalAnimationTrackEditor::AddKey(const FGuid& ObjectGuid, UObject* AdditionalAsset)
 {
@@ -166,6 +176,7 @@ void FSkeletalAnimationTrackEditor::AddKey(const FGuid& ObjectGuid, UObject* Add
 			FOnKeyProperty::CreateRaw( this, &FSkeletalAnimationTrackEditor::AddKeyInternal, OutObjects, AnimSequence) );
 	}
 }
+
 
 bool FSkeletalAnimationTrackEditor::HandleAssetAdded(UObject* Asset, const FGuid& TargetObjectGuid)
 {
@@ -191,6 +202,7 @@ bool FSkeletalAnimationTrackEditor::HandleAssetAdded(UObject* Asset, const FGuid
 	}
 	return false;
 }
+
 
 void FSkeletalAnimationTrackEditor::BuildObjectBindingTrackMenu(FMenuBuilder& MenuBuilder, const FGuid& ObjectBinding, const UClass* ObjectClass)
 {
@@ -219,6 +231,7 @@ void FSkeletalAnimationTrackEditor::BuildObjectBindingTrackMenu(FMenuBuilder& Me
 	}
 }
 
+
 void FSkeletalAnimationTrackEditor::BuildAnimationSubMenu(FMenuBuilder& MenuBuilder, FGuid ObjectBinding, USkeleton* Skeleton)
 {
 	const TSharedPtr<ISequencer> ParentSequencer = GetSequencer();
@@ -243,11 +256,12 @@ void FSkeletalAnimationTrackEditor::BuildAnimationSubMenu(FMenuBuilder& MenuBuil
 				FText::Format( NSLOCTEXT("Sequencer", "AddAnimSequence", "{AnimationName}"), Args ),
 				FText::Format( NSLOCTEXT("Sequencer", "AddAnimSequenceTooltip", "Adds a {AnimationName} animation to this skeletal mesh."), Args ),
 				FSlateIcon(),
-				FUIAction(FExecuteAction::CreateSP(ParentSequencer.Get(), &ISequencer::AddAnimation, ObjectBinding, AnimSequence))
+				FUIAction(FExecuteAction::CreateRaw(this, &FSkeletalAnimationTrackEditor::HandleAddAnimSequencerMenuEntryExecute, ObjectBinding, AnimSequence))
 				);
 		}
 	}
 }
+
 
 void FSkeletalAnimationTrackEditor::AddKeyInternal( float KeyTime, const TArray<UObject*> Objects, class UAnimSequence* AnimSequence )
 {
@@ -267,6 +281,7 @@ void FSkeletalAnimationTrackEditor::AddKeyInternal( float KeyTime, const TArray<
 		}
 	}
 }
+
 
 USkeleton* FSkeletalAnimationTrackEditor::AcquireSkeletonFromObjectGuid(const FGuid& Guid)
 {
@@ -297,4 +312,10 @@ USkeleton* FSkeletalAnimationTrackEditor::AcquireSkeletonFromObjectGuid(const FG
 	}
 
 	return Skeleton;
+}
+
+
+void FSkeletalAnimationTrackEditor::HandleAddAnimSequencerMenuEntryExecute(FGuid ObjectGuid, UAnimSequence* AnimSequence)
+{
+	AddKey(ObjectGuid, AnimSequence);
 }

@@ -144,8 +144,8 @@ void Main(
 
 	#if USE_WORLD_POSITION_EXCLUDING_SHADER_OFFSETS
 		{
-			float4 ScreenPosition = ComputeScreenPosition(SvPosition);
-			CalcMaterialParametersEx(MaterialParameters, SvPosition, ScreenPosition, bIsFrontFace, ComputeWorldWorldPosCamRelative(ScreenPosition), BasePassInterpolants.PixelPositionExcludingWPO);
+			float4 ScreenPosition = SvPositionToScreenPosition(SvPosition);
+			CalcMaterialParametersEx(MaterialParameters, SvPosition, ScreenPosition, bIsFrontFace, SvPositionToTranslatedWorld(SvPosition), BasePassInterpolants.PixelPositionExcludingWPO);
 		}
 	#else
 		CalcMaterialParameters(MaterialParameters, SvPosition, bIsFrontFace);
@@ -310,7 +310,7 @@ void Main(
 			for (int i = 0; i < NUM_DYNAMIC_POINT_LIGHTS; i++)
 			{
 			#endif
-				float3 ToLight = LightPositionAndInvRadius[i].xyz - MaterialParameters.WorldPosition;
+				float3 ToLight = LightPositionAndInvRadius[i].xyz - MaterialParameters.AbsoluteWorldPosition;
 				float DistanceSqr = dot(ToLight, ToLight);
 				float3 L = ToLight * rsqrt(DistanceSqr);
 

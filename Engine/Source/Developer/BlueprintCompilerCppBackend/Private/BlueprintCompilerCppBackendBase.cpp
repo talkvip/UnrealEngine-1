@@ -3,6 +3,7 @@
 #include "BlueprintCompilerCppBackendModulePrivatePCH.h"
 #include "BlueprintCompilerCppBackendBase.h"
 #include "BlueprintCompilerCppBackendUtils.h"
+#include "IBlueprintCompilerCppBackendModule.h" // for GetBaseFilename()
 
 void FBlueprintCompilerCppBackendBase::EmitStructProperties(FStringOutputDevice& Target, UStruct* SourceClass)
 {
@@ -60,11 +61,27 @@ void FBlueprintCompilerCppBackendBase::DeclareDelegates(UClass* SourceClass, TIn
 			}
 		}
 
+		// remove duplicates, n^2, but n is small:
+		for (int32 I = 0; I < Delegates.Num(); ++I)
+		{
+			UFunction* TargetFn = Delegates[I]->SignatureFunction;
+			for (int32 J = I + 1; J < Delegates.Num(); ++J)
+			{
+				if (TargetFn == Delegates[J]->SignatureFunction)
+				{
+					// swap erase:
+					Delegates[J] = Delegates[Delegates.Num() - 1];
+					Delegates.RemoveAt(Delegates.Num() - 1);
+				}
+			}
+		}
+
 		auto DelegateDeclarations = FEmitHelper::EmitSinglecastDelegateDeclarations(Delegates);
 		FString AllDeclarations;
 		FEmitHelper::ArrayToString(DelegateDeclarations, AllDeclarations, TEXT(";\n"));
 		if (DelegateDeclarations.Num())
 		{
+			Emit(Header, TEXT("\t"));
 			Emit(Header, *AllDeclarations);
 			Emit(Header, TEXT(";\n"));
 		}
@@ -420,15 +437,18 @@ void FBlueprintCompilerCppBackendBase::EmitFileBeginning(const FString& CleanNam
 				check(Field);
 				const bool bWantedType = Field->IsA<UBlueprintGeneratedClass>() || Field->IsA<UUserDefinedEnum>() || Field->IsA<UUserDefinedStruct>();
 
-				// Wanted no-native type, thet will be converted
+				// Wanted no-native type, that will be converted
 				if (bWantedType)
 				{
+					// @TODO: Need to query if this asset will actually be converted
+
 					const FString Name = Field->GetName();
 					bool bAlreadyIncluded = false;
 					AlreadyIncluded.Add(Name, &bAlreadyIncluded);
 					if (!bAlreadyIncluded)
 					{
-						EmitIncludeHeader(Dst, *Name, true);
+						const FString GeneratedFilename = IBlueprintCompilerCppBackendModule::GetBaseFilename(Field);
+						EmitIncludeHeader(Dst, *GeneratedFilename, true);
 					}
 				}
 				// headers for native items

@@ -2,27 +2,38 @@
 
 #pragma once
 
+
 class UMovieSceneMaterialTrack;
+
 
 /**
  * Track editor for material parameters.
  */
-class FMaterialTrackEditor : public FMovieSceneTrackEditor
+class FMaterialTrackEditor
+	: public FMovieSceneTrackEditor
 {
 public:
+
+	/** Constructor. */
 	FMaterialTrackEditor( TSharedRef<ISequencer> InSequencer );
 
+	/** Virtual destructor. */
 	virtual ~FMaterialTrackEditor() { }
 
-	/* FMovieSceneTrackEditor interface */
-	virtual TSharedRef<ISequencerSection> MakeSectionInterface( UMovieSceneSection& SectionObject, UMovieSceneTrack* Track ) override;
+public:
+
+	// ISequencerTrackEditor interface
+
 	virtual TSharedPtr<SWidget> BuildOutlinerEditWidget( const FGuid& ObjectBinding, UMovieSceneTrack* Track ) override;
+	virtual TSharedRef<ISequencerSection> MakeSectionInterface( UMovieSceneSection& SectionObject, UMovieSceneTrack* Track ) override;
 
 protected:
+
 	/** Gets a material interface for a specific object binding and material track. */
 	virtual UMaterialInterface* GetMaterialInterfaceForTrack( FGuid ObjectBinding, UMovieSceneMaterialTrack* MaterialTrack ) = 0;
 
 private:
+
 	/** Provides the contents of the add parameter menu. */
 	TSharedRef<SWidget> OnGetAddParameterMenuContent( FGuid ObjectBinding, UMovieSceneMaterialTrack* MaterialTrack );
 
@@ -44,20 +55,28 @@ private:
 	void AddVectorParameter( FGuid ObjectBinding, UMovieSceneMaterialTrack* MaterialTrack, FName ParameterName );
 };
 
+
 /**
  * A specialized material track editor for component materials
  */
-class FComponentMaterialTrackEditor : public FMaterialTrackEditor
+class FComponentMaterialTrackEditor
+	: public FMaterialTrackEditor
 {
 public:
+
 	FComponentMaterialTrackEditor( TSharedRef<ISequencer> InSequencer );
 
-	static TSharedRef<FMovieSceneTrackEditor> CreateTrackEditor( TSharedRef<ISequencer> OwningSequencer );
+	static TSharedRef<ISequencerTrackEditor> CreateTrackEditor( TSharedRef<ISequencer> OwningSequencer );
 
-	/** FMovieSceneTrackEditor Interface */
+public:
+
+	// ISequencerTrackEditor interface
+
 	virtual bool SupportsType( TSubclassOf<UMovieSceneTrack> Type ) const override;
 
 protected:
-	/** FMaterialtrackEditor interface */
+
+	// FMaterialtrackEditor interface
+
 	virtual UMaterialInterface* GetMaterialInterfaceForTrack( FGuid ObjectBinding, UMovieSceneMaterialTrack* MaterialTrack ) override;
 };

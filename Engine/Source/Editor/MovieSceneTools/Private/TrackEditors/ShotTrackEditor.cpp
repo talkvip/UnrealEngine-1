@@ -288,22 +288,6 @@ FReply FShotSection::OnSectionDoubleClicked( const FGeometry& SectionGeometry, c
 	return FReply::Handled();
 }
 
-void FShotSection::BuildSectionContextMenu(FMenuBuilder& MenuBuilder)
-{
-	MenuBuilder.AddMenuEntry(
-		NSLOCTEXT("FShotTrackEditor", "FilterToShots", "Filter To Shots"),
-		NSLOCTEXT("FShotTrackEditor", "FilterToShotsToolTip", "Filters to the selected shot sections"),
-		FSlateIcon(),
-		FUIAction(FExecuteAction::CreateSP(this, &FShotSection::FilterToSelectedShotSections, true))
-		);
-}
-
-
-void FShotSection::FilterToSelectedShotSections(bool bZoomToShotBounds)
-{
-	Sequencer.Pin()->FilterToSelectedShotSections(bZoomToShotBounds);
-}
-
 int32 FShotSection::OnPaintSection( const FGeometry& AllottedGeometry, const FSlateRect& SectionClippingRect, FSlateWindowElementList& OutDrawElements, int32 LayerId, bool bParentEnabled ) const
 {
 	const ESlateDrawEffect::Type DrawEffects = bParentEnabled ? ESlateDrawEffect::None : ESlateDrawEffect::DisabledEffect;
@@ -531,7 +515,7 @@ FShotTrackEditor::~FShotTrackEditor()
 {
 }
 
-TSharedRef<FMovieSceneTrackEditor> FShotTrackEditor::CreateTrackEditor( TSharedRef<ISequencer> InSequencer )
+TSharedRef<ISequencerTrackEditor> FShotTrackEditor::CreateTrackEditor( TSharedRef<ISequencer> InSequencer )
 {
 	return MakeShareable( new FShotTrackEditor( InSequencer ) );
 }
@@ -580,7 +564,7 @@ void FShotTrackEditor::BuildObjectBindingTrackMenu(FMenuBuilder& MenuBuilder, co
 			NSLOCTEXT("FShotTrackEditor", "AddShot", "Add New Shot"),
 			NSLOCTEXT("FShotTrackEditor", "AddShotTooltip", "Adds a new shot using this camera at the scrubber location."),
 			FSlateIcon(),
-			FUIAction(FExecuteAction::CreateSP(ParentSequencer.Get(), &ISequencer::AddNewShot, ObjectBinding))
+			FUIAction(FExecuteAction::CreateRaw(this, &FShotTrackEditor::HandleAddShotMenuEntryExecute, ObjectBinding))
 			);
 	}
 }
@@ -723,4 +707,10 @@ UFactory* FShotTrackEditor::GetAssetFactoryForNewShot( UClass* SequenceClass )
 	}
 
 	return ShotFactory.Get();
+}
+
+
+void FShotTrackEditor::HandleAddShotMenuEntryExecute(FGuid CameraGuid)
+{
+	AddKey(CameraGuid);
 }

@@ -23,7 +23,7 @@ public:
 	 * @param InSequencer The sequencer instance to be used by this tool.
 	 * @return The new instance of this class.
 	 */
-	static TSharedRef<FMovieSceneTrackEditor> CreateTrackEditor(TSharedRef<ISequencer> InSequencer);
+	static TSharedRef<ISequencerTrackEditor> CreateTrackEditor(TSharedRef<ISequencer> InSequencer);
 
 public:
 
@@ -36,7 +36,7 @@ public:
 
 public:
 
-	// FMovieSceneTrackEditor interface
+	// ISequencerTrackEditor interface
 
 	virtual void AddKey(const FGuid& ObjectGuid, UObject* AdditionalAsset = nullptr) override;
 	virtual void BuildObjectBindingTrackMenu(FMenuBuilder& MenuBuilder, const FGuid& ObjectBinding, const UClass* ObjectClass) override;

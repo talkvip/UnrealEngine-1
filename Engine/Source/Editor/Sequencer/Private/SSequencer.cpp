@@ -57,22 +57,6 @@ public:
 		ViewRange = InArgs._ViewRange;
 		Sequencer = InSequencer;
 	}
-
-	virtual void Tick( const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime ) override
-	{
-		if (Sequencer.Pin()->IsShotFilteringOn())
-		{
-			TArray< TWeakObjectPtr<UMovieSceneSection> > FilterShots = Sequencer.Pin()->GetFilteringShotSections();
-			// if there are filtering shots, continuously update the cached filter zones
-			// we do this in tick, and cache it in order to make animation work properly
-			CachedFilteredRanges.Empty();
-			for (int32 i = 0; i < FilterShots.Num(); ++i)
-			{
-				UMovieSceneSection* Filter = FilterShots[i].Get();
-				CachedFilteredRanges.Add(Filter->GetRange());
-			}
-		}
-	}
 	
 	virtual int32 OnPaint( const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyClippingRect, FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled ) const override
 	{
@@ -953,21 +937,6 @@ void SSequencer::UpdateBreadcrumbs(const TArray< TWeakObjectPtr<class UMovieScen
 		BreadcrumbTrail->PushCrumb( CrumbName, FSequencerBreadcrumb( FocusedMovieSceneInstance ) );
 	}
 
-	if (Sequencer.Pin()->IsShotFilteringOn())
-	{
-		TAttribute<FText> CrumbString;
-		if (FilteringShots.Num() == 1)
-		{
-			CrumbString = TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateSP(this, &SSequencer::GetShotSectionTitle, FilteringShots[0].Get()));
-		}
-		else 
-		{
-			CrumbString = LOCTEXT("MultipleShots", "Multiple Shots");
-		}
-
-		BreadcrumbTrail->PushCrumb(CrumbString, FSequencerBreadcrumb());
-	}
-
 	SequencerNodeTree->UpdateCachedVisibilityBasedOnShotFiltersChanged();
 }
 
@@ -1318,13 +1287,6 @@ void SSequencer::OnCrumbClicked(const FSequencerBreadcrumb& Item)
 		{
 			Sequencer.Pin()->PopToMovieScene( Item.MovieSceneInstance.Pin().ToSharedRef() );
 		}
-
-		Sequencer.Pin()->FilterToShotSections( TArray< TWeakObjectPtr<UMovieSceneSection> >() );
-	}
-	else
-	{
-		// refilter what we already have
-		Sequencer.Pin()->FilterToShotSections(Sequencer.Pin()->GetFilteringShotSections());
 	}
 }
 

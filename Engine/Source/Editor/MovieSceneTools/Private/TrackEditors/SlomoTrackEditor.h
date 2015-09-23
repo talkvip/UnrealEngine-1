@@ -2,11 +2,11 @@
 
 #pragma once
 
-#include "MovieSceneSlomoTrack.h"
 #include "FloatPropertyTrackEditor.h"
 
 
 class ISequencer;
+class UMovieSceneTrack;
 
 
 /**
@@ -23,7 +23,7 @@ public:
 	 * @param InSequencer The sequencer instance to be used by this tool.
 	 * @return The new instance of this class.
 	 */
-	static TSharedRef<FMovieSceneTrackEditor> CreateTrackEditor(TSharedRef<ISequencer> InSequencer);
+	static TSharedRef<ISequencerTrackEditor> CreateTrackEditor(TSharedRef<ISequencer> InSequencer);
 
 public:
 
@@ -39,7 +39,18 @@ public:
 	// ISequencerTrackEditor interface
 
 //	virtual void AddKey(const FGuid& ObjectGuid, UObject* AdditionalAsset = nullptr) override;
+	virtual void BuildAddTrackMenu(FMenuBuilder& MenuBuilder) override;
 //	virtual void BuildObjectBindingTrackMenu(FMenuBuilder& MenuBuilder, const FGuid& ObjectBinding, const UClass* ObjectClass) override;
 //	virtual TSharedRef<ISequencerSection> MakeSectionInterface(UMovieSceneSection& SectionObject, UMovieSceneTrack* Track) override;
 	virtual bool SupportsType(TSubclassOf<UMovieSceneTrack> Type) const override;
+
+private:
+
+	/** Callback for executing the "Add Event Track" menu entry. */
+	void HandleAddSlomoTrackMenuEntryExecute();
+
+private:
+
+	/** Pointer to the sequence's slomo track, if it exists. */
+	TWeakObjectPtr<UMovieSceneTrack> SlomoTrack;
 };

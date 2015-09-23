@@ -5,3 +5,11 @@
 #include "MovieSceneSlomoTrack.h"
 #include "MovieSceneSlomoTrackInstance.h"
 
+
+/* UMovieSceneFloatTrack overrides
+ *****************************************************************************/
+
+bool UMovieSceneSlomoTrack::IsVisibleWhenEmpty() const
+{
+	return true;
+}

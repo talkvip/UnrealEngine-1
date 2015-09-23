@@ -39,8 +39,11 @@
 #include "GenericCommands.h"
 #include "Engine/BlueprintGeneratedClass.h"
 #include "Engine/Selection.h"
+#include "LevelEditor.h"
 #include "IMenu.h"
 
+#include "MovieSceneCaptureModule.h"
+#include "AutomatedActorAnimationCapture.h"
 
 #define LOCTEXT_NAMESPACE "Sequencer"
 
@@ -663,7 +666,7 @@ void FSequencer::SetGlobalTimeDirectly( float NewTime )
 {
 	float LastTime = ScrubPosition;
 
-	if (Settings->GetShowRangeSlider() && Settings->GetLockInOutToStartEndRange())
+	if (!Settings->GetAutoScrollEnabled())
 	{
 		UMovieScene* FocusedMovieScene = GetFocusedMovieSceneSequence()->GetMovieScene();
 		NewTime = FMath::Clamp(NewTime, FocusedMovieScene->InTime, FocusedMovieScene->OutTime);
@@ -2279,11 +2282,44 @@ void FSequencer::BindSequencerCommands()
 		FCanExecuteAction::CreateLambda( []{ return true; } ),
 		FIsActionChecked::CreateLambda( [this]{ return Settings->GetShowCurveEditor(); } ) );
 
+	SequencerCommandBindings->MapAction( Commands.RenderMovie,
+		FExecuteAction::CreateLambda([this]{
+			FLevelEditorModule& LevelEditorModule = FModuleManager::GetModuleChecked<FLevelEditorModule>(TEXT("LevelEditor"));
+			IMovieSceneCaptureModule& MovieSceneCaptureModule = IMovieSceneCaptureModule::Get();
+
+			// Create a new movie scene capture object for an automated actor animation, and open the tab
+			UAutomatedActorAnimationCapture* MovieSceneCapture = NewObject<UAutomatedActorAnimationCapture>(GetTransientPackage(), UAutomatedActorAnimationCapture::StaticClass(), NAME_None, RF_Transient);
+			MovieSceneCapture->LoadConfig();
+
+			// Set the actor animation asset we want to render
+			MovieSceneCapture->ActorAnimation = GetCurrentAsset()->GetPathName();
+
+			// Set the level we want to render
+			for (const FWorldContext& Context : GEngine->GetWorldContexts())
+			{
+				if (Context.WorldType == EWorldType::Editor)
+				{
+					MovieSceneCapture->Level = Context.World()->GetOutermost()->GetPathName();
+					break;
+				}
+			}
+			MovieSceneCaptureModule.OpenCaptureSettings(LevelEditorModule.GetLevelEditorTabManager().ToSharedRef(), MovieSceneCapture);
+		})
+	);
+
 	SequencerWidget->BindCommands(SequencerCommandBindings);
 
 	for (int32 i = 0; i < TrackEditors.Num(); ++i)
 	{
 		TrackEditors[i]->BindCommands(SequencerCommandBindings);
+	}
+}
+
+void FSequencer::BuildAddTrackMenu(class FMenuBuilder& MenuBuilder)
+{
+	for (int32 i = 0; i < TrackEditors.Num(); ++i)
+	{
+		TrackEditors[i]->BuildAddTrackMenu(MenuBuilder);
 	}
 }
 

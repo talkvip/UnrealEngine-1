@@ -560,10 +560,17 @@ void FShotTrackEditor::Tick(float DeltaTime)
 
 void FShotTrackEditor::BuildAddTrackMenu(FMenuBuilder& MenuBuilder)
 {
+	UMovieSceneSequence* RootMovieSceneSequence = GetSequencer()->GetRootMovieSceneSequence();
+
+	if ((RootMovieSceneSequence == nullptr) || (RootMovieSceneSequence->GetClass()->GetName() != TEXT("ActorAnimationInstance")))
+	{
+		return;
+	}
+
 	MenuBuilder.AddMenuEntry(
 		LOCTEXT("AddShotTrack", "Add Shot Track"),
 		LOCTEXT("AddShotTooltip", "Adds a shot track, as well as a new shot at the current scrubber location if a camera is selected."),
-		FSlateIcon(FEditorStyle::GetStyleSetName(), "ActorAnimationEditor.Tracks.Shot"),
+		FSlateIcon(FEditorStyle::GetStyleSetName(), "Sequencer.Tracks.Shot"),
 		FUIAction(
 			FExecuteAction::CreateRaw(this, &FShotTrackEditor::HandleAddShotTrackMenuEntryExecute),
 			FCanExecuteAction::CreateRaw(this, &FShotTrackEditor::HandleAddShotTrackMenuEntryCanExecute)

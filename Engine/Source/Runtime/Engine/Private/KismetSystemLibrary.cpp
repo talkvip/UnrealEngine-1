@@ -2997,7 +2997,7 @@ int32 UKismetSystemLibrary::GetRenderingMaterialQualityLevel()
 	static const IConsoleVariable* CVar = IConsoleManager::Get().FindConsoleVariable(TEXT("r.MaterialQualityLevel"));
 
 	// clamp range
-	int32 Ret = FMath::Clamp(CVar->GetInt(), 0, 1);
+	int32 Ret = FMath::Clamp(CVar->GetInt(), 0, (int32)EMaterialQualityLevel::Num - 1);
 
 	return Ret;
 }
@@ -3146,6 +3146,21 @@ void UKismetSystemLibrary::SetVolumeButtonsHandledBySystem(bool bEnabled)
 bool UKismetSystemLibrary::GetVolumeButtonsHandledBySystem()
 {
 	return FPlatformMisc::GetVolumeButtonsHandledBySystem();
+}
+
+void UKismetSystemLibrary::ResetGamepadAssignments()
+{
+	FPlatformMisc::ResetGamepadAssignments();
+}
+
+void UKismetSystemLibrary::ResetGamepadAssignmentToController(int32 ControllerId)
+{
+	FPlatformMisc::ResetGamepadAssignmentToController(ControllerId);
+}
+
+bool UKismetSystemLibrary::IsControllerAssignedToGamepad(int32 ControllerId)
+{
+	return FPlatformMisc::IsControllerAssignedToGamepad(ControllerId);
 }
 
 void UKismetSystemLibrary::SetSupressViewportTransitionMessage(UObject* WorldContextObject, bool bState)

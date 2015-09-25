@@ -8,18 +8,24 @@ using System.Runtime.Serialization.Formatters.Binary;
 
 namespace UnrealBuildTool
 {
-	/**
-	 * Caches include dependency information to speed up preprocessing on subsequent runs.
-	 */
+	/// <summary>
+	/// Caches include dependency information to speed up preprocessing on subsequent runs.
+	/// </summary>
 	public class ActionHistory
 	{
-		/** Path to store the cache data to. */
+		/// <summary>
+		/// Path to store the cache data to.
+		/// </summary>
 		private string FilePath;
 
-		/** The command lines used to produce files, keyed by the absolute file paths. */
+		/// <summary>
+		/// The command lines used to produce files, keyed by the absolute file paths.
+		/// </summary>
 		private Dictionary<string, string> ProducedItemToPreviousActionCommandLine;
 
-		/** Whether the dependency cache is dirty and needs to be saved. */
+		/// <summary>
+		/// Whether the dependency cache is dirty and needs to be saved.
+		/// </summary>
 		private bool bIsDirty;
 
 		public ActionHistory(string InFilePath)
@@ -59,7 +65,7 @@ namespace UnrealBuildTool
 		public void Save()
 		{
 			// Only save if we've made changes to it since load.
-			if( bIsDirty )
+			if (bIsDirty)
 			{
 				// Serialize the cache to disk.
 				try
@@ -100,7 +106,7 @@ namespace UnrealBuildTool
 				// Monolithic configs and programs have their Action History stored in their respective project folders
 				// or under engine intermediate folder + program name folder
 				DirectoryReference RootDirectory;
-				if(Target.ProjectFile != null)
+				if (Target.ProjectFile != null)
 				{
 					RootDirectory = Target.ProjectFile.Directory;
 				}

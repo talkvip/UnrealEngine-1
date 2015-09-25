@@ -3,6 +3,7 @@
 #include "MovieSceneToolsPrivatePCH.h"
 #include "EventTrackEditor.h"
 #include "EventTrackSection.h"
+#include "MovieSceneEventTrack.h"
 
 
 #define LOCTEXT_NAMESPACE "FEventTrackEditor"
@@ -36,10 +37,17 @@ void FEventTrackEditor::AddKey(const FGuid& ObjectGuid, UObject* AdditionalAsset
 
 void FEventTrackEditor::BuildAddTrackMenu(FMenuBuilder& MenuBuilder)
 {
+	UMovieSceneSequence* RootMovieSceneSequence = GetSequencer()->GetRootMovieSceneSequence();
+
+	if ((RootMovieSceneSequence == nullptr) || (RootMovieSceneSequence->GetClass()->GetName() != TEXT("ActorAnimationInstance")))
+	{
+		return;
+	}
+
 	MenuBuilder.AddMenuEntry(
 		LOCTEXT("AddEventTrack", "Add Event Track"),
 		LOCTEXT("AddEventTooltip", "Adds a new event track that can trigger events on the timeline."),
-		FSlateIcon(FEditorStyle::GetStyleSetName(), "ActorAnimationEditor.Tracks.Event"),
+		FSlateIcon(FEditorStyle::GetStyleSetName(), "Sequencer.Tracks.Event"),
 		FUIAction(
 			FExecuteAction::CreateRaw(this, &FEventTrackEditor::HandleAddEventTrackMenuEntryExecute)
 		)
@@ -74,7 +82,16 @@ bool FEventTrackEditor::SupportsType(TSubclassOf<UMovieSceneTrack> Type) const
 
 void FEventTrackEditor::HandleAddEventTrackMenuEntryExecute()
 {
+	UMovieSceneSequence* FocusedSequence = GetSequencer()->GetFocusedMovieSceneSequence();
+	UMovieScene* MovieScene = FocusedSequence->GetMovieScene();
 
+	if (MovieScene != nullptr)
+	{
+		UMovieSceneTrack* NewTrack = MovieScene->AddMasterTrack(UMovieSceneEventTrack::StaticClass());
+		NewTrack->AddSection(NewTrack->CreateNewSection());
+
+		GetSequencer()->NotifyMovieSceneDataChanged();
+	}
 }
 
 

@@ -20,16 +20,24 @@ namespace UnrealBuildTool
 {
 	public class RPCUtilHelper
 	{
-		/** The Mac we are compiling on */
+		/// <summary>
+		/// The Mac we are compiling on
+		/// </summary>
 		private static string MacName;
 
-		/** A socket per command thread */
+		/// <summary>
+		/// A socket per command thread
+		/// </summary>
 		private static Hashtable CommandThreadSockets = new Hashtable();
 
-		/** Time difference between remote and local idea's of UTC time */
+		/// <summary>
+		/// Time difference between remote and local idea's of UTC time
+		/// </summary>
 		private static TimeSpan TimeDifferenceFromRemote = new TimeSpan(0);
 
-		/** The number of commands the remote side should be able to run at once */
+		/// <summary>
+		/// The number of commands the remote side should be able to run at once
+		/// </summary>
 		private static int MaxRemoteCommandsAllowed = 0;
 
 		private static DateTime RemoteToLocalTime(string RemoteTime)
@@ -97,7 +105,7 @@ namespace UnrealBuildTool
 						TimeDifferenceFromRemote = DateTime.UtcNow - RemoteTimebase;
 
 						// now figure out max number of commands to run at once
-//						int PageSize = int.Parse(Lines[1]);
+						//						int PageSize = int.Parse(Lines[1]);
 						Int64 AvailableMem = Int64.Parse(Lines[1].Replace(".", ""));// *PageSize;
 						int NumProcesses = (int)Math.Max(1, AvailableMem / (RemoteToolChain.MemoryPerCompileMB * 1024 * 1024));
 
@@ -107,31 +115,31 @@ namespace UnrealBuildTool
 
 						Console.WriteLine("Remote time is {0}, difference is {1}", RemoteTimebase.ToString(), TimeDifferenceFromRemote.ToString());
 					}
-					
+
 					if (BuildConfiguration.bFlushBuildDirOnRemoteMac)
 					{
 						Command("/", "rm", "-rf /UE4/Builds/" + Environment.MachineName, null);
 					}
 				}
-				catch(Exception Ex)
+				catch (Exception Ex)
 				{
 					Log.TraceVerbose("SSH Initialize exception {0}", Ex.ToString());
 					Log.TraceError("Failed to run init commands on {0}", MacName);
 					return RemoteToolChain.RemoteToolChainErrorCode.SSHCommandFailed;
 				}
 			}
- 			else
- 			{
+			else
+			{
 				Log.TraceError("Failed to ping Mac named {0}", MacName);
 				return RemoteToolChain.RemoteToolChainErrorCode.ServerNotResponding;
- 			}
+			}
 
 			return RemoteToolChain.RemoteToolChainErrorCode.NoError;
 		}
 
-		/**
-		 * Handle a thread ending
-		 */
+		/// <summary>
+		/// Handle a thread ending
+		/// </summary>
 		public static void OnThreadComplete()
 		{
 			lock (CommandThreadSockets)
@@ -171,13 +179,13 @@ namespace UnrealBuildTool
 			return ThreadSocket;
 		}
 
-		/**
-		 * This function should be used as the ActionHandler delegate method for Actions that
-		 * need to run over RPCUtility. It will block until the remote command completes
-		 */
+		/// <summary>
+		/// This function should be used as the ActionHandler delegate method for Actions that
+		/// need to run over RPCUtility. It will block until the remote command completes
+		/// </summary>
 		static public void RPCActionHandler(Action Action, out int ExitCode, out string Output)
 		{
-			Hashtable Results = RPCUtilHelper.Command(Action.WorkingDirectory, Action.CommandPath, Action.CommandArguments, 
+			Hashtable Results = RPCUtilHelper.Command(Action.WorkingDirectory, Action.CommandPath, Action.CommandArguments,
 				Action.ProducedItems.Count > 0 ? Action.ProducedItems[0].AbsolutePath : null);
 			if (Results == null)
 			{
@@ -202,9 +210,7 @@ namespace UnrealBuildTool
 			}
 		}
 
-		/** 
-		 * @return the modification time on the remote machine, accounting for rough difference in time between the two machines
-		 */
+		/// <returns>the modification time on the remote machine, accounting for rough difference in time between the two machines</returns>
 		public static bool GetRemoteFileInfo(string RemotePath, out DateTime ModificationTime, out long Length)
 		{
 			if (RemoteToolChain.bUseRPCUtil)
@@ -217,7 +223,7 @@ namespace UnrealBuildTool
 				Hashtable Results = Command("/", "bash", CommandArgs, null);
 
 				string Output = Results["CommandOutput"] as string;
-				string[] Tokens =  Output.Split(",".ToCharArray());
+				string[] Tokens = Output.Split(",".ToCharArray());
 				if (Tokens.Length == 2)
 				{
 					ModificationTime = RemoteToLocalTime(Tokens[0]);
@@ -229,7 +235,7 @@ namespace UnrealBuildTool
 				ModificationTime = DateTime.MinValue;
 				Length = 0;
 				return false;
-			
+
 			}
 		}
 
@@ -412,10 +418,10 @@ namespace UnrealBuildTool
 
 				// execute the file, not a commandline
 				Hashtable Results = Command(RemoteDir, "sh", RemoteCommandsFile + " && rm " + RemoteCommandsFile, null);
-				
+
 				Console.WriteLine("BatchFileInfo took {0}", (DateTime.Now - Now).ToString());
 
-				string[] Lines = ((string)Results["CommandOutput"]).Split("\r\n".ToCharArray(),	StringSplitOptions.RemoveEmptyEntries);
+				string[] Lines = ((string)Results["CommandOutput"]).Split("\r\n".ToCharArray(), StringSplitOptions.RemoveEmptyEntries);
 				if (Lines.Length != Files.Length * 2)
 				{
 					throw new BuildException("Received the wrong number of results from BatchFileInfo");

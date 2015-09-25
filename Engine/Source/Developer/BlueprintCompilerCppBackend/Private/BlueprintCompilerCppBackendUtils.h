@@ -29,7 +29,6 @@ private:
 	int32 LocalNameIndexMax;
 	TArray<FString> HighPriorityLines;
 	TArray<FString> LowPriorityLines;
-	UClass* ActualClass;
 
 	//ConstructorOnly Local Names
 	TMap<UObject*, FString> ClassSubobjectsMap;
@@ -45,17 +44,11 @@ public:
 
 	const FGatherConvertedClassDependencies& Dependencies;
 
-	FEmitterLocalContext(UClass* InClass, const FGatherConvertedClassDependencies& InDependencies)
+	FEmitterLocalContext(const FGatherConvertedClassDependencies& InDependencies)
 		: CurrentCodeType(EGeneratedCodeType::Regular)
 		, LocalNameIndexMax(0)
-		, ActualClass(InClass)
 		, Dependencies(InDependencies)
 	{}
-
-	UClass* GetActualClass() const
-	{
-		return ActualClass;
-	}
 
 	// CONSTRUCTOR FUNCTIONS
 
@@ -110,18 +103,48 @@ public:
 
 	// UNIVERSAL FUNCTIONS
 
+	UClass* GetFirstNativeParent(UClass* InClass) const
+	{
+		check(InClass);
+		for (UClass* ItClass = InClass; ItClass; ItClass = ItClass->GetSuperClass())
+		{
+			auto BPGC = Cast<UBlueprintGeneratedClass>(ItClass);
+			if (ItClass->HasAnyClassFlags(CLASS_Native) || (BPGC && Dependencies.WillClassBeConverted(BPGC)))
+			{
+				return ItClass;
+			}
+		}
+		check(false);
+		return nullptr;
+	}
+
+	UClass* GetNativeOrConvertedClass(UClass* InClass) const
+	{
+		check(InClass);
+		if (InClass->HasAnyClassFlags(CLASS_Native))
+		{
+			return InClass;
+		}
+		auto BPGC = CastChecked<UBlueprintGeneratedClass>(InClass);
+		if (Dependencies.WillClassBeConverted(BPGC))
+		{
+			return InClass;
+		}
+		return GetFirstNativeParent(InClass);
+	}
+
 	FString GenerateGetProperty(const UProperty* Property) const;
 
 	FString GenerateUniqueLocalName();
 
 	UClass* GetCurrentlyGeneratedClass() const
 	{
-		return ActualClass;
+		return Cast<UClass>(Dependencies.GetOriginalStruct());
 	}
 
 	/** All objects (that can be referenced from other package) that will have a different path in cooked build
 	(due to the native code generation), should be handled by this function */
-	FString FindGloballyMappedObject(UObject* Object, bool bLoadIfNotFound = false);
+	FString FindGloballyMappedObject(const UObject* Object, const UClass* ExpectedClass = nullptr, bool bLoadIfNotFound = false, bool bTryUsedAssetsList = true);
 
 	// TEXT FUNCTIONS
 
@@ -171,6 +194,11 @@ public:
 		FlushLines();
 		Result.Reset();
 	}
+
+	// Functions needed for Unconverted classes
+	FString ExportCppDeclaration(const UProperty* Property, EExportedDeclaration::Type DeclarationType, uint32 AdditionalExportCPPFlags, bool bSkipParameterName = false) const;
+	FString ExportTextItem(const UProperty* Property, const void* PropertyValue) const;
+
 };
 
 struct FEmitHelper
@@ -198,11 +226,11 @@ struct FEmitHelper
 
 	static FString EmitUFuntion(UFunction* Function, TArray<FString>* AdditinalMetaData = nullptr);
 
-	static int32 ParseDelegateDetails(UFunction* Signature, FString& OutParametersMacro, FString& OutParamNumberStr);
+	static int32 ParseDelegateDetails(FEmitterLocalContext& EmitterContext, UFunction* Signature, FString& OutParametersMacro, FString& OutParamNumberStr);
 
-	static TArray<FString> EmitSinglecastDelegateDeclarations(const TArray<UDelegateProperty*>& Delegates);
+	static TArray<FString> EmitSinglecastDelegateDeclarations(FEmitterLocalContext& EmitterContext, const TArray<UDelegateProperty*>& Delegates);
 
-	static TArray<FString> EmitMulticastDelegateDeclarations(UClass* SourceClass);
+	static TArray<FString> EmitMulticastDelegateDeclarations(FEmitterLocalContext& EmitterContext, UClass* SourceClass);
 
 	static FString EmitLifetimeReplicatedPropsImpl(UClass* SourceClass, const FString& CppClassName, const TCHAR* InCurrentIndent);
 

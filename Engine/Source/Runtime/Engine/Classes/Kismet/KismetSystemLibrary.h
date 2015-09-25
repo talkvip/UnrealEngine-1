@@ -1342,6 +1342,7 @@ class ENGINE_API UKismetSystemLibrary : public UBlueprintFunctionLibrary
 	 * Get the clamped state of r.MaterialQualityLevel, see console variable help (allows for scalability, cannot be used in construction scripts)
 	 * 0: low
 	 * 1: high
+	 * 2: medium
 	 */
 	UFUNCTION(BlueprintPure, Category="Rendering|Material", meta=(UnsafeDuringActorConstruction = "true"))
 	static int32 GetRenderingMaterialQualityLevel();
@@ -1436,6 +1437,24 @@ class ENGINE_API UKismetSystemLibrary : public UBlueprintFunctionLibrary
 	 */
 	UFUNCTION(BlueprintPure, Category = "Utilities|Platform")
 	static bool GetVolumeButtonsHandledBySystem();
+
+	/**
+	 * Resets the gamepad to player controller id assignments (Android only)
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Utilities|Platform")
+	static void ResetGamepadAssignments();
+
+	/*
+	 * Resets the gamepad assignment to player controller id (Android only)
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Utilities|Platform")
+	static void ResetGamepadAssignmentToController(int32 ControllerId);
+
+	/**
+	 * Returns true if controller id assigned to a gamepad (Android only)
+	 */
+	UFUNCTION(BlueprintPure, Category = "Utilities|Platform")
+	static bool IsControllerAssignedToGamepad(int32 ControllerId);
 
 	/**
 	 * Sets the state of the transition message rendered by the viewport. (The blue text displayed when the game is paused and so forth.)

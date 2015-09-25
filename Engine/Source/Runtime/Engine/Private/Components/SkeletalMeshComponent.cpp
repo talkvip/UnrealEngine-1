@@ -39,6 +39,8 @@
 
 TAutoConsoleVariable<int32> CVarUseParallelAnimationEvaluation(TEXT("a.ParallelAnimEvaluation"), 1, TEXT("If 1, animation evaluation will be run across the task graph system. If 0, evaluation will run purely on the game thread"));
 
+DECLARE_CYCLE_STAT(TEXT("Swap Anim Buffers"), STAT_CompleteAnimSwapBuffers, STATGROUP_Anim);
+DECLARE_CYCLE_STAT(TEXT("Update SkelMesh Bounds"), STAT_UpdateSkelMeshBounds, STATGROUP_Anim);
 DECLARE_CYCLE_STAT_EXTERN(TEXT("Anim Instance Spawn Time"), STAT_AnimSpawnTime, STATGROUP_Anim, );
 DEFINE_STAT(STAT_AnimSpawnTime);
 DEFINE_STAT(STAT_PostAnimEvaluation);
@@ -101,10 +103,13 @@ public:
 	void DoTask(ENamedThreads::Type CurrentThread, const FGraphEventRef& MyCompletionGraphEvent)
 	{
 		SCOPE_CYCLE_COUNTER(STAT_AnimGameThreadTime);
+
 		if (USkeletalMeshComponent* Comp = SkeletalMeshComponent.Get())
 		{
+			FScopeCycleCounterUObject ComponentScope(Comp);
+			FScopeCycleCounterUObject MeshScope(Comp->SkeletalMesh);
+
 			const bool bPerformPostAnimEvaluation = true;
-			QUICK_SCOPE_CYCLE_COUNTER(STAT_USkeletalMeshComponent_CompleteParallelAnimationEvaluation);
 			Comp->CompleteParallelAnimationEvaluation(bPerformPostAnimEvaluation);
 		}
 	}
@@ -1019,6 +1024,8 @@ void USkeletalMeshComponent::UpdateSlaveComponent()
 		}
 	}
 
+	PrepareCloth();
+
 	Super::UpdateSlaveComponent();
 }
 
@@ -1065,6 +1072,13 @@ void USkeletalMeshComponent::SubmitClothSimulationContext()
 	//If the editable teleport mode is non default it means the user has actively written to it since the previous flip. This means we should use it. Otherwise use the internal because the cloth code set it as needed
 	InternalClothSimulationContext.ClothTeleportMode = EditableClothSimulationContext.ClothTeleportMode == FClothingActor::Default ? InternalClothSimulationContext.ClothTeleportMode : EditableClothSimulationContext.ClothTeleportMode;
 	EditableClothSimulationContext.ClothTeleportMode = FClothingActor::Default;	//reset editable teleport mode to default because user has to set it directly
+
+	if(InternalClothSimulationContext.InMasterBoneMapCacheCount != MasterBoneMapCacheCount)
+	{
+		InternalClothSimulationContext.InMasterBoneMapCacheCount = MasterBoneMapCacheCount;
+		InternalClothSimulationContext.InMasterPoseComponent = MasterPoseComponent.Get();
+		InternalClothSimulationContext.InMasterBoneMap = MasterBoneMap;
+	}
 
 	//we intentionally ignore PrevRootBone which is only needed internally, but is still in the Context struct for the sake of const
 }
@@ -1218,10 +1232,23 @@ void USkeletalMeshComponent::PrepareCloth()
 			FClothManager* ClothManager = PhysScene->GetClothManager();
 			bool bClothNeedsPhysics = BodyInstance.bSimulatePhysics || IsAnySimulatingPhysics();	//TODO: this errs on the side of simulating later. We may want to optimize this so that it's only needed when cloth bodies are simulating
 			PrepareClothSchedule PrepareSchedule = bClothNeedsPhysics ? PrepareClothSchedule::WaitOnPhysics : PrepareClothSchedule::IgnorePhysics;
+
+			SubmitClothSimulationContext();	//duplicate needed data for off-thread work
+
 			ClothManager->RegisterForPrepareCloth(this, PrepareSchedule);
 		}
 	}
 #endif
+}
+
+FClothSimulationContext::FClothSimulationContext()
+{
+	ClothTeleportCosineThresholdInRad = 0.f;
+	ClothTeleportDistThresholdSquared = 0.f;
+	ClothTeleportMode = FClothingActor::TeleportMode::Default;
+	
+	USkeletalMeshComponent* InMasterComponent = nullptr;
+	InMasterBoneMapCacheCount = -1;
 }
 
 void USkeletalMeshComponent::PostAnimEvaluation(FAnimationEvaluationContext& EvaluationContext)
@@ -1282,6 +1309,7 @@ void USkeletalMeshComponent::PostAnimEvaluation(FAnimationEvaluationContext& Eva
 		PostBlendPhysics();
 	}
 
+
 	PrepareCloth();
 }
 
@@ -1291,6 +1319,8 @@ void USkeletalMeshComponent::PostAnimEvaluation(FAnimationEvaluationContext& Eva
 
 void USkeletalMeshComponent::UpdateBounds()
 {
+	SCOPE_CYCLE_COUNTER(STAT_UpdateSkelMeshBounds);
+
 #if WITH_EDITOR
 	FBoxSphereBounds OriginalBounds = Bounds; // Save old bounds
 #endif
@@ -1332,6 +1362,8 @@ void USkeletalMeshComponent::UpdateBounds()
 
 FBoxSphereBounds USkeletalMeshComponent::CalcBounds(const FTransform& LocalToWorld) const
 {
+	SCOPE_CYCLE_COUNTER(STAT_CalcSkelMeshBounds);
+
 	FVector RootBoneOffset = RootBoneTranslation;
 
 	// if to use MasterPoseComponent's fixed skel bounds, 
@@ -1453,35 +1485,6 @@ void USkeletalMeshComponent::SetAnimInstanceClass(class UClass* NewClass)
 UAnimInstance* USkeletalMeshComponent::GetAnimInstance() const
 {
 	return AnimScriptInstance;
-}
-
-FMatrix USkeletalMeshComponent::GetTransformMatrix() const
-{
-	FTransform RootTransform = GetBoneTransform(0);
-	FVector Translation;
-	FQuat Rotation;
-	
-	// if in editor, it should always use localToWorld
-	// if root motion is ignored, use root transform 
-	if( GetWorld()->IsGameWorld() || !SkeletalMesh )
-	{
-		// add root translation info
-		Translation = RootTransform.GetLocation();
-	}
-	else
-	{
-		Translation = ComponentToWorld.TransformPosition(SkeletalMesh->RefSkeleton.GetRefBonePose()[0].GetTranslation());
-	}
-
-	// if root rotation is ignored, use root transform rotation
-	Rotation = RootTransform.GetRotation();
-
-	// now I need to get scale
-	// only LocalToWorld will have scale
-	FVector ScaleVector = ComponentToWorld.GetScale3D();
-
-	Rotation.Normalize();
-	return FScaleMatrix(ScaleVector)*FQuatRotationTranslationMatrix(Rotation, Translation);
 }
 
 void USkeletalMeshComponent::NotifySkelControlBeyondLimit( USkelControlLookAt* LookAt ) {}
@@ -2205,6 +2208,31 @@ void USkeletalMeshComponent::RefreshActiveVertexAnims()
 	{
 		ActiveVertexAnims.Empty();
 	}
+}
+
+void USkeletalMeshComponent::ParallelAnimationEvaluation() 
+{ 
+	PerformAnimationEvaluation(AnimEvaluationContext.SkeletalMesh, AnimEvaluationContext.AnimInstance, AnimEvaluationContext.SpaceBases, AnimEvaluationContext.LocalAtoms, AnimEvaluationContext.VertexAnims, AnimEvaluationContext.RootBoneTranslation, AnimEvaluationContext.Curve); 
+}
+
+void USkeletalMeshComponent::CompleteParallelAnimationEvaluation(bool bDoPostAnimEvaluation)
+{
+	ParallelAnimationEvaluationTask.SafeRelease(); //We are done with this task now, clean up!
+
+	if (bDoPostAnimEvaluation && (AnimEvaluationContext.AnimInstance == AnimScriptInstance) && (AnimEvaluationContext.SkeletalMesh == SkeletalMesh) && (AnimEvaluationContext.SpaceBases.Num() == GetNumSpaceBases()))
+	{
+		{
+			SCOPE_CYCLE_COUNTER(STAT_CompleteAnimSwapBuffers);
+
+			Exchange(AnimEvaluationContext.SpaceBases, AnimEvaluationContext.bDoInterpolation ? CachedSpaceBases : GetEditableSpaceBases());
+			Exchange(AnimEvaluationContext.LocalAtoms, AnimEvaluationContext.bDoInterpolation ? CachedLocalAtoms : LocalAtoms);
+			Exchange(AnimEvaluationContext.VertexAnims, ActiveVertexAnims);
+			Exchange(AnimEvaluationContext.RootBoneTranslation, RootBoneTranslation);
+		}
+
+		PostAnimEvaluation(AnimEvaluationContext);
+	}
+	AnimEvaluationContext.Clear();
 }
 
 bool USkeletalMeshComponent::HandleExistingParallelEvaluationTask(bool bBlockOnTask, bool bPerformPostAnimEvaluation)

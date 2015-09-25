@@ -9,31 +9,43 @@ using System.Xml;
 
 namespace UnrealBuildTool
 {
-    public class IOSPlatform : UEBuildPlatform
-    {
-        // by default, use an empty architecture (which is really just a modifer to the platform for some paths/names)
-        [XmlConfig]
-        public static string IOSArchitecture = "";
+	public class IOSPlatform : UEBuildPlatform
+	{
+		// by default, use an empty architecture (which is really just a modifer to the platform for some paths/names)
+		[XmlConfig]
+		public static string IOSArchitecture = "";
 
-		/** Which version of the iOS to allow at run time */
+		/// <summary>
+		/// Which version of the iOS to allow at run time
+		/// </summary>
 		public static string RunTimeIOSVersion = "7.0";
 
-		/** which devices the game is allowed to run on */
+		/// <summary>
+		/// which devices the game is allowed to run on
+		/// </summary>
 		public static string RunTimeIOSDevices = "1,2";
 
-		/** The architecture(s) to compile */
+		/// <summary>
+		/// The architecture(s) to compile
+		/// </summary>
 		[XmlConfig]
 		public static string NonShippingArchitectures = "armv7";
 		[XmlConfig]
 		public static string ShippingArchitectures = "armv7,arm64";
 
-		/** additional linker flags for shipping */
+		/// <summary>
+		/// additional linker flags for shipping
+		/// </summary>
 		public static string AdditionalShippingLinkerFlags = "";
 
-		/** additional linker flags for non-shipping */
+		/// <summary>
+		/// additional linker flags for non-shipping
+		/// </summary>
 		public static string AdditionalLinkerFlags = "";
 
-		/** mobile provision to use for code signing */
+		/// <summary>
+		/// mobile provision to use for code signing
+		/// </summary>
 		public static string MobileProvision = "";
 
 		private bool bInitializedProject = false;
@@ -61,13 +73,13 @@ namespace UnrealBuildTool
 
 		}
 		// The current architecture - affects everything about how UBT operates on IOS
-        public override string GetActiveArchitecture()
-        {
-            return IOSArchitecture;
-        }
+		public override string GetActiveArchitecture()
+		{
+			return IOSArchitecture;
+		}
 
-        protected override SDKStatus HasRequiredManualSDKInternal()
-        {
+		protected override SDKStatus HasRequiredManualSDKInternal()
+		{
 			if (!Utils.IsRunningOnMono)
 			{
 				// check to see if iTunes is installed
@@ -82,80 +94,76 @@ namespace UnrealBuildTool
 				}
 			}
 			return SDKStatus.Valid;
-        }
+		}
 
-        /**
-         *	Register the platform with the UEBuildPlatform class
-         */
-        protected override void RegisterBuildPlatformInternal()
-        {
-            // Register this build platform for IOS
-            Log.TraceVerbose("        Registering for {0}", UnrealTargetPlatform.IOS.ToString());
-            UEBuildPlatform.RegisterBuildPlatform(UnrealTargetPlatform.IOS, this);
-            UEBuildPlatform.RegisterPlatformWithGroup(UnrealTargetPlatform.IOS, UnrealPlatformGroup.Unix);
-            UEBuildPlatform.RegisterPlatformWithGroup(UnrealTargetPlatform.IOS, UnrealPlatformGroup.Apple);
+		/// <summary>
+		/// Register the platform with the UEBuildPlatform class
+		/// </summary>
+		protected override void RegisterBuildPlatformInternal()
+		{
+			// Register this build platform for IOS
+			Log.TraceVerbose("        Registering for {0}", UnrealTargetPlatform.IOS.ToString());
+			UEBuildPlatform.RegisterBuildPlatform(UnrealTargetPlatform.IOS, this);
+			UEBuildPlatform.RegisterPlatformWithGroup(UnrealTargetPlatform.IOS, UnrealPlatformGroup.Unix);
+			UEBuildPlatform.RegisterPlatformWithGroup(UnrealTargetPlatform.IOS, UnrealPlatformGroup.Apple);
 
-            if (GetActiveArchitecture() == "-simulator")
-            {
-                UEBuildPlatform.RegisterPlatformWithGroup(UnrealTargetPlatform.IOS, UnrealPlatformGroup.Simulator);
-            }
-            else
-            {
-                UEBuildPlatform.RegisterPlatformWithGroup(UnrealTargetPlatform.IOS, UnrealPlatformGroup.Device);
-            }
-        }
+			if (GetActiveArchitecture() == "-simulator")
+			{
+				UEBuildPlatform.RegisterPlatformWithGroup(UnrealTargetPlatform.IOS, UnrealPlatformGroup.Simulator);
+			}
+			else
+			{
+				UEBuildPlatform.RegisterPlatformWithGroup(UnrealTargetPlatform.IOS, UnrealPlatformGroup.Device);
+			}
+		}
 
-        /**
-         *	Retrieve the CPPTargetPlatform for the given UnrealTargetPlatform
-         *
-         *	@param	InUnrealTargetPlatform		The UnrealTargetPlatform being build
-         *	
-         *	@return	CPPTargetPlatform			The CPPTargetPlatform to compile for
-         */
-        public override CPPTargetPlatform GetCPPTargetPlatform(UnrealTargetPlatform InUnrealTargetPlatform)
-        {
-            switch (InUnrealTargetPlatform)
-            {
-                case UnrealTargetPlatform.IOS:
-                    return CPPTargetPlatform.IOS;
-            }
-            throw new BuildException("IOSPlatform::GetCPPTargetPlatform: Invalid request for {0}", InUnrealTargetPlatform.ToString());
-        }
+		/// <summary>
+		/// Retrieve the CPPTargetPlatform for the given UnrealTargetPlatform
+		/// </summary>
+		/// <param name="InUnrealTargetPlatform"> The UnrealTargetPlatform being build</param>
+		/// <returns>CPPTargetPlatform   The CPPTargetPlatform to compile for</returns>
+		public override CPPTargetPlatform GetCPPTargetPlatform(UnrealTargetPlatform InUnrealTargetPlatform)
+		{
+			switch (InUnrealTargetPlatform)
+			{
+				case UnrealTargetPlatform.IOS:
+					return CPPTargetPlatform.IOS;
+			}
+			throw new BuildException("IOSPlatform::GetCPPTargetPlatform: Invalid request for {0}", InUnrealTargetPlatform.ToString());
+		}
 
-        /**
-         *	Get the extension to use for the given binary type
-         *	
-         *	@param	InBinaryType		The binary type being built
-         *	
-         *	@return	string				The binary extenstion (ie 'exe' or 'dll')
-         */
-        public override string GetBinaryExtension(UEBuildBinaryType InBinaryType)
-        {
-            switch (InBinaryType)
-            {
-                case UEBuildBinaryType.DynamicLinkLibrary:
-                    return ".dylib";
-                case UEBuildBinaryType.Executable:
-                    return "";
-                case UEBuildBinaryType.StaticLibrary:
-                    return ".a";
-                case UEBuildBinaryType.Object:
-                    return ".o";
-                case UEBuildBinaryType.PrecompiledHeader:
-                    return ".gch";
-            }
-            return base.GetBinaryExtension(InBinaryType);
-        }
+		/// <summary>
+		/// Get the extension to use for the given binary type
+		/// </summary>
+		/// <param name="InBinaryType"> The binary type being built</param>
+		/// <returns>string    The binary extenstion (ie 'exe' or 'dll')</returns>
+		public override string GetBinaryExtension(UEBuildBinaryType InBinaryType)
+		{
+			switch (InBinaryType)
+			{
+				case UEBuildBinaryType.DynamicLinkLibrary:
+					return ".dylib";
+				case UEBuildBinaryType.Executable:
+					return "";
+				case UEBuildBinaryType.StaticLibrary:
+					return ".a";
+				case UEBuildBinaryType.Object:
+					return ".o";
+				case UEBuildBinaryType.PrecompiledHeader:
+					return ".gch";
+			}
+			return base.GetBinaryExtension(InBinaryType);
+		}
 
-        public override string GetDebugInfoExtension(UEBuildBinaryType InBinaryType)
-        {
-            return BuildConfiguration.bGeneratedSYMFile ? ".dSYM" : "";
-        }
+		public override string GetDebugInfoExtension(UEBuildBinaryType InBinaryType)
+		{
+			return BuildConfiguration.bGeneratedSYMFile ? ".dSYM" : "";
+		}
 
-        public override bool CanUseXGE()
-        {
-            return false;
-        }
+		public override bool CanUseXGE()
+		{
+			return false;
+		}
 
 		public override bool CanUseDistcc()
 		{
@@ -269,11 +277,10 @@ namespace UnrealBuildTool
 			}
 		}
 
-		/**
-		 * Check for the default configuration
-		 *
-		 * return true if the project uses the default build config
-		 */
+		/// <summary>
+		/// Check for the default configuration
+		/// return true if the project uses the default build config
+		/// </summary>
 		public override bool HasDefaultBuildConfig(UnrealTargetPlatform Platform, DirectoryReference ProjectDirectoryName)
 		{
 			string[] BoolKeys = new string[] {
@@ -288,7 +295,7 @@ namespace UnrealBuildTool
 
 			// look up iOS specific settings
 			if (!DoProjectSettingsMatchDefault(Platform, ProjectDirectoryName, "/Script/IOSRuntimeSettings.IOSRuntimeSettings",
-				    BoolKeys, null, StringKeys))
+					BoolKeys, null, StringKeys))
 			{
 				return false;
 			}
@@ -297,170 +304,176 @@ namespace UnrealBuildTool
 			return base.HasDefaultBuildConfig(Platform, ProjectDirectoryName);
 		}
 
-		/**
-         *	Setup the target environment for building
-         *	
-         *	@param	InBuildTarget		The target being built
-         */
-        public override void SetUpEnvironment(UEBuildTarget InBuildTarget)
-        {
-            InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("PLATFORM_IOS=1");
-            InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("PLATFORM_APPLE=1");
+		/// <summary>
+		/// Setup the target environment for building
+		/// </summary>
+		/// <param name="InBuildTarget"> The target being built</param>
+		public override void SetUpEnvironment(UEBuildTarget InBuildTarget)
+		{
+			InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("PLATFORM_IOS=1");
+			InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("PLATFORM_APPLE=1");
 
-            InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("WITH_TTS=0");
-            InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("WITH_SPEECH_RECOGNITION=0");
-            InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("WITH_DATABASE_SUPPORT=0");
-            InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("WITH_EDITOR=0");
-            InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("USE_NULL_RHI=0");
-            InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("REQUIRES_ALIGNED_INT_ACCESS");
+			InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("WITH_TTS=0");
+			InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("WITH_SPEECH_RECOGNITION=0");
+			InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("WITH_DATABASE_SUPPORT=0");
+			InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("WITH_EDITOR=0");
+			InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("USE_NULL_RHI=0");
+			InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("REQUIRES_ALIGNED_INT_ACCESS");
 
-            if (GetActiveArchitecture() == "-simulator")
-            {
-                InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("WITH_SIMULATOR=1");
-            }
+			if (GetActiveArchitecture() == "-simulator")
+			{
+				InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("WITH_SIMULATOR=1");
+			}
 
-            // needs IOS8 for Metal
-            if (IOSToolChain.IOSSDKVersionFloat >= 8.0 && UEBuildConfiguration.bCompileAgainstEngine)
-            {
-                InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("HAS_METAL=1");
-                InBuildTarget.ExtraModuleNames.Add("MetalRHI");
-            }
-            else
-            {
-                InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("HAS_METAL=0");
-            }
+			// needs IOS8 for Metal
+			if (IOSToolChain.IOSSDKVersionFloat >= 8.0 && UEBuildConfiguration.bCompileAgainstEngine)
+			{
+				InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("HAS_METAL=1");
+				InBuildTarget.ExtraModuleNames.Add("MetalRHI");
+			}
+			else
+			{
+				InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("HAS_METAL=0");
+			}
 
-            InBuildTarget.GlobalLinkEnvironment.Config.AdditionalFrameworks.Add( new UEBuildFramework( "GameKit" ) );
-            InBuildTarget.GlobalLinkEnvironment.Config.AdditionalFrameworks.Add( new UEBuildFramework( "StoreKit" ) );
-        }
+			InBuildTarget.GlobalLinkEnvironment.Config.AdditionalFrameworks.Add(new UEBuildFramework("GameKit"));
+			InBuildTarget.GlobalLinkEnvironment.Config.AdditionalFrameworks.Add(new UEBuildFramework("StoreKit"));
+		}
 
-        /**
-        *	Whether the editor should be built for this platform or not
-        *	
-        *	@param	InPlatform		The UnrealTargetPlatform being built
-        *	@param	InConfiguration	The UnrealTargetConfiguration being built
-        *	@return	bool			true if the editor should be built, false if not
-        */
-        public override bool ShouldNotBuildEditor(UnrealTargetPlatform InPlatform, UnrealTargetConfiguration InConfiguration)
-        {
-            return true;
-        }
+		/// <summary>
+		/// Whether the editor should be built for this platform or not
+		/// </summary>
+		/// <param name="InPlatform"> The UnrealTargetPlatform being built</param>
+		/// <param name="InConfiguration">The UnrealTargetConfiguration being built</param>
+		/// <returns>bool   true if the editor should be built, false if not</returns>
+		public override bool ShouldNotBuildEditor(UnrealTargetPlatform InPlatform, UnrealTargetConfiguration InConfiguration)
+		{
+			return true;
+		}
 
-        public override bool BuildRequiresCookedData(UnrealTargetPlatform InPlatform, UnrealTargetConfiguration InConfiguration)
-        {
-            return true; // for iOS can only run cooked. this is mostly for testing console code paths.
-        }
+		public override bool BuildRequiresCookedData(UnrealTargetPlatform InPlatform, UnrealTargetConfiguration InConfiguration)
+		{
+			return true; // for iOS can only run cooked. this is mostly for testing console code paths.
+		}
 
-        /**
-         *	Whether this platform should create debug information or not
-         *	
-         *	@param	InPlatform			The UnrealTargetPlatform being built
-         *	@param	InConfiguration		The UnrealTargetConfiguration being built
-         *	
-         *	@return	bool				true if debug info should be generated, false if not
-         */
-        public override bool ShouldCreateDebugInfo(UnrealTargetPlatform Platform, UnrealTargetConfiguration Configuration)
-        {
-            return true;
-        }
+		/// <summary>
+		/// Whether this platform should create debug information or not
+		/// </summary>
+		/// <param name="InPlatform">  The UnrealTargetPlatform being built</param>
+		/// <param name="InConfiguration"> The UnrealTargetConfiguration being built</param>
+		/// <returns>bool    true if debug info should be generated, false if not</returns>
+		public override bool ShouldCreateDebugInfo(UnrealTargetPlatform Platform, UnrealTargetConfiguration Configuration)
+		{
+			return true;
+		}
 
-        public override void ResetBuildConfiguration(UnrealTargetPlatform InPlatform, UnrealTargetConfiguration InConfiguration)
-        {
-            UEBuildConfiguration.bBuildEditor = false;
-            UEBuildConfiguration.bBuildDeveloperTools = false;
-            UEBuildConfiguration.bCompileAPEX = false;
-            UEBuildConfiguration.bRuntimePhysicsCooking = false;
-            UEBuildConfiguration.bCompileSimplygon = false;
-            UEBuildConfiguration.bBuildDeveloperTools = false;
-            UEBuildConfiguration.bCompileICU = true;
+		public override void ResetBuildConfiguration(UnrealTargetPlatform InPlatform, UnrealTargetConfiguration InConfiguration)
+		{
+			UEBuildConfiguration.bBuildEditor = false;
+			UEBuildConfiguration.bBuildDeveloperTools = false;
+			UEBuildConfiguration.bCompileAPEX = false;
+			UEBuildConfiguration.bRuntimePhysicsCooking = false;
+			UEBuildConfiguration.bCompileSimplygon = false;
+			UEBuildConfiguration.bBuildDeveloperTools = false;
+			UEBuildConfiguration.bCompileICU = true;
 
-            // we currently don't have any simulator libs for PhysX
-            if (GetActiveArchitecture() == "-simulator")
-            {
-                UEBuildConfiguration.bCompilePhysX = false;
-            }
-        }
+			// we currently don't have any simulator libs for PhysX
+			if (GetActiveArchitecture() == "-simulator")
+			{
+				UEBuildConfiguration.bCompilePhysX = false;
+			}
+		}
 
-        public override bool ShouldCompileMonolithicBinary(UnrealTargetPlatform InPlatform)
-        {
-            // This platform currently always compiles monolithic
-            return true;
-        }
+		public override bool ShouldCompileMonolithicBinary(UnrealTargetPlatform InPlatform)
+		{
+			// This platform currently always compiles monolithic
+			return true;
+		}
 
-        public override void ValidateBuildConfiguration(CPPTargetConfiguration Configuration, CPPTargetPlatform Platform, bool bCreateDebugInfo)
-        {
+		public override void ValidateBuildConfiguration(CPPTargetConfiguration Configuration, CPPTargetPlatform Platform, bool bCreateDebugInfo)
+		{
 			// check the base first
 			base.ValidateBuildConfiguration(Configuration, Platform, bCreateDebugInfo);
 
-            BuildConfiguration.bUsePCHFiles = false;
-            BuildConfiguration.bUseSharedPCHs = false;
-            BuildConfiguration.bCheckExternalHeadersForModification = false;
-            BuildConfiguration.bCheckSystemHeadersForModification = false;
-            BuildConfiguration.ProcessorCountMultiplier = IOSToolChain.GetAdjustedProcessorCountMultiplier();
-            BuildConfiguration.bDeployAfterCompile = true;
+			BuildConfiguration.bUsePCHFiles = false;
+			BuildConfiguration.bUseSharedPCHs = false;
+			BuildConfiguration.bCheckExternalHeadersForModification = false;
+			BuildConfiguration.bCheckSystemHeadersForModification = false;
+			BuildConfiguration.ProcessorCountMultiplier = IOSToolChain.GetAdjustedProcessorCountMultiplier();
+			BuildConfiguration.bDeployAfterCompile = true;
 		}
 
-        /**
-         *	Whether the platform requires the extra UnityCPPWriter
-         *	This is used to add an extra file for UBT to get the #include dependencies from
-         *	
-         *	@return	bool	true if it is required, false if not
-         */
-        public override bool RequiresExtraUnityCPPWriter()
-        {
-            return true;
-        }
+		/// <summary>
+		/// Whether the platform requires the extra UnityCPPWriter
+		/// This is used to add an extra file for UBT to get the #include dependencies from
+		/// </summary>
+		/// <returns>bool true if it is required, false if not</returns>
+		public override bool RequiresExtraUnityCPPWriter()
+		{
+			return true;
+		}
 
-        /**
-         *     Modify the newly created module passed in for this platform.
-         *     This is not required - but allows for hiding details of a
-         *     particular platform.
-         *     
-		 *  @param  Name			The name of the module
-		 *	@param	Rules			The module rules
-		 *	@param	Target			The target being build
-		 */
+		/// <summary>
+		/// Modify the newly created module passed in for this platform.
+		/// This is not required - but allows for hiding details of a
+		/// particular platform.
+		/// </summary>
+		/// <param name="">Name   The name of the module</param>
+		/// <param name="Rules">  The module rules</param>
+		/// <param name="Target">  The target being build</param>
 		public override void ModifyModuleRules(string ModuleName, ModuleRules Rules, TargetInfo Target)
-        {
-            if ((Target.Platform == UnrealTargetPlatform.Win32) || (Target.Platform == UnrealTargetPlatform.Win64) || (Target.Platform == UnrealTargetPlatform.Mac))
-            {
-                bool bBuildShaderFormats = UEBuildConfiguration.bForceBuildShaderFormats;
-                if (!UEBuildConfiguration.bBuildRequiresCookedData)
-                {
-                    if (ModuleName == "Engine")
-                    {
-                        if (UEBuildConfiguration.bBuildDeveloperTools)
-                        {
-                            Rules.PlatformSpecificDynamicallyLoadedModuleNames.Add("IOSTargetPlatform");
-                        }
-                    }
-                    else if (ModuleName == "TargetPlatform")
-                    {
-                        bBuildShaderFormats = true;
+		{
+			if ((Target.Platform == UnrealTargetPlatform.Win32) || (Target.Platform == UnrealTargetPlatform.Win64) || (Target.Platform == UnrealTargetPlatform.Mac))
+			{
+				bool bBuildShaderFormats = UEBuildConfiguration.bForceBuildShaderFormats;
+				if (!UEBuildConfiguration.bBuildRequiresCookedData)
+				{
+					if (ModuleName == "Engine")
+					{
+						if (UEBuildConfiguration.bBuildDeveloperTools)
+						{
+							Rules.PlatformSpecificDynamicallyLoadedModuleNames.Add("IOSTargetPlatform");
+						}
+					}
+					else if (ModuleName == "TargetPlatform")
+					{
+						bBuildShaderFormats = true;
 						Rules.DynamicallyLoadedModuleNames.Add("TextureFormatPVR");
 						Rules.DynamicallyLoadedModuleNames.Add("TextureFormatASTC");
-                        if (UEBuildConfiguration.bBuildDeveloperTools)
-                        {
-                            Rules.PlatformSpecificDynamicallyLoadedModuleNames.Add("AudioFormatADPCM");
-                        }
-                    }
-                }
-
-                // allow standalone tools to use targetplatform modules, without needing Engine
-				if(ModuleName == "TargetPlatform")
-				{
-                    if (UEBuildConfiguration.bForceBuildTargetPlatforms)
-                    {
-                        Rules.PlatformSpecificDynamicallyLoadedModuleNames.Add("IOSTargetPlatform");
-                    }
-    
-                    if (bBuildShaderFormats)
-                    {
-                        Rules.PlatformSpecificDynamicallyLoadedModuleNames.Add("MetalShaderFormat");
-                    }
+						if (UEBuildConfiguration.bBuildDeveloperTools)
+						{
+							Rules.PlatformSpecificDynamicallyLoadedModuleNames.Add("AudioFormatADPCM");
+						}
+					}
 				}
-            }
-        }
-    }
+
+				// allow standalone tools to use targetplatform modules, without needing Engine
+				if (ModuleName == "TargetPlatform")
+				{
+					if (UEBuildConfiguration.bForceBuildTargetPlatforms)
+					{
+						Rules.PlatformSpecificDynamicallyLoadedModuleNames.Add("IOSTargetPlatform");
+					}
+
+					if (bBuildShaderFormats)
+					{
+						Rules.PlatformSpecificDynamicallyLoadedModuleNames.Add("MetalShaderFormat");
+					}
+				}
+			}
+		}
+
+		/// <summary>
+		/// Create a build deployment handler
+		/// </summary>
+		/// <param name="ProjectFile">The project file of the target being deployed. Used to find any deployment specific settings.</param>
+		/// <param name="DeploymentHandler">The output deployment handler</param>
+		/// <returns>True if the platform requires a deployment handler, false otherwise</returns>
+		public override bool TryCreateDeploymentHandler(FileReference ProjectFile, out UEBuildDeploy DeploymentHandler)
+		{
+			DeploymentHandler = new UEDeployIOS();
+			return true;
+		}
+	}
 }
 

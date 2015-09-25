@@ -17,6 +17,15 @@ class UMovieSceneEventTrack
 
 public:
 
+	/** Default constructor. */
+	UMovieSceneEventTrack()
+		: bFireEventsWhenForwards(true)
+		, bFireEventsWhenBackwards(false)
+		, TrackName("Events")
+	{ }
+
+public:
+
 	/**
 	 * Adds an event to the appropriate section.
 	 *
@@ -31,15 +40,16 @@ public:
 	/**
 	 * Trigger the events that fall into the given time range.
 	 *
-	 * @param TimeRange The time range to trigger events in.
-	 * @param Backwards Whether the events should be triggered in reverse order.
+	 * @param Position The current position in time.
+	 * @param LastPosition The time at the last update.
 	 */
-	void TriggerEvents(TRange<float> TimeRange, bool Backwards);
+	void TriggerEvents(float Position, float LastPosition);
 
 public:
 
 	// UMovieSceneTrack interface
 
+	virtual void AddSection(UMovieSceneSection* Section) override;
 	virtual TSharedPtr<IMovieSceneTrackInstance> CreateInstance() override;
 	virtual UMovieSceneSection* CreateNewSection() override;
 	virtual const TArray<UMovieSceneSection*>& GetAllSections() const override;
@@ -59,10 +69,6 @@ private:
 	/** If events should be fired when passed playing the sequence backwards. */
 	UPROPERTY(EditAnywhere, Category=TrackEvent)
 	uint32 bFireEventsWhenBackwards:1;
-
-	/** If checked each key's event name is the exact name of the custom event function in level script that will be called */
-	UPROPERTY(EditAnywhere, Category=TrackEvent)
-	uint32 bUseCustomEventName:1;
 
 	/** The track's sections. */
 	UPROPERTY()

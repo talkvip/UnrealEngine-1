@@ -75,7 +75,7 @@ namespace UnrealBuildTool
 				Result += " /D_CRT_STDIO_LEGACY_WIDE_SPECIFIERS=1";
 			}
 
-			if ( BuildConfiguration.bUseSharedPCHs )
+			if (BuildConfiguration.bUseSharedPCHs)
 			{
 				// @todo SharedPCH: Disable warning about PCH defines not matching .cpp defines.  We "cheat" these defines a little
 				// bit to make shared PCHs work.  But it's totally safe.  Trust us.
@@ -170,7 +170,7 @@ namespace UnrealBuildTool
 				Result += " /D USE_WINRT_MAIN=1";
 
 				// WinRT requires exceptions!
-//				if (CompileEnvironment.Config.bEnableExceptions)
+				//				if (CompileEnvironment.Config.bEnableExceptions)
 				{
 					// Enable C++ exception handling, but not C exceptions.
 					Result += " /EHsc";
@@ -221,7 +221,7 @@ namespace UnrealBuildTool
 			}
 
 			// Specify the appropriate runtime library based on the platform and config.
-			if( CompileEnvironment.Config.Target.Configuration == CPPTargetConfiguration.Debug && BuildConfiguration.bDebugBuildsActuallyUseDebugCRT )
+			if (CompileEnvironment.Config.Target.Configuration == CPPTargetConfiguration.Debug && BuildConfiguration.bDebugBuildsActuallyUseDebugCRT)
 			{
 				Result += " /MDd";
 			}
@@ -263,7 +263,7 @@ namespace UnrealBuildTool
 			else
 			{
 				// Level 3 warnings.
-//				Result += " /W3";
+				//				Result += " /W3";
 				Result += " /W1";
 			}
 
@@ -309,10 +309,10 @@ namespace UnrealBuildTool
 			Result += " /DYNAMICBASE \"d2d1.lib\" \"d3d11.lib\" \"dxgi.lib\" \"ole32.lib\" \"windowscodecs.lib\" \"dwrite.lib\" \"kernel32.lib\"";
 
 			// WinRT
-//			if (WinRTPlatform.ShouldCompileWinRT() == true)
+			//			if (WinRTPlatform.ShouldCompileWinRT() == true)
 			{
 				// generate metadata
-//				Result += " /WINMD:ONLY";
+				//				Result += " /WINMD:ONLY";
 
 				Result += " /WINMD";
 				Result += " /APPCONTAINER";
@@ -487,11 +487,11 @@ namespace UnrealBuildTool
 				Arguments += string.Format(" /D \"{0}\"", Definition);
 			}
 
-// Log.TraceInformation("Compile Arguments for {0}:", ModuleName);
-// Log.TraceInformation(Arguments);
+			// Log.TraceInformation("Compile Arguments for {0}:", ModuleName);
+			// Log.TraceInformation(Arguments);
 
 			var BuildPlatform = UEBuildPlatform.GetBuildPlatformForCPPTargetPlatform(CompileEnvironment.Config.Target.Platform);
-			
+
 			// Create a compile action for each source file.
 			CPPOutput Result = new CPPOutput();
 			foreach (FileItem SourceFile in SourceFiles)
@@ -501,7 +501,7 @@ namespace UnrealBuildTool
 				bool bIsPlainCFile = Path.GetExtension(SourceFile.AbsolutePath).ToUpperInvariant() == ".C";
 
 				// Add the C++ source file and its included files to the prerequisite item list.
-				AddPrerequisiteSourceFile( Target, BuildPlatform, CompileEnvironment, SourceFile, CompileAction.PrerequisiteItems );
+				AddPrerequisiteSourceFile(Target, BuildPlatform, CompileEnvironment, SourceFile, CompileAction.PrerequisiteItems);
 
 				// If this is a CLR file then make sure our dependent assemblies are added as prerequisites
 				if (CompileEnvironment.Config.CLRMode == CPPCLRMode.CLREnabled)
@@ -850,7 +850,9 @@ namespace UnrealBuildTool
 			return OutputFile;
 		}
 
-		/** Accesses the bin directory for the VC toolchain for the specified platform. */
+		/// <summary>
+		/// Accesses the bin directory for the VC toolchain for the specified platform.
+		/// </summary>
 		static string GetVCToolPath(CPPTargetPlatform Platform, CPPTargetConfiguration Configuration, string ToolName)
 		{
 			// Initialize environment variables required for spawned tools.
@@ -903,7 +905,9 @@ namespace UnrealBuildTool
 			return VCToolPath;
 		}
 
-		/** Accesses the directory for .NET Framework binaries such as MSBuild */
+		/// <summary>
+		/// Accesses the directory for .NET Framework binaries such as MSBuild
+		/// </summary>
 		static string GetDotNetFrameworkToolPath(CPPTargetPlatform Platform, string ToolName)
 		{
 			// Initialize environment variables required for spawned tools.
@@ -920,15 +924,19 @@ namespace UnrealBuildTool
 			return ToolPath;
 		}
 
-		/** Helper to only initialize environment variables once. */
+		/// <summary>
+		/// Helper to only initialize environment variables once.
+		/// </summary>
 		static bool bAreEnvironmentVariablesAlreadyInitialized = false;
 
-		/** Installation folder of the Windows SDK, e.g. C:\Program Files\Microsoft SDKs\Windows\v6.0A\ */
+		/// <summary>
+		/// Installation folder of the Windows SDK, e.g. C:\Program Files\Microsoft SDKs\Windows\v6.0A\
+		/// </summary>
 		static string WindowsSDKDir = "";
 
-		/**
-		 * Initializes environment variables required by toolchain. Different for 32 and 64 bit.
-		 */
+		/// <summary>
+		/// Initializes environment variables required by toolchain. Different for 32 and 64 bit.
+		/// </summary>
 		static void InitializeEnvironmentVariables(CPPTargetPlatform Platform)
 		{
 			if (!bAreEnvironmentVariablesAlreadyInitialized)

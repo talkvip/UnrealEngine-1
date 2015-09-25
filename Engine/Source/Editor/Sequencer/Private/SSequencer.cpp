@@ -259,10 +259,8 @@ void SSequencer::Construct( const FArguments& InArgs, TSharedRef< class FSequenc
 		DetailsView->SetVisibility(TAttribute<EVisibility>::Create(TAttribute<EVisibility>::FGetter::CreateSP(this, &SSequencer::HandleDetailsViewVisibility)));
 	}
 
-	const int32 				Column0	= 0,	Column1	= 1;
-	const int32 Row0	= 0,
-				Row1	= 1,
-				Row2	= 2;
+	const int32 Column0 = 0, Column1 = 1;
+	const int32 Row0 = 0, Row1 = 1, Row2 = 2;
 
 	ChildSlot
 	[
@@ -372,6 +370,7 @@ void SSequencer::Construct( const FArguments& InArgs, TSharedRef< class FSequenc
 												SNew( SBorder )
 													.BorderImage( FEditorStyle::GetBrush("ToolPanel.GroupBorder") )
 													.BorderBackgroundColor( FLinearColor(.50f, .50f, .50f, 1.0f ) )
+													.Padding(0)
 													[
 														TopTimeSlider
 													]
@@ -446,25 +445,25 @@ void SSequencer::Construct( const FArguments& InArgs, TSharedRef< class FSequenc
 					]
 
 				+ SOverlay::Slot()
-				[
-					SNew( SSequencerSplitterOverlay )
-					.Style(FEditorStyle::Get(), "Sequencer.AnimationOutliner.Splitter")
-					.Visibility(EVisibility::SelfHitTestInvisible)
-
-					+ SSplitter::Slot()
-					.Value( FillCoefficient_0 )
-					.OnSlotResized( SSplitter::FOnSlotResized::CreateSP(this, &SSequencer::OnColumnFillCoefficientChanged, 0) )
 					[
-						SNew(SSpacer)
-					]
+						SNew( SSequencerSplitterOverlay )
+							.Style(FEditorStyle::Get(), "Sequencer.AnimationOutliner.Splitter")
+							.Visibility(EVisibility::SelfHitTestInvisible)
 
-					+ SSplitter::Slot()
-					.Value( FillCoefficient_1 )
-					.OnSlotResized( SSplitter::FOnSlotResized::CreateSP(this, &SSequencer::OnColumnFillCoefficientChanged, 1) )
-					[
-						SNew(SSpacer)
+						+ SSplitter::Slot()
+							.Value( FillCoefficient_0 )
+							.OnSlotResized( SSplitter::FOnSlotResized::CreateSP(this, &SSequencer::OnColumnFillCoefficientChanged, 0) )
+							[
+								SNew(SSpacer)
+							]
+
+						+ SSplitter::Slot()
+							.Value( FillCoefficient_1 )
+							.OnSlotResized( SSplitter::FOnSlotResized::CreateSP(this, &SSequencer::OnColumnFillCoefficientChanged, 1) )
+							[
+								SNew(SSpacer)
+							]
 					]
-				]
 			]
 		]
 	];
@@ -537,7 +536,17 @@ EVisibility SSequencer::HandleDetailsViewVisibility() const
 
 void SSequencer::HandleKeySelectionChanged()
 {
+	TSharedPtr<FStructOnScope> Struct;
+	const TArray<FSelectedKey> SelectedKeys = Sequencer.Pin()->GetSelection().GetSelectedKeys().Array();
 
+	if (SelectedKeys.Num() > 0)
+	{
+		// @todo sequencer: highlight selected keys in details view
+	}
+	else
+	{
+		// @todo sequencer: remove key highlights in details view
+	}
 }
 
 
@@ -791,11 +800,8 @@ TSharedRef<SWidget> SSequencer::MakeGeneralMenu()
 		if (Sequencer.Pin()->IsLevelEditorSequencer())
 		{
 			MenuBuilder.AddMenuEntry( FSequencerCommands::Get().ToggleDetailsView );
-			MenuBuilder.AddMenuEntry( FSequencerCommands::Get().ToggleCleanView );
 		}
 
-		MenuBuilder.AddMenuEntry( FSequencerCommands::Get().ToggleAutoScroll );
-				
 		if (Sequencer.Pin()->IsLevelEditorSequencer())
 		{
 			MenuBuilder.AddMenuEntry( FSequencerCommands::Get().FindInContentBrowser );
@@ -815,9 +821,10 @@ TSharedRef<SWidget> SSequencer::MakeSnapMenu()
 
 	MenuBuilder.BeginSection("FramesRanges", LOCTEXT("SnappingMenuFrameRangesHeader", "Frame Ranges") );
 	{
+		MenuBuilder.AddMenuEntry( FSequencerCommands::Get().ToggleAutoScroll );
 		MenuBuilder.AddMenuEntry( FSequencerCommands::Get().ToggleShowFrameNumbers );
 		MenuBuilder.AddMenuEntry( FSequencerCommands::Get().ToggleShowRangeSlider );
-		MenuBuilder.AddMenuEntry( FSequencerCommands::Get().ToggleLockInOutToStartEndRange );
+		MenuBuilder.AddMenuEntry( FSequencerCommands::Get().ToggleLockInOutToStartEndRange );				
 	}
 	MenuBuilder.EndSection();
 
@@ -938,8 +945,6 @@ void SSequencer::UpdateLayoutTree()
 	// This must come after the selection state has been restored so that the curve editor is populated with the correctly selected nodes
 	CurveEditor->SetSequencerNodeTree(SequencerNodeTree);
 
-	SequencerNodeTree->UpdateCachedVisibilityBasedOnShotFiltersChanged();
-
 	// Continue broadcasting selection changes
 	Sequencer.Pin()->GetSelection().ResumeBroadcast();
 }
@@ -959,8 +964,6 @@ void SSequencer::UpdateBreadcrumbs(const TArray< TWeakObjectPtr<class UMovieScen
 		// The current breadcrumb is not a moviescene so we need to make a new breadcrumb in order return to the parent moviescene later
 		BreadcrumbTrail->PushCrumb( CrumbName, FSequencerBreadcrumb( FocusedMovieSceneInstance ) );
 	}
-
-	SequencerNodeTree->UpdateCachedVisibilityBasedOnShotFiltersChanged();
 }
 
 void SSequencer::ResetBreadcrumbs()

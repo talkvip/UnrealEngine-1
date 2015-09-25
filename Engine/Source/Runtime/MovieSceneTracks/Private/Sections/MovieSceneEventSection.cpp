@@ -4,22 +4,53 @@
 #include "MovieSceneEventSection.h"
 
 
+/* UMovieSceneSection structors
+ *****************************************************************************/
+
+UMovieSceneEventSection::UMovieSceneEventSection()
+{
+	SetIsInfinite(true);
+}
+
+
 /* UMovieSceneSection overrides
  *****************************************************************************/
 
 void UMovieSceneEventSection::AddKey(float Time, const FName& EventName, FKeyParams KeyParams)
 {
-	for (auto& Key : Keys)
-	{
-		if (Key.Time == Time)
-		{
-			Key.EventNames.AddUnique(EventName);
+	Modify();
+	Events.UpdateOrAddKey(Time, EventName);
+}
 
-			return;
+
+void UMovieSceneEventSection::TriggerEvents(ALevelScriptActor* LevelScriptActor, float Position, float LastPosition)
+{
+	const TArray<FNameCurveKey>& Keys = Events.GetKeys();
+
+	if (Position >= LastPosition)
+	{
+		for (const auto& Key : Keys)
+		{
+			if ((Key.Time > LastPosition) && (Key.Time <= Position))
+			{
+				TriggerEvent(Key.Value, LevelScriptActor);
+			}
 		}
 	}
+	else
+	{
+		for (int32 KeyIndex = Keys.Num() - 1; KeyIndex >= 0; --KeyIndex)
+		{
+			const auto& Key = Keys[KeyIndex];
 
-	Keys.HeapPush(FMovieSceneEventSectionKey(EventName, Time));
+			if ((Key.Time >= Position) && (Key.Time < LastPosition))
+			{
+				TriggerEvent(Key.Value, LevelScriptActor);
+			}
+
+			
+		}
+	}
 }
 
 
@@ -30,26 +61,19 @@ void UMovieSceneEventSection::DilateSection(float DilationFactor, float Origin, 
 {
 	Super::DilateSection(DilationFactor, Origin, KeyHandles);
 
-	for (auto& Key : Keys)
-	{
-		Key.Time = Key.Time * DilationFactor - Origin;
-	}
+	Events.ScaleCurve(Origin, DilationFactor, KeyHandles);
 }
 
 
 void UMovieSceneEventSection::GetKeyHandles(TSet<FKeyHandle>& KeyHandles) const
 {
-	 // @todo gmp: implement event tracks
-}
-
-
-void UMovieSceneEventSection::GetSnapTimes(TArray<float>& OutSnapTimes, bool bGetSectionBorders) const
-{
-	Super::GetSnapTimes(OutSnapTimes, bGetSectionBorders);
-
-	for (auto& Key : Keys)
+	for (auto It(Events.GetKeyHandleIterator()); It; ++It)
 	{
-		OutSnapTimes.Add(Key.Time);
+		float Time = Events.GetKeyTime(It.Key());
+		if (IsTimeWithinSection(Time))
+		{
+			KeyHandles.Add(It.Key());
+		}
 	}
 }
 
@@ -58,8 +82,29 @@ void UMovieSceneEventSection::MoveSection(float DeltaPosition, TSet<FKeyHandle>&
 {
 	Super::MoveSection(DeltaPosition, KeyHandles);
 
-	for (auto& Key : Keys)
+	Events.ShiftCurve(DeltaPosition, KeyHandles);
+}
+
+
+/* UMovieSceneSection overrides
+ *****************************************************************************/
+
+void UMovieSceneEventSection::TriggerEvent(const FName& Event, ALevelScriptActor* LevelScriptActor)
+{
+	UFunction* EventFunction = LevelScriptActor->FindFunction(Event);
+
+	if (EventFunction == nullptr)
 	{
-		Key.Time += DeltaPosition;
+		// @todo sequencer: gmp: add external log category for MovieScene
+		//UE_LOG(LogMovieScene, Log, TEXT("UMovieSceneEventSection::TriggerEvent: Unable to find function '%s'"), *Event.ToString());
+	}
+	else if (EventFunction->NumParms != 0)
+	{
+		// @todo sequencer: gmp: add external log category for MovieScene
+		//UE_LOG(LogMovieScene, Log, TEXT("UMovieSceneEventSection::TriggerEvent: Function '%s' does not have zero parameters."), *Event.ToString());
+	}
+	else
+	{
+		LevelScriptActor->ProcessEvent(EventFunction, nullptr);
 	}
 }

@@ -37,40 +37,55 @@ namespace UnrealBuildTool
 		}
 	}
 
-	/**
-	 * Caches include dependency information to speed up preprocessing on subsequent runs.
-	 */
+	/// <summary>
+	/// Caches include dependency information to speed up preprocessing on subsequent runs.
+	/// </summary>
 	public class DependencyCache
 	{
-		/** The version number for binary serialization */
+		/// <summary>
+		/// The version number for binary serialization
+		/// </summary>
 		const int FileVersion = 1;
 
-		/** The file signature for binary serialization */
+		/// <summary>
+		/// The file signature for binary serialization
+		/// </summary>
 		const int FileSignature = ('D' << 24) | ('C' << 16) | FileVersion;
 
-		/** Path to store the cache data to. */
+		/// <summary>
+		/// Path to store the cache data to.
+		/// </summary>
 		private FileReference BackingFile;
 
-		/** The time the cache was created. Used to invalidate entries. */
+		/// <summary>
+		/// The time the cache was created. Used to invalidate entries.
+		/// </summary>
 		public DateTime CreationTimeUtc;
 
-		/** The time the cache was last updated. Stored as the creation date when saved. Not serialized. */
+		/// <summary>
+		/// The time the cache was last updated. Stored as the creation date when saved. Not serialized.
+		/// </summary>
 		private DateTime UpdateTimeUtc;
 
-		/** Dependency lists, keyed on file's absolute path. */
+		/// <summary>
+		/// Dependency lists, keyed on file's absolute path.
+		/// </summary>
 		private Dictionary<FileReference, List<DependencyInclude>> DependencyMap;
 
-		/** A mapping of whether various files exist. Not serialized. */
+		/// <summary>
+		/// A mapping of whether various files exist. Not serialized.
+		/// </summary>
 		private Dictionary<FileReference, bool> FileExistsInfo;
 
-		/** Whether the dependency cache is dirty and needs to be saved. Not serialized. */
+		/// <summary>
+		/// Whether the dependency cache is dirty and needs to be saved. Not serialized.
+		/// </summary>
 		private bool bIsDirty;
 
-		/**
-		 * Creates and deserializes the dependency cache at the passed in location
-		 * 
-		 * @param	CachePath	Name of the cache file to deserialize
-		 */
+		/// <summary>
+		/// Creates and deserializes the dependency cache at the passed in location
+		/// </summary>
+		/// <param name="CachePath">Name of the cache file to deserialize</param>
 		public static DependencyCache Create(FileReference CacheFile)
 		{
 			// See whether the cache file exists.
@@ -85,7 +100,7 @@ namespace UnrealBuildTool
 
 				// Deserialize cache from disk if there is one.
 				DependencyCache Result = Load(CacheFile);
-				if(Result != null)
+				if (Result != null)
 				{
 					// Successfully serialize, create the transient variables and return cache.
 					Result.UpdateTimeUtc = DateTime.UtcNow;
@@ -103,11 +118,10 @@ namespace UnrealBuildTool
 			return new DependencyCache(CacheFile);
 		}
 
-		/**
-		 * Loads the cache from the passed in file.
-		 * 
-		 * @param	Cache	File to deserialize from
-		 */
+		/// <summary>
+		/// Loads the cache from the passed in file.
+		/// </summary>
+		/// <param name="Cache">File to deserialize from</param>
 		public static DependencyCache Load(FileReference CacheFile)
 		{
 			DependencyCache Result = null;
@@ -126,7 +140,7 @@ namespace UnrealBuildTool
 
 					using (BinaryReader Reader = new BinaryReader(new FileStream(CacheFile.FullName, FileMode.Open, FileAccess.Read)))
 					{
-						if(Reader.ReadInt32() == FileSignature)
+						if (Reader.ReadInt32() == FileSignature)
 						{
 							Result = DependencyCache.Deserialize(Reader);
 						}
@@ -149,14 +163,14 @@ namespace UnrealBuildTool
 			Writer.Write(BackingFile);
 			Writer.Write(CreationTimeUtc.ToBinary());
 
-			Dictionary<FileReference, int> FileToUniqueId = new Dictionary<FileReference,int>();
+			Dictionary<FileReference, int> FileToUniqueId = new Dictionary<FileReference, int>();
 
 			Writer.Write(DependencyMap.Count);
-			foreach(KeyValuePair<FileReference, List<DependencyInclude>> Pair in DependencyMap)
+			foreach (KeyValuePair<FileReference, List<DependencyInclude>> Pair in DependencyMap)
 			{
 				Writer.Write(Pair.Key);
 				Writer.Write(Pair.Value.Count);
-				foreach(DependencyInclude Include in Pair.Value)
+				foreach (DependencyInclude Include in Pair.Value)
 				{
 					Writer.Write(Include.IncludeName);
 					Writer.Write(Include.HasAttemptedResolve);
@@ -176,17 +190,17 @@ namespace UnrealBuildTool
 			Cache.CreationTimeUtc = DateTime.FromBinary(Reader.ReadInt64());
 
 			int NumEntries = Reader.ReadInt32();
-			Cache.DependencyMap = new Dictionary<FileReference,List<DependencyInclude>>(NumEntries);
+			Cache.DependencyMap = new Dictionary<FileReference, List<DependencyInclude>>(NumEntries);
 
 			List<FileReference> UniqueFiles = new List<FileReference>();
-			for(int Idx = 0; Idx < NumEntries; Idx++)
+			for (int Idx = 0; Idx < NumEntries; Idx++)
 			{
 				FileReference File = Reader.ReadFileReference();
 
 				int NumIncludes = Reader.ReadInt32();
 				List<DependencyInclude> Includes = new List<DependencyInclude>(NumIncludes);
 
-				for(int IncludeIdx = 0; IncludeIdx < NumIncludes; IncludeIdx++)
+				for (int IncludeIdx = 0; IncludeIdx < NumIncludes; IncludeIdx++)
 				{
 					DependencyInclude Include = new DependencyInclude(Reader.ReadString());
 					Include.HasAttemptedResolve = Reader.ReadBoolean();
@@ -202,11 +216,10 @@ namespace UnrealBuildTool
 			return Cache;
 		}
 
-		/**
-		 * Constructor
-		 * 
-		 * @param	Cache	File associated with this cache
-		 */
+		/// <summary>
+		/// Constructor
+		/// </summary>
+		/// <param name="Cache">File associated with this cache</param>
 		protected DependencyCache(FileReference InBackingFile)
 		{
 			BackingFile = InBackingFile;
@@ -217,9 +230,9 @@ namespace UnrealBuildTool
 			CreateFileExistsInfo();
 		}
 
-		/**
-		 * Saves the dependency cache to disk using the update time as the creation time.
-		 */
+		/// <summary>
+		/// Saves the dependency cache to disk using the update time as the creation time.
+		/// </summary>
 		public void Save()
 		{
 			// Only save if we've made changes to it since load.
@@ -234,7 +247,7 @@ namespace UnrealBuildTool
 				try
 				{
 					BackingFile.Directory.CreateDirectory();
-					using(BinaryWriter Writer = new BinaryWriter(new FileStream(BackingFile.FullName, FileMode.Create, FileAccess.Write)))
+					using (BinaryWriter Writer = new BinaryWriter(new FileStream(BackingFile.FullName, FileMode.Create, FileAccess.Write)))
 					{
 						Writer.Write(FileSignature);
 						Serialize(Writer);
@@ -260,7 +273,7 @@ namespace UnrealBuildTool
 			}
 
 			FileReference MutexPath = BackingFile + ".buildmutex";
-			if(MutexPath.Exists())
+			if (MutexPath.Exists())
 			{
 				try
 				{
@@ -273,12 +286,10 @@ namespace UnrealBuildTool
 			}
 		}
 
-		/**
-		 * Returns the direct dependencies of the specified FileItem if it exists in the cache and they are not stale.
-		 *
-		 * @param  File  File to try to find dependencies in cache
-		 * @returns  Dependency info for File, or null if no dependencies are cached or if the cache is stale.
-		 */
+		/// <summary>
+		/// Returns the direct dependencies of the specified FileItem if it exists in the cache and they are not stale.
+		/// </summary>
+		/// <param name="">File  File to try to find dependencies in cache</param>
 		public List<DependencyInclude> GetCachedDependencyInfo(FileItem File)
 		{
 			// Check whether File is in cache.
@@ -324,13 +335,12 @@ namespace UnrealBuildTool
 			return Includes;
 		}
 
-		/**
-		 * Update cache with dependencies for the passed in file.
-		 * 
-		 * @param	File			File to update dependencies for
-		 * @param	Dependencies	List of dependencies to cache for passed in file
-		 * @param	HasUObjects		True if this file was found to contain UObject classes or types
-		 */
+		/// <summary>
+		/// Update cache with dependencies for the passed in file.
+		/// </summary>
+		/// <param name="File">  File to update dependencies for</param>
+		/// <param name="Dependencies">List of dependencies to cache for passed in file</param>
+		/// <param name="HasUObjects"> True if this file was found to contain UObject classes or types</param>
 		public void SetDependencyInfo(FileItem File, List<DependencyInclude> Info)
 		{
 			DependencyMap[File.Reference] = Info;

@@ -31,6 +31,7 @@ public class LevelEditor : ModuleRules
 
 		PrivateDependencyModuleNames.AddRange(
 			new string[] {
+				"ActorAnimation",
 				"Analytics",
 				"Core",
 				"CoreUObject",
@@ -62,7 +63,8 @@ public class LevelEditor : ModuleRules
 				"KismetWidgets",
 				"Sequencer",
                 "Foliage",
-                "HierarchicalLODOutliner"
+                "HierarchicalLODOutliner",
+				"MaterialShaderQualitySettings",
 			}
 		);
 

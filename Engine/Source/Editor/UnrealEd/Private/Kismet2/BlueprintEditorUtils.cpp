@@ -1877,12 +1877,12 @@ void FBlueprintEditorUtils::PropagateParentBlueprintDefaults(UClass* ClassToProp
 
 UNREALED_API FSecondsCounterData BlueprintCompileAndLoadTimerData;
 
-void FBlueprintEditorUtils::PostDuplicateBlueprint(UBlueprint* Blueprint)
+void FBlueprintEditorUtils::PostDuplicateBlueprint(UBlueprint* Blueprint, bool bDuplicateForPIE)
 {
 	FSecondsCounterScope Timer(BlueprintCompileAndLoadTimerData); 
 	
 	// Only recompile after duplication if this isn't PIE
-	if (!GIsPlayInEditorWorld)
+	if (!bDuplicateForPIE)
 	{
 		check(Blueprint->GeneratedClass != NULL);
 		{
@@ -4536,7 +4536,7 @@ void FBlueprintEditorUtils::ChangeMemberVariableType(UBlueprint* Blueprint, cons
 
 							const bool bSetFindWithinBlueprint = false;
 							const bool bSelectFirstResult = false;
-							BlueprintEditor->SummonSearchUI(bSetFindWithinBlueprint, VariableName.ToString(), bSelectFirstResult);
+							BlueprintEditor->SummonSearchUI(bSetFindWithinBlueprint, AllVariableNodes[0]->GetFindReferenceSearchString(), bSelectFirstResult);
 						}
 					}
 					else
@@ -5014,7 +5014,7 @@ void FBlueprintEditorUtils::ChangeLocalVariableType(UBlueprint* InBlueprint, con
 
 					const bool bSetFindWithinBlueprint = true;
 					const bool bSelectFirstResult = false;
-					BlueprintEditor->SummonSearchUI(bSetFindWithinBlueprint, InVariableName.ToString(), bSelectFirstResult);
+					BlueprintEditor->SummonSearchUI(bSetFindWithinBlueprint, VariableNodes[0]->GetFindReferenceSearchString(), bSelectFirstResult);
 				}
 			}
 		}

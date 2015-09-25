@@ -11,10 +11,10 @@ namespace UnrealBuildTool
 {
 	class MacPlatform : UEBuildPlatform
 	{
-        public override bool CanUseXGE()
-        {
-            return false;
-        }
+		public override bool CanUseXGE()
+		{
+			return false;
+		}
 
 		public override bool CanUseDistcc()
 		{
@@ -26,9 +26,9 @@ namespace UnrealBuildTool
 			return SDKStatus.Valid;
 		}
 
-		/**
-		 *	Register the platform with the UEBuildPlatform class
-		 */
+		/// <summary>
+		/// Register the platform with the UEBuildPlatform class
+		/// </summary>
 		protected override void RegisterBuildPlatformInternal()
 		{
 			// Register this build platform for Mac
@@ -38,13 +38,11 @@ namespace UnrealBuildTool
 			UEBuildPlatform.RegisterPlatformWithGroup(UnrealTargetPlatform.Mac, UnrealPlatformGroup.Apple);
 		}
 
-		/**
-		 *	Retrieve the CPPTargetPlatform for the given UnrealTargetPlatform
-		 *
-		 *	@param	InUnrealTargetPlatform		The UnrealTargetPlatform being build
-		 *	
-		 *	@return	CPPTargetPlatform			The CPPTargetPlatform to compile for
-		 */
+		/// <summary>
+		/// Retrieve the CPPTargetPlatform for the given UnrealTargetPlatform
+		/// </summary>
+		/// <param name="InUnrealTargetPlatform"> The UnrealTargetPlatform being build</param>
+		/// <returns>CPPTargetPlatform   The CPPTargetPlatform to compile for</returns>
 		public override CPPTargetPlatform GetCPPTargetPlatform(UnrealTargetPlatform InUnrealTargetPlatform)
 		{
 			switch (InUnrealTargetPlatform)
@@ -55,18 +53,16 @@ namespace UnrealBuildTool
 			throw new BuildException("MacPlatform::GetCPPTargetPlatform: Invalid request for {0}", InUnrealTargetPlatform.ToString());
 		}
 
-		/**
-		 *	Get the extension to use for the given binary type
-		 *	
-		 *	@param	InBinaryType		The binrary type being built
-		 *	
-		 *	@return	string				The binary extenstion (ie 'exe' or 'dll')
-		 */
+		/// <summary>
+		/// Get the extension to use for the given binary type
+		/// </summary>
+		/// <param name="InBinaryType"> The binrary type being built</param>
+		/// <returns>string    The binary extenstion (ie 'exe' or 'dll')</returns>
 		public override string GetBinaryExtension(UEBuildBinaryType InBinaryType)
 		{
 			switch (InBinaryType)
 			{
-				case UEBuildBinaryType.DynamicLinkLibrary: 
+				case UEBuildBinaryType.DynamicLinkLibrary:
 					return ".dylib";
 				case UEBuildBinaryType.Executable:
 					return "";
@@ -80,13 +76,11 @@ namespace UnrealBuildTool
 			return base.GetBinaryExtension(InBinaryType);
 		}
 
-		/**
-		 *	Get the extension to use for debug info for the given binary type
-		 *	
-		 *	@param	InBinaryType		The binary type being built
-		 *	
-		 *	@return	string				The debug info extension (i.e. 'pdb')
-		 */
+		/// <summary>
+		/// Get the extension to use for debug info for the given binary type
+		/// </summary>
+		/// <param name="InBinaryType"> The binary type being built</param>
+		/// <returns>string    The debug info extension (i.e. 'pdb')</returns>
 		public override string GetDebugInfoExtension(UEBuildBinaryType InBinaryType)
 		{
 			return BuildConfiguration.bGeneratedSYMFile || BuildConfiguration.bUsePDBFiles ? ".dSYM" : "";
@@ -96,42 +90,41 @@ namespace UnrealBuildTool
 		{
 			if (Target.Platform == UnrealTargetPlatform.Mac)
 			{
-                bool bBuildShaderFormats = UEBuildConfiguration.bForceBuildShaderFormats;
+				bool bBuildShaderFormats = UEBuildConfiguration.bForceBuildShaderFormats;
 
-                if (!UEBuildConfiguration.bBuildRequiresCookedData)
-                {
-                    if (ModuleName == "TargetPlatform")
-                    {
-                        bBuildShaderFormats = true;
-                    }
-                }
+				if (!UEBuildConfiguration.bBuildRequiresCookedData)
+				{
+					if (ModuleName == "TargetPlatform")
+					{
+						bBuildShaderFormats = true;
+					}
+				}
 
 				// allow standalone tools to use target platform modules, without needing Engine
-				if(ModuleName == "TargetPlatform")
+				if (ModuleName == "TargetPlatform")
 				{
-				    if (UEBuildConfiguration.bForceBuildTargetPlatforms)
-				    {
-					    Rules.DynamicallyLoadedModuleNames.Add("MacTargetPlatform");
-					    Rules.DynamicallyLoadedModuleNames.Add("MacNoEditorTargetPlatform");
-					    Rules.DynamicallyLoadedModuleNames.Add("MacClientTargetPlatform");
-					    Rules.DynamicallyLoadedModuleNames.Add("MacServerTargetPlatform");
-					    Rules.DynamicallyLoadedModuleNames.Add("AllDesktopTargetPlatform");
-				    }
-    
-                    if (bBuildShaderFormats)
-                    {
-					    // Rules.DynamicallyLoadedModuleNames.Add("ShaderFormatD3D");
-                        Rules.DynamicallyLoadedModuleNames.Add("ShaderFormatOpenGL");
-                    }
+					if (UEBuildConfiguration.bForceBuildTargetPlatforms)
+					{
+						Rules.DynamicallyLoadedModuleNames.Add("MacTargetPlatform");
+						Rules.DynamicallyLoadedModuleNames.Add("MacNoEditorTargetPlatform");
+						Rules.DynamicallyLoadedModuleNames.Add("MacClientTargetPlatform");
+						Rules.DynamicallyLoadedModuleNames.Add("MacServerTargetPlatform");
+						Rules.DynamicallyLoadedModuleNames.Add("AllDesktopTargetPlatform");
+					}
+
+					if (bBuildShaderFormats)
+					{
+						// Rules.DynamicallyLoadedModuleNames.Add("ShaderFormatD3D");
+						Rules.DynamicallyLoadedModuleNames.Add("ShaderFormatOpenGL");
+					}
 				}
 			}
 		}
-		
-		/**
-		 *	Setup the target environment for building
-		 *	
-		 *	@param	InBuildTarget		The target being built
-		 */
+
+		/// <summary>
+		/// Setup the target environment for building
+		/// </summary>
+		/// <param name="InBuildTarget"> The target being built</param>
 		public override void SetUpEnvironment(UEBuildTarget InBuildTarget)
 		{
 			InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("PLATFORM_MAC=1");
@@ -156,14 +149,12 @@ namespace UnrealBuildTool
 
 		}
 
-		/**
-		 *	Whether this platform should create debug information or not
-		 *
-		 *	@param	InPlatform			The UnrealTargetPlatform being built
-		 *	@param	InConfiguration		The UnrealTargetConfiguration being built
-		 *	
-		 *	@return	bool				true if debug info should be generated, false if not
-		 */
+		/// <summary>
+		/// Whether this platform should create debug information or not
+		/// </summary>
+		/// <param name="InPlatform">  The UnrealTargetPlatform being built</param>
+		/// <param name="InConfiguration"> The UnrealTargetConfiguration being built</param>
+		/// <returns>bool    true if debug info should be generated, false if not</returns>
 		public override bool ShouldCreateDebugInfo(UnrealTargetPlatform Platform, UnrealTargetConfiguration Configuration)
 		{
 			return true;
@@ -193,40 +184,51 @@ namespace UnrealBuildTool
 			BuildConfiguration.bDeployAfterCompile = true;
 		}
 
-        public override void ValidateUEBuildConfiguration()
-        {
+		public override void ValidateUEBuildConfiguration()
+		{
 			if (ProjectFileGenerator.bGenerateProjectFiles && !ProjectFileGenerator.bGeneratingRocketProjectFiles)
 			{
 				// When generating non-Rocket project files we need intellisense generator to include info from all modules, including editor-only third party libs
 				UEBuildConfiguration.bCompileLeanAndMeanUE = false;
 			}
-        }
+		}
 
-		/**
-		 *	Whether the platform requires the extra UnityCPPWriter
-		 *	This is used to add an extra file for UBT to get the #include dependencies from
-		 *	
-		 *	@return	bool	true if it is required, false if not
-		 */
+		/// <summary>
+		/// Whether the platform requires the extra UnityCPPWriter
+		/// This is used to add an extra file for UBT to get the #include dependencies from
+		/// </summary>
+		/// <returns>bool true if it is required, false if not</returns>
 		public override bool RequiresExtraUnityCPPWriter()
 		{
 			return true;
 		}
 
-		/**
-		 *	Return whether we wish to have this platform's binaries in our builds
-		 */
+		/// <summary>
+		/// Return whether we wish to have this platform's binaries in our builds
+		/// </summary>
 		public override bool IsBuildRequired()
 		{
 			return false;
 		}
 
-		/**
-		 *	Return whether we wish to have this platform's binaries in our CIS tests
-		 */
+		/// <summary>
+		/// Return whether we wish to have this platform's binaries in our CIS tests
+		/// </summary>
 		public override bool IsCISRequired()
 		{
 			return false;
+		}
+
+		/// <summary>
+		/// Create a build deployment handler
+		/// </summary>
+		/// <param name="ProjectFile">The project file of the target being deployed. Used to find any deployment specific settings.</param>
+		/// <param name="DeploymentHandler">The output deployment handler</param>
+		/// <returns>True if the platform requires a deployment handler, false otherwise</returns>
+		public override bool TryCreateDeploymentHandler(FileReference ProjectFile, out UEBuildDeploy DeploymentHandler)
+		{
+			DeploymentHandler = new UEDeployMac();
+			return true;
 		}
 	}
 }

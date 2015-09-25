@@ -17,7 +17,9 @@ class UMovieSceneSlomoTrack
 
 public:
 
-	// UMovieSceneFloatTrack overrides
+	// UMovieSceneTrack interface
 
-	virtual bool IsVisibleWhenEmpty() const override;
+	virtual TSharedPtr<IMovieSceneTrackInstance> CreateInstance() override;
+	virtual UMovieSceneSection* CreateNewSection() override;
+	virtual FName GetTrackName() const override;
 };

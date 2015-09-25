@@ -9,10 +9,28 @@ class SSequencerTrackLane;
 class FSequencerTimeSliderController;
 class FSequencer;
 
+/** Structure representing a slot in the track area */
+class FTrackAreaSlot : public TSlotBase<FTrackAreaSlot>
+{
+public:
+	/** Construction from a track lane */
+	FTrackAreaSlot(const TSharedPtr<SSequencerTrackLane>& InSlotContent);
+
+	/** Get the vertical position of this slot inside its parent */
+	float GetVerticalOffset() const;
+
+	/** Horizontal/Vertical alignment for the slot */
+	EHorizontalAlignment HAlignment;
+	EVerticalAlignment VAlignment;
+
+	/** The track lane that we represent */
+	TWeakPtr<SSequencerTrackLane> TrackLane;
+};
+
 /**
  * The area where tracks( rows of sections ) are displayed
  */
-class SSequencerTrackArea : public SOverlay
+class SSequencerTrackArea : public SPanel
 {
 public:
 	SLATE_BEGIN_ARGS( SSequencerTrackArea )
@@ -42,10 +60,18 @@ public:
 	virtual void OnMouseCaptureLost() override;
 	virtual FCursorReply OnCursorQuery( const FGeometry& MyGeometry, const FPointerEvent& CursorEvent ) const override;
 	virtual void Tick( const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime ) override;
+	virtual void OnArrangeChildren( const FGeometry& AllottedGeometry, FArrangedChildren& ArrangedChildren ) const override;
+	virtual FVector2D ComputeDesiredSize(float) const override;
+	virtual FChildren* GetChildren() override;
 
 	/** Access the cached geometry for this track area */
 	const FGeometry& GetCachedGeometry() const { return CachedGeometry; }
-	
+
+private:
+
+	/** The track area's children */
+	TPanelChildren<FTrackAreaSlot> Children;
+
 private:
 
 	/** Cached geometry */

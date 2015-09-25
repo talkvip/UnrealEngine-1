@@ -491,6 +491,7 @@ void USkeletalMeshComponent::UpdateKinematicBonesToAnim(const TArray<FTransform>
 		return;
 	}
 
+#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
 	// If desired, draw the skeleton at the point where we pass it to the physics.
 	if (bShowPrePhysBones && SkeletalMesh && InSpaceBases.Num() == SkeletalMesh->RefSkeleton.GetNum())
 	{
@@ -504,6 +505,7 @@ void USkeletalMeshComponent::UpdateKinematicBonesToAnim(const TArray<FTransform>
 			GetWorld()->LineBatcher->DrawLine(ThisPos, ParentPos, AnimSkelDrawColor, SDPG_Foreground);
 		}
 	}
+#endif
 
 	// warn if it has non-uniform scale
 	const FVector& MeshScale3D = CurrentLocalToWorld.GetScale3D();
@@ -565,7 +567,7 @@ void USkeletalMeshComponent::UpdateKinematicBonesToAnim(const TArray<FTransform>
 #if WITH_PHYSX
 						// update bone transform to world
 						const FTransform BoneTransform = InSpaceBases[BoneIndex] * CurrentLocalToWorld;
-						if(BoneTransform.ContainsNaN())
+						if(!BoneTransform.IsValid())
 						{
 							const FName BodyName = PhysicsAsset->BodySetup[i]->BoneName;
 							UE_LOG(LogPhysics, Warning, TEXT("UpdateKinematicBonesToAnim: Trying to set transform with bad data %s on PhysicsAsset '%s' in SkeletalMesh '%s' for bone '%s'"), *BoneTransform.ToHumanReadableString(), *PhysicsAsset->GetName(), *SkeletalMesh->GetName(), *BodyName.ToString());
@@ -573,8 +575,7 @@ void USkeletalMeshComponent::UpdateKinematicBonesToAnim(const TArray<FTransform>
 						}					
 
 						// If kinematic and not teleporting, set kinematic target
-						PxRigidDynamic* PRigidDynamic = BodyInst->GetPxRigidDynamic_AssumesLocked();
-						if (!IsRigidBodyNonKinematic_AssumesLocked(PRigidDynamic) && !bTeleport)
+						if (!BodyInst->IsInstanceSimulatingPhysics() && !bTeleport)
 						{
 							PhysScene->SetKinematicTarget_AssumesLocked(BodyInst, BoneTransform, true);
 						}
@@ -583,7 +584,8 @@ void USkeletalMeshComponent::UpdateKinematicBonesToAnim(const TArray<FTransform>
 						{
 							const PxTransform PNewPose = U2PTransform(BoneTransform);
 							ensure(PNewPose.isValid());
-							PRigidDynamic->setGlobalPose(PNewPose);
+							PxRigidActor* RigidActor = BodyInst->GetPxRigidActor_AssumesLocked(); // This should never fail because IsValidBodyInstance() passed above
+							RigidActor->setGlobalPose(PNewPose);
 						}
 #endif
 

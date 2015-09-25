@@ -55,7 +55,9 @@ namespace UnrealBuildTool
 		/// True if we should only build against the app-local CRT and set the API-set flags
 		public static readonly bool bWinApiFamilyApp = true;
 
-		/** True if VS EnvDTE is available (false when building using Visual Studio Express) */
+		/// <summary>
+		/// True if VS EnvDTE is available (false when building using Visual Studio Express)
+		/// </summary>
 		public static bool bHasVisualStudioDTE
 		{
 			get
@@ -83,28 +85,25 @@ namespace UnrealBuildTool
 			}
 		}
 
-		/**
-		 * Returns VisualStudio common tools path for current compiler.
-		 * 
-		 * @return Common tools path.
-		 */
+		/// <summary>
+		/// Returns VisualStudio common tools path for current compiler.
+		/// </summary>
+		/// <returns>Common tools path.</returns>
 		public static string GetVSComnToolsPath()
 		{
 			return GetVSComnToolsPath(Compiler);
 		}
 
-		/**
-		 * Returns VisualStudio common tools path for given compiler.
-		 * 
-		 * @param Compiler Compiler for which to return tools path.
-		 * 
-		 * @return Common tools path.
-		 */
+		/// <summary>
+		/// Returns VisualStudio common tools path for given compiler.
+		/// </summary>
+		/// <param name="Compiler">Compiler for which to return tools path.</param>
+		/// <returns>Common tools path.</returns>
 		public static string GetVSComnToolsPath(WindowsCompiler Compiler)
 		{
 			int VSVersion;
 
-			switch(Compiler)
+			switch (Compiler)
 			{
 				case WindowsCompiler.VisualStudio2015:
 					VSVersion = 14;
@@ -122,17 +121,17 @@ namespace UnrealBuildTool
 
 			string VSPath = null;
 
-			foreach(var PossibleRegPath in PossibleRegPaths)
+			foreach (var PossibleRegPath in PossibleRegPaths)
 			{
-				VSPath = (string) Registry.GetValue(string.Format(@"HKEY_LOCAL_MACHINE\SOFTWARE\{0}\{1}.0", PossibleRegPath, VSVersion), "InstallDir", null);
+				VSPath = (string)Registry.GetValue(string.Format(@"HKEY_LOCAL_MACHINE\SOFTWARE\{0}\{1}.0", PossibleRegPath, VSVersion), "InstallDir", null);
 
-				if(VSPath != null)
+				if (VSPath != null)
 				{
 					break;
 				}
 			}
 
-			if(VSPath == null)
+			if (VSPath == null)
 			{
 				return null;
 			}
@@ -141,9 +140,9 @@ namespace UnrealBuildTool
 		}
 
 
-		/**
-		 *	Register the platform with the UEBuildPlatform class
-		 */
+		/// <summary>
+		/// Register the platform with the UEBuildPlatform class
+		/// </summary>
 		protected override void RegisterBuildPlatformInternal()
 		{
 			// Register this build platform for UWP
@@ -152,13 +151,11 @@ namespace UnrealBuildTool
 			UEBuildPlatform.RegisterPlatformWithGroup(UnrealTargetPlatform.UWP, UnrealPlatformGroup.Microsoft);
 		}
 
-		/**
-		 *	Retrieve the CPPTargetPlatform for the given UnrealTargetPlatform
-		 *
-		 *	@param	InUnrealTargetPlatform		The UnrealTargetPlatform being build
-		 *	
-		 *	@return	CPPTargetPlatform			The CPPTargetPlatform to compile for
-		 */
+		/// <summary>
+		/// Retrieve the CPPTargetPlatform for the given UnrealTargetPlatform
+		/// </summary>
+		/// <param name="InUnrealTargetPlatform"> The UnrealTargetPlatform being build</param>
+		/// <returns>CPPTargetPlatform   The CPPTargetPlatform to compile for</returns>
 		public override CPPTargetPlatform GetCPPTargetPlatform(UnrealTargetPlatform InUnrealTargetPlatform)
 		{
 			switch (InUnrealTargetPlatform)
@@ -169,18 +166,16 @@ namespace UnrealBuildTool
 			throw new BuildException("UWPPlatform::GetCPPTargetPlatform: Invalid request for {0}", InUnrealTargetPlatform.ToString());
 		}
 
-		/**
-		 *	Get the extension to use for the given binary type
-		 *	
-		 *	@param	InBinaryType		The binrary type being built
-		 *	
-		 *	@return	string				The binary extenstion (ie 'exe' or 'dll')
-		 */
+		/// <summary>
+		/// Get the extension to use for the given binary type
+		/// </summary>
+		/// <param name="InBinaryType"> The binrary type being built</param>
+		/// <returns>string    The binary extenstion (ie 'exe' or 'dll')</returns>
 		public override string GetBinaryExtension(UEBuildBinaryType InBinaryType)
 		{
 			switch (InBinaryType)
 			{
-				case UEBuildBinaryType.DynamicLinkLibrary: 
+				case UEBuildBinaryType.DynamicLinkLibrary:
 					return ".dll";
 				case UEBuildBinaryType.Executable:
 					return ".exe";
@@ -194,15 +189,15 @@ namespace UnrealBuildTool
 			return base.GetBinaryExtension(InBinaryType);
 		}
 
-		
+
 		/// <summary>
 		/// When using a Visual Studio compiler, returns the version name as a string
 		/// </summary>
 		/// <returns>The Visual Studio compiler version name (e.g. "2012")</returns>
 		public static string GetVisualStudioCompilerVersionName()
 		{
-			switch( Compiler )
-			{ 
+			switch (Compiler)
+			{
 				case WindowsCompiler.VisualStudio2015:
 					return "2015";
 				default:
@@ -211,14 +206,12 @@ namespace UnrealBuildTool
 		}
 
 
-		/**
-		 *	Get the extension to use for debug info for the given binary type
-		 *	
-		 *	@param	InBinaryType		The binary type being built
-		 *	
-		 *	@return	string				The debug info extension (i.e. 'pdb')
-		 */
-		public override string GetDebugInfoExtension( UEBuildBinaryType InBinaryType )
+		/// <summary>
+		/// Get the extension to use for debug info for the given binary type
+		/// </summary>
+		/// <param name="InBinaryType"> The binary type being built</param>
+		/// <returns>string    The debug info extension (i.e. 'pdb')</returns>
+		public override string GetDebugInfoExtension(UEBuildBinaryType InBinaryType)
 		{
 			switch (InBinaryType)
 			{
@@ -229,28 +222,24 @@ namespace UnrealBuildTool
 			return "";
 		}
 
-		/**
-		 *	Whether incremental linking should be used
-		 *	
-		 *	@param	InPlatform			The CPPTargetPlatform being built
-		 *	@param	InConfiguration		The CPPTargetConfiguration being built
-		 *	
-		 *	@return	bool	true if incremental linking should be used, false if not
-		 */
+		/// <summary>
+		/// Whether incremental linking should be used
+		/// </summary>
+		/// <param name="InPlatform">  The CPPTargetPlatform being built</param>
+		/// <param name="InConfiguration"> The CPPTargetConfiguration being built</param>
+		/// <returns>bool true if incremental linking should be used, false if not</returns>
 		public override bool ShouldUseIncrementalLinking(CPPTargetPlatform Platform, CPPTargetConfiguration Configuration)
 		{
 			return (Configuration == CPPTargetConfiguration.Debug);
 		}
 
-		/**
-		 *	Whether PDB files should be used
-		 *	
-		 *	@param	InPlatform			The CPPTargetPlatform being built
-		 *	@param	InConfiguration		The CPPTargetConfiguration being built
-		 *	@param	bInCreateDebugInfo	true if debug info is getting create, false if not
-		 *	
-		 *	@return	bool	true if PDB files should be used, false if not
-		 */
+		/// <summary>
+		/// Whether PDB files should be used
+		/// </summary>
+		/// <param name="InPlatform">  The CPPTargetPlatform being built</param>
+		/// <param name="InConfiguration"> The CPPTargetConfiguration being built</param>
+		/// <param name="bInCreateDebugInfo">true if debug info is getting create, false if not</param>
+		/// <returns>bool true if PDB files should be used, false if not</returns>
 		public override bool ShouldUsePDBFiles(CPPTargetPlatform Platform, CPPTargetConfiguration Configuration, bool bCreateDebugInfo)
 		{
 			// Only supported on PC.
@@ -261,13 +250,12 @@ namespace UnrealBuildTool
 			return false;
 		}
 
-		/**
-		 *	Whether the editor should be built for this platform or not
-		 *	
-		 *	@param	InPlatform		The UnrealTargetPlatform being built
-		 *	@param	InConfiguration	The UnrealTargetConfiguration being built
-		 *	@return	bool			true if the editor should be built, false if not
-		 */
+		/// <summary>
+		/// Whether the editor should be built for this platform or not
+		/// </summary>
+		/// <param name="InPlatform"> The UnrealTargetPlatform being built</param>
+		/// <param name="InConfiguration">The UnrealTargetConfiguration being built</param>
+		/// <returns>bool   true if the editor should be built, false if not</returns>
 		public override bool ShouldNotBuildEditor(UnrealTargetPlatform InPlatform, UnrealTargetConfiguration InConfiguration)
 		{
 			return true;
@@ -332,11 +320,10 @@ namespace UnrealBuildTool
 			}
 		}
 
-		/**
-		 *	Setup the target environment for building
-		 *	
-		 *	@param	InBuildTarget		The target being built
-		 */
+		/// <summary>
+		/// Setup the target environment for building
+		/// </summary>
+		/// <param name="InBuildTarget"> The target being built</param>
 		public override void SetUpEnvironment(UEBuildTarget InBuildTarget)
 		{
 
@@ -391,7 +378,7 @@ namespace UnrealBuildTool
 
 			InBuildTarget.GlobalLinkEnvironment.Config.AdditionalLibraries.Add("mincore.lib");
 			InBuildTarget.GlobalLinkEnvironment.Config.AdditionalLibraries.Add("dloadhelper.lib");
-		   
+
 			// Disable Simplygon support if compiling against the NULL RHI.
 			if (InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Contains("USE_NULL_RHI=1"))
 			{
@@ -399,11 +386,10 @@ namespace UnrealBuildTool
 			}
 		}
 
-		/**
-		 *	Setup the configuration environment for building
-		 *	
-		 *	@param	InBuildTarget		The target being built
-		 */
+		/// <summary>
+		/// Setup the configuration environment for building
+		/// </summary>
+		/// <param name="InBuildTarget"> The target being built</param>
 		public override void SetUpConfigurationEnvironment(UEBuildTarget InBuildTarget)
 		{
 			// Determine the C++ compile/link configuration based on the Unreal configuration.
@@ -414,8 +400,8 @@ namespace UnrealBuildTool
 				default:
 				case UnrealTargetConfiguration.Debug:
 					CompileConfiguration = CPPTargetConfiguration.Debug;
-					if( BuildConfiguration.bDebugBuildsActuallyUseDebugCRT )
-					{ 
+					if (BuildConfiguration.bDebugBuildsActuallyUseDebugCRT)
+					{
 						InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("_DEBUG=1"); // the engine doesn't use this, but lots of 3rd party stuff does
 					}
 					else
@@ -425,7 +411,7 @@ namespace UnrealBuildTool
 					InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("UE_BUILD_DEBUG=1");
 					break;
 				case UnrealTargetConfiguration.DebugGame:
-					// Default to Development; can be overriden by individual modules.
+				// Default to Development; can be overriden by individual modules.
 				case UnrealTargetConfiguration.Development:
 					CompileConfiguration = CPPTargetConfiguration.Development;
 					InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("NDEBUG=1"); // the engine doesn't use this, but lots of 3rd party stuff does
@@ -445,7 +431,7 @@ namespace UnrealBuildTool
 
 			// Set up the global C++ compilation and link environment.
 			InBuildTarget.GlobalCompileEnvironment.Config.Target.Configuration = CompileConfiguration;
-			InBuildTarget.GlobalLinkEnvironment.Config.Target.Configuration    = CompileConfiguration;
+			InBuildTarget.GlobalLinkEnvironment.Config.Target.Configuration = CompileConfiguration;
 
 			// Create debug info based on the heuristics specified by the user.
 			InBuildTarget.GlobalCompileEnvironment.Config.bCreateDebugInfo =
@@ -460,36 +446,46 @@ namespace UnrealBuildTool
 			InBuildTarget.GlobalLinkEnvironment.Config.bCreateDebugInfo = true;
 		}
 
-		/**
-		 *	Whether this platform should create debug information or not
-		 *	
-		 *	@param	InPlatform			The UnrealTargetPlatform being built
-		 *	@param	InConfiguration		The UnrealTargetConfiguration being built
-		 *	
-		 *	@return	bool				true if debug info should be generated, false if not
-		 */
+		/// <summary>
+		/// Whether this platform should create debug information or not
+		/// </summary>
+		/// <param name="InPlatform">  The UnrealTargetPlatform being built</param>
+		/// <param name="InConfiguration"> The UnrealTargetConfiguration being built</param>
+		/// <returns>bool    true if debug info should be generated, false if not</returns>
 		public override bool ShouldCreateDebugInfo(UnrealTargetPlatform Platform, UnrealTargetConfiguration Configuration)
 		{
 			switch (Configuration)
 			{
-				case UnrealTargetConfiguration.Development: 
-				case UnrealTargetConfiguration.Shipping: 
-				case UnrealTargetConfiguration.Test: 
+				case UnrealTargetConfiguration.Development:
+				case UnrealTargetConfiguration.Shipping:
+				case UnrealTargetConfiguration.Test:
 					return !BuildConfiguration.bOmitPCDebugInfoInDevelopment;
 				case UnrealTargetConfiguration.DebugGame:
 				case UnrealTargetConfiguration.Debug:
-				default: 
+				default:
 					return true;
 			};
 		}
 
-		/**
-		 *	Return whether this platform has uniquely named binaries across multiple games
-		 */
+		/// <summary>
+		/// Return whether this platform has uniquely named binaries across multiple games
+		/// </summary>
 		public override bool HasUniqueBinaries()
 		{
 			// Windows applications have many shared binaries between games
 			return false;
+		}
+
+		/// <summary>
+		/// Create a build deployment handler
+		/// </summary>
+		/// <param name="ProjectFile">The project file of the target being deployed. Used to find any deployment specific settings.</param>
+		/// <param name="DeploymentHandler">The output deployment handler</param>
+		/// <returns>True if the platform requires a deployment handler, false otherwise</returns>
+		public override bool TryCreateDeploymentHandler(FileReference ProjectFile, out UEBuildDeploy DeploymentHandler)
+		{
+			DeploymentHandler = new UWPDeploy();
+			return true;
 		}
 	}
 }

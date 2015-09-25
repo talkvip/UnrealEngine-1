@@ -8,19 +8,10 @@ using System.Xml;
 using System.IO;
 using System.Diagnostics;
 
-namespace UnrealBuildTool.IOS
+namespace UnrealBuildTool
 {
 	public class UEDeployIOS : UEBuildDeploy
 	{
-		/**
-		 *	Register the platform with the UEBuildDeploy class
-		 */
-		public override void RegisterBuildDeploy()
-		{
-			// TODO: print debug info and handle any cases that would keep this from registering
-			UEBuildDeploy.RegisterBuildDeploy(UnrealTargetPlatform.IOS, this);
-		}
-
 		class VersionUtilities
 		{
 			public static string BuildDirectory
@@ -281,15 +272,15 @@ namespace UnrealBuildTool.IOS
 			Text.AppendLine("\t<key>CFBundleDevelopmentRegion</key>");
 			Text.AppendLine("\t<string>English</string>");
 			Text.AppendLine("\t<key>CFBundleDisplayName</key>");
-			Text.AppendLine(string.Format("\t<string>{0}</string>", BundleDisplayName.Replace("[PROJECT_NAME]", ProjectName).Replace("_","")));
+			Text.AppendLine(string.Format("\t<string>{0}</string>", BundleDisplayName.Replace("[PROJECT_NAME]", ProjectName).Replace("_", "")));
 			Text.AppendLine("\t<key>CFBundleExecutable</key>");
 			Text.AppendLine(string.Format("\t<string>{0}</string>", bIsUE4Game ? "UE4Game" : GameName));
 			Text.AppendLine("\t<key>CFBundleIdentifier</key>");
-			Text.AppendLine(string.Format("\t<string>{0}</string>", BundleIdentifier.Replace("[PROJECT_NAME]", ProjectName).Replace("_","")));
+			Text.AppendLine(string.Format("\t<string>{0}</string>", BundleIdentifier.Replace("[PROJECT_NAME]", ProjectName).Replace("_", "")));
 			Text.AppendLine("\t<key>CFBundleInfoDictionaryVersion</key>");
 			Text.AppendLine("\t<string>6.0</string>");
 			Text.AppendLine("\t<key>CFBundleName</key>");
-			Text.AppendLine(string.Format("\t<string>{0}</string>", BundleName.Replace("[PROJECT_NAME]", ProjectName).Replace("_","")));
+			Text.AppendLine(string.Format("\t<string>{0}</string>", BundleName.Replace("[PROJECT_NAME]", ProjectName).Replace("_", "")));
 			Text.AppendLine("\t<key>CFBundlePackageType</key>");
 			Text.AppendLine("\t<string>APPL</string>");
 			Text.AppendLine("\t<key>CFBundleSignature</key>");
@@ -363,7 +354,7 @@ namespace UnrealBuildTool.IOS
 			Text.AppendLine("\t\t\t<true/>");
 			Text.AppendLine("\t\t</dict>");
 			Text.AppendLine("\t</dict>");
- 			if (File.Exists(LaunchXib))
+			if (File.Exists(LaunchXib))
 			{
 				// TODO: compile the xib via remote tool
 				Text.AppendLine("\t<key>UILaunchStoryboardName</key>");
@@ -438,7 +429,7 @@ namespace UnrealBuildTool.IOS
 			{
 				Text.AppendLine("\t<key>FacebookAppID</key>");
 				Text.AppendLine(string.Format("\t<string>{0}</string>", FacebookAppID));
-				
+
 			}
 			if (!string.IsNullOrEmpty(ExtraData))
 			{
@@ -479,11 +470,11 @@ namespace UnrealBuildTool.IOS
 				throw new BuildException("UEDeployIOS.PrepForUATPackageOrDeploy only supports running on the Mac");
 			}
 
-			bool bIsUE4Game = InExecutablePath.Contains ("UE4Game");
-			string BinaryPath = Path.GetDirectoryName (InExecutablePath);
-			string GameExeName = Path.GetFileName (InExecutablePath);
+			bool bIsUE4Game = InExecutablePath.Contains("UE4Game");
+			string BinaryPath = Path.GetDirectoryName(InExecutablePath);
+			string GameExeName = Path.GetFileName(InExecutablePath);
 			string GameName = bIsUE4Game ? "UE4Game" : InProjectName;
-			string PayloadDirectory =  BinaryPath + "/Payload";
+			string PayloadDirectory = BinaryPath + "/Payload";
 			string AppDirectory = PayloadDirectory + "/" + GameName + ".app";
 			string CookedContentDirectory = AppDirectory + "/cookeddata";
 			string BuildDirectory = InProjectDirectory + "/Build/IOS";
@@ -533,16 +524,16 @@ namespace UnrealBuildTool.IOS
 					ProvisionWithPrefix = InEngineDir + "/Build/IOS/NotForLicensees/UE4Game.mobileprovision";
 				}
 			}
-			if (File.Exists (ProvisionWithPrefix))
+			if (File.Exists(ProvisionWithPrefix))
 			{
-				Directory.CreateDirectory (Environment.GetEnvironmentVariable ("HOME") + "/Library/MobileDevice/Provisioning Profiles/");
+				Directory.CreateDirectory(Environment.GetEnvironmentVariable("HOME") + "/Library/MobileDevice/Provisioning Profiles/");
 				if (File.Exists(Environment.GetEnvironmentVariable("HOME") + "/Library/MobileDevice/Provisioning Profiles/" + InProjectName + ".mobileprovision"))
 				{
 					DestFileInfo = new FileInfo(Environment.GetEnvironmentVariable("HOME") + "/Library/MobileDevice/Provisioning Profiles/" + InProjectName + ".mobileprovision");
 					DestFileInfo.Attributes = DestFileInfo.Attributes & ~FileAttributes.ReadOnly;
 				}
-				File.Copy (ProvisionWithPrefix, Environment.GetEnvironmentVariable ("HOME") + "/Library/MobileDevice/Provisioning Profiles/" + InProjectName + ".mobileprovision", true);
-				DestFileInfo = new FileInfo (Environment.GetEnvironmentVariable ("HOME") + "/Library/MobileDevice/Provisioning Profiles/" + InProjectName + ".mobileprovision");
+				File.Copy(ProvisionWithPrefix, Environment.GetEnvironmentVariable("HOME") + "/Library/MobileDevice/Provisioning Profiles/" + InProjectName + ".mobileprovision", true);
+				DestFileInfo = new FileInfo(Environment.GetEnvironmentVariable("HOME") + "/Library/MobileDevice/Provisioning Profiles/" + InProjectName + ".mobileprovision");
 				DestFileInfo.Attributes = DestFileInfo.Attributes & ~FileAttributes.ReadOnly;
 			}
 			if (!File.Exists(ProvisionWithPrefix) || Environment.GetEnvironmentVariable("IsBuildMachine") == "1")
@@ -616,16 +607,16 @@ namespace UnrealBuildTool.IOS
 					DestFileInfo.Attributes = DestFileInfo.Attributes & ~FileAttributes.ReadOnly;
 				}
 				File.Copy(ProvisionWithPrefix, Environment.GetEnvironmentVariable("HOME") + "/Library/MobileDevice/Provisioning Profiles/" + InProjectName + "_Distro.mobileprovision", true);
-				DestFileInfo = new FileInfo (Environment.GetEnvironmentVariable ("HOME") + "/Library/MobileDevice/Provisioning Profiles/" + InProjectName + "_Distro.mobileprovision");
+				DestFileInfo = new FileInfo(Environment.GetEnvironmentVariable("HOME") + "/Library/MobileDevice/Provisioning Profiles/" + InProjectName + "_Distro.mobileprovision");
 				DestFileInfo.Attributes = DestFileInfo.Attributes & ~FileAttributes.ReadOnly;
 			}
 
 			// compile the launch .xib
-//			string LaunchXib = InEngineDir + "/Build/IOS/Resources/Interface/LaunchScreen.xib";
-//			if (File.Exists(BuildDirectory + "/Resources/Interface/LaunchScreen.xib"))
-//			{
-//				LaunchXib = BuildDirectory + "/Resources/Interface/LaunchScreen.xib";
-//			}
+			//			string LaunchXib = InEngineDir + "/Build/IOS/Resources/Interface/LaunchScreen.xib";
+			//			if (File.Exists(BuildDirectory + "/Resources/Interface/LaunchScreen.xib"))
+			//			{
+			//				LaunchXib = BuildDirectory + "/Resources/Interface/LaunchScreen.xib";
+			//			}
 
 			bool bSkipDefaultPNGs = GeneratePList(InProjectDirectory, bIsUE4Game, GameName, InProjectName, InEngineDir, AppDirectory);
 
@@ -701,44 +692,6 @@ namespace UnrealBuildTool.IOS
 			}
 			else
 			{
-				// If it is requested, send the app bundle back to the platform executing these commands.
-				if (BuildConfiguration.bCopyAppBundleBackToDevice)
-				{
-					Log.TraceInformation("Copying binaries back to this device...");
-
-					IOSToolChain Toolchain = UEToolChain.GetPlatformToolChain(CPPTargetPlatform.IOS) as IOSToolChain;
-
-					try
-					{
-						string BinaryDir = Path.GetDirectoryName(InTarget.OutputPath.FullName) + "\\";
-						if (BinaryDir.EndsWith(InTarget.AppName + "\\Binaries\\IOS\\") && InTarget.TargetType != TargetRules.TargetType.Game)
-						{
-							BinaryDir = BinaryDir.Replace(InTarget.TargetType.ToString(), "Game");
-						}
-
-						// Get the app bundle's name
-						string AppFullName = InTarget.AppName;
-						if (InTarget.Configuration != UnrealTargetConfiguration.Development)
-						{
-							AppFullName += "-" + InTarget.Platform.ToString();
-							AppFullName += "-" + InTarget.Configuration.ToString();
-						}
-
-						foreach (string BinaryPath in Toolchain.BuiltBinaries.Select(x => x.FullName))
-						{
-							if (!BinaryPath.Contains("Dummy"))
-							{
-								RPCUtilHelper.CopyFile(Toolchain.ConvertPath(BinaryPath), BinaryPath, false);
-							}
-						}
-						Log.TraceInformation("Copied binaries successfully.");
-					}
-					catch (Exception)
-					{
-						Log.TraceInformation("Copying binaries back to this device failed.");
-					}
-				}
-
 				GeneratePList(ProjectDirectory, bIsUE4Game, GameName, UnrealBuildTool.GetUProjectFile() == null ? "" : Path.GetFileNameWithoutExtension(UnrealBuildTool.GetUProjectFile().FullName), "../../Engine", "");
 			}
 			return true;

@@ -5,6 +5,9 @@
 #include "MovieSceneEventSection.generated.h"
 
 
+class ALevelScriptActor;
+
+
 /**
  * Structure for event section keys.
  */
@@ -50,6 +53,9 @@ class UMovieSceneEventSection
 {
 	GENERATED_BODY()
 
+	/** Default constructor. */
+	UMovieSceneEventSection();
+
 public:
 
 	/**
@@ -61,18 +67,44 @@ public:
 	 */
 	void AddKey(float Time, const FName& EventName, FKeyParams KeyParams);
 
+	/**
+	 * @return The float curve on this section
+	 */
+	FNameCurve& GetEventCurve()
+	{
+		return Events;
+	}
+
+	/**
+	 * Trigger the events that fall into the given time range.
+	 *
+	 * @param LevelScriptActor The script actor to trigger the events on.
+	 * @param Position The current position in time.
+	 * @param LastPosition The time at the last update.
+	 */
+	void TriggerEvents(ALevelScriptActor* LevelScriptActor, float Position, float LastPosition);
+
 public:
 
 	// UMovieSceneSection interface
 
 	virtual void DilateSection(float DilationFactor, float Origin, TSet<FKeyHandle>& KeyHandles) override;
 	virtual void GetKeyHandles(TSet<FKeyHandle>& KeyHandles) const override;
-	virtual void GetSnapTimes(TArray<float>& OutSnapTimes, bool bGetSectionBorders) const override;
 	virtual void MoveSection(float DeltaPosition, TSet<FKeyHandle>& KeyHandles) override;
+
+protected:
+
+	/**
+	 * Trigger event for the specified key.
+	 *
+	 * @param Key The key to trigger.
+	 * @param LevelScriptActor The script actor to trigger the events on.
+	 */
+	void TriggerEvent(const FName& Event, ALevelScriptActor* LevelScriptActor);
 
 private:
 
 	/** The section's keys. */
-	UPROPERTY(EditAnywhere, Category="Audio")
-	TArray<FMovieSceneEventSectionKey> Keys;
+	UPROPERTY(EditAnywhere, Category="Events")
+	FNameCurve Events;
 };

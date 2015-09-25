@@ -51,11 +51,10 @@ void FEmitDefaultValueHelper::OuterGenerate(FEmitterLocalContext& Context
 				
 				const FString PropertyObject = Context.GenerateGetProperty(Property); //X::StaticClass()->FindPropertyByName(GET_MEMBER_NAME_CHECKED(X, X))
 
-				FStringOutputDevice TypeDeclaration;
 				const uint32 CppTemplateTypeFlags = EPropertyExportCPPFlags::CPPF_CustomTypeName
 					| EPropertyExportCPPFlags::CPPF_NoConst | EPropertyExportCPPFlags::CPPF_NoRef | EPropertyExportCPPFlags::CPPF_NoStaticArray
 					| EPropertyExportCPPFlags::CPPF_BlueprintCppBackend;
-				Property->ExportCppDeclaration(TypeDeclaration, EExportedDeclaration::Parameter, nullptr, CppTemplateTypeFlags, true);
+				const FString TypeDeclaration = Context.ExportCppDeclaration(Property, EExportedDeclaration::Parameter, CppTemplateTypeFlags, true);
 
 				const FString OperatorStr = (EPropertyAccessOperator::Dot == AccessOperator) ? TEXT("&") : TEXT("");
 				const FString ContainerStr = (EPropertyAccessOperator::None == AccessOperator) ? TEXT("this") : FString::Printf(TEXT("%s(%s)"), *OperatorStr, *OuterPath);
@@ -87,7 +86,7 @@ FString FEmitDefaultValueHelper::GenerateGetDefaultValue(const UUserDefinedStruc
 	FStructOnScope StructData(Struct);
 	FStructureEditorUtils::Fill_MakeStructureDefaultValue(Struct, StructData.GetStructMemory());
 
-	FEmitterLocalContext Context(nullptr, Dependencies);
+	FEmitterLocalContext Context(Dependencies);
 	Context.IncreaseIndent();
 	Context.IncreaseIndent();
 	for (auto Property : TFieldRange<const UProperty>(Struct))
@@ -107,8 +106,8 @@ void FEmitDefaultValueHelper::InnerGenerate(FEmitterLocalContext& Context, const
 		FString ValueStr = HandleSpecialTypes(LocalContext, LocalProperty, LocalValuePtr);
 		if (ValueStr.IsEmpty())
 		{
+			ValueStr = LocalContext.ExportTextItem(LocalProperty, LocalValuePtr);
 			auto StructProperty = Cast<const UStructProperty>(LocalProperty);
-			LocalProperty->ExportTextItem(ValueStr, LocalValuePtr, LocalValuePtr, nullptr, EPropertyPortFlags::PPF_ExportCpp);
 			if (ValueStr.IsEmpty() && StructProperty)
 			{
 				check(StructProperty->Struct);
@@ -183,7 +182,8 @@ FString FEmitDefaultValueHelper::HandleSpecialTypes(FEmitterLocalContext& Contex
 		if (Object)
 		{
 			{
-				const FString MappedObject = Context.FindGloballyMappedObject(Object);
+				UClass* ObjectClassToUse = Context.GetNativeOrConvertedClass(ObjectProperty->PropertyClass);
+				const FString MappedObject = Context.FindGloballyMappedObject(Object, ObjectClassToUse);
 				if (!MappedObject.IsEmpty())
 				{
 					return MappedObject;
@@ -300,7 +300,7 @@ FString FEmitDefaultValueHelper::HandleNonNativeComponent(FEmitterLocalContext& 
 				}
 				else if (USceneComponent* ParentComponentTemplate = Node->GetParentComponentTemplate(CastChecked<UBlueprint>(BPGC->ClassGeneratedBy)))
 				{
-					ParentVariableName = Context.FindGloballyMappedObject(ParentComponentTemplate);
+					ParentVariableName = Context.FindGloballyMappedObject(ParentComponentTemplate, USceneComponent::StaticClass());
 				}
 
 				if (!ParentVariableName.IsEmpty())
@@ -358,7 +358,7 @@ struct FDependenciesHelper
 		}
 		for (auto LocAsset : Context.Dependencies.Assets)
 		{
-			const FString AssetStr = Context.FindGloballyMappedObject(LocAsset, true);
+			const FString AssetStr = Context.FindGloballyMappedObject(LocAsset, nullptr, true, false);
 			Context.AddLine(FString::Printf(TEXT("CastChecked<UDynamicClass>(GetClass())->UsedAssets.Add(%s);"), *AssetStr));
 		}
 	}
@@ -440,7 +440,7 @@ struct FDependenciesHelper
 
 FString FEmitDefaultValueHelper::GenerateConstructor(FEmitterLocalContext& Context)
 {
-	auto BPGC = CastChecked<UBlueprintGeneratedClass>(Context.GetActualClass());
+	auto BPGC = CastChecked<UBlueprintGeneratedClass>(Context.GetCurrentlyGeneratedClass());
 	const FString CppClassName = FEmitHelper::GetCppName(BPGC);
 
 	Context.AddLine(FString::Printf(TEXT("%s::%s(const FObjectInitializer& ObjectInitializer) : Super(ObjectInitializer)"), *CppClassName, *CppClassName));

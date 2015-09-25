@@ -127,48 +127,54 @@ namespace UnrealBuildTool
 		/// </summary>
 		/// <param name="InitFilePath">The path to the project file on disk</param>
 		public XcodeProjectFile(FileReference InitFilePath)
-			: base( InitFilePath )
+			: base(InitFilePath)
 		{
 		}
 
-		/** Gets Xcode file category based on its extension */
+		/// <summary>
+		/// Gets Xcode file category based on its extension
+		/// </summary>
 		private string GetFileCategory(string Extension)
 		{
 			// @todo Mac: Handle more categories
 			switch (Extension)
 			{
-			case ".framework":
-				return "Frameworks";
-			default:
-				return "Sources";
+				case ".framework":
+					return "Frameworks";
+				default:
+					return "Sources";
 			}
 		}
 
-		/** Gets Xcode file type based on its extension */
+		/// <summary>
+		/// Gets Xcode file type based on its extension
+		/// </summary>
 		private string GetFileType(string Extension)
 		{
 			// @todo Mac: Handle more file types
 			switch (Extension)
 			{
-			case ".c":
-			case ".m":
-				return "sourcecode.c.objc";
-			case ".cc":
-			case ".cpp":
-			case ".mm":
-				return "sourcecode.cpp.objcpp";
-			case ".h":
-			case ".inl":
-			case ".pch":
-				return "sourcecode.c.h";
-			case ".framework":
-				return "wrapper.framework";
-			default:
-				return "file.text";
+				case ".c":
+				case ".m":
+					return "sourcecode.c.objc";
+				case ".cc":
+				case ".cpp":
+				case ".mm":
+					return "sourcecode.cpp.objcpp";
+				case ".h":
+				case ".inl":
+				case ".pch":
+					return "sourcecode.c.h";
+				case ".framework":
+					return "wrapper.framework";
+				default:
+					return "file.text";
 			}
 		}
 
-		/** Returns true if Extension is a known extension for files containing source code */
+		/// <summary>
+		/// Returns true if Extension is a known extension for files containing source code
+		/// </summary>
 		private bool IsSourceCode(string Extension)
 		{
 			return Extension == ".c" || Extension == ".cc" || Extension == ".cpp" || Extension == ".m" || Extension == ".mm";
@@ -205,10 +211,10 @@ namespace UnrealBuildTool
 			return false;
 		}
 
-		/**
-		 * Returns a project navigator group to which the file should belong based on its path.
-		 * Creates a group tree if it doesn't exist yet.
-		 */
+		/// <summary>
+		/// Returns a project navigator group to which the file should belong based on its path.
+		/// Creates a group tree if it doesn't exist yet.
+		/// </summary>
 		public XcodeFileGroup FindGroupByFullPath(ref Dictionary<string, XcodeFileGroup> Groups, DirectoryReference FullPath)
 		{
 			string RelativePath = (FullPath == XcodeProjectFileGenerator.MasterProjectPath) ? "" : FullPath.MakeRelativeTo(XcodeProjectFileGenerator.MasterProjectPath);
@@ -269,9 +275,9 @@ namespace UnrealBuildTool
 			return new XcodeSourceFile(InitFilePath, InitProjectSubFolder);
 		}
 
-		/**
-		 * Generates bodies of all sections that contain a list of source files plus a dictionary of project navigator groups.
-		 */
+		/// <summary>
+		/// Generates bodies of all sections that contain a list of source files plus a dictionary of project navigator groups.
+		/// </summary>
 		public void GenerateSectionsContents(ref string PBXBuildFileSection, ref string PBXFileReferenceSection,
 											 ref string PBXSourcesBuildPhaseSection, ref Dictionary<string, XcodeFileGroup> Groups)
 		{

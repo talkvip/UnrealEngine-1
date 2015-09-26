@@ -205,6 +205,7 @@ void SSequencer::Construct( const FArguments& InArgs, TSharedRef< class FSequenc
 	TSharedRef<ITimeSlider> BottomTimeRange = SequencerWidgets.CreateTimeRange( TimeSliderController, TAttribute<EVisibility>(this, &SSequencer::GetTimeRangeVisibility), TAttribute<bool>(this, &SSequencer::ShowFrameNumbers), TAttribute<float>(this, &SSequencer::OnGetTimeSnapInterval));
 
 	OnGetAddMenuContent = InArgs._OnGetAddMenuContent;
+	AddMenuExtender = InArgs._AddMenuExtender;
 
 	ColumnFillCoefficients[0] = .25f;
 	ColumnFillCoefficients[1] = .75f;
@@ -296,7 +297,7 @@ void SSequencer::Construct( const FArguments& InArgs, TSharedRef< class FSequenc
 							.Orientation(Orient_Horizontal)
 						
 						+ SSplitter::Slot()
-							.Value(0.85f)
+							.Value(0.80f)
 							[
 								SNew(SBox)
 									.Padding(FMargin(0.0f, 2.0f, 0.0f, 0.0f))
@@ -438,7 +439,7 @@ void SSequencer::Construct( const FArguments& InArgs, TSharedRef< class FSequenc
 							]
 
 						+ SSplitter::Slot()
-							.Value(0.15f)
+							.Value(0.2f)
 							[
 								DetailsView.ToSharedRef()
 							]
@@ -515,6 +516,40 @@ void SSequencer::NotifyPostChange(const FPropertyChangedEvent& PropertyChangedEv
 }
 
 
+/* SSequencer implementation
+ *****************************************************************************/
+
+void SSequencer::UpdateDetailsView()
+{
+	TArray<TWeakObjectPtr<UObject>> Sections;
+
+	// get selected sections
+	for (auto Section : Sequencer.Pin()->GetSelection().GetSelectedSections())
+	{
+		Sections.Add(Section);
+	}
+
+	// get sections from selected keys
+	const TArray<FSelectedKey> SelectedKeys = Sequencer.Pin()->GetSelection().GetSelectedKeys().Array();
+
+	for (const auto& Key : SelectedKeys)
+	{
+		if (Key.Section != nullptr)
+		{
+			Sections.AddUnique(Key.Section);
+		}
+	}
+
+	// @todo sequencer: highlight selected keys in details view
+
+	// update details view
+	DetailsView->SetObjects(Sections, true);
+}
+
+
+/* SSequencer callbacks
+ *****************************************************************************/
+
 bool SSequencer::HandleDetailsViewEnabled() const
 {
 	return true;
@@ -527,39 +562,20 @@ EVisibility SSequencer::HandleDetailsViewVisibility() const
 	{
 		return EVisibility::Visible;
 	}
-	else
-	{
-		return EVisibility::Collapsed;
-	}
+
+	return EVisibility::Collapsed;
 }
 
 
 void SSequencer::HandleKeySelectionChanged()
 {
-	TSharedPtr<FStructOnScope> Struct;
-	const TArray<FSelectedKey> SelectedKeys = Sequencer.Pin()->GetSelection().GetSelectedKeys().Array();
-
-	if (SelectedKeys.Num() > 0)
-	{
-		// @todo sequencer: highlight selected keys in details view
-	}
-	else
-	{
-		// @todo sequencer: remove key highlights in details view
-	}
+	UpdateDetailsView();
 }
 
 
 void SSequencer::HandleSectionSelectionChanged()
 {
-	TArray<TWeakObjectPtr<UObject>> Sections;
-
-	for (auto Section : Sequencer.Pin()->GetSelection().GetSelectedSections())
-	{
-		Sections.Add(Section);
-	}
-
-	DetailsView->SetObjects(Sections, true);
+	UpdateDetailsView();
 }
 
 
@@ -626,6 +642,8 @@ TSharedRef<SWidget> SSequencer::MakeToolBar()
 				, LOCTEXT("SaveDirtyPackagesTooltip", "Saves the current movie scene")
 				, FSlateIcon(FEditorStyle::GetStyleSetName(), "Sequencer.Save"));
 
+			ToolBarBuilder.AddToolBarButton( FSequencerCommands::Get().RenderMovie );
+
 			ToolBarBuilder.AddSeparator();
 		}
 
@@ -640,13 +658,6 @@ TSharedRef<SWidget> SSequencer::MakeToolBar()
 
 		if( Sequencer.Pin()->IsLevelEditorSequencer() )
 		{
-			ToolBarBuilder.AddToolBarButton(
-				FUIAction(FExecuteAction::CreateSP(this, &SSequencer::OnAddObjectClicked))
-				, NAME_None
-				, LOCTEXT("AddObject", "Add Object")
-				, LOCTEXT("AddObjectTooltip", "Add selected objects")
-				, FSlateIcon(FEditorStyle::GetStyleSetName(), "Sequencer.AddObject"));
-
 			TAttribute<FSlateIcon> KeyAllIcon;
 			KeyAllIcon.Bind(TAttribute<FSlateIcon>::FGetter::CreateLambda([&]{
 				static FSlateIcon KeyAllEnabledIcon(FEditorStyle::GetStyleSetName(), "Sequencer.KeyAllEnabled");
@@ -759,33 +770,29 @@ TSharedRef<SWidget> SSequencer::MakeToolBar()
 	}
 	ToolBarBuilder.EndSection();
 
-	if( Sequencer.Pin()->IsLevelEditorSequencer() )
-	{
-		ToolBarBuilder.BeginSection("Render Movie");
-
-		ToolBarBuilder.AddToolBarButton( FSequencerCommands::Get().RenderMovie );
-
-		ToolBarBuilder.EndSection();
-	}
-	
-
 	return ToolBarBuilder.MakeWidget();
 }
 
 TSharedRef<SWidget> SSequencer::MakeAddMenu()
 {
-	FMenuBuilder MenuBuilder(true, nullptr);
+	FMenuBuilder MenuBuilder(true, nullptr, AddMenuExtender);
 	{
+
 		// let toolkits populate the menu
+		MenuBuilder.BeginSection("MainMenu");
 		OnGetAddMenuContent.ExecuteIfBound(MenuBuilder, Sequencer.Pin().ToSharedRef());
+		MenuBuilder.EndSection();
 
 		// let track editors populate the menu
 		TSharedPtr<FSequencer> PinnedSequencer = Sequencer.Pin();
 
+		// Always create the section so that we afford extension
+		MenuBuilder.BeginSection("AddTracks");
 		if (PinnedSequencer.IsValid())
 		{
 			PinnedSequencer->BuildAddTrackMenu(MenuBuilder);
 		}
+		MenuBuilder.EndSection();
 	}
 
 	return MenuBuilder.MakeWidget();
@@ -1299,6 +1306,16 @@ void SSequencer::OnActorSelectionChanged(UObject*)
 			}
 		}
 	}
+
+	const TSet<TSharedRef<FSequencerDisplayNode>>& OutlinerSelection = Sequencer.Pin()->GetSelection().GetSelectedOutlinerNodes();
+	if (OutlinerSelection.Num() == 1)
+	{
+		for (auto& Node : OutlinerSelection)
+		{
+			TreeView->RequestScrollIntoView(Node);
+			break;
+		}
+	}
 }
 
 void SSequencer::OnCrumbClicked(const FSequencerBreadcrumb& Item)
@@ -1331,28 +1348,6 @@ TSharedPtr<SSequencerTreeView> SSequencer::GetTreeView() const
 	return TreeView;
 }
 
-void SSequencer::DeleteSelectedNodes()
-{
-	TSet< TSharedRef<FSequencerDisplayNode> > SelectedNodesCopy = Sequencer.Pin()->GetSelection().GetSelectedOutlinerNodes();
-
-	if( SelectedNodesCopy.Num() > 0 )
-	{
-		const FScopedTransaction Transaction( LOCTEXT("UndoDeletingObject", "Delete Object from MovieScene") );
-
-		FSequencer& SequencerRef = *Sequencer.Pin();
-
-		for( const TSharedRef<FSequencerDisplayNode>& SelectedNode : SelectedNodesCopy )
-		{
-			if( !SelectedNode->IsHidden() )
-			{
-				// Delete everything in the entire node
-				TSharedRef<const FSequencerDisplayNode> NodeToBeDeleted = StaticCastSharedRef<const FSequencerDisplayNode>(SelectedNode);
-				SequencerRef.OnRequestNodeDeleted( NodeToBeDeleted );
-			}
-		}
-	}
-}
-
 TArray<FSectionHandle> SSequencer::GetSectionHandles(const TSet<TWeakObjectPtr<UMovieSceneSection>>& DesiredSections) const
 {
 	TArray<FSectionHandle> SectionHandles;
@@ -1383,11 +1378,6 @@ TArray<FSectionHandle> SSequencer::GetSectionHandles(const TSet<TWeakObjectPtr<U
 void SSequencer::OnSaveMovieSceneClicked()
 {
 	Sequencer.Pin()->SaveCurrentMovieScene();
-}
-
-void SSequencer::OnAddObjectClicked()
-{
-	Sequencer.Pin()->AddSelectedObjects();
 }
 
 void SSequencer::StepToNextKey()

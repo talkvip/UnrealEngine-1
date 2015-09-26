@@ -83,6 +83,8 @@ public:
 		SLATE_EVENT( FOnScrubPositionChanged, OnScrubPositionChanged )
 		/** Called to populate the add combo button in the toolbar. */
 		SLATE_EVENT( FOnGetAddMenuContent, OnGetAddMenuContent )
+		/** Extender to use for the add menu. */
+		SLATE_ARGUMENT( TSharedPtr<FExtender>, AddMenuExtender )
 	SLATE_END_ARGS()
 
 
@@ -113,9 +115,6 @@ public:
 	void UpdateBreadcrumbs(const TArray< TWeakObjectPtr<class UMovieSceneSection> >& FilteringShots);
 	void ResetBreadcrumbs();
 
-	/** Deletes selected nodes out of the sequencer node tree */
-	void DeleteSelectedNodes();
-
 	/** Step to next and previous keyframes */
 	void StepToNextKey();
 	void StepToPreviousKey();
@@ -129,9 +128,6 @@ public:
 
 	/** Called when the save button is clicked */
 	void OnSaveMovieSceneClicked();
-
-	/** Called when the add object button is clicked */
-	void OnAddObjectClicked();
 
 	/** Access the tree view for this sequencer */
 	TSharedPtr<SSequencerTreeView> GetTreeView() const;
@@ -150,6 +146,11 @@ public:
 	// FNotifyHook overrides
 
 	void NotifyPostChange(const FPropertyChangedEvent& PropertyChangedEvent, class FEditPropertyChain* PropertyThatChanged);
+
+protected:
+
+	/** Update the details view from the currently selected keys and sections. */
+	void UpdateDetailsView();
 
 private:
 	
@@ -333,6 +334,8 @@ private:
 	bool bUserIsSelecting;
 	/** The current edit tool */
 	TUniquePtr<ISequencerEditTool> EditTool;
+	/** Extender to use for the 'add' menu */
+	TSharedPtr<FExtender> AddMenuExtender;
 
 	FOnGetAddMenuContent OnGetAddMenuContent;
 

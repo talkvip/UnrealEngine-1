@@ -2089,6 +2089,7 @@ void UParticleSystem::GetAssetRegistryTags(TArray<FAssetRegistryTag>& OutTags) c
 
 	// Run thru the emitters and see if any will loop forever
 	bool bAnyEmitterLoopsForever = false;
+	bool bEmitterIsDangerous = false;
 	for (int32 EmitterIndex = 0; (EmitterIndex < Emitters.Num()) && !bAnyEmitterLoopsForever; ++EmitterIndex)
 	{
 		if (const UParticleEmitter* Emitter = Emitters[EmitterIndex])
@@ -2105,11 +2106,25 @@ void UParticleSystem::GetAssetRegistryTags(TArray<FAssetRegistryTag>& OutTags) c
 						bAnyEmitterLoopsForever = true;
 						break;
 					}
+
+					UParticleModuleSpawn *SpawnModule = LODLevel->SpawnModule;
+					check(SpawnModule);
+
+					if (SpawnModule->GetMaximumSpawnRate() == 0 
+						&& RequiredModule->EmitterDuration == 0
+						&& RequiredModule->EmitterLoops == 0 
+						)
+					{
+						bEmitterIsDangerous = true;
+					}
+
 				}
 			}
 		}
 	}
+
 	OutTags.Add(FAssetRegistryTag("Looping", bAnyEmitterLoopsForever ? TEXT("True") : TEXT("False"), FAssetRegistryTag::TT_Alphabetical));
+	OutTags.Add(FAssetRegistryTag("Immortal", bEmitterIsDangerous ? TEXT("True") : TEXT("False"), FAssetRegistryTag::TT_Alphabetical));
 
 	Super::GetAssetRegistryTags(OutTags);
 }
@@ -2728,6 +2743,7 @@ UParticleSystemComponent::UParticleSystemComponent(const FObjectInitializer& Obj
 	bIsViewRelevanceDirty = true;
 	CustomTimeDilation = 1.0f;
 	bAllowConcurrentTick = true;
+	bAsyncWorkOutstanding = false;
 	bWasActive = false;
 #if WITH_EDITORONLY_DATA
 	EditorDetailMode = -1;
@@ -3876,6 +3892,7 @@ void UParticleSystemComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 		AsyncInstanceParameters.Reset();
 		AsyncInstanceParameters.Append(InstanceParameters);
 
+		bAsyncWorkOutstanding = true;
 		{
 			QUICK_SCOPE_CYCLE_COUNTER(STAT_UParticleSystemComponent_QueueAsync);
 			AsyncWork = TGraphTask<FParticleAsyncTask>::CreateTask(nullptr, ENamedThreads::GameThread).ConstructAndDispatchWhenReady(this);
@@ -3915,6 +3932,7 @@ void UParticleSystemComponent::ComputeTickComponent_Concurrent()
 	FScopeCycleCounterUObject AdditionalScope(AdditionalStatObject(), GET_STATID(STAT_ParticleComputeTickTime));
 	// Tick Subemitters.
 	int32 EmitterIndex;
+	bAllEmittersFinished = true;
 	for (EmitterIndex = 0; EmitterIndex < EmitterInstances.Num(); EmitterIndex++)
 	{
 		FParticleEmitterInstance* Instance = EmitterInstances[EmitterIndex];
@@ -3933,6 +3951,10 @@ void UParticleSystemComponent::ComputeTickComponent_Concurrent()
 			if (SpriteLODLevel && SpriteLODLevel->bEnabled)
 			{
 				Instance->Tick(DeltaTimeTick, bSuppressSpawning);
+				if (!Instance->bEmitterIsDone == true)
+				{
+					bAllEmittersFinished = false;
+				}
 
 				if (!Instance->Tick_MaterialOverrides())
 				{
@@ -3948,6 +3970,11 @@ void UParticleSystemComponent::ComputeTickComponent_Concurrent()
 			}
 		}
 	}
+	if (bAsyncWorkOutstanding)
+	{
+		FPlatformMisc::MemoryBarrier();
+		bAsyncWorkOutstanding = false;
+	}
 }
 
 void UParticleSystemComponent::FinalizeTickComponent()
@@ -3960,6 +3987,12 @@ void UParticleSystemComponent::FinalizeTickComponent()
 	}
 	AsyncWork = NULL; // this task is done
 	bNeedsFinalize = false;
+
+	// should this be moved later?
+	if (bAllEmittersFinished == true && Template->bAutoDeactivate==true)
+	{
+		this->DeactivateSystem();
+	}
 	if (FXConsoleVariables::bFreezeParticleSimulation == false)
 	{
 		int32 EmitterIndex;
@@ -4090,25 +4123,26 @@ void UParticleSystemComponent::WaitForAsyncAndFinalize(EForceAsyncWorkCompletion
 {
 	if (AsyncWork.GetReference() && !AsyncWork->IsComplete())
 	{
-#if WITH_EDITOR
 		check(IsInGameThread());
 		SCOPE_CYCLE_COUNTER(STAT_GTSTallTime);
 		double StartTime = FPlatformTime::Seconds();
 		QUICK_SCOPE_CYCLE_COUNTER(STAT_UParticleSystemComponent_WaitForAsyncAndFinalize);
+#if WITH_EDITOR
 		FTaskGraphInterface::Get().WaitUntilTaskCompletes(AsyncWork, ENamedThreads::GameThread_Local);
+#else
+		// since in the non-editor case the completion is chained to a game thread task (not a gamethread_local one), and we don't want to execute arbitrary tasks 
+		// in what is probably a very, very deep callstack, we will spin here and wait for the async task to finish. The we will do the finalize. The finalize will be attempted again later but do nothing
+		while (bAsyncWorkOutstanding)
+		{
+			FPlatformProcess::SleepNoStats(0.0f);
+		}
+#endif
 		float ThisTime = float(FPlatformTime::Seconds() - StartTime) * 1000.0f;
 		if (Behavior != SILENT)
 		{
 			UE_LOG(LogParticles, Warning, TEXT("Stalled gamethread waiting for particles %5.2fms '%s' '%s'"), ThisTime, *GetFullNameSafe(this), *GetFullNameSafe(Template));
-			if (Behavior == ENSURE_AND_STALL)
-			{
-				ensureMsgf(0,TEXT("Stalled gamethread waiting for particles %5.2fms '%s' '%s'"), ThisTime, *GetFullNameSafe(this), *GetFullNameSafe(Template));
-			}
 		}
 		const_cast<UParticleSystemComponent*>(this)->FinalizeTickComponent();
-#else
-		check(0);
-#endif
 	}
 }
 
@@ -5254,10 +5288,10 @@ int32 UParticleSystemComponent::DetermineLODLevelForLocation(const FVector& Effe
 		// This will now put everything in LODLevel 0 (high detail) by default
 		float LODDistanceSqr = (PlayerViewLocations.Num() ? FMath::Square(WORLD_MAX) : 0.0f);
 		for (const FVector& ViewLocation : PlayerViewLocations)
-		{
+			{
 			const float DistanceToEffectSqr = FVector(ViewLocation - EffectLocation).SizeSquared();
 			if (DistanceToEffectSqr < LODDistanceSqr)
-			{
+				{
 				LODDistanceSqr = DistanceToEffectSqr;
 			}
 		}

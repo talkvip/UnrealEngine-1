@@ -242,7 +242,6 @@ namespace AutomationTool
 			this.Stage = InParams.Stage;
 			this.SkipStage = InParams.SkipStage;
             this.StageDirectoryParam = InParams.StageDirectoryParam;
-            this.StageNonMonolithic = InParams.StageNonMonolithic;
 			this.Manifests = InParams.Manifests;
             this.CreateChunkInstall = InParams.CreateChunkInstall;
 			this.UE4Exe = InParams.UE4Exe;
@@ -307,7 +306,7 @@ namespace AutomationTool
 		/// If a parameter value is not set, it will be parsed from the command line if the command is null, the default value will be used.
 		/// </summary>
 		public ProjectParams(			
-			string RawProjectPath,
+			FileReference RawProjectPath,
 
 			CommandUtils Command = null,
 			string Device = null,			
@@ -318,7 +317,6 @@ namespace AutomationTool
 			string StageCommandline = null,
             string BundleName = null,
             string StageDirectoryParam = null,
-            bool? StageNonMonolithic = null,
 			string UE4Exe = null,
 			string SignPak = null,
 			List<UnrealTargetConfiguration> ClientConfigsToBuild = null,
@@ -523,7 +521,6 @@ namespace AutomationTool
 				this.Stage = true;
 			}
 			this.StageDirectoryParam = ParseParamValueIfNotSpecified(Command, StageDirectoryParam, "stagingdirectory", String.Empty, true);
-            this.StageNonMonolithic = GetParamValueIfNotSpecified(Command, StageNonMonolithic, this.StageNonMonolithic, "StageNonMonolithic");
 			this.bCodeSign = GetParamValueIfNotSpecified(Command, CodeSign, CommandUtils.IsBuildMachine, "CodeSign");
 			this.Manifests = GetParamValueIfNotSpecified(Command, Manifests, this.Manifests, "manifests");
             this.CreateChunkInstall = GetParamValueIfNotSpecified(Command, CreateChunkInstall, this.CreateChunkInstall, "createchunkinstall");
@@ -762,9 +759,9 @@ namespace AutomationTool
 		#region Shared
 
 		/// <summary>
-		/// Shared: Full path where the project exists (For uprojects this should include the uproj filename, otherwise just project folder)
+		/// Shared: Full path to the .uproject file
 		/// </summary>
-		public string RawProjectPath { private set; get; }
+		public FileReference RawProjectPath { private set; get; }
 
 		/// <summary>
 		/// Shared: The current project is a foreign project, commandline: -foreign
@@ -925,21 +922,16 @@ namespace AutomationTool
                 }
                 if ( HasDLCName )
                 {
-                     return Path.GetFullPath( CommandUtils.CombinePaths(Path.GetDirectoryName(RawProjectPath), "Plugins", DLCName, "Saved", "StagedBuilds" ) );
+                     return Path.GetFullPath( CommandUtils.CombinePaths(Path.GetDirectoryName(RawProjectPath.FullName), "Plugins", DLCName, "Saved", "StagedBuilds" ) );
                 }
                 // default return the project saved\stagedbuilds directory
-                return Path.GetFullPath( CommandUtils.CombinePaths(Path.GetDirectoryName(RawProjectPath), "Saved", "StagedBuilds") );
+                return Path.GetFullPath( CommandUtils.CombinePaths(Path.GetDirectoryName(RawProjectPath.FullName), "Saved", "StagedBuilds") );
 			}
 		}
 
 		[Help("stagingdirectory=Path", "Directory to copy the builds to, i.e. -stagingdirectory=C:\\Stage")]
 		public string StageDirectoryParam;
-
-        /// <summary>
-        /// Whether the project should use non monolithic staging
-        /// </summary>
-        public bool StageNonMonolithic;
-
+        
 		[Help("ue4exe=ExecutableName", "Name of the UE4 Editor executable, i.e. -ue4exe=UE4Editor.exe")]
 		public string UE4Exe;
 
@@ -956,7 +948,7 @@ namespace AutomationTool
 		{
 			get
 			{
-                return Path.GetFullPath(String.IsNullOrEmpty(ArchiveDirectoryParam) ? CommandUtils.CombinePaths(Path.GetDirectoryName(RawProjectPath), "ArchivedBuilds") : ArchiveDirectoryParam);
+                return Path.GetFullPath(String.IsNullOrEmpty(ArchiveDirectoryParam) ? CommandUtils.CombinePaths(Path.GetDirectoryName(RawProjectPath.FullName), "ArchivedBuilds") : ArchiveDirectoryParam);
 			}
 		}
 
@@ -1736,7 +1728,7 @@ namespace AutomationTool
 			// the full solution for per-platform packaging settings.
 			if (!Manifests)
 			{				
-				ConfigCacheIni GameIni = ConfigCacheIni.CreateConfigCacheIni(UnrealTargetPlatform.Unknown, "Game", new DirectoryReference(Path.GetDirectoryName(RawProjectPath)));
+				ConfigCacheIni GameIni = ConfigCacheIni.CreateConfigCacheIni(UnrealTargetPlatform.Unknown, "Game", RawProjectPath.Directory);
 				String IniPath = "/Script/UnrealEd.ProjectPackagingSettings";
 				bool bSetting = false;
 				if (!GameIni.GetBool(IniPath, "bGenerateChunks", out bSetting))
@@ -1855,7 +1847,7 @@ namespace AutomationTool
 		}
 		private bool bIsCodeBasedProject;
 
-		public string CodeBasedUprojectPath
+		public FileReference CodeBasedUprojectPath
 		{
             get { return IsCodeBasedProject ? RawProjectPath : null; }
 		}
@@ -2039,15 +2031,15 @@ namespace AutomationTool
 
 		public void Validate()
 		{
-			if (String.IsNullOrEmpty(RawProjectPath))
+			if (RawProjectPath == null)
 			{
 				throw new AutomationException("RawProjectPath can't be empty.");
 			}
-            if (!RawProjectPath.EndsWith(".uproject", StringComparison.InvariantCultureIgnoreCase))
+            if (!RawProjectPath.HasExtension(".uproject"))
             {
                 throw new AutomationException("RawProjectPath {0} must end with .uproject", RawProjectPath);
             }
-            if (!CommandUtils.FileExists_NoExceptions(RawProjectPath))
+            if (!CommandUtils.FileExists_NoExceptions(RawProjectPath.FullName))
             {
                 throw new AutomationException("RawProjectPath {0} file must exist", RawProjectPath);
             }

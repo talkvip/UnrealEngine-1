@@ -14,251 +14,9 @@ namespace UnrealBuildTool
 		Invalid,		// Could not find the desired SDK, SDK setup failed, etc.		
 	};
 
-	public interface IUEBuildPlatform
+	public abstract partial class UEBuildPlatform
 	{
-		/// <summary>
-		/// Whether the required external SDKs are installed for this platform
-		/// </summary>
-		SDKStatus HasRequiredSDKsInstalled();
-
-		/// <summary>
-		/// If this platform can be compiled with XGE
-		/// </summary>
-		bool CanUseXGE();
-
-		/// <summary>
-		/// If this platform can be compiled with DMUCS/Distcc
-		/// </summary>
-		bool CanUseDistcc();
-
-		/// <summary>
-		/// If this platform can be compiled with SN-DBS
-		/// </summary>
-		bool CanUseSNDBS();
-
-		/// <summary>
-		/// Register the platform with the UEBuildPlatform class
-		/// </summary>
-		void RegisterBuildPlatform();
-
-		/// <summary>
-		/// Attempt to set up AutoSDK for this platform
-		/// </summary>
-		void ManageAndValidateSDK();
-
-		/// <summary>
-		/// Retrieve the CPPTargetPlatform for the given UnrealTargetPlatform
-		/// </summary>
-		/// <param name="InUnrealTargetPlatform">The UnrealTargetPlatform being build</param>
-		/// <returns>CPPTargetPlatform The CPPTargetPlatform to compile for</returns>
-		CPPTargetPlatform GetCPPTargetPlatform(UnrealTargetPlatform InUnrealTargetPlatform);
-
-		/// <summary>
-		/// Get the extension to use for the given binary type
-		/// </summary>
-		/// <param name="InBinaryType">The binary type being built</param>
-		/// <returns>string The binary extension (i.e. 'exe' or 'dll')</returns>
-		string GetBinaryExtension(UEBuildBinaryType InBinaryType);
-
-		/// <summary>
-		/// Get the extension to use for debug info for the given binary type
-		/// </summary>
-		/// <param name="InBinaryType">The binary type being built</param>
-		/// <returns>string The debug info extension (i.e. 'pdb')</returns>
-		string GetDebugInfoExtension(UEBuildBinaryType InBinaryType);
-
-		/// <summary>
-		/// Whether incremental linking should be used
-		/// </summary>
-		/// <param name="InPlatform">The CPPTargetPlatform being built</param>
-		/// <param name="InConfiguration">The CPPTargetConfiguration being built</param>
-		/// <returns>bool true if incremental linking should be used, false if not</returns>
-		bool ShouldUseIncrementalLinking(CPPTargetPlatform Platform, CPPTargetConfiguration Configuration);
-
-		/// <summary>
-		/// Whether PDB files should be used
-		/// </summary>
-		/// <param name="InPlatform">The CPPTargetPlatform being built</param>
-		/// <param name="InConfiguration">The CPPTargetConfiguration being built</param>
-		/// <param name="bInCreateDebugInfo">true if debug info is getting create, false if not</param>
-		/// <returns>bool true if PDB files should be used, false if not</returns>
-		bool ShouldUsePDBFiles(CPPTargetPlatform Platform, CPPTargetConfiguration Configuration, bool bCreateDebugInfo);
-
-		/// <summary>
-		/// Whether PCH files should be used
-		/// </summary>
-		/// <param name="InPlatform">The CPPTargetPlatform being built</param>
-		/// <param name="InConfiguration">The CPPTargetConfiguration being built</param>
-		/// <returns>bool true if PCH files should be used, false if not</returns>
-		bool ShouldUsePCHFiles(CPPTargetPlatform Platform, CPPTargetConfiguration Configuration);
-
-		/// <summary>
-		/// Whether the editor should be built for this platform or not
-		/// </summary>
-		/// <param name="InPlatform">The UnrealTargetPlatform being built</param>
-		/// <param name="InConfiguration">The UnrealTargetConfiguration being built</param>
-		/// <returns>bool true if the editor should be built, false if not</returns>
-		bool ShouldNotBuildEditor(UnrealTargetPlatform InPlatform, UnrealTargetConfiguration InConfiguration);
-
-		/// <summary>
-		/// Whether this build should support ONLY cooked data or not
-		/// </summary>
-		/// <param name="InPlatform">The UnrealTargetPlatform being built</param>
-		/// <param name="InConfiguration">The UnrealTargetConfiguration being built</param>
-		/// <returns>bool true if the editor should be built, false if not</returns>
-		bool BuildRequiresCookedData(UnrealTargetPlatform InPlatform, UnrealTargetConfiguration InConfiguration);
-
-		/// <summary>
-		/// Whether the platform requires the extra UnityCPPWriter
-		/// This is used to add an extra file for UBT to get the #include dependencies from
-		/// </summary>
-		/// <returns>bool true if it is required, false if not</returns>
-		bool RequiresExtraUnityCPPWriter();
-
-		/// <summary>
-		/// Whether this platform should build a monolithic binary
-		/// </summary>
-		bool ShouldCompileMonolithicBinary(UnrealTargetPlatform InPlatform);
-
-		/// <summary>
-		/// Get a list of extra modules the platform requires.
-		/// This is to allow undisclosed platforms to add modules they need without exposing information about the platform.
-		/// </summary>
-		/// <param name="Target">The target being build</param>
-		/// <param name="BuildTarget">The UEBuildTarget getting build</param>
-		/// <param name="PlatformExtraModules">OUTPUT the list of extra modules the platform needs to add to the target</param>
-		void GetExtraModules(TargetInfo Target, UEBuildTarget BuildTarget, ref List<string> PlatformExtraModules);
-
-		/// <summary>
-		/// Modify the newly created module passed in for this platform.
-		/// This is not required - but allows for hiding details of a
-		/// particular platform.
-		/// </summary>
-		/// <param name="">ModuleName  The name of the module</param>
-		/// <param name="Rules">  The module rules</param>
-		/// <param name="Target">  The target being build</param>
-		void ModifyModuleRules(string ModuleName, ModuleRules Rules, TargetInfo Target);
-
-		/// <summary>
-		/// Setup the target environment for building
-		/// </summary>
-		/// <param name="InBuildTarget">The target being built</param>
-		void SetUpEnvironment(UEBuildTarget InBuildTarget);
-
-		/// <summary>
-		/// Allow the platform to set an optional architecture
-		/// </summary>
-		string GetActiveArchitecture();
-
-		/// <summary>
-		/// Allow the platform to apply architecture-specific name according to its rules
-		/// </summary>
-		/// <param name="BinaryName">name of the binary, not specific to any architecture</param>
-		/// <returns>Possibly architecture-specific name</returns>
-		string ApplyArchitectureName(string BinaryName);
-
-		/// <summary>
-		/// For platforms that need to output multiple files per binary (ie Android "fat" binaries)
-		/// this will emit multiple paths. By default, it simply makes an array from the input
-		/// </summary>
-		List<FileReference> FinalizeBinaryPaths(FileReference BinaryName);
-
-		/// <summary>
-		/// Setup the configuration environment for building
-		/// </summary>
-		/// <param name="InBuildTarget">The target being built</param>
-		void SetUpConfigurationEnvironment(UEBuildTarget InBuildTarget);
-
-		/// <summary>
-		/// Setup the project environment for building
-		/// </summary>
-		/// <param name="InBuildTarget">The target being built</param>
-		void SetUpProjectEnvironment(UnrealTargetPlatform InPlatform);
-
-		/// <summary>
-		/// Whether this platform should create debug information or not
-		/// </summary>
-		/// <param name="InPlatform">The UnrealTargetPlatform being built</param>
-		/// <param name="InConfiguration">The UnrealTargetConfiguration being built</param>
-		/// <returns>bool true if debug info should be generated, false if not</returns>
-		bool ShouldCreateDebugInfo(UnrealTargetPlatform Platform, UnrealTargetConfiguration Configuration);
-
-		/// <summary>
-		/// Gives the platform a chance to 'override' the configuration settings
-		/// that are overridden on calls to RunUBT.
-		/// </summary>
-		/// <param name="InPlatform">The UnrealTargetPlatform being built</param>
-		/// <param name="InConfiguration">The UnrealTargetConfiguration being built</param>
-		/// <returns>bool true if debug info should be generated, false if not</returns>
-		void ResetBuildConfiguration(UnrealTargetPlatform InPlatform, UnrealTargetConfiguration InConfiguration);
-
-		/// <summary>
-		/// Validate the UEBuildConfiguration for this platform
-		/// This is called BEFORE calling UEBuildConfiguration to allow setting
-		/// various fields used in that function such as CompileLeanAndMean...
-		/// </summary>
-		void ValidateUEBuildConfiguration();
-
-		/// <summary>
-		/// Validate configuration for this platform
-		/// NOTE: This function can/will modify BuildConfiguration!
-		/// </summary>
-		/// <param name="InPlatform">The CPPTargetPlatform being built</param>
-		/// <param name="InConfiguration">The CPPTargetConfiguration being built</param>
-		/// <param name="bInCreateDebugInfo">true if debug info is getting create, false if not</param>
-		void ValidateBuildConfiguration(CPPTargetConfiguration Configuration, CPPTargetPlatform Platform, bool bCreateDebugInfo);
-
-		/// <summary>
-		/// Return whether this platform has uniquely named binaries across multiple games
-		/// </summary>
-		bool HasUniqueBinaries();
-
-		/// <summary>
-		/// Return whether we wish to have this platform's binaries in our builds
-		/// </summary>
-		bool IsBuildRequired();
-
-		/// <summary>
-		/// Return whether we wish to have this platform's binaries in our CIS tests
-		/// </summary>
-		bool IsCISRequired();
-
-		/// <summary>
-		/// Whether the build platform requires deployment prep
-		/// </summary>
-		/// <returns></returns>
-		bool RequiresDeployPrepAfterCompile();
-
-		/// <summary>
-		/// Return all valid configurations for this platform
-		/// Typically, this is always Debug, Development, and Shipping - but Test is a likely future addition for some platforms
-		/// </summary>
-		List<UnrealTargetConfiguration> GetConfigurations(UnrealTargetPlatform InUnrealTargetPlatform, bool bIncludeDebug);
-
-		/// <summary>
-		/// Setup the binaries for this specific platform.
-		/// </summary>
-		/// <param name="InBuildTarget">The target being built</param>
-		void SetupBinaries(UEBuildTarget InBuildTarget);
-
-		/// <summary>
-		/// Check for the default configuration
-		/// return true if the project uses the default build config
-		/// </summary>
-		bool HasDefaultBuildConfig(UnrealTargetPlatform InPlatform, DirectoryReference InProjectPath);
-
-		/// <summary>
-		/// Create a build deployment handler
-		/// </summary>
-		/// <param name="ProjectFile">The project file of the target being deployed. Used to find any deployment specific settings.</param>
-		/// <param name="DeploymentHandler">The output deployment handler</param>
-		/// <returns>True if the platform requires a deployment handler, false otherwise</returns>
-		bool TryCreateDeploymentHandler(FileReference ProjectFile, out UEBuildDeploy DeploymentHandler);
-	}
-
-	public abstract partial class UEBuildPlatform : IUEBuildPlatform
-	{
-		public static Dictionary<UnrealTargetPlatform, IUEBuildPlatform> BuildPlatformDictionary = new Dictionary<UnrealTargetPlatform, IUEBuildPlatform>();
+		public static Dictionary<UnrealTargetPlatform, UEBuildPlatform> BuildPlatformDictionary = new Dictionary<UnrealTargetPlatform, UEBuildPlatform>();
 
 		// a mapping of a group to the platforms in the group (ie, Microsoft contains Win32 and Win64)
 		static Dictionary<UnrealPlatformGroup, List<UnrealTargetPlatform>> PlatformGroupDictionary = new Dictionary<UnrealPlatformGroup, List<UnrealTargetPlatform>>();
@@ -346,7 +104,7 @@ namespace UnrealBuildTool
 		/// <param name="InPlatform">  The UnrealTargetPlatform being built</param>
 		/// <param name="bInAllowFailure"> If true, do not throw an exception and return null</param>
 		/// <returns>UEBuildPlatform  The instance of the build platform</returns>
-		public static IUEBuildPlatform GetBuildPlatform(UnrealTargetPlatform InPlatform, bool bInAllowFailure = false)
+		public static UEBuildPlatform GetBuildPlatform(UnrealTargetPlatform InPlatform, bool bInAllowFailure = false)
 		{
 			if (BuildPlatformDictionary.ContainsKey(InPlatform) == true)
 			{
@@ -365,7 +123,7 @@ namespace UnrealBuildTool
 		/// <param name="InPlatform">  The CPPTargetPlatform being built</param>
 		/// <param name="bInAllowFailure"> If true, do not throw an exception and return null</param>
 		/// <returns>UEBuildPlatform  The instance of the build platform</returns>
-		public static IUEBuildPlatform GetBuildPlatformForCPPTargetPlatform(CPPTargetPlatform InPlatform, bool bInAllowFailure = false)
+		public static UEBuildPlatform GetBuildPlatformForCPPTargetPlatform(CPPTargetPlatform InPlatform, bool bInAllowFailure = false)
 		{
 			UnrealTargetPlatform UTPlatform = UEBuildTarget.CPPTargetPlatformToUnrealTargetPlatform(InPlatform);
 			if (BuildPlatformDictionary.ContainsKey(UTPlatform) == true)
@@ -580,10 +338,9 @@ namespace UnrealBuildTool
 		/// Get a list of extra modules the platform requires.
 		/// This is to allow undisclosed platforms to add modules they need without exposing information about the platform.
 		/// </summary>
-		/// <param name="Target">     The target being build</param>
-		/// <param name="BuildTarget">    The UEBuildTarget getting build</param>
-		/// <param name="PlatformExtraModules"> OUTPUT the list of extra modules the platform needs to add to the target</param>
-		public virtual void GetExtraModules(TargetInfo Target, UEBuildTarget BuildTarget, ref List<string> PlatformExtraModules)
+		/// <param name="Target">The target being build</param>
+		/// <param name="ExtraModuleNames">List of extra modules the platform needs to add to the target</param>
+		public virtual void AddExtraModules(TargetInfo Target, List<string> ExtraModuleNames)
 		{
 		}
 
@@ -638,7 +395,7 @@ namespace UnrealBuildTool
 		/// For platforms that need to output multiple files per binary (ie Android "fat" binaries)
 		/// this will emit multiple paths. By default, it simply makes an array from the input
 		/// </summary>
-		public virtual List<FileReference> FinalizeBinaryPaths(FileReference BinaryName)
+		public virtual List<FileReference> FinalizeBinaryPaths(FileReference BinaryName, FileReference ProjectFile)
 		{
 			List<FileReference> TempList = new List<FileReference>() { BinaryName };
 			return TempList;
@@ -648,11 +405,11 @@ namespace UnrealBuildTool
 		/// Setup the configuration environment for building
 		/// </summary>
 		/// <param name="InBuildTarget"> The target being built</param>
-		public virtual void SetUpConfigurationEnvironment(UEBuildTarget InBuildTarget)
+		public virtual void SetUpConfigurationEnvironment(TargetInfo Target, CPPEnvironment GlobalCompileEnvironment, LinkEnvironment GlobalLinkEnvironment)
 		{
 			// Determine the C++ compile/link configuration based on the Unreal configuration.
 			CPPTargetConfiguration CompileConfiguration;
-			UnrealTargetConfiguration CheckConfig = InBuildTarget.Configuration;
+			UnrealTargetConfiguration CheckConfig = Target.Configuration;
 
 			switch (CheckConfig)
 			{
@@ -661,41 +418,41 @@ namespace UnrealBuildTool
 					CompileConfiguration = CPPTargetConfiguration.Debug;
 					if (BuildConfiguration.bDebugBuildsActuallyUseDebugCRT)
 					{
-						InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("_DEBUG=1"); // the engine doesn't use this, but lots of 3rd party stuff does
+						GlobalCompileEnvironment.Config.Definitions.Add("_DEBUG=1"); // the engine doesn't use this, but lots of 3rd party stuff does
 					}
 					else
 					{
-						InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("NDEBUG=1"); // the engine doesn't use this, but lots of 3rd party stuff does
+						GlobalCompileEnvironment.Config.Definitions.Add("NDEBUG=1"); // the engine doesn't use this, but lots of 3rd party stuff does
 					}
-					InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("UE_BUILD_DEBUG=1");
+					GlobalCompileEnvironment.Config.Definitions.Add("UE_BUILD_DEBUG=1");
 					break;
 				case UnrealTargetConfiguration.DebugGame:
 				// Individual game modules can be switched to be compiled in debug as necessary. By default, everything is compiled in development.
 				case UnrealTargetConfiguration.Development:
 					CompileConfiguration = CPPTargetConfiguration.Development;
-					InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("NDEBUG=1"); // the engine doesn't use this, but lots of 3rd party stuff does
-					InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("UE_BUILD_DEVELOPMENT=1");
+					GlobalCompileEnvironment.Config.Definitions.Add("NDEBUG=1"); // the engine doesn't use this, but lots of 3rd party stuff does
+					GlobalCompileEnvironment.Config.Definitions.Add("UE_BUILD_DEVELOPMENT=1");
 					break;
 				case UnrealTargetConfiguration.Shipping:
 					CompileConfiguration = CPPTargetConfiguration.Shipping;
-					InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("NDEBUG=1"); // the engine doesn't use this, but lots of 3rd party stuff does
-					InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("UE_BUILD_SHIPPING=1");
+					GlobalCompileEnvironment.Config.Definitions.Add("NDEBUG=1"); // the engine doesn't use this, but lots of 3rd party stuff does
+					GlobalCompileEnvironment.Config.Definitions.Add("UE_BUILD_SHIPPING=1");
 					break;
 				case UnrealTargetConfiguration.Test:
 					CompileConfiguration = CPPTargetConfiguration.Shipping;
-					InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("NDEBUG=1"); // the engine doesn't use this, but lots of 3rd party stuff does
-					InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("UE_BUILD_TEST=1");
+					GlobalCompileEnvironment.Config.Definitions.Add("NDEBUG=1"); // the engine doesn't use this, but lots of 3rd party stuff does
+					GlobalCompileEnvironment.Config.Definitions.Add("UE_BUILD_TEST=1");
 					break;
 			}
 
 			// Set up the global C++ compilation and link environment.
-			InBuildTarget.GlobalCompileEnvironment.Config.Target.Configuration = CompileConfiguration;
-			InBuildTarget.GlobalLinkEnvironment.Config.Target.Configuration = CompileConfiguration;
+			GlobalCompileEnvironment.Config.Target.Configuration = CompileConfiguration;
+			GlobalLinkEnvironment.Config.Target.Configuration = CompileConfiguration;
 
 			// Create debug info based on the heuristics specified by the user.
-			InBuildTarget.GlobalCompileEnvironment.Config.bCreateDebugInfo =
-				!BuildConfiguration.bDisableDebugInfo && ShouldCreateDebugInfo(InBuildTarget.Platform, CheckConfig);
-			InBuildTarget.GlobalLinkEnvironment.Config.bCreateDebugInfo = InBuildTarget.GlobalCompileEnvironment.Config.bCreateDebugInfo;
+			GlobalCompileEnvironment.Config.bCreateDebugInfo =
+				!BuildConfiguration.bDisableDebugInfo && ShouldCreateDebugInfo(Target.Platform, CheckConfig);
+			GlobalLinkEnvironment.Config.bCreateDebugInfo = GlobalCompileEnvironment.Config.bCreateDebugInfo;
 		}
 
 		/// <summary>
@@ -880,14 +637,6 @@ namespace UnrealBuildTool
 			return Configurations;
 		}
 
-		/// <summary>
-		/// Setup the binaries for this specific platform.
-		/// </summary>
-		/// <param name="InBuildTarget"> The target being built</param>
-		public virtual void SetupBinaries(UEBuildTarget InBuildTarget)
-		{
-		}
-
 		protected static bool DoProjectSettingsMatchDefault(UnrealTargetPlatform Platform, DirectoryReference ProjectDirectoryName, string Section, string[] BoolKeys, string[] IntKeys, string[] StringKeys)
 		{
 			ConfigCacheIni ProjIni = ConfigCacheIni.CreateConfigCacheIni(Platform, "Engine", ProjectDirectoryName);
@@ -954,17 +703,23 @@ namespace UnrealBuildTool
 		}
 
 		/// <summary>
+		/// Creates a toolchain instance for the given platform. There should be a single toolchain instance per-target, as their may be
+		/// state data and configuration cached between calls.
+		/// </summary>
+		/// <param name="Platform">The platform to create a toolchain for</param>
+		/// <param name="ProjectFile">The path to the project file for this target</param>
+		/// <returns>New toolchain instance.</returns>
+		public abstract UEToolChain CreateToolChain(CPPTargetPlatform Platform, FileReference ProjectFile);
+
+		/// <summary>
 		/// Create a build deployment handler
 		/// </summary>
 		/// <param name="ProjectFile">The project file of the target being deployed. Used to find any deployment specific settings.</param>
 		/// <param name="DeploymentHandler">The output deployment handler</param>
 		/// <returns>True if the platform requires a deployment handler, false otherwise</returns>
 		public abstract bool TryCreateDeploymentHandler(FileReference ProjectFile, out UEBuildDeploy DeploymentHandler);
-	}
 
-	// AutoSDKs handling portion
-	public abstract partial class UEBuildPlatform : IUEBuildPlatform
-	{
+		// AutoSDKs handling portion
 
 		#region protected AutoSDKs Utility
 

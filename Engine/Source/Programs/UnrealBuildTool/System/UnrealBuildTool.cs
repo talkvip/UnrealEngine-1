@@ -486,7 +486,7 @@ namespace UnrealBuildTool
 					{
 						if (CheckType.IsClass && !CheckType.IsAbstract)
 						{
-							if (Utils.ImplementsInterface<IUEBuildPlatform>(CheckType))
+							if (CheckType.IsSubclassOf(typeof(UEBuildPlatform)))
 							{
 								Log.TraceVerbose("    Registering build platform: {0}", CheckType.ToString());
 								var TempInst = (UEBuildPlatform)(UBTAssembly.CreateInstance(CheckType.FullName, true));
@@ -500,13 +500,7 @@ namespace UnrealBuildTool
 				{
 					if (CheckType.IsClass && !CheckType.IsAbstract)
 					{
-						if (Utils.ImplementsInterface<IUEToolChain>(CheckType))
-						{
-							Log.TraceVerbose("    Registering tool chain    : {0}", CheckType.ToString());
-							var TempInst = (UEToolChain)(UBTAssembly.CreateInstance(CheckType.FullName, true));
-							TempInst.RegisterToolChain();
-						}
-						else if (CheckType.IsSubclassOf(typeof(UEPlatformProjectGenerator)))
+						if (CheckType.IsSubclassOf(typeof(UEPlatformProjectGenerator)))
 						{
 							ProjectGeneratorList.Add(CheckType);
 						}
@@ -862,6 +856,10 @@ namespace UnrealBuildTool
 				else if (LowercaseArg == "-nocef3")
 				{
 					UEBuildConfiguration.bCompileCEF3 = false;
+				}
+				else if (LowercaseArg == "-winxp")
+				{
+					UEBuildConfiguration.PreferredSubPlatform = "WindowsXP";
 				}
 				else if (LowercaseArg == "-rununrealcodeanalyzer")
 				{
@@ -1387,7 +1385,7 @@ namespace UnrealBuildTool
 							if ((Result == ECompilationResult.Succeeded) && (BuildConfiguration.bDeployAfterCompile == true) && (BuildConfiguration.bXGEExport == false) &&
 								(UEBuildConfiguration.bGenerateManifest == false) && (UEBuildConfiguration.bGenerateExternalFileList == false) && (UEBuildConfiguration.bCleanProject == false))
 							{
-								IUEBuildPlatform BuildPlatform = UEBuildPlatform.GetBuildPlatform(CheckPlatform);
+								UEBuildPlatform BuildPlatform = UEBuildPlatform.GetBuildPlatform(CheckPlatform);
 
 								UEBuildDeploy DeploymentHandler;
 								if (BuildPlatform.TryCreateDeploymentHandler(UnrealBuildTool.GetUProjectFile(), out DeploymentHandler))
@@ -1396,7 +1394,7 @@ namespace UnrealBuildTool
 									BuildConfiguration.bFlushBuildDirOnRemoteMac = false;
 									var TargetDescs = UEBuildTarget.ParseTargetCommandLine(Arguments, GetUProjectFile());
 									UEBuildTarget CheckTarget = UEBuildTarget.CreateTarget(TargetDescs[0]);	// @todo ubtmake: This may not work in assembler only mode.  We don't want to be loading target rules assemblies here either.
-									IUEToolChain ToolChain = UEToolChain.GetPlatformToolChain(BuildPlatform.GetCPPTargetPlatform(TargetDescs[0].Platform));
+									UEToolChain ToolChain = BuildPlatform.CreateToolChain(BuildPlatform.GetCPPTargetPlatform(TargetDescs[0].Platform), UnrealBuildTool.GetUProjectFile());
 									CheckTarget.SetupGlobalEnvironment(ToolChain);
 									if ((CheckTarget.TargetType == TargetRules.TargetType.Game) ||
 										(CheckTarget.TargetType == TargetRules.TargetType.Server) ||
@@ -1624,7 +1622,7 @@ namespace UnrealBuildTool
 			string ExecutorName = "Unknown";
 			ECompilationResult BuildResult = ECompilationResult.Succeeded;
 
-			var ToolChain = UEToolChain.GetPlatformToolChain(BuildPlatform.GetCPPTargetPlatform(ResetPlatform));
+			var ToolChain = BuildPlatform.CreateToolChain(BuildPlatform.GetCPPTargetPlatform(ResetPlatform), UnrealBuildTool.GetUProjectFile());
 
 			string EULAViolationWarning = null;
 			Thread CPPIncludesThread = null;
@@ -2212,7 +2210,7 @@ namespace UnrealBuildTool
 
 			if (!ProjectFileGenerator.bGenerateProjectFiles && !UEBuildConfiguration.bGenerateManifest && bIsEditorTarget)
 			{
-				var EditorProcessFilenames = UEBuildTarget.MakeExecutablePaths(UnrealBuildTool.EngineDirectory, "UE4Editor", TargetDesc.Platform, TargetDesc.Configuration, UnrealTargetConfiguration.Development, false, null);
+				var EditorProcessFilenames = UEBuildTarget.MakeExecutablePaths(UnrealBuildTool.EngineDirectory, "UE4Editor", TargetDesc.Platform, TargetDesc.Configuration, UnrealTargetConfiguration.Development, false, null, null);
 				if (EditorProcessFilenames.Count != 1)
 				{
 					throw new BuildException("ShouldDoHotReload cannot handle multiple binaries returning from UEBuildTarget.MakeExecutablePaths");
@@ -2689,10 +2687,12 @@ namespace UnrealBuildTool
 				// configurations and platforms, and save it into the base intermediate folder
 				var TargetCollectionName = MakeTargetCollectionName(TargetDescs);
 
+				TargetDescriptor DescriptorWithProject = TargetDescs.FirstOrDefault(x => x.ProjectFile != null);
+
 				DirectoryReference ProjectIntermediatePath;
-				if (UnrealBuildTool.HasUProjectFile())
+				if (DescriptorWithProject != null)
 				{
-					ProjectIntermediatePath = DirectoryReference.Combine(UnrealBuildTool.GetUProjectPath(), BuildConfiguration.BaseIntermediateFolder);
+					ProjectIntermediatePath = DirectoryReference.Combine(DescriptorWithProject.ProjectFile.Directory, BuildConfiguration.BaseIntermediateFolder);
 				}
 				else
 				{
@@ -2716,9 +2716,9 @@ namespace UnrealBuildTool
 			// If there's only one target, just save the UBTMakefile in the target's build intermediate directory
 			// under a folder for that target (and platform/config combo.)
 			DirectoryReference PlatformIntermediatePath;
-			if (UnrealBuildTool.HasUProjectFile())
+			if (Target.ProjectFile != null)
 			{
-				PlatformIntermediatePath = DirectoryReference.Combine(UnrealBuildTool.GetUProjectPath(), BuildConfiguration.PlatformIntermediateFolder);
+				PlatformIntermediatePath = DirectoryReference.Combine(Target.ProjectFile.Directory, BuildConfiguration.PlatformIntermediateFolder);
 			}
 			else
 			{

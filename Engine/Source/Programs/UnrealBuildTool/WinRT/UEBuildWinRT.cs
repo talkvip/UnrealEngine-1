@@ -217,14 +217,14 @@ namespace UnrealBuildTool
 		/// Get a list of extra modules the platform requires.
 		/// This is to allow undisclosed platforms to add modules they need without exposing information about the platfomr.
 		/// </summary>
-		/// <param name="Target">     The target being build</param>
-		/// <param name="BuildTarget">    The UEBuildTarget getting build</param>
-		/// <param name="PlatformExtraModules"> OUTPUT the list of extra modules the platform needs to add to the target</param>
-		public override void GetExtraModules(TargetInfo Target, UEBuildTarget BuildTarget, ref List<string> PlatformExtraModules)
+		/// <param name="Target">The target being build</param>
+		/// <param name="PlatformExtraModules">List of extra modules the platform needs to add to the target</param>
+		public override void AddExtraModules(TargetInfo Target, List<string> ExtraModuleNames)
 		{
+			ExtraModuleNames.Add("XInput");
 			if (Target.Platform == UnrealTargetPlatform.WinRT)
 			{
-				PlatformExtraModules.Add("XAudio2");
+				ExtraModuleNames.Add("XAudio2");
 			}
 		}
 
@@ -615,15 +615,6 @@ namespace UnrealBuildTool
 			};
 		}
 
-		/// <summary>
-		/// Setup the binaries for this specific platform.
-		/// </summary>
-		/// <param name="InBuildTarget"> The target being built</param>
-		public override void SetupBinaries(UEBuildTarget InBuildTarget)
-		{
-			InBuildTarget.ExtraModuleNames.Add("XInput");
-		}
-
 		//
 		// WinRT specific functions
 		//
@@ -633,6 +624,16 @@ namespace UnrealBuildTool
 		public static bool ShouldCompileWinRT()
 		{
 			return WinRTPlatform.bCompileWinRT;
+		}
+
+		/// <summary>
+		/// Creates a toolchain instance for the given platform.
+		/// </summary>
+		/// <param name="Platform">The platform to create a toolchain for</param>
+		/// <returns>New toolchain instance.</returns>
+		public override UEToolChain CreateToolChain(CPPTargetPlatform Platform, FileReference ProjectFile)
+		{
+			return new WinRTToolChain(Platform);
 		}
 
 		/// <summary>

@@ -415,22 +415,18 @@ namespace UnrealBuildTool
 			string[] CmdLine = Environment.GetCommandLineArgs();
 
 			bool SupportWindowsXPIfAvailable = false;
-			SupportWindowsXPIfAvailable = CmdLine.Contains("-winxp", StringComparer.InvariantCultureIgnoreCase);
 
 			// ...check if it was supported from a config.
-			if (!SupportWindowsXPIfAvailable)
+			ConfigCacheIni Ini = ConfigCacheIni.CreateConfigCacheIni(UnrealTargetPlatform.Win64, "Engine", UnrealBuildTool.GetUProjectPath());
+			string MinimumOS;
+			if (Ini.GetString("/Script/WindowsTargetPlatform.WindowsTargetSettings", "MinimumOSVersion", out MinimumOS))
 			{
-				ConfigCacheIni Ini = ConfigCacheIni.CreateConfigCacheIni(UnrealTargetPlatform.Win64, "Engine", UnrealBuildTool.GetUProjectPath());
-				string MinimumOS;
-				if (Ini.GetString("/Script/WindowsTargetPlatform.WindowsTargetSettings", "MinimumOSVersion", out MinimumOS))
+				if (string.IsNullOrEmpty(MinimumOS) == false)
 				{
-					if (string.IsNullOrEmpty(MinimumOS) == false)
-					{
-						SupportWindowsXPIfAvailable = MinimumOS == "MSOS_XP";
-					}
+					SupportWindowsXPIfAvailable = MinimumOS == "MSOS_XP";
 				}
 			}
-
+	
 			SupportWindowsXP = SupportWindowsXPIfAvailable;
 		}
 
@@ -535,13 +531,9 @@ namespace UnrealBuildTool
 			InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("WIN32=1");
 
 			// Should we enable Windows XP support
-			if ((InBuildTarget.TargetType == TargetRules.TargetType.Program) && (GetCPPTargetPlatform(InBuildTarget.Platform) == CPPTargetPlatform.Win32))
+			if(UEBuildConfiguration.PreferredSubPlatform.Equals("WindowsXP", StringComparison.InvariantCultureIgnoreCase))
 			{
-				// Check if the target has requested XP support.
-				if (String.Equals(InBuildTarget.Rules.PreferredSubPlatform, "WindowsXP", StringComparison.InvariantCultureIgnoreCase))
-				{
-					SupportWindowsXP = true;
-				}
+				SupportWindowsXP = true;
 			}
 
 			if (WindowsPlatform.bUseWindowsSDK10 && WindowsPlatform.Compiler == WindowsCompiler.VisualStudio2015)
@@ -702,12 +694,12 @@ namespace UnrealBuildTool
 		/// Setup the configuration environment for building
 		/// </summary>
 		/// <param name="InBuildTarget"> The target being built</param>
-		public override void SetUpConfigurationEnvironment(UEBuildTarget InBuildTarget)
+		public override void SetUpConfigurationEnvironment(TargetInfo Target, CPPEnvironment GlobalCompileEnvironment, LinkEnvironment GlobalLinkEnvironment)
 		{
 			// Determine the C++ compile/link configuration based on the Unreal configuration.
 			CPPTargetConfiguration CompileConfiguration;
 			//@todo SAS: Add a true Debug mode!
-			UnrealTargetConfiguration CheckConfig = InBuildTarget.Configuration;
+			UnrealTargetConfiguration CheckConfig = Target.Configuration;
 			switch (CheckConfig)
 			{
 				default:
@@ -715,40 +707,40 @@ namespace UnrealBuildTool
 					CompileConfiguration = CPPTargetConfiguration.Debug;
 					if (BuildConfiguration.bDebugBuildsActuallyUseDebugCRT)
 					{
-						InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("_DEBUG=1"); // the engine doesn't use this, but lots of 3rd party stuff does
+						GlobalCompileEnvironment.Config.Definitions.Add("_DEBUG=1"); // the engine doesn't use this, but lots of 3rd party stuff does
 					}
 					else
 					{
-						InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("NDEBUG=1"); // the engine doesn't use this, but lots of 3rd party stuff does
+						GlobalCompileEnvironment.Config.Definitions.Add("NDEBUG=1"); // the engine doesn't use this, but lots of 3rd party stuff does
 					}
-					InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("UE_BUILD_DEBUG=1");
+					GlobalCompileEnvironment.Config.Definitions.Add("UE_BUILD_DEBUG=1");
 					break;
 				case UnrealTargetConfiguration.DebugGame:
 				// Default to Development; can be overridden by individual modules.
 				case UnrealTargetConfiguration.Development:
 					CompileConfiguration = CPPTargetConfiguration.Development;
-					InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("NDEBUG=1"); // the engine doesn't use this, but lots of 3rd party stuff does
-					InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("UE_BUILD_DEVELOPMENT=1");
+					GlobalCompileEnvironment.Config.Definitions.Add("NDEBUG=1"); // the engine doesn't use this, but lots of 3rd party stuff does
+					GlobalCompileEnvironment.Config.Definitions.Add("UE_BUILD_DEVELOPMENT=1");
 					break;
 				case UnrealTargetConfiguration.Shipping:
 					CompileConfiguration = CPPTargetConfiguration.Shipping;
-					InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("NDEBUG=1"); // the engine doesn't use this, but lots of 3rd party stuff does
-					InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("UE_BUILD_SHIPPING=1");
+					GlobalCompileEnvironment.Config.Definitions.Add("NDEBUG=1"); // the engine doesn't use this, but lots of 3rd party stuff does
+					GlobalCompileEnvironment.Config.Definitions.Add("UE_BUILD_SHIPPING=1");
 					break;
 				case UnrealTargetConfiguration.Test:
 					CompileConfiguration = CPPTargetConfiguration.Shipping;
-					InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("NDEBUG=1"); // the engine doesn't use this, but lots of 3rd party stuff does
-					InBuildTarget.GlobalCompileEnvironment.Config.Definitions.Add("UE_BUILD_TEST=1");
+					GlobalCompileEnvironment.Config.Definitions.Add("NDEBUG=1"); // the engine doesn't use this, but lots of 3rd party stuff does
+					GlobalCompileEnvironment.Config.Definitions.Add("UE_BUILD_TEST=1");
 					break;
 			}
 
 			// Set up the global C++ compilation and link environment.
-			InBuildTarget.GlobalCompileEnvironment.Config.Target.Configuration = CompileConfiguration;
-			InBuildTarget.GlobalLinkEnvironment.Config.Target.Configuration = CompileConfiguration;
+			GlobalCompileEnvironment.Config.Target.Configuration = CompileConfiguration;
+			GlobalLinkEnvironment.Config.Target.Configuration = CompileConfiguration;
 
 			// Create debug info based on the heuristics specified by the user.
-			InBuildTarget.GlobalCompileEnvironment.Config.bCreateDebugInfo =
-				!BuildConfiguration.bDisableDebugInfo && ShouldCreateDebugInfo(InBuildTarget.Platform, CheckConfig);
+			GlobalCompileEnvironment.Config.bCreateDebugInfo =
+				!BuildConfiguration.bDisableDebugInfo && ShouldCreateDebugInfo(Target.Platform, CheckConfig);
 
 			// NOTE: Even when debug info is turned off, we currently force the linker to generate debug info
 			//       anyway on Visual C++ platforms.  This will cause a PDB file to be generated with symbols
@@ -756,7 +748,7 @@ namespace UnrealBuildTool
 			//       useful call stacks, even though compiler-generate debug info may be disabled.  This gives
 			//       us much of the build-time savings of fully-disabled debug info, without giving up call
 			//       data completely.
-			InBuildTarget.GlobalLinkEnvironment.Config.bCreateDebugInfo = true;
+			GlobalLinkEnvironment.Config.bCreateDebugInfo = true;
 		}
 
 		/// <summary>
@@ -787,6 +779,16 @@ namespace UnrealBuildTool
 		{
 			// Windows applications have many shared binaries between games
 			return false;
+		}
+
+		/// <summary>
+		/// Creates a toolchain instance for the given platform.
+		/// </summary>
+		/// <param name="Platform">The platform to create a toolchain for</param>
+		/// <returns>New toolchain instance.</returns>
+		public override UEToolChain CreateToolChain(CPPTargetPlatform Platform, FileReference ProjectFile)
+		{
+			return new VCToolChain(Platform);
 		}
 
 		/// <summary>

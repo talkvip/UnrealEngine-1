@@ -1177,7 +1177,7 @@ namespace UnrealBuildTool
 			{
 				OutputDirectory = UnrealBuildTool.EngineDirectory;
 			}
-			OutputPaths = MakeExecutablePaths(OutputDirectory, bCompileMonolithic ? TargetName : AppName, Platform, Configuration, Rules.UndecoratedConfiguration, bCompileMonolithic && ProjectFile != null, Rules.ExeBinariesSubFolder);
+			OutputPaths = MakeExecutablePaths(OutputDirectory, bCompileMonolithic ? TargetName : AppName, Platform, Configuration, Rules.UndecoratedConfiguration, bCompileMonolithic && ProjectFile != null, Rules.ExeBinariesSubFolder, ProjectFile);
 
 			// handle some special case defines (so build system can pass -DEFINE as normal instead of needing
 			// to know about special parameters)
@@ -1306,7 +1306,7 @@ namespace UnrealBuildTool
 		protected void CleanTarget(BuildManifest Manifest)
 		{
 			// Expand all the paths in the receipt; they'll currently use variables for the engine and project directories
-			IUEBuildPlatform BuildPlatform = UEBuildPlatform.GetBuildPlatform(Platform);
+			UEBuildPlatform BuildPlatform = UEBuildPlatform.GetBuildPlatform(Platform);
 			// Expand all the paths in the receipt; they'll currently use variables for the engine and project directories
 			TargetReceipt ReceiptWithFullPaths;
 			if (!TargetReceipt.TryRead(ReceiptFileName, out ReceiptWithFullPaths))
@@ -1569,7 +1569,7 @@ namespace UnrealBuildTool
 			// Expand all the paths in the receipt; they'll currently use variables for the engine and project directories
 			TargetReceipt ReceiptWithFullPaths = new TargetReceipt(Receipt);
 			ReceiptWithFullPaths.ExpandPathVariables(UnrealBuildTool.EngineDirectory, ProjectDirectory);
-			IUEBuildPlatform BuildPlatform = UEBuildPlatform.GetBuildPlatform(Platform);
+			UEBuildPlatform BuildPlatform = UEBuildPlatform.GetBuildPlatform(Platform);
 			// Expand all the paths in the receipt; they'll currently use variables for the engine and project directories
 			TargetReceipt BuiltReceiptWithFullPaths;
 			if (!TargetReceipt.TryRead(ReceiptFileName, out BuiltReceiptWithFullPaths))
@@ -1658,7 +1658,7 @@ namespace UnrealBuildTool
 			HashSet<string> FileNames = new HashSet<string>(StringComparer.CurrentCultureIgnoreCase);
 
 			// Get the platform we're building for
-			IUEBuildPlatform BuildPlatform = UEBuildPlatform.GetBuildPlatform(Platform);
+			UEBuildPlatform BuildPlatform = UEBuildPlatform.GetBuildPlatform(Platform);
 
 			// Add all their include paths
 			foreach (string ModuleName in ModuleNames)
@@ -1802,7 +1802,7 @@ namespace UnrealBuildTool
 				Manifest.AddBuildProduct(BuildProduct.Path);
 			}
 
-			IUEBuildPlatform BuildPlatform = UEBuildPlatform.GetBuildPlatform(Platform);
+			UEBuildPlatform BuildPlatform = UEBuildPlatform.GetBuildPlatform(Platform);
 			if (OnlyModules.Count == 0)
 			{
 				Manifest.AddBuildProduct(ReceiptFileName);
@@ -1821,7 +1821,7 @@ namespace UnrealBuildTool
 		/// <summary>
 		/// Prepare all the receipts this target (all the .target and .modules files). See the VersionManifest class for an explanation of what these files are.
 		/// </summary>
-		public void PrepareReceipts(IUEToolChain ToolChain)
+		public void PrepareReceipts(UEToolChain ToolChain)
 		{
 			// Read the version file
 			BuildVersion Version;
@@ -1916,7 +1916,7 @@ namespace UnrealBuildTool
 		{
 			if (Receipt != null)
 			{
-				IUEBuildPlatform BuildPlatform = UEBuildPlatform.GetBuildPlatform(Platform);
+				UEBuildPlatform BuildPlatform = UEBuildPlatform.GetBuildPlatform(Platform);
 				if (OnlyModules == null || OnlyModules.Count == 0)
 				{
 					Directory.CreateDirectory(Path.GetDirectoryName(ReceiptFileName));
@@ -1966,7 +1966,7 @@ namespace UnrealBuildTool
 		/// <summary>
 		/// Builds the target, appending list of output files and returns building result.
 		/// </summary>
-		public ECompilationResult Build(IUEToolChain TargetToolChain, out List<FileItem> OutputItems, out List<UHTModuleInfo> UObjectModules, out string EULAViolationWarning)
+		public ECompilationResult Build(UEToolChain TargetToolChain, out List<FileItem> OutputItems, out List<UHTModuleInfo> UObjectModules, out string EULAViolationWarning)
 		{
 			OutputItems = new List<FileItem>();
 			UObjectModules = new List<UHTModuleInfo>();
@@ -2212,7 +2212,7 @@ namespace UnrealBuildTool
 		/// Setup target before build. This method finds dependencies, sets up global environment etc.
 		/// </summary>
 		/// <returns>Special Rocket lib files that are build products.</returns>
-		public void PreBuildSetup(IUEToolChain TargetToolChain)
+		public void PreBuildSetup(UEToolChain TargetToolChain)
 		{
 			// Set up the global compile and link environment in GlobalCompileEnvironment and GlobalLinkEnvironment.
 			SetupGlobalEnvironment(TargetToolChain);
@@ -2241,9 +2241,6 @@ namespace UnrealBuildTool
 			{
 				AddPlugin(BuildPlugin);
 			}
-
-			// Allow the platform to setup binaries/plugins/modules
-			UEBuildPlatform.GetBuildPlatform(Platform).SetupBinaries(this);
 
 			// Describe what's being built.
 			Log.TraceVerbose("Building {0} - {1} - {2} - {3}", AppName, TargetName, Platform, Configuration);
@@ -2931,7 +2928,7 @@ namespace UnrealBuildTool
 
 			// Get the output filenames
 			FileReference BaseBinaryPath = FileReference.Combine(OutputDirectory, MakeBinaryFileName(AppName + "-" + Module.Name, Platform, ModuleConfiguration, Rules.UndecoratedConfiguration, BinaryType));
-			List<FileReference> OutputFilePaths = UEBuildPlatform.GetBuildPlatform(Platform).FinalizeBinaryPaths(BaseBinaryPath);
+			List<FileReference> OutputFilePaths = UEBuildPlatform.GetBuildPlatform(Platform).FinalizeBinaryPaths(BaseBinaryPath, ProjectFile);
 
 			// Prepare the configuration object
 			UEBuildBinaryConfiguration Config = new UEBuildBinaryConfiguration(
@@ -2996,7 +2993,7 @@ namespace UnrealBuildTool
 				Result.AppendFormat("-{0}-{1}", Platform.ToString(), Configuration.ToString());
 			}
 
-			IUEBuildPlatform BuildPlatform = UEBuildPlatform.GetBuildPlatform(Platform);
+			UEBuildPlatform BuildPlatform = UEBuildPlatform.GetBuildPlatform(Platform);
 			Result.Append(BuildPlatform.ApplyArchitectureName(""));
 
 			if (BuildConfiguration.bRunUnrealCodeAnalyzer)
@@ -3022,7 +3019,7 @@ namespace UnrealBuildTool
 		/// <param name="bIncludesGameModules">Whether this executable contains game modules</param>
 		/// <param name="ExeSubFolder">Subfolder for executables. May be null.</param>
 		/// <returns>List of executable paths for this target</returns>
-		public static List<FileReference> MakeExecutablePaths(DirectoryReference BaseDirectory, string BinaryName, UnrealTargetPlatform Platform, UnrealTargetConfiguration Configuration, UnrealTargetConfiguration UndecoratedConfiguration, bool bIncludesGameModules, string ExeSubFolder)
+		public static List<FileReference> MakeExecutablePaths(DirectoryReference BaseDirectory, string BinaryName, UnrealTargetPlatform Platform, UnrealTargetConfiguration Configuration, UnrealTargetConfiguration UndecoratedConfiguration, bool bIncludesGameModules, string ExeSubFolder, FileReference ProjectFile)
 		{
 			// Get the configuration for the executable. If we're building DebugGame, and this executable only contains engine modules, use the same name as development.
 			UnrealTargetConfiguration ExeConfiguration = Configuration;
@@ -3040,7 +3037,7 @@ namespace UnrealBuildTool
 			FileReference BinaryFile = FileReference.Combine(BinaryDirectory, MakeBinaryFileName(BinaryName, Platform, ExeConfiguration, UndecoratedConfiguration, UEBuildBinaryType.Executable));
 
 			// Allow the platform to customize the output path (and output several executables at once if necessary)
-			return UEBuildPlatform.GetBuildPlatform(Platform).FinalizeBinaryPaths(BinaryFile);
+			return UEBuildPlatform.GetBuildPlatform(Platform).FinalizeBinaryPaths(BinaryFile, ProjectFile);
 		}
 
 		/// <summary>
@@ -3050,7 +3047,7 @@ namespace UnrealBuildTool
 		{
 			var BuildPlatform = UEBuildPlatform.GetBuildPlatform(Platform);
 			List<string> PlatformExtraModules = new List<string>();
-			BuildPlatform.GetExtraModules(TargetInfo, this, ref PlatformExtraModules);
+			BuildPlatform.AddExtraModules(TargetInfo, PlatformExtraModules);
 			ExtraModuleNames.AddRange(PlatformExtraModules);
 		}
 
@@ -3191,7 +3188,7 @@ namespace UnrealBuildTool
 		/// <summary>
 		/// Sets up the global compile and link environment for the target.
 		/// </summary>
-		public virtual void SetupGlobalEnvironment(IUEToolChain ToolChain)
+		public virtual void SetupGlobalEnvironment(UEToolChain ToolChain)
 		{
 			var BuildPlatform = UEBuildPlatform.GetBuildPlatform(Platform);
 
@@ -3432,7 +3429,7 @@ namespace UnrealBuildTool
 
 		void SetUpConfigurationEnvironment()
 		{
-			UEBuildPlatform.GetBuildPlatform(Platform).SetUpConfigurationEnvironment(this);
+			UEBuildPlatform.GetBuildPlatform(Platform).SetUpConfigurationEnvironment(TargetInfo, GlobalCompileEnvironment, GlobalLinkEnvironment);
 
 			// Check to see if we're compiling a library or not
 			bool bIsBuildingDLL = OutputPaths[0].HasExtension(".dll");

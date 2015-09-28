@@ -260,17 +260,6 @@ namespace UnrealBuildTool
 		}
 
 		/// <summary>
-		/// Get a list of extra modules the platform requires.
-		/// This is to allow undisclosed platforms to add modules they need without exposing information about the platfomr.
-		/// </summary>
-		/// <param name="Target">     The target being build</param>
-		/// <param name="BuildTarget">    The UEBuildTarget getting build</param>
-		/// <param name="PlatformExtraModules"> OUTPUT the list of extra modules the platform needs to add to the target</param>
-		public override void GetExtraModules(TargetInfo Target, UEBuildTarget BuildTarget, ref List<string> PlatformExtraModules)
-		{
-		}
-
-		/// <summary>
 		/// Modify the newly created module passed in for this platform.
 		/// This is not required - but allows for hiding details of a
 		/// particular platform.
@@ -387,11 +376,13 @@ namespace UnrealBuildTool
 		}
 
 		/// <summary>
-		/// Setup the binaries for this specific platform.
+		/// Creates a toolchain instance for the given platform.
 		/// </summary>
-		/// <param name="InBuildTarget"> The target being built</param>
-		public override void SetupBinaries(UEBuildTarget InBuildTarget)
+		/// <param name="Platform">The platform to create a toolchain for</param>
+		/// <returns>New toolchain instance.</returns>
+		public override UEToolChain CreateToolChain(CPPTargetPlatform Platform, FileReference ProjectFile)
 		{
+			return new LinuxToolChain();
 		}
 
 		/// <summary>

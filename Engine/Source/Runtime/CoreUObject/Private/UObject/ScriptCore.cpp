@@ -36,20 +36,15 @@ COREUOBJECT_API int32 GMaximumScriptLoopIterations = 1000000;
 	#define RECURSE_LIMIT 250
 #endif
 
-#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
-	#define DO_GUARD 1
-#endif
-
-//@TODO: ScriptParallel: Contended static usage
-#if DO_GUARD
-	static int32 Runaway=0;
-	static int32 Recurse=0;
-	static bool Ranaway = false;
-	#define CHECK_RUNAWAY {++Runaway;}
-	COREUOBJECT_API void GInitRunaway() {Recurse=Runaway=0; Ranaway = false;}
+#if DO_BLUEPRINT_GUARD
+#define CHECK_RUNAWAY { ++FBlueprintExceptionTracker::Get().Runaway; }
+COREUOBJECT_API void GInitRunaway() 
+{
+	FBlueprintExceptionTracker::Get().ResetRunaway();
+}
 #else
-	#define CHECK_RUNAWAY
-	COREUOBJECT_API void GInitRunaway() {}
+#define CHECK_RUNAWAY
+COREUOBJECT_API void GInitRunaway() {}
 #endif
 
 #define IMPLEMENT_FUNCTION(cls,func) \
@@ -76,7 +71,7 @@ void FBlueprintCoreDelegates::ThrowScriptException(const UObject* ActiveObject, 
 	case EBlueprintExceptionType::Tracepoint:
 	case EBlueprintExceptionType::WireTracepoint:
 		break;
-#if WITH_EDITOR
+#if WITH_EDITOR && DO_BLUEPRINT_GUARD
 	case EBlueprintExceptionType::AccessViolation:
 		{
 			struct FIntConfigValueHelper
@@ -92,9 +87,8 @@ void FBlueprintCoreDelegates::ThrowScriptException(const UObject* ActiveObject, 
 			static const FIntConfigValueHelper MaxNumOfAccessViolation;
 			if (MaxNumOfAccessViolation.Value > 0)
 			{
-				static TMap<FName, int32> DisplayedWarningsMap;
 				const FName ActiveObjectName = ActiveObject ? ActiveObject->GetFName() : FName();
-				int32& Num = DisplayedWarningsMap.FindOrAdd(ActiveObjectName);
+				int32& Num = FBlueprintExceptionTracker::Get().DisplayedWarningsMap.FindOrAdd(ActiveObjectName);
 				if (Num > MaxNumOfAccessViolation.Value)
 				{
 					break;
@@ -108,7 +102,11 @@ void FBlueprintCoreDelegates::ThrowScriptException(const UObject* ActiveObject, 
 		break;
 	}
 
-	OnScriptException.Broadcast(ActiveObject, StackFrame, Info);
+	// cant fire arbitrary delegates here off the game thead
+	if(IsInGameThread())
+	{
+		OnScriptException.Broadcast(ActiveObject, StackFrame, Info);
+	}
 
 	if (Info.GetType() == EBlueprintExceptionType::FatalError)
 	{
@@ -142,41 +140,55 @@ FEditorScriptExecutionGuard::~FEditorScriptExecutionGuard()
 	GAllowActorScriptExecutionInEditor = bOldGAllowScriptExecutionInEditor;
 }
 
+bool IsValidCPPIdentifierChar(TCHAR Char)
+{
+	return Char == TCHAR('_')
+		|| (Char >= TCHAR('a') && Char <= TCHAR('z'))
+		|| (Char >= TCHAR('A') && Char <= TCHAR('Z'))
+		|| (Char >= TCHAR('0') && Char <= TCHAR('9'));
+}
+
+FString ToValidCPPIdentifierChars(TCHAR Char)
+{
+	FString Ret;
+	int32 RawValue = Char;
+	int32 Counter = 0;
+	while (RawValue != 0)
+	{
+		int32 Digit = RawValue % 63;
+		RawValue = (RawValue - Digit) / 63;
+
+		TCHAR SafeChar;
+		if (Digit < 26)
+		{
+			SafeChar = TCHAR(TCHAR('a') + (26 - Digit));
+		}
+		else if (Digit < 52)
+		{
+			SafeChar = TCHAR(TCHAR('A') + (52 - Digit));
+		}
+		else if (Digit < 62)
+		{
+			SafeChar = TCHAR(TCHAR('0') + (62 - Digit));
+		}
+		else
+		{
+			check(Digit == 62);
+			SafeChar = TCHAR('_');
+		}
+
+		Ret.AppendChar(SafeChar);
+	}
+	return Ret;
+}
+
 FString UnicodeToCPPIdentifier(const FString& InName, bool bDeprecated, const TCHAR* Prefix)
 {
 	// FName's can contain unicode characters or collide with other CPP identifiers or keywords. This function 
 	// returns a string that will have a prefix which is unlikely to collide with existing identifiers and
 	// converts unicode characters in place to valid ascii characters. Strictly speaking a C++ compiler *could*
 	// support unicode identifiers in source files, but I am not comfortable relying on this behavior.
-	
-	auto IsValidIdentifierChar = [](TCHAR Char)
-	{
-		return Char == TCHAR('_')
-			|| (Char >= TCHAR('a') && Char <= TCHAR('z'))
-			|| (Char >= TCHAR('A') && Char <= TCHAR('Z'))
-			|| (Char >= TCHAR('0') && Char <= TCHAR('9'));
-	};
 
-	auto ToValidIdentifier = [](int32 Val) -> TCHAR
-	{
-		if (Val < 26)
-		{
-			return TCHAR(TCHAR('a') + (26 - Val));
-		}
-		else if (Val < 52)
-		{
-			return TCHAR(TCHAR('A') + (52 - Val));
-		}
-		else if (Val < 62)
-		{
-			return TCHAR(TCHAR('0') + (62 - Val));
-		}
-		else
-		{
-			check(Val == 62);
-			return TCHAR('_');
-		}
-	};
 
 	FString Ret = InName;
 	// Initialize postfix with a unique identifier. This prevents potential collisions between names that have unicode
@@ -185,18 +197,11 @@ FString UnicodeToCPPIdentifier(const FString& InName, bool bDeprecated, const TC
 	for (auto& Char : Ret)
 	{
 		// if the character is not a valid character for a c++ identifier, then we need to encode it using valid characters:
-		if (!IsValidIdentifierChar(Char))
+		if (!IsValidCPPIdentifierChar(Char))
 		{
 			// deterministically map char to a valid ascii character, we have 63 characters available (aA-zZ, 0-9, and _)
 			// so the optimal encoding would be base 63:
-			int32 RawValue = Char;
-			int32 Counter = 0;
-			while (RawValue != 0)
-			{
-				int32 Digit = RawValue % 63;
-				RawValue = (RawValue - Digit) / 63;
-				Postfix.AppendChar(ToValidIdentifier(Digit));
-			}
+			Postfix.Append(ToValidCPPIdentifierChars(Char));
 			Char = TCHAR('x');
 		}
 	}
@@ -257,15 +262,17 @@ void FFrame::KismetExecutionMessage(const TCHAR* Message, ELogVerbosity::Type Ve
 #endif
 	}
 
-#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+#if DO_BLUEPRINT_GUARD
 	// Walk the script stack, if any
 	FString ScriptStack;
-	if( GScriptStack.Num() > 0 )
+
+	FBlueprintExceptionTracker& BlueprintExceptionTracker = FBlueprintExceptionTracker::Get();
+	if( BlueprintExceptionTracker.ScriptStack.Num() > 0 )
 	{
 		ScriptStack = TEXT( "Script call stack:\n" );
-		for( int32 i = GScriptStack.Num() - 1; i >= 0; --i )
+		for( int32 i = BlueprintExceptionTracker.ScriptStack.Num() - 1; i >= 0; --i )
 		{
-			ScriptStack += TEXT( "\t" ) + GScriptStack[i].GetStackDescription() + TEXT( "\n" );
+			ScriptStack += TEXT( "\t" ) + BlueprintExceptionTracker.ScriptStack[i].GetStackDescription() + TEXT( "\n" );
 		}
 	}
 #endif
@@ -725,15 +732,15 @@ void UObject::ProcessInternal( FFrame& Stack, RESULT_DECL )
 		// No POD struct can ever be stored in this buffer. 
 		MS_ALIGN(16) uint8 Buffer[MAX_SIMPLE_RETURN_VALUE_SIZE] GCC_ALIGN(16);
 
-#if DO_GUARD
-		if(Ranaway)
+#if DO_BLUEPRINT_GUARD
+		if(FBlueprintExceptionTracker::Get().bRanaway)
 		{
 			// If we have a return property, return a zeroed value in it, to try and save execution as much as possible
 			UProperty* ReturnProp = ((UFunction*)Stack.Node)->GetReturnProperty();
 			ClearReturnValue(ReturnProp, RESULT_PARAM);
 			return;
 		}
-		else if (++Recurse == RECURSE_LIMIT)
+		else if (++FBlueprintExceptionTracker::Get().Recurse == RECURSE_LIMIT)
 		{
 			// We've hit the recursion limit, so print out the stack, warn, and then continue with a zeroed return value.
 			UE_LOG(LogScriptCore, Log, TEXT("%s"), *Stack.GetStackTrace());
@@ -749,7 +756,7 @@ void UObject::ProcessInternal( FFrame& Stack, RESULT_DECL )
 
 			// This flag prevents repeated warnings of infinite loop, script exception handler 
 			// is expected to have terminated execution appropriately:
-			Ranaway = true;
+			FBlueprintExceptionTracker::Get().bRanaway = true;
 
 			return;
 		}
@@ -760,8 +767,8 @@ void UObject::ProcessInternal( FFrame& Stack, RESULT_DECL )
 		// Execute the bytecode
 		while (*Stack.Code != EX_Return)
 		{
-#if DO_GUARD
-			if( Runaway > GMaximumScriptLoopIterations )
+#if DO_BLUEPRINT_GUARD
+			if( FBlueprintExceptionTracker::Get().Runaway > GMaximumScriptLoopIterations )
 			{
 				// We've hit the recursion limit, so print out the stack, warn, and then continue with a zeroed return value.
 				UE_LOG(LogScriptCore, Log, TEXT("%s"), *Stack.GetStackTrace());
@@ -776,7 +783,7 @@ void UObject::ProcessInternal( FFrame& Stack, RESULT_DECL )
 
 				// Need to reset Runaway counter BEFORE throwing script exception, because the exception causes a modal dialog,
 				// and other scripts running will then erroneously think they are also "runaway".
-				Runaway = 0;
+				FBlueprintExceptionTracker::Get().Runaway = 0;
 
 				FBlueprintCoreDelegates::ThrowScriptException(this, Stack, RunawayLoopExceptionInfo);
 				return;
@@ -798,8 +805,8 @@ void UObject::ProcessInternal( FFrame& Stack, RESULT_DECL )
 			Stack.Code++;
 		}
 
-#if DO_GUARD
-		--Recurse;
+#if DO_BLUEPRINT_GUARD
+		--FBlueprintExceptionTracker::Get().Recurse;
 #endif
 	}
 	else
@@ -963,8 +970,6 @@ UFunction* UObject::FindFunctionChecked( FName InName ) const
 
 void UObject::ProcessEvent( UFunction* Function, void* Parms )
 {
-	static int32 ScriptEntryTag = 0;
-
 	checkf(!HasAnyFlags(RF_Unreachable),TEXT("%s  Function: '%s'"), *GetFullName(), *Function->GetPathName());
 	checkf(!FUObjectThreadContext::Get().IsRoutingPostLoad, TEXT("Cannot call UnrealScript (%s - %s) while PostLoading objects"), *GetFullName(), *Function->GetFullName());
 
@@ -1006,9 +1011,12 @@ void UObject::ProcessEvent( UFunction* Function, void* Parms )
 	}
 	checkSlow((Function->ParmsSize == 0) || (Parms != NULL));
 
-	ScriptEntryTag++;
+#if DO_BLUEPRINT_GUARD
+	FBlueprintExceptionTracker& BlueprintExceptionTracker = FBlueprintExceptionTracker::Get();
+	BlueprintExceptionTracker.ScriptEntryTag++;
 
-	CONDITIONAL_SCOPE_CYCLE_COUNTER(STAT_BlueprintTime, ScriptEntryTag == 1);
+	CONDITIONAL_SCOPE_CYCLE_COUNTER(STAT_BlueprintTime, BlueprintExceptionTracker.ScriptEntryTag == 1);
+#endif
 
 #if UE_BLUEPRINT_EVENTGRAPH_FASTCALLS
 	// Fast path for ubergraph calls
@@ -1131,7 +1139,9 @@ void UObject::ProcessEvent( UFunction* Function, void* Parms )
 		}
 	}
 
-	--ScriptEntryTag;
+#if DO_BLUEPRINT_GUARD
+	--BlueprintExceptionTracker.ScriptEntryTag;
+#endif
 }
 
 #ifdef _MSC_VER
@@ -1608,9 +1618,7 @@ void UObject::execLet(FFrame& Stack, RESULT_DECL)
 		}
 		else
 		{
-			//@TODO: ScriptParallel: Contended static usage
-			static uint8 Crud[1024];//@temp
-			Stack.MostRecentPropertyAddress = Crud;
+			Stack.MostRecentPropertyAddress = (uint8*)FMemory_Alloca(1024);
 			FMemory::Memzero(Stack.MostRecentPropertyAddress, sizeof(FString));
 		}
 	}

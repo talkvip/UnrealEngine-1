@@ -16,12 +16,37 @@ namespace UnrealBuildTool
 
 	public abstract partial class UEBuildPlatform
 	{
-		public static Dictionary<UnrealTargetPlatform, UEBuildPlatform> BuildPlatformDictionary = new Dictionary<UnrealTargetPlatform, UEBuildPlatform>();
+		private static Dictionary<UnrealTargetPlatform, UEBuildPlatform> BuildPlatformDictionary = new Dictionary<UnrealTargetPlatform, UEBuildPlatform>();
 
 		// a mapping of a group to the platforms in the group (ie, Microsoft contains Win32 and Win64)
 		static Dictionary<UnrealPlatformGroup, List<UnrealTargetPlatform>> PlatformGroupDictionary = new Dictionary<UnrealPlatformGroup, List<UnrealTargetPlatform>>();
 
 		private bool bInitializedProject = false;
+
+		public readonly UnrealTargetPlatform Platform;
+
+		/// <summary>
+		/// Constructor.
+		/// </summary>
+		/// <param name="InPlatform">The enum value for this platform</param>
+		public UEBuildPlatform(UnrealTargetPlatform InPlatform)
+		{
+			Platform = InPlatform;
+		}
+
+		/// <summary>
+		/// Whether the required external SDKs are installed for this platform. Could be either a manual install or an AutoSDK.
+		/// </summary>
+		public abstract SDKStatus HasRequiredSDKsInstalled();
+
+		/// <summary>
+		/// Gets all the registered platforms
+		/// </summary>
+		/// <returns>Sequence of registered platforms</returns>
+		public static IEnumerable<UnrealTargetPlatform> GetRegisteredPlatforms()
+		{
+			return BuildPlatformDictionary.Keys;
+		}
 
 		/// <summary>
 		/// Attempt to convert a string to an UnrealTargetPlatform enum entry
@@ -50,32 +75,31 @@ namespace UnrealBuildTool
 		}
 
 		/// <summary>
+		/// Determines whether a given platform is available
+		/// </summary>
+		/// <param name="Platform">The platform to check for</param>
+		/// <returns>True if it's available, false otherwise</returns>
+		public static bool IsPlatformAvailable(UnrealTargetPlatform Platform)
+		{
+			return BuildPlatformDictionary.ContainsKey(Platform);
+		}
+
+		/// <summary>
 		/// Register the given platforms UEBuildPlatform instance
 		/// </summary>
 		/// <param name="InPlatform">  The UnrealTargetPlatform to register with</param>
 		/// <param name="InBuildPlatform"> The UEBuildPlatform instance to use for the InPlatform</param>
-		public static void RegisterBuildPlatform(UnrealTargetPlatform InPlatform, UEBuildPlatform InBuildPlatform)
+		public static void RegisterBuildPlatform(UEBuildPlatform InBuildPlatform)
 		{
-			if (BuildPlatformDictionary.ContainsKey(InPlatform) == true)
+			if (BuildPlatformDictionary.ContainsKey(InBuildPlatform.Platform) == true)
 			{
 				Log.TraceWarning("RegisterBuildPlatform Warning: Registering build platform {0} for {1} when it is already set to {2}",
-					InBuildPlatform.ToString(), InPlatform.ToString(), BuildPlatformDictionary[InPlatform].ToString());
-				BuildPlatformDictionary[InPlatform] = InBuildPlatform;
+					InBuildPlatform.ToString(), InBuildPlatform.Platform.ToString(), BuildPlatformDictionary[InBuildPlatform.Platform].ToString());
+				BuildPlatformDictionary[InBuildPlatform.Platform] = InBuildPlatform;
 			}
 			else
 			{
-				BuildPlatformDictionary.Add(InPlatform, InBuildPlatform);
-			}
-		}
-
-		/// <summary>
-		/// Unregister the given platform
-		/// </summary>
-		public static void UnregisterBuildPlatform(UnrealTargetPlatform InPlatform)
-		{
-			if (BuildPlatformDictionary.ContainsKey(InPlatform) == true)
-			{
-				BuildPlatformDictionary.Remove(InPlatform);
+				BuildPlatformDictionary.Add(InBuildPlatform.Platform, InBuildPlatform);
 			}
 		}
 
@@ -150,9 +174,13 @@ namespace UnrealBuildTool
 		{
 			foreach (var PlatformEntry in BuildPlatformDictionary)
 			{
-				if (Only == UnrealTargetPlatform.Unknown || PlatformEntry.Key == Only || PlatformEntry.Key == Target.Platform)
+				if(PlatformEntry.Key == Target.Platform)
 				{
-					PlatformEntry.Value.ModifyModuleRules(ModuleName, Rules, Target);
+					PlatformEntry.Value.ModifyModuleRulesForActivePlatform(ModuleName, Rules, Target);
+				}
+				else if (Only == UnrealTargetPlatform.Unknown || PlatformEntry.Key == Only)
+				{
+					PlatformEntry.Value.ModifyModuleRulesForOtherPlatform(ModuleName, Rules, Target);
 				}
 			}
 		}
@@ -160,7 +188,7 @@ namespace UnrealBuildTool
 		/// <summary>
 		/// Returns the delimiter used to separate paths in the PATH environment variable for the platform we are executing on.
 		/// </summary>
-		public String GetPathVarDelimiter()
+		public static String GetPathVarDelimiter()
 		{
 			switch (BuildHostPlatform.Current.Platform)
 			{
@@ -202,17 +230,6 @@ namespace UnrealBuildTool
 		{
 			return false;
 		}
-
-		/// <summary>
-		/// Register the platform with the UEBuildPlatform class
-		/// </summary>
-		public void RegisterBuildPlatform()
-		{
-			ManageAndValidateSDK();
-			RegisterBuildPlatformInternal();
-		}
-
-		protected abstract void RegisterBuildPlatformInternal();
 
 		/// <summary>
 		/// Retrieve the CPPTargetPlatform for the given UnrealTargetPlatform
@@ -345,14 +362,24 @@ namespace UnrealBuildTool
 		}
 
 		/// <summary>
-		/// Modify the newly created module passed in for this platform.
-		/// This is not required - but allows for hiding details of a
-		/// particular platform.
+		/// Modify the rules for a newly created module, in a target that's being built for this platform.
+		/// This is not required - but allows for hiding details of a particular platform.
 		/// </summary>
-		/// <param name="">ModuleName  The name of the module</param>
-		/// <param name="Rules">  The module rules</param>
-		/// <param name="Target">  The target being build</param>
-		public virtual void ModifyModuleRules(string ModuleName, ModuleRules Rules, TargetInfo Target)
+		/// <param name="ModuleName">The name of the module</param>
+		/// <param name="Rules">The module rules</param>
+		/// <param name="Target">The target being build</param>
+		public virtual void ModifyModuleRulesForActivePlatform(string ModuleName, ModuleRules Rules, TargetInfo Target)
+		{
+		}
+
+		/// <summary>
+		/// Modify the rules for a newly created module, where the target is a different host platform.
+		/// This is not required - but allows for hiding details of a particular platform.
+		/// </summary>
+		/// <param name="ModuleName">The name of the module</param>
+		/// <param name="Rules">The module rules</param>
+		/// <param name="Target">The target being build</param>
+		public virtual void ModifyModuleRulesForOtherPlatform(string ModuleName, ModuleRules Rules, TargetInfo Target)
 		{
 		}
 
@@ -718,7 +745,10 @@ namespace UnrealBuildTool
 		/// <param name="DeploymentHandler">The output deployment handler</param>
 		/// <returns>True if the platform requires a deployment handler, false otherwise</returns>
 		public abstract bool TryCreateDeploymentHandler(FileReference ProjectFile, out UEBuildDeploy DeploymentHandler);
+	}
 
+	public abstract class UEBuildPlatformSDK
+	{
 		// AutoSDKs handling portion
 
 		#region protected AutoSDKs Utility
@@ -1124,7 +1154,7 @@ namespace UnrealBuildTool
 
 					// actually perform the PATH stripping / adding.
 					String OrigPathVar = Environment.GetEnvironmentVariable("PATH");
-					String PathDelimiter = GetPathVarDelimiter();
+					String PathDelimiter = UEBuildPlatform.GetPathVarDelimiter();
 					String[] PathVars = OrigPathVar.Split(PathDelimiter.ToCharArray());
 
 					List<String> ModifiedPathVars = new List<string>();
@@ -1509,5 +1539,13 @@ namespace UnrealBuildTool
 		}
 
 		#endregion
+	}
+
+	public abstract class UEBuildPlatformFactory
+	{
+		/// <summary>
+		/// Register the platform with the UEBuildPlatform class
+		/// </summary>
+		public abstract void RegisterBuildPlatforms();
 	}
 }

@@ -85,9 +85,6 @@
 #include "RawDistributionVectorStructCustomization.h"
 #include "CollisionProfileNameCustomization.h"
 #include "DocumentationActorDetails.h"
-#include "MediaPlayerCustomization.h"
-#include "MediaSoundWaveCustomization.h"
-#include "MediaTextureCustomization.h"
 #include "SoundWaveDetails.h"
 #include "AudioSettingsDetails.h"
 #include "DateTimeStructCustomization.h"
@@ -104,9 +101,9 @@
 #include "ConfigEditorPropertyDetails.h"
 #include "AssetImportDataCustomization.h"
 #include "CaptureResolutionCustomization.h"
-#include "ActorAnimationPlaybackSettingsCustomization.h"
 #include "TextCustomization.h"
 #include "AnimTrailNodeDetails.h"
+
 
 IMPLEMENT_MODULE( FDetailCustomizationsModule, DetailCustomizations );
 
@@ -116,7 +113,6 @@ void FDetailCustomizationsModule::StartupModule()
 	FPropertyEditorModule& PropertyModule = FModuleManager::GetModuleChecked<FPropertyEditorModule>("PropertyEditor");
 	
 	RegisterPropertyTypeCustomizations();
-
 	RegisterObjectCustomizations();
 
 	PropertyModule.NotifyCustomizationModuleChanged();
@@ -213,7 +209,6 @@ void FDetailCustomizationsModule::RegisterPropertyTypeCustomizations()
 	RegisterCustomPropertyTypeLayout("HierarchicalSimplification", FOnGetPropertyTypeCustomizationInstance::CreateStatic(&FHierarchicalSimplificationCustomizations::MakeInstance));
 	RegisterCustomPropertyTypeLayout("PostProcessSettings", FOnGetPropertyTypeCustomizationInstance::CreateStatic(&FPostProcessSettingsCustomization::MakeInstance));
 	RegisterCustomPropertyTypeLayout("AssetImportInfo", FOnGetPropertyTypeCustomizationInstance::CreateStatic(&FAssetImportDataCustomization::MakeInstance));
-	RegisterCustomPropertyTypeLayout("ActorAnimationPlaybackSettings", FOnGetPropertyTypeCustomizationInstance::CreateStatic(&FActorAnimationPlaybackSettingsCustomization::MakeInstance));
 	RegisterCustomPropertyTypeLayout("CaptureResolution", FOnGetPropertyTypeCustomizationInstance::CreateStatic(&FCaptureResolutionCustomization::MakeInstance));
 	RegisterCustomPropertyTypeLayout("WeightedBlendable", FOnGetPropertyTypeCustomizationInstance::CreateStatic(&FWeightedBlendableCustomization::MakeInstance));
 }
@@ -298,10 +293,6 @@ void FDetailCustomizationsModule::RegisterObjectCustomizations()
 
 	RegisterCustomClassLayout("SourceCodeAccessSettings", FOnGetDetailCustomizationInstance::CreateStatic(&FSourceCodeAccessSettingsDetails::MakeInstance));
 	RegisterCustomClassLayout("ParticleSystemComponent", FOnGetDetailCustomizationInstance::CreateStatic(&FParticleSystemComponentDetails::MakeInstance));
-
-	RegisterCustomClassLayout("MediaPlayer", FOnGetDetailCustomizationInstance::CreateStatic(&FMediaPlayerCustomization::MakeInstance));
-	RegisterCustomClassLayout("MediaSoundWave", FOnGetDetailCustomizationInstance::CreateStatic(&FMediaSoundWaveCustomization::MakeInstance));
-	RegisterCustomClassLayout("MediaTexture", FOnGetDetailCustomizationInstance::CreateStatic(&FMediaTextureCustomization::MakeInstance));
 
 	RegisterCustomClassLayout("FbxImportUI", FOnGetDetailCustomizationInstance::CreateStatic(&FFbxImportUIDetails::MakeInstance));
 

@@ -15,7 +15,7 @@
 #include "Editor/ContentBrowser/Public/ContentBrowserModule.h"
 #include "EngineBuildSettings.h"
 #include "Matinee/MatineeActor.h"
-#include "MovieSceneActor.h"
+#include "LevelSequenceActor.h"
 #include "Engine/LevelScriptBlueprint.h"
 #include "ISettingsCategory.h"
 #include "ISettingsContainer.h"
@@ -1233,7 +1233,7 @@ TSharedRef< SWidget > FLevelEditorToolBar::MakeLevelEditorToolBar( const TShared
 			FUIAction(),
 			FOnGetContent::CreateStatic( &FLevelEditorToolBar::GenerateCinematicsMenuContent, InCommandList, TWeakPtr<SLevelEditor>( InLevelEditor ) ),
 			LOCTEXT( "EditCinematics_Label", "Cinematics" ),
-			LOCTEXT( "EditCinematics_Tooltip", "Displays a list of Matinee and Actor Animation objects to open in their respective editors"),
+			LOCTEXT( "EditCinematics_Tooltip", "Displays a list of Matinee and Level Sequence objects to open in their respective editors"),
 			FSlateIcon(FEditorStyle::GetStyleSetName(), "LevelEditor.EditMatinee") 
 			);
 	}
@@ -2031,7 +2031,7 @@ TSharedRef< SWidget > FLevelEditorToolBar::GenerateCinematicsMenuContent( TShare
 	const bool bShouldCloseWindowAfterMenuSelection = true;
 	FMenuBuilder MenuBuilder( bShouldCloseWindowAfterMenuSelection, InCommandList, Extender );
 
-	// We can't build a list of Matinees and MovieSceneActors while the current World is a PIE world.
+	// We can't build a list of Matinees and LevelSequenceActors while the current World is a PIE world.
 	SceneOutliner::FInitializationOptions InitOptions;
 	{
 		InitOptions.Mode = ESceneOutlinerMode::ActorPicker;
@@ -2044,7 +2044,7 @@ TSharedRef< SWidget > FLevelEditorToolBar::GenerateCinematicsMenuContent( TShare
 
 		// Only display Matinee and MovieScene actors
 		auto ActorFilter = [](const AActor* Actor){
-			return Actor->IsA( AMatineeActor::StaticClass() ) || Actor->IsA( AMovieSceneActor::StaticClass() );
+			return Actor->IsA( AMatineeActor::StaticClass() ) || Actor->IsA( ALevelSequenceActor::StaticClass() );
 		};
 		InitOptions.Filters->AddFilterPredicate( SceneOutliner::FActorFilterPredicate::CreateLambda( ActorFilter ) );
 	}
@@ -2100,7 +2100,7 @@ TSharedRef< SWidget > FLevelEditorToolBar::GenerateCinematicsMenuContent( TShare
 	MenuBuilder.EndSection();
 
 	UWorld* World = LevelEditorWeakPtr.Pin()->GetWorld();
-	const bool bHasAnyMatineeActors = !!TActorIterator<AMatineeActor>(World) || !!TActorIterator<AMovieSceneActor>(World);
+	const bool bHasAnyMatineeActors = !!TActorIterator<AMatineeActor>(World) || !!TActorIterator<ALevelSequenceActor>(World);
 
 	//Add a heading to separate the existing matinees from the 'Add New Matinee Actor' button
 	MenuBuilder.BeginSection("LevelEditorExistingMatinee", LOCTEXT( "MatineeMenuCombo_ExistingHeading", "Edit Existing Matinee" ) );
@@ -2123,17 +2123,18 @@ void FLevelEditorToolBar::OnCinematicsActorPicked( AActor* Actor )
 	FSlateApplication::Get().DismissAllMenus();
 
 	// Make sure we dismiss the menus before we open this
-	if(AMatineeActor* MatineeActor = Cast<AMatineeActor>(Actor))
+	if (AMatineeActor* MatineeActor = Cast<AMatineeActor>(Actor))
 	{
 		// Open Matinee for editing!
 		GEditor->OpenMatinee( MatineeActor );
 	}
-	else if (AMovieSceneActor* MovieSceneActor = Cast<AMovieSceneActor>(Actor))
+	else if (ALevelSequenceActor* LevelSequenceActor = Cast<ALevelSequenceActor>(Actor))
 	{
-		UObject* Animation = MovieSceneActor->ActorAnimation.TryLoad();
-		if (Animation)
+		UObject* Asset = LevelSequenceActor->LevelSequence.TryLoad();
+
+		if (Asset != nullptr)
 		{
-			FAssetEditorManager::Get().OpenEditorForAsset(Animation);
+			FAssetEditorManager::Get().OpenEditorForAsset(Asset);
 		}
 	}
 }

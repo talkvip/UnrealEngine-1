@@ -11,6 +11,18 @@ namespace UnrealBuildTool
 {
 	class MacPlatform : UEBuildPlatform
 	{
+		MacPlatformSDK SDK;
+
+		public MacPlatform(MacPlatformSDK InSDK) : base(UnrealTargetPlatform.Mac)
+		{
+			SDK = InSDK;
+		}
+
+		public override SDKStatus HasRequiredSDKsInstalled()
+		{
+			return SDK.HasRequiredSDKsInstalled();
+		}
+
 		public override bool CanUseXGE()
 		{
 			return false;
@@ -19,23 +31,6 @@ namespace UnrealBuildTool
 		public override bool CanUseDistcc()
 		{
 			return true;
-		}
-
-		protected override SDKStatus HasRequiredManualSDKInternal()
-		{
-			return SDKStatus.Valid;
-		}
-
-		/// <summary>
-		/// Register the platform with the UEBuildPlatform class
-		/// </summary>
-		protected override void RegisterBuildPlatformInternal()
-		{
-			// Register this build platform for Mac
-			Log.TraceVerbose("        Registering for {0}", UnrealTargetPlatform.Mac.ToString());
-			UEBuildPlatform.RegisterBuildPlatform(UnrealTargetPlatform.Mac, this);
-			UEBuildPlatform.RegisterPlatformWithGroup(UnrealTargetPlatform.Mac, UnrealPlatformGroup.Unix);
-			UEBuildPlatform.RegisterPlatformWithGroup(UnrealTargetPlatform.Mac, UnrealPlatformGroup.Apple);
 		}
 
 		/// <summary>
@@ -86,39 +81,54 @@ namespace UnrealBuildTool
 			return BuildConfiguration.bGeneratedSYMFile || BuildConfiguration.bUsePDBFiles ? ".dSYM" : "";
 		}
 
-		public override void ModifyModuleRules(string ModuleName, ModuleRules Rules, TargetInfo Target)
+		/// <summary>
+		/// Modify the rules for a newly created module, in a target that's being built for this platform.
+		/// This is not required - but allows for hiding details of a particular platform.
+		/// </summary>
+		/// <param name="ModuleName">The name of the module</param>
+		/// <param name="Rules">The module rules</param>
+		/// <param name="Target">The target being build</param>
+		public override void ModifyModuleRulesForActivePlatform(string ModuleName, ModuleRules Rules, TargetInfo Target)
 		{
-			if (Target.Platform == UnrealTargetPlatform.Mac)
+			bool bBuildShaderFormats = UEBuildConfiguration.bForceBuildShaderFormats;
+
+			if (!UEBuildConfiguration.bBuildRequiresCookedData)
 			{
-				bool bBuildShaderFormats = UEBuildConfiguration.bForceBuildShaderFormats;
-
-				if (!UEBuildConfiguration.bBuildRequiresCookedData)
-				{
-					if (ModuleName == "TargetPlatform")
-					{
-						bBuildShaderFormats = true;
-					}
-				}
-
-				// allow standalone tools to use target platform modules, without needing Engine
 				if (ModuleName == "TargetPlatform")
 				{
-					if (UEBuildConfiguration.bForceBuildTargetPlatforms)
-					{
-						Rules.DynamicallyLoadedModuleNames.Add("MacTargetPlatform");
-						Rules.DynamicallyLoadedModuleNames.Add("MacNoEditorTargetPlatform");
-						Rules.DynamicallyLoadedModuleNames.Add("MacClientTargetPlatform");
-						Rules.DynamicallyLoadedModuleNames.Add("MacServerTargetPlatform");
-						Rules.DynamicallyLoadedModuleNames.Add("AllDesktopTargetPlatform");
-					}
-
-					if (bBuildShaderFormats)
-					{
-						// Rules.DynamicallyLoadedModuleNames.Add("ShaderFormatD3D");
-						Rules.DynamicallyLoadedModuleNames.Add("ShaderFormatOpenGL");
-					}
+					bBuildShaderFormats = true;
 				}
 			}
+
+			// allow standalone tools to use target platform modules, without needing Engine
+			if (ModuleName == "TargetPlatform")
+			{
+				if (UEBuildConfiguration.bForceBuildTargetPlatforms)
+				{
+					Rules.DynamicallyLoadedModuleNames.Add("MacTargetPlatform");
+					Rules.DynamicallyLoadedModuleNames.Add("MacNoEditorTargetPlatform");
+					Rules.DynamicallyLoadedModuleNames.Add("MacClientTargetPlatform");
+					Rules.DynamicallyLoadedModuleNames.Add("MacServerTargetPlatform");
+					Rules.DynamicallyLoadedModuleNames.Add("AllDesktopTargetPlatform");
+				}
+
+				if (bBuildShaderFormats)
+				{
+					// Rules.DynamicallyLoadedModuleNames.Add("ShaderFormatD3D");
+					Rules.DynamicallyLoadedModuleNames.Add("ShaderFormatOpenGL");
+				}
+			}
+		}
+
+		/// <summary>
+		/// Modify the rules for a newly created module, where the target is a different host platform.
+		/// This is not required - but allows for hiding details of a particular platform.
+		/// </summary>
+		/// <param name="ModuleName">The name of the module</param>
+		/// <param name="Rules">The module rules</param>
+		/// <param name="Target">The target being build</param>
+		public override void ModifyModuleRulesForOtherPlatform(string ModuleName, ModuleRules Rules, TargetInfo Target)
+		{
 		}
 
 		/// <summary>
@@ -239,6 +249,32 @@ namespace UnrealBuildTool
 		{
 			DeploymentHandler = new UEDeployMac();
 			return true;
+		}
+	}
+
+	class MacPlatformSDK : UEBuildPlatformSDK
+	{
+		protected override SDKStatus HasRequiredManualSDKInternal()
+		{
+			return SDKStatus.Valid;
+		}
+	}
+
+	class MacPlatformFactory : UEBuildPlatformFactory
+	{
+		/// <summary>
+		/// Register the platform with the UEBuildPlatform class
+		/// </summary>
+		public override void RegisterBuildPlatforms()
+		{
+			MacPlatformSDK SDK = new MacPlatformSDK();
+			SDK.ManageAndValidateSDK();
+
+			// Register this build platform for Mac
+			Log.TraceVerbose("        Registering for {0}", UnrealTargetPlatform.Mac.ToString());
+			UEBuildPlatform.RegisterBuildPlatform(new MacPlatform(SDK));
+			UEBuildPlatform.RegisterPlatformWithGroup(UnrealTargetPlatform.Mac, UnrealPlatformGroup.Unix);
+			UEBuildPlatform.RegisterPlatformWithGroup(UnrealTargetPlatform.Mac, UnrealPlatformGroup.Apple);
 		}
 	}
 }

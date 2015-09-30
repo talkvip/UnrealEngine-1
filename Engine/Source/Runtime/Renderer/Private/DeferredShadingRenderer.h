@@ -116,6 +116,8 @@ public:
 	void RenderVisualizeTexturePool(FRHICommandListImmediate& RHICmdList);
 #endif
 
+	/** Offline culling of static triangles that won't be seen at runtime. */
+	void PreCullStaticMeshes(FRHICommandListImmediate& RHICmdList, const TArray<UStaticMeshComponent*>& ComponentsToPreCull, const TArray<TArray<FPlane> >& CullVolumes);
 
 	/** bound shader state for occlusion test prims */
 	static FGlobalBoundShaderState OcclusionTestBoundShaderState;
@@ -161,7 +163,7 @@ private:
 	 * Renders the scene's prepass and occlusion queries.
 	 * @return true if anything was rendered
 	 */
-	bool RenderPrePass(FRHICommandListImmediate& RHICmdList);
+	bool RenderPrePass(FRHICommandListImmediate& RHICmdList, bool bDepthWasCleared);
 
 	/**
 	 * Renders the active HMD's hidden area mask as a depth prepass, if available.

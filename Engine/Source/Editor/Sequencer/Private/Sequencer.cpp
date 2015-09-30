@@ -43,7 +43,7 @@
 #include "IMenu.h"
 
 #include "MovieSceneCaptureModule.h"
-#include "AutomatedActorAnimationCapture.h"
+#include "AutomatedLevelSequenceCapture.h"
 
 #define LOCTEXT_NAMESPACE "Sequencer"
 
@@ -237,7 +237,8 @@ void FSequencer::Tick(float InDeltaTime)
 		SetGlobalTimeDirectly(GetGlobalTime() + Offset);
 	}
 
-	float NewTime = GetGlobalTime() + InDeltaTime;
+	float NewTime = GetGlobalTime() + InDeltaTime * GWorld->GetWorldSettings()->MatineeTimeDilation;
+
 	if (PlaybackState == EMovieScenePlayerStatus::Playing ||
 		PlaybackState == EMovieScenePlayerStatus::Recording)
 	{
@@ -505,6 +506,14 @@ void FSequencer::SnapToFrame()
 		UpdateRuntimeInstances();
 	}
 }
+
+bool FSequencer::CanSnapToFrame() const
+{
+	const bool bKeysSelected = Selection.GetSelectedKeys().Num() > 0;
+
+	return bKeysSelected && CanShowFrameNumbers();
+}
+
 void FSequencer::SpawnOrDestroyPuppetObjects( TSharedRef<FMovieSceneSequenceInstance> MovieSceneInstance )
 {
 	UMovieSceneSequence* Sequence = MovieSceneInstance->GetSequence();
@@ -1101,16 +1110,18 @@ void FSequencer::UpdateTimeBoundsToFocusedMovieScene()
 	USequencerProjectSettings* ProjectSettings = GetMutableDefault<USequencerProjectSettings>();
 
 	const int32 InFrame = ProjectSettings->InFrame;
-	const int32 OutFrame = ProjectSettings->OutFrame;
+	const float Duration = ProjectSettings->Duration;
+	const bool bUsingFrameRate = SequencerSnapValues::IsTimeSnapIntervalFrameRate(Settings->GetTimeSnapInterval());
+	float FrameRate = 1.0f / Settings->GetTimeSnapInterval();
 
 	UMovieScene* FocusedMovieScene = GetFocusedMovieSceneSequence()->GetMovieScene();
 
 	float InTime = FocusedMovieScene->InTime;
 	if (InTime >= FLT_MAX)
 	{
-		if (SequencerSnapValues::IsTimeSnapIntervalFrameRate(Settings->GetTimeSnapInterval()))
+		if (bUsingFrameRate)
 		{
-			InTime = SequencerHelpers::FrameToTime(InFrame, 1.0f/Settings->GetTimeSnapInterval());
+			InTime = SequencerHelpers::FrameToTime(InFrame, FrameRate);
 		}
 		else
 		{
@@ -1121,22 +1132,24 @@ void FSequencer::UpdateTimeBoundsToFocusedMovieScene()
 	float OutTime = FocusedMovieScene->OutTime;
 	if (OutTime <= -FLT_MAX)
 	{
-		if (SequencerSnapValues::IsTimeSnapIntervalFrameRate(Settings->GetTimeSnapInterval()))
+		if (bUsingFrameRate)
 		{
-			OutTime = SequencerHelpers::FrameToTime(OutFrame, 1.0f/Settings->GetTimeSnapInterval());
+			OutTime = SequencerHelpers::FrameToTime(InFrame, FrameRate) + Duration;
+			int32 OutFrame = SequencerHelpers::TimeToFrame(OutTime, FrameRate);
+			OutTime = SequencerHelpers::FrameToTime(OutFrame, FrameRate);
 		}
 		else
 		{
-			OutTime = 5.0f;
+			OutTime = Duration;
 		}
 	}
 
 	float StartTime = FocusedMovieScene->StartTime;
 	if (StartTime >= FLT_MAX)
 	{
-		if (SequencerSnapValues::IsTimeSnapIntervalFrameRate(Settings->GetTimeSnapInterval()))
+		if (bUsingFrameRate)
 		{
-			StartTime = SequencerHelpers::FrameToTime(InFrame, 1.0f/Settings->GetTimeSnapInterval());
+			StartTime = SequencerHelpers::FrameToTime(InFrame, FrameRate);
 		}
 		else
 		{
@@ -1147,13 +1160,15 @@ void FSequencer::UpdateTimeBoundsToFocusedMovieScene()
 	float EndTime = FocusedMovieScene->EndTime;
 	if (EndTime <= -FLT_MAX)
 	{
-		if (SequencerSnapValues::IsTimeSnapIntervalFrameRate(Settings->GetTimeSnapInterval()))
+		if (bUsingFrameRate)
 		{
-			EndTime = SequencerHelpers::FrameToTime(OutFrame, 1.0f/Settings->GetTimeSnapInterval());
+			EndTime = SequencerHelpers::FrameToTime(InFrame, FrameRate) + Duration;
+			int32 EndFrame = SequencerHelpers::TimeToFrame(EndTime, FrameRate);
+			EndTime = SequencerHelpers::FrameToTime(EndFrame, FrameRate);
 		}
 		else
 		{
-			EndTime = 5.0f;
+			EndTime = Duration;
 		}
 	}
 
@@ -2350,12 +2365,12 @@ void FSequencer::BindSequencerCommands()
 			FLevelEditorModule& LevelEditorModule = FModuleManager::GetModuleChecked<FLevelEditorModule>(TEXT("LevelEditor"));
 			IMovieSceneCaptureModule& MovieSceneCaptureModule = IMovieSceneCaptureModule::Get();
 
-			// Create a new movie scene capture object for an automated actor animation, and open the tab
-			UAutomatedActorAnimationCapture* MovieSceneCapture = NewObject<UAutomatedActorAnimationCapture>(GetTransientPackage(), UAutomatedActorAnimationCapture::StaticClass(), NAME_None, RF_Transient);
+			// Create a new movie scene capture object for an automated level sequence, and open the tab
+			UAutomatedLevelSequenceCapture* MovieSceneCapture = NewObject<UAutomatedLevelSequenceCapture>(GetTransientPackage(), UAutomatedLevelSequenceCapture::StaticClass(), NAME_None, RF_Transient);
 			MovieSceneCapture->LoadConfig();
 
-			// Set the actor animation asset we want to render
-			MovieSceneCapture->ActorAnimation = GetCurrentAsset()->GetPathName();
+			// Set the level sequence asset we want to render
+			MovieSceneCapture->LevelSequence = GetCurrentAsset()->GetPathName();
 
 			// Set the level we want to render
 			for (const FWorldContext& Context : GEngine->GetWorldContexts())
@@ -2366,6 +2381,7 @@ void FSequencer::BindSequencerCommands()
 					break;
 				}
 			}
+
 			MovieSceneCaptureModule.OpenCaptureSettings(LevelEditorModule.GetLevelEditorTabManager().ToSharedRef(), MovieSceneCapture);
 		})
 	);

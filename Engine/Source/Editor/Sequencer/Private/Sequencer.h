@@ -145,6 +145,11 @@ public:
 	void SnapToFrame();
 
 	/**
+ 	 * Are there keys to snap? 
+	 */
+	bool CanSnapToFrame() const;
+
+	/**
 	 * @return Movie scene tools used by the sequencer
 	 */
 	const TArray<TSharedPtr<ISequencerTrackEditor>>& GetTrackEditors() const
@@ -376,7 +381,7 @@ protected:
 	}
 
 	/** 
-	 * Find the viewed actor animation asset in the content browser
+	 * Find the viewed sequence asset in the content browser
 	 */
 	void FindInContentBrowser();
 

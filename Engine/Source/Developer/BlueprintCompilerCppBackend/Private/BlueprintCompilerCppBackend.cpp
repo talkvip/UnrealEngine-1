@@ -99,7 +99,7 @@ void FBlueprintCompilerCppBackend::EmitAssignmentStatment(FEmitterLocalContext& 
 
 	FString BeginCast;
 	FString EndCast;
-	FEmitHelper::GenerateAutomaticCast(Statement.LHS->Type, Statement.RHS[0]->Type, BeginCast, EndCast);
+	FEmitHelper::GenerateAutomaticCast(EmitterContext, Statement.LHS->Type, Statement.RHS[0]->Type, BeginCast, EndCast);
 	EmitterContext.AddLine(FString::Printf(TEXT("%s = %s%s%s;"), *DestinationExpression, *BeginCast, *SourceExpression, *EndCast));
 }
 
@@ -161,7 +161,7 @@ void FBlueprintCompilerCppBackend::EmitDynamicCastStatement(FEmitterLocalContext
 	auto BPGC = Cast<UBlueprintGeneratedClass>(ClassPtr);
 	if (BPGC && !EmitterContext.Dependencies.WillClassBeConverted(BPGC))
 	{
-		const FString NativeClass = FEmitHelper::GetCppName(EmitterContext.GetFirstNativeParent(ClassPtr));
+		const FString NativeClass = FEmitHelper::GetCppName(EmitterContext.GetFirstNativeOrConvertedClass(ClassPtr));
 		const FString TargetClass = EmitterContext.FindGloballyMappedObject(ClassPtr, UClass::StaticClass(), true);
 		EmitterContext.AddLine(FString::Printf(TEXT("%s = NoNativeCast<%s>(%s, %s);"), *CastedValue, *NativeClass, *TargetClass, *ObjectValue));
 	}
@@ -391,7 +391,7 @@ FString FBlueprintCompilerCppBackend::EmitMethodInputParameterList(FEmitterLocal
 				check(Schema);
 				if (Schema->ConvertPropertyToPinType(FuncParamProperty, LType))
 				{
-					FEmitHelper::GenerateAutomaticCast(LType, Term->Type, BeginCast, CloseCast);
+					FEmitHelper::GenerateAutomaticCast(EmitterContext, LType, Term->Type, BeginCast, CloseCast);
 				}
 				VarName += BeginCast;
 				VarName += TermToText(EmitterContext, Term);
@@ -432,7 +432,7 @@ FString FBlueprintCompilerCppBackend::EmitCallStatmentInner(FEmitterLocalContext
 			check(Schema);
 			if (Schema->ConvertPropertyToPinType(FuncToCallReturnProperty, RType))
 			{
-				FEmitHelper::GenerateAutomaticCast(Statement.LHS->Type, RType, BeginCast, CloseCast);
+				FEmitHelper::GenerateAutomaticCast(EmitterContext, Statement.LHS->Type, RType, BeginCast, CloseCast);
 			}
 			Result += FString::Printf(TEXT("%s = %s"), *TermToText(EmitterContext, Statement.LHS), *BeginCast);
 		}
@@ -537,7 +537,7 @@ FString FBlueprintCompilerCppBackend::TermToText(FEmitterLocalContext& EmitterCo
 					: Cast<UClass>(Term->Context->Type.PinSubCategoryObject.Get());
 				if (MinimalClass)
 				{
-					MinimalClass = EmitterContext.GetFirstNativeParent(MinimalClass);
+					MinimalClass = EmitterContext.GetFirstNativeOrConvertedClass(MinimalClass);
 					ContextStr += FString::Printf(TEXT("GetDefaultValueSafe<%s>(")
 						, *FEmitHelper::GetCppName(MinimalClass));
 				}
@@ -631,9 +631,8 @@ FString FBlueprintCompilerCppBackend::LatentFunctionInfoTermToText(FEmitterLocal
 	return FEmitHelper::LiteralTerm(EmitterContext, Term->Type, StructValues, nullptr);
 }
 
-FString FBlueprintCompilerCppBackend::InnerFunctionImplementation(FKismetFunctionContext& FunctionContext, FEmitterLocalContext& EmitterContext, bool bUseSwitchState)
+void FBlueprintCompilerCppBackend::InnerFunctionImplementation(FKismetFunctionContext& FunctionContext, FEmitterLocalContext& EmitterContext, bool bUseSwitchState)
 {
-	EmitterContext.IncreaseIndent();
 	if (bUseSwitchState)
 	{
 		if (FunctionContext.bUseFlowStack)
@@ -786,10 +785,4 @@ FString FBlueprintCompilerCppBackend::InnerFunctionImplementation(FKismetFunctio
 		EmitterContext.DecreaseIndent();
 		EmitterContext.AddLine(TEXT("} while( CurrentState != -1 );"));
 	}
-
-
-	const FString Result = EmitterContext.GetResult();
-	EmitterContext.ClearResult();
-	EmitterContext.DecreaseIndent();
-	return Result;
 }

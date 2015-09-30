@@ -50,6 +50,18 @@ namespace UnrealBuildTool
 
 		private bool bInitializedProject = false;
 
+		IOSPlatformSDK SDK;
+
+		public IOSPlatform(IOSPlatformSDK InSDK) : base(UnrealTargetPlatform.IOS)
+		{
+			SDK = InSDK;
+		}
+
+		public override SDKStatus HasRequiredSDKsInstalled()
+		{
+			return SDK.HasRequiredSDKsInstalled();
+		}
+
 		public string GetRunTimeVersion()
 		{
 			return RunTimeIOSVersion;
@@ -76,45 +88,6 @@ namespace UnrealBuildTool
 		public override string GetActiveArchitecture()
 		{
 			return IOSArchitecture;
-		}
-
-		protected override SDKStatus HasRequiredManualSDKInternal()
-		{
-			if (!Utils.IsRunningOnMono)
-			{
-				// check to see if iTunes is installed
-				string dllPath = Microsoft.Win32.Registry.GetValue("HKEY_LOCAL_MACHINE\\SOFTWARE\\Wow6432Node\\Apple Inc.\\Apple Mobile Device Support\\Shared", "iTunesMobileDeviceDLL", null) as string;
-				if (String.IsNullOrEmpty(dllPath) || !File.Exists(dllPath))
-				{
-					dllPath = Microsoft.Win32.Registry.GetValue("HKEY_LOCAL_MACHINE\\SOFTWARE\\Wow6432Node\\Apple Inc.\\Apple Mobile Device Support\\Shared", "MobileDeviceDLL", null) as string;
-					if (String.IsNullOrEmpty(dllPath) || !File.Exists(dllPath))
-					{
-						return SDKStatus.Invalid;
-					}
-				}
-			}
-			return SDKStatus.Valid;
-		}
-
-		/// <summary>
-		/// Register the platform with the UEBuildPlatform class
-		/// </summary>
-		protected override void RegisterBuildPlatformInternal()
-		{
-			// Register this build platform for IOS
-			Log.TraceVerbose("        Registering for {0}", UnrealTargetPlatform.IOS.ToString());
-			UEBuildPlatform.RegisterBuildPlatform(UnrealTargetPlatform.IOS, this);
-			UEBuildPlatform.RegisterPlatformWithGroup(UnrealTargetPlatform.IOS, UnrealPlatformGroup.Unix);
-			UEBuildPlatform.RegisterPlatformWithGroup(UnrealTargetPlatform.IOS, UnrealPlatformGroup.Apple);
-
-			if (GetActiveArchitecture() == "-simulator")
-			{
-				UEBuildPlatform.RegisterPlatformWithGroup(UnrealTargetPlatform.IOS, UnrealPlatformGroup.Simulator);
-			}
-			else
-			{
-				UEBuildPlatform.RegisterPlatformWithGroup(UnrealTargetPlatform.IOS, UnrealPlatformGroup.Device);
-			}
 		}
 
 		/// <summary>
@@ -414,14 +387,24 @@ namespace UnrealBuildTool
 		}
 
 		/// <summary>
-		/// Modify the newly created module passed in for this platform.
-		/// This is not required - but allows for hiding details of a
-		/// particular platform.
+		/// Modify the rules for a newly created module, in a target that's being built for this platform.
+		/// This is not required - but allows for hiding details of a particular platform.
 		/// </summary>
-		/// <param name="">Name   The name of the module</param>
-		/// <param name="Rules">  The module rules</param>
-		/// <param name="Target">  The target being build</param>
-		public override void ModifyModuleRules(string ModuleName, ModuleRules Rules, TargetInfo Target)
+		/// <param name="ModuleName">The name of the module</param>
+		/// <param name="Rules">The module rules</param>
+		/// <param name="Target">The target being build</param>
+		public override void ModifyModuleRulesForActivePlatform(string ModuleName, ModuleRules Rules, TargetInfo Target)
+		{
+		}
+
+		/// <summary>
+		/// Modify the rules for a newly created module, where the target is a different host platform.
+		/// This is not required - but allows for hiding details of a particular platform.
+		/// </summary>
+		/// <param name="ModuleName">The name of the module</param>
+		/// <param name="Rules">The module rules</param>
+		/// <param name="Target">The target being build</param>
+		public override void ModifyModuleRulesForOtherPlatform(string ModuleName, ModuleRules Rules, TargetInfo Target)
 		{
 			if ((Target.Platform == UnrealTargetPlatform.Win32) || (Target.Platform == UnrealTargetPlatform.Win64) || (Target.Platform == UnrealTargetPlatform.Mac))
 			{
@@ -483,6 +466,54 @@ namespace UnrealBuildTool
 		{
 			DeploymentHandler = new UEDeployIOS();
 			return true;
+		}
+	}
+
+	public class IOSPlatformSDK : UEBuildPlatformSDK
+	{
+		protected override SDKStatus HasRequiredManualSDKInternal()
+		{
+			if (!Utils.IsRunningOnMono)
+			{
+				// check to see if iTunes is installed
+				string dllPath = Microsoft.Win32.Registry.GetValue("HKEY_LOCAL_MACHINE\\SOFTWARE\\Wow6432Node\\Apple Inc.\\Apple Mobile Device Support\\Shared", "iTunesMobileDeviceDLL", null) as string;
+				if (String.IsNullOrEmpty(dllPath) || !File.Exists(dllPath))
+				{
+					dllPath = Microsoft.Win32.Registry.GetValue("HKEY_LOCAL_MACHINE\\SOFTWARE\\Wow6432Node\\Apple Inc.\\Apple Mobile Device Support\\Shared", "MobileDeviceDLL", null) as string;
+					if (String.IsNullOrEmpty(dllPath) || !File.Exists(dllPath))
+					{
+						return SDKStatus.Invalid;
+					}
+				}
+			}
+			return SDKStatus.Valid;
+		}
+	}
+
+	public class IOSPlatformFactory : UEBuildPlatformFactory
+	{
+		/// <summary>
+		/// Register the platform with the UEBuildPlatform class
+		/// </summary>
+		public override void RegisterBuildPlatforms()
+		{
+			IOSPlatformSDK SDK = new IOSPlatformSDK();
+			SDK.ManageAndValidateSDK();
+
+			// Register this build platform for IOS
+			Log.TraceVerbose("        Registering for {0}", UnrealTargetPlatform.IOS.ToString());
+			UEBuildPlatform.RegisterBuildPlatform(new IOSPlatform(SDK));
+			UEBuildPlatform.RegisterPlatformWithGroup(UnrealTargetPlatform.IOS, UnrealPlatformGroup.Unix);
+			UEBuildPlatform.RegisterPlatformWithGroup(UnrealTargetPlatform.IOS, UnrealPlatformGroup.Apple);
+
+			if (IOSPlatform.IOSArchitecture == "-simulator")
+			{
+				UEBuildPlatform.RegisterPlatformWithGroup(UnrealTargetPlatform.IOS, UnrealPlatformGroup.Simulator);
+			}
+			else
+			{
+				UEBuildPlatform.RegisterPlatformWithGroup(UnrealTargetPlatform.IOS, UnrealPlatformGroup.Device);
+			}
 		}
 	}
 }

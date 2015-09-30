@@ -2,6 +2,7 @@
 
 #include "UMGPrivatePCH.h"
 #include "WidgetRenderer.h"
+#include "HittestGrid.h"
 
 #if !UE_SERVER
 #include "ISlateRHIRendererModule.h"
@@ -20,7 +21,9 @@ void SVirtualWindow::Construct(const FArguments& InArgs)
 
 FWidgetRenderer::FWidgetRenderer()
 {
+#if !UE_SERVER
 	Renderer = FModuleManager::Get().LoadModuleChecked<ISlateRHIRendererModule>("SlateRHIRenderer").CreateSlate3DRenderer();
+#endif
 }
 
 FWidgetRenderer::~FWidgetRenderer()
@@ -46,7 +49,7 @@ UTextureRenderTarget2D* FWidgetRenderer::DrawWidget(TSharedRef<SWidget>& Widget,
 void FWidgetRenderer::DrawWidget(UTextureRenderTarget2D* RenderTarget, TSharedRef<SWidget>& Widget, FVector2D DrawSize, float DeltaTime)
 {
 	TSharedRef<SVirtualWindow> Window = SNew(SVirtualWindow).Size(DrawSize);
-	TSharedRef<FHittestGrid> HitTestGrid = MakeShareable(new FHittestGrid);
+	TSharedRef<FHittestGrid> HitTestGrid = MakeShareable(new FHittestGrid());
 
 	Window->SetContent(Widget);
 	Window->Resize(DrawSize);

@@ -12,6 +12,18 @@ namespace UnrealBuildTool
 {
 	class AndroidPlatform : UEBuildPlatform
 	{
+		AndroidPlatformSDK SDK;
+
+		public AndroidPlatform(AndroidPlatformSDK InSDK) : base(UnrealTargetPlatform.Android)
+		{
+			SDK = InSDK;
+		}
+
+		public override SDKStatus HasRequiredSDKsInstalled()
+		{
+			return SDK.HasRequiredSDKsInstalled();
+		}
+
 		// The current architecture - affects everything about how UBT operates on Android
 		public override string GetActiveArchitecture()
 		{
@@ -22,163 +34,6 @@ namespace UnrealBuildTool
 		public override bool CanUseXGE()
 		{
 			return false;
-		}
-
-		protected override bool PlatformSupportsAutoSDKs()
-		{
-			return true;
-		}
-
-		public override string GetSDKTargetPlatformName()
-		{
-			return "Android";
-		}
-
-		protected override string GetRequiredSDKString()
-		{
-			return "-19";
-		}
-
-		protected override String GetRequiredScriptVersionString()
-		{
-			return "3.0";
-		}
-
-		// prefer auto sdk on android as correct 'manual' sdk detection isn't great at the moment.
-		protected override bool PreferAutoSDK()
-		{
-			return true;
-		}
-
-		/// <summary>
-		/// checks if the sdk is installed or has been synced
-		/// </summary>
-		/// <returns></returns>
-		private bool HasAnySDK()
-		{
-			string NDKPath = Environment.GetEnvironmentVariable("NDKROOT");
-			{
-				var configCacheIni = ConfigCacheIni.CreateConfigCacheIni(UnrealTargetPlatform.Unknown, "Engine", (DirectoryReference)null);
-				var AndroidEnv = new Dictionary<string, string>();
-
-				Dictionary<string, string> EnvVarNames = new Dictionary<string, string> { 
-                                                         {"ANDROID_HOME", "SDKPath"}, 
-                                                         {"NDKROOT", "NDKPath"}, 
-                                                         {"ANT_HOME", "ANTPath"},
-                                                         {"JAVA_HOME", "JavaPath"}
-                                                         };
-
-				string path;
-				foreach (var kvp in EnvVarNames)
-				{
-					if (configCacheIni.GetPath("/Script/AndroidPlatformEditor.AndroidSDKSettings", kvp.Value, out path) && !string.IsNullOrEmpty(path))
-					{
-						AndroidEnv.Add(kvp.Key, path);
-					}
-					else
-					{
-						var envValue = Environment.GetEnvironmentVariable(kvp.Key);
-						if (!String.IsNullOrEmpty(envValue))
-						{
-							AndroidEnv.Add(kvp.Key, envValue);
-						}
-					}
-				}
-
-				// If we are on Mono and we are still missing a key then go and find it from the .bash_profile
-				if (Utils.IsRunningOnMono && !EnvVarNames.All(s => AndroidEnv.ContainsKey(s.Key)))
-				{
-					string BashProfilePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Personal), ".bash_profile");
-					if (File.Exists(BashProfilePath))
-					{
-						string[] BashProfileContents = File.ReadAllLines(BashProfilePath);
-
-						// Walk backwards so we keep the last export setting instead of the first
-						for (int LineIndex = BashProfileContents.Length - 1; LineIndex >= 0; --LineIndex)
-						{
-							foreach (var kvp in EnvVarNames)
-							{
-								if (AndroidEnv.ContainsKey(kvp.Key))
-								{
-									continue;
-								}
-
-								if (BashProfileContents[LineIndex].StartsWith("export " + kvp.Key + "="))
-								{
-									string PathVar = BashProfileContents[LineIndex].Split('=')[1].Replace("\"", "");
-									AndroidEnv.Add(kvp.Key, PathVar);
-								}
-							}
-						}
-					}
-				}
-
-				// Set for the process
-				foreach (var kvp in AndroidEnv)
-				{
-					Environment.SetEnvironmentVariable(kvp.Key, kvp.Value);
-				}
-
-				// See if we have an NDK path now...
-				AndroidEnv.TryGetValue("NDKROOT", out NDKPath);
-			}
-
-			// we don't have an NDKROOT specified
-			if (String.IsNullOrEmpty(NDKPath))
-			{
-				return false;
-			}
-
-			NDKPath = NDKPath.Replace("\"", "");
-
-			// need a supported llvm
-			if (!Directory.Exists(Path.Combine(NDKPath, @"toolchains/llvm-3.6")) &&
-				!Directory.Exists(Path.Combine(NDKPath, @"toolchains/llvm-3.5")) &&
-				!Directory.Exists(Path.Combine(NDKPath, @"toolchains/llvm-3.3")) &&
-				!Directory.Exists(Path.Combine(NDKPath, @"toolchains/llvm-3.1")))
-			{
-				return false;
-			}
-			return true;
-		}
-
-
-		protected override SDKStatus HasRequiredManualSDKInternal()
-		{
-			// if any autosdk setup has been done then the local process environment is suspect
-			if (HasSetupAutoSDK())
-			{
-				return SDKStatus.Invalid;
-			}
-
-			if (HasAnySDK())
-			{
-				return SDKStatus.Valid;
-			}
-
-			return SDKStatus.Invalid;
-		}
-
-		protected override void RegisterBuildPlatformInternal()
-		{
-			if ((ProjectFileGenerator.bGenerateProjectFiles == true) || (HasRequiredSDKsInstalled() == SDKStatus.Valid) || Environment.GetEnvironmentVariable("IsBuildMachine") == "1")
-			{
-				bool bRegisterBuildPlatform = true;
-
-				FileReference AndroidTargetPlatformFile = FileReference.Combine(UnrealBuildTool.EngineSourceDirectory, "Developer", "Android", "AndroidTargetPlatform", "AndroidTargetPlatform.Build.cs");
-				if (AndroidTargetPlatformFile.Exists() == false)
-				{
-					bRegisterBuildPlatform = false;
-				}
-
-				if (bRegisterBuildPlatform == true)
-				{
-					// Register this build platform
-					Log.TraceVerbose("        Registering for {0}", UnrealTargetPlatform.Android.ToString());
-					UEBuildPlatform.RegisterBuildPlatform(UnrealTargetPlatform.Android, this);
-					UEBuildPlatform.RegisterPlatformWithGroup(UnrealTargetPlatform.Android, UnrealPlatformGroup.Android);
-				}
-			}
 		}
 
 		public override CPPTargetPlatform GetCPPTargetPlatform(UnrealTargetPlatform InUnrealTargetPlatform)
@@ -296,7 +151,25 @@ namespace UnrealBuildTool
 		{
 		}
 
-		public override void ModifyModuleRules(string ModuleName, ModuleRules Rules, TargetInfo Target)
+		/// <summary>
+		/// Modify the rules for a newly created module, in a target that's being built for this platform.
+		/// This is not required - but allows for hiding details of a particular platform.
+		/// </summary>
+		/// <param name="ModuleName">The name of the module</param>
+		/// <param name="Rules">The module rules</param>
+		/// <param name="Target">The target being build</param>
+		public override void ModifyModuleRulesForActivePlatform(string ModuleName, ModuleRules Rules, TargetInfo Target)
+		{
+		}
+
+		/// <summary>
+		/// Modify the rules for a newly created module, where the target is a different host platform.
+		/// This is not required - but allows for hiding details of a particular platform.
+		/// </summary>
+		/// <param name="ModuleName">The name of the module</param>
+		/// <param name="Rules">The module rules</param>
+		/// <param name="Target">The target being build</param>
+		public override void ModifyModuleRulesForOtherPlatform(string ModuleName, ModuleRules Rules, TargetInfo Target)
 		{
 			if ((Target.Platform == UnrealTargetPlatform.Win32) || (Target.Platform == UnrealTargetPlatform.Win64) || (Target.Platform == UnrealTargetPlatform.Mac))
 			{
@@ -490,6 +363,171 @@ namespace UnrealBuildTool
 		{
 			DeploymentHandler = new UEDeployAndroid(ProjectFile);
 			return true;
+		}
+	}
+
+	class AndroidPlatformSDK : UEBuildPlatformSDK
+	{
+		protected override bool PlatformSupportsAutoSDKs()
+		{
+			return true;
+		}
+
+		public override string GetSDKTargetPlatformName()
+		{
+			return "Android";
+		}
+
+		protected override string GetRequiredSDKString()
+		{
+			return "-19";
+		}
+
+		protected override String GetRequiredScriptVersionString()
+		{
+			return "3.0";
+		}
+
+		// prefer auto sdk on android as correct 'manual' sdk detection isn't great at the moment.
+		protected override bool PreferAutoSDK()
+		{
+			return true;
+		}
+
+		/// <summary>
+		/// checks if the sdk is installed or has been synced
+		/// </summary>
+		/// <returns></returns>
+		private bool HasAnySDK()
+		{
+			string NDKPath = Environment.GetEnvironmentVariable("NDKROOT");
+			{
+				var configCacheIni = ConfigCacheIni.CreateConfigCacheIni(UnrealTargetPlatform.Unknown, "Engine", (DirectoryReference)null);
+				var AndroidEnv = new Dictionary<string, string>();
+
+				Dictionary<string, string> EnvVarNames = new Dictionary<string, string> { 
+                                                         {"ANDROID_HOME", "SDKPath"}, 
+                                                         {"NDKROOT", "NDKPath"}, 
+                                                         {"ANT_HOME", "ANTPath"},
+                                                         {"JAVA_HOME", "JavaPath"}
+                                                         };
+
+				string path;
+				foreach (var kvp in EnvVarNames)
+				{
+					if (configCacheIni.GetPath("/Script/AndroidPlatformEditor.AndroidSDKSettings", kvp.Value, out path) && !string.IsNullOrEmpty(path))
+					{
+						AndroidEnv.Add(kvp.Key, path);
+					}
+					else
+					{
+						var envValue = Environment.GetEnvironmentVariable(kvp.Key);
+						if (!String.IsNullOrEmpty(envValue))
+						{
+							AndroidEnv.Add(kvp.Key, envValue);
+						}
+					}
+				}
+
+				// If we are on Mono and we are still missing a key then go and find it from the .bash_profile
+				if (Utils.IsRunningOnMono && !EnvVarNames.All(s => AndroidEnv.ContainsKey(s.Key)))
+				{
+					string BashProfilePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Personal), ".bash_profile");
+					if (File.Exists(BashProfilePath))
+					{
+						string[] BashProfileContents = File.ReadAllLines(BashProfilePath);
+
+						// Walk backwards so we keep the last export setting instead of the first
+						for (int LineIndex = BashProfileContents.Length - 1; LineIndex >= 0; --LineIndex)
+						{
+							foreach (var kvp in EnvVarNames)
+							{
+								if (AndroidEnv.ContainsKey(kvp.Key))
+								{
+									continue;
+								}
+
+								if (BashProfileContents[LineIndex].StartsWith("export " + kvp.Key + "="))
+								{
+									string PathVar = BashProfileContents[LineIndex].Split('=')[1].Replace("\"", "");
+									AndroidEnv.Add(kvp.Key, PathVar);
+								}
+							}
+						}
+					}
+				}
+
+				// Set for the process
+				foreach (var kvp in AndroidEnv)
+				{
+					Environment.SetEnvironmentVariable(kvp.Key, kvp.Value);
+				}
+
+				// See if we have an NDK path now...
+				AndroidEnv.TryGetValue("NDKROOT", out NDKPath);
+			}
+
+			// we don't have an NDKROOT specified
+			if (String.IsNullOrEmpty(NDKPath))
+			{
+				return false;
+			}
+
+			NDKPath = NDKPath.Replace("\"", "");
+
+			// need a supported llvm
+			if (!Directory.Exists(Path.Combine(NDKPath, @"toolchains/llvm-3.6")) &&
+				!Directory.Exists(Path.Combine(NDKPath, @"toolchains/llvm-3.5")) &&
+				!Directory.Exists(Path.Combine(NDKPath, @"toolchains/llvm-3.3")) &&
+				!Directory.Exists(Path.Combine(NDKPath, @"toolchains/llvm-3.1")))
+			{
+				return false;
+			}
+			return true;
+		}
+
+		protected override SDKStatus HasRequiredManualSDKInternal()
+		{
+			// if any autosdk setup has been done then the local process environment is suspect
+			if (HasSetupAutoSDK())
+			{
+				return SDKStatus.Invalid;
+			}
+
+			if (HasAnySDK())
+			{
+				return SDKStatus.Valid;
+			}
+
+			return SDKStatus.Invalid;
+		}
+	}
+
+	public class AndroidPlatformFactory : UEBuildPlatformFactory
+	{
+		public override void RegisterBuildPlatforms()
+		{
+			AndroidPlatformSDK SDK = new AndroidPlatformSDK();
+			SDK.ManageAndValidateSDK();
+
+			if ((ProjectFileGenerator.bGenerateProjectFiles == true) || (SDK.HasRequiredSDKsInstalled() == SDKStatus.Valid) || Environment.GetEnvironmentVariable("IsBuildMachine") == "1")
+			{
+				bool bRegisterBuildPlatform = true;
+
+				FileReference AndroidTargetPlatformFile = FileReference.Combine(UnrealBuildTool.EngineSourceDirectory, "Developer", "Android", "AndroidTargetPlatform", "AndroidTargetPlatform.Build.cs");
+				if (AndroidTargetPlatformFile.Exists() == false)
+				{
+					bRegisterBuildPlatform = false;
+				}
+
+				if (bRegisterBuildPlatform == true)
+				{
+					// Register this build platform
+					Log.TraceVerbose("        Registering for {0}", UnrealTargetPlatform.Android.ToString());
+					UEBuildPlatform.RegisterBuildPlatform(new AndroidPlatform(SDK));
+					UEBuildPlatform.RegisterPlatformWithGroup(UnrealTargetPlatform.Android, UnrealPlatformGroup.Android);
+				}
+			}
 		}
 	}
 }

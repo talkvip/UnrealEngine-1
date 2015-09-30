@@ -58,20 +58,18 @@ namespace UnrealBuildTool
 				}
 
 				// Second, default based on what's installed, from newest to oldest
-				// @todo UWP: Currently we default to VS 2013, even if VS 2015 is installed, until the engine is fully updated to
-				// support compiling with VS 2015.  You can override this with the "-2015" command-line switch.
-				// 				else if (!String.IsNullOrEmpty(WindowsPlatform.GetVSComnToolsPath(WindowsCompiler.VisualStudio2015)))
-				// 				{
-				// 					CachedCompiler = WindowsCompiler.VisualStudio2015;
-				// 				}
+ 				else if (!String.IsNullOrEmpty(WindowsPlatform.GetVSComnToolsPath(WindowsCompiler.VisualStudio2015)))
+ 				{
+ 					CachedCompiler = WindowsCompiler.VisualStudio2015;
+ 				}
 				else if (!String.IsNullOrEmpty(WindowsPlatform.GetVSComnToolsPath(WindowsCompiler.VisualStudio2013)))
 				{
 					CachedCompiler = WindowsCompiler.VisualStudio2013;
 				}
 				else
 				{
-					// Finally assume 2013 is installed to defer errors somewhere else like VCToolChain
-					CachedCompiler = WindowsCompiler.VisualStudio2013;
+					// Finally assume 2015 is installed to defer errors somewhere else like VCToolChain
+					CachedCompiler = WindowsCompiler.VisualStudio2015;
 				}
 
 				return CachedCompiler.Value;
@@ -149,17 +147,31 @@ namespace UnrealBuildTool
 			}
 		}
 
+		WindowsPlatformSDK SDK;
+
+		/// <summary>
+		/// Constructor
+		/// </summary>
+		/// <param name="InPlatform">Creates a windows platform with the given enum value</param>
+		public WindowsPlatform(UnrealTargetPlatform InPlatform, WindowsPlatformSDK InSDK) : base(InPlatform)
+		{
+			SDK = InSDK;
+		}
+
+		/// <summary>
+		/// Whether the required external SDKs are installed for this platform. Could be either a manual install or an AutoSDK.
+		/// </summary>
+		public override SDKStatus HasRequiredSDKsInstalled()
+		{
+			return SDK.HasRequiredSDKsInstalled();
+		}
+
 		/// <summary>
 		/// The current architecture
 		/// </summary>
 		public override string GetActiveArchitecture()
 		{
 			return IsWindowsXPSupported() ? "_XP" : base.GetActiveArchitecture();
-		}
-
-		protected override SDKStatus HasRequiredManualSDKInternal()
-		{
-			return SDKStatus.Valid;
 		}
 
 		/// <summary>
@@ -239,23 +251,6 @@ namespace UnrealBuildTool
 			{
 				return false;
 			}
-		}
-
-		/// <summary>
-		/// Register the platform with the UEBuildPlatform class
-		/// </summary>
-		protected override void RegisterBuildPlatformInternal()
-		{
-			// Register this build platform for both Win64 and Win32
-			Log.TraceVerbose("        Registering for {0}", UnrealTargetPlatform.Win64.ToString());
-			UEBuildPlatform.RegisterBuildPlatform(UnrealTargetPlatform.Win64, this);
-			UEBuildPlatform.RegisterPlatformWithGroup(UnrealTargetPlatform.Win64, UnrealPlatformGroup.Windows);
-			UEBuildPlatform.RegisterPlatformWithGroup(UnrealTargetPlatform.Win64, UnrealPlatformGroup.Microsoft);
-
-			Log.TraceVerbose("        Registering for {0}", UnrealTargetPlatform.Win32.ToString());
-			UEBuildPlatform.RegisterBuildPlatform(UnrealTargetPlatform.Win32, this);
-			UEBuildPlatform.RegisterPlatformWithGroup(UnrealTargetPlatform.Win32, UnrealPlatformGroup.Windows);
-			UEBuildPlatform.RegisterPlatformWithGroup(UnrealTargetPlatform.Win32, UnrealPlatformGroup.Microsoft);
 		}
 
 		/// <summary>
@@ -466,60 +461,75 @@ namespace UnrealBuildTool
 			UEBuildConfiguration.bCompileICU = true;
 		}
 
-		public override void ModifyModuleRules(string ModuleName, ModuleRules Rules, TargetInfo Target)
+		/// <summary>
+		/// Modify the rules for a newly created module, in a target that's being built for this platform.
+		/// This is not required - but allows for hiding details of a particular platform.
+		/// </summary>
+		/// <param name="ModuleName">The name of the module</param>
+		/// <param name="Rules">The module rules</param>
+		/// <param name="Target">The target being build</param>
+		public override void ModifyModuleRulesForActivePlatform(string ModuleName, ModuleRules Rules, TargetInfo Target)
 		{
-			if ((Target.Platform == UnrealTargetPlatform.Win32) || (Target.Platform == UnrealTargetPlatform.Win64))
+			bool bBuildShaderFormats = UEBuildConfiguration.bForceBuildShaderFormats;
+
+			if (!UEBuildConfiguration.bBuildRequiresCookedData)
 			{
-				bool bBuildShaderFormats = UEBuildConfiguration.bForceBuildShaderFormats;
-
-				if (!UEBuildConfiguration.bBuildRequiresCookedData)
-				{
-					if (ModuleName == "TargetPlatform")
-					{
-						bBuildShaderFormats = true;
-					}
-				}
-
-				// allow standalone tools to use target platform modules, without needing Engine
 				if (ModuleName == "TargetPlatform")
 				{
-					if (UEBuildConfiguration.bForceBuildTargetPlatforms)
-					{
-						Rules.DynamicallyLoadedModuleNames.Add("WindowsTargetPlatform");
-						Rules.DynamicallyLoadedModuleNames.Add("WindowsNoEditorTargetPlatform");
-						Rules.DynamicallyLoadedModuleNames.Add("WindowsServerTargetPlatform");
-						Rules.DynamicallyLoadedModuleNames.Add("WindowsClientTargetPlatform");
-						Rules.DynamicallyLoadedModuleNames.Add("AllDesktopTargetPlatform");
-					}
+					bBuildShaderFormats = true;
+				}
+			}
 
-					if (bBuildShaderFormats)
-					{
-						Rules.DynamicallyLoadedModuleNames.Add("ShaderFormatD3D");
-						Rules.DynamicallyLoadedModuleNames.Add("ShaderFormatOpenGL");
+			// allow standalone tools to use target platform modules, without needing Engine
+			if (ModuleName == "TargetPlatform")
+			{
+				if (UEBuildConfiguration.bForceBuildTargetPlatforms)
+				{
+					Rules.DynamicallyLoadedModuleNames.Add("WindowsTargetPlatform");
+					Rules.DynamicallyLoadedModuleNames.Add("WindowsNoEditorTargetPlatform");
+					Rules.DynamicallyLoadedModuleNames.Add("WindowsServerTargetPlatform");
+					Rules.DynamicallyLoadedModuleNames.Add("WindowsClientTargetPlatform");
+					Rules.DynamicallyLoadedModuleNames.Add("AllDesktopTargetPlatform");
+				}
 
-						//#todo-rco: Remove when public
-						string VulkanSDKPath = Environment.GetEnvironmentVariable("VK_SDK_PATH");
+				if (bBuildShaderFormats)
+				{
+					Rules.DynamicallyLoadedModuleNames.Add("ShaderFormatD3D");
+					Rules.DynamicallyLoadedModuleNames.Add("ShaderFormatOpenGL");
+
+					//#todo-rco: Remove when public
+					string VulkanSDKPath = Environment.GetEnvironmentVariable("VK_SDK_PATH");
+					{
+						if (!String.IsNullOrEmpty(VulkanSDKPath))
 						{
-							if (!String.IsNullOrEmpty(VulkanSDKPath))
-							{
-								Rules.DynamicallyLoadedModuleNames.Add("VulkanShaderFormat");
-							}
+							Rules.DynamicallyLoadedModuleNames.Add("VulkanShaderFormat");
 						}
 					}
 				}
-
-				if (ModuleName == "D3D11RHI")
-				{
-					// To enable platform specific D3D11 RHI Types
-					Rules.PrivateIncludePaths.Add("Runtime/Windows/D3D11RHI/Private/Windows");
-				}
-
-				if (ModuleName == "D3D12RHI")
-				{
-					// To enable platform specific D3D12 RHI Types
-					Rules.PrivateIncludePaths.Add("Runtime/Windows/D3D12RHI/Private/Windows");
-				}
 			}
+
+			if (ModuleName == "D3D11RHI")
+			{
+				// To enable platform specific D3D11 RHI Types
+				Rules.PrivateIncludePaths.Add("Runtime/Windows/D3D11RHI/Private/Windows");
+			}
+
+			if (ModuleName == "D3D12RHI")
+			{
+				// To enable platform specific D3D12 RHI Types
+				Rules.PrivateIncludePaths.Add("Runtime/Windows/D3D12RHI/Private/Windows");
+			}
+		}
+
+		/// <summary>
+		/// Modify the rules for a newly created module, where the target is a different host platform.
+		/// This is not required - but allows for hiding details of a particular platform.
+		/// </summary>
+		/// <param name="ModuleName">The name of the module</param>
+		/// <param name="Rules">The module rules</param>
+		/// <param name="Target">The target being build</param>
+		public override void ModifyModuleRulesForOtherPlatform(string ModuleName, ModuleRules Rules, TargetInfo Target)
+		{
 		}
 
 		/// <summary>
@@ -801,6 +811,37 @@ namespace UnrealBuildTool
 		{
 			DeploymentHandler = null;
 			return false;
+		}
+	}
+
+	public class WindowsPlatformSDK : UEBuildPlatformSDK
+	{
+		protected override SDKStatus HasRequiredManualSDKInternal()
+		{
+			return SDKStatus.Valid;
+		}
+	}
+
+	class WindowsPlatformFactory : UEBuildPlatformFactory
+	{
+		/// <summary>
+		/// Register the platform with the UEBuildPlatform class
+		/// </summary>
+		public override void RegisterBuildPlatforms()
+		{
+			WindowsPlatformSDK SDK = new WindowsPlatformSDK();
+			SDK.ManageAndValidateSDK();
+
+			// Register this build platform for both Win64 and Win32
+			Log.TraceVerbose("        Registering for {0}", UnrealTargetPlatform.Win64.ToString());
+			UEBuildPlatform.RegisterBuildPlatform(new WindowsPlatform(UnrealTargetPlatform.Win64, SDK));
+			UEBuildPlatform.RegisterPlatformWithGroup(UnrealTargetPlatform.Win64, UnrealPlatformGroup.Windows);
+			UEBuildPlatform.RegisterPlatformWithGroup(UnrealTargetPlatform.Win64, UnrealPlatformGroup.Microsoft);
+
+			Log.TraceVerbose("        Registering for {0}", UnrealTargetPlatform.Win32.ToString());
+			UEBuildPlatform.RegisterBuildPlatform(new WindowsPlatform(UnrealTargetPlatform.Win32, SDK));
+			UEBuildPlatform.RegisterPlatformWithGroup(UnrealTargetPlatform.Win32, UnrealPlatformGroup.Windows);
+			UEBuildPlatform.RegisterPlatformWithGroup(UnrealTargetPlatform.Win32, UnrealPlatformGroup.Microsoft);
 		}
 	}
 }

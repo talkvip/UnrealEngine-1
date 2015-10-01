@@ -83,6 +83,17 @@ void UNetConnection::InitBase(UNetDriver* InDriver,class FSocket* InSocket, cons
 	// Owning net driver
 	Driver = InDriver;
 
+	// Reset Handler
+	Handler.Reset(NULL);
+
+	Handler = MakeUnique<PacketHandler>();
+
+	if(Handler.IsValid())
+	{
+		Handler::Mode Mode = Driver->ServerConnection != nullptr ? Handler::Mode::Client : Handler::Mode::Server;
+		Handler->Initialize(Mode);
+	}
+
 	// Stats
 	StatUpdateTime			= Driver->Time;
 	LastReceiveTime			= Driver->Time;
@@ -141,6 +152,12 @@ void UNetConnection::InitBase(UNetDriver* InDriver,class FSocket* InSocket, cons
 void UNetConnection::InitConnection(UNetDriver* InDriver, EConnectionState InState, const FURL& InURL, int32 InConnectionSpeed, int32 InMaxPacket)
 {
 	Driver = InDriver;
+
+	if (!Handler.IsValid())
+	{
+		Handler = MakeUnique<PacketHandler>();
+	}
+
 	// We won't be sending any packets, so use a default size
 	MaxPacket = (InMaxPacket == 0 || InMaxPacket > MAX_PACKET_SIZE) ? MAX_PACKET_SIZE : InMaxPacket;
 	PacketOverhead = 0;
@@ -302,6 +319,8 @@ void UNetConnection::CleanUp()
 	}
 
 	CleanupDormantActorState();
+
+	Handler.Reset(NULL);
 
 	Driver = NULL;
 }
@@ -666,20 +685,9 @@ void UNetConnection::ReceivedPacket( FBitReader& Reader )
 
 	ValidateSendBuffer();
 
-	const double RealtimeSeconds	= FPlatformTime::Seconds();
-	const float DeltaTime			= Driver->Time - LastReceiveTime;
-	const float DeltaRealtime		= RealtimeSeconds - LastReceiveRealtime;
-
 	// Update receive time to avoid timeout.
 	LastReceiveTime		= Driver->Time;
-	LastReceiveRealtime = RealtimeSeconds;
-
-	const float Timeout = GetTimeoutValue();
-
-	if ( DeltaTime > Timeout || DeltaRealtime > Timeout )
-	{
-		UE_LOG( LogNetTraffic, Warning, TEXT( "UNetConnection::ReceivedPacket: Large time between packets. DeltaTime: %2.2f, Realtime: %2.2f, DriverTime: %2.2f, Threshold: %2.2f %s" ), DeltaTime, DeltaRealtime, Driver->Time, Timeout, *Describe() );
-	}
+	LastReceiveRealtime = FPlatformTime::Seconds();
 
 	// Check packet ordering.
 	const int32 PacketId = InternalAck ? InPacketId + 1 : MakeRelative(Reader.ReadInt(MAX_PACKETID),InPacketId,MAX_PACKETID);

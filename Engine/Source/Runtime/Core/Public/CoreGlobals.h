@@ -232,6 +232,9 @@ extern CORE_API bool GIsRetrievingVTablePtr;
 /** Steadily increasing frame counter. */
 extern CORE_API uint64 GFrameCounter;
 
+/** GFrameCounter the last time GC was run. */
+extern CORE_API uint64 GLastGCFrame;
+
 /** Incremented once per frame before the scene is being rendered. In split screen mode this is incremented once for all views (not for each view). */
 extern CORE_API uint32 GFrameNumber;
 
@@ -249,8 +252,8 @@ extern CORE_API bool GIsFirstInstance;
 
 #endif
 
-/** Threshold for a frame to be considered a hitch (in seconds. */
-extern CORE_API float GHitchThreshold;
+/** Threshold for a frame to be considered a hitch (in milliseconds). */
+extern CORE_API float GHitchThresholdMS;
 
 /** Size to break up data into when saving compressed data */
 extern CORE_API int32 GSavingCompressionChunkSize;

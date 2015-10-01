@@ -137,13 +137,25 @@ bool AGameSession::HandleStartMatchRequest()
 
 void AGameSession::InitOptions( const FString& Options )
 {
-	UWorld* World = GetWorld();
+	UWorld* const World = GetWorld();
 	check(World);
-	AGameMode* const GameMode = World->GetAuthGameMode();
+	AGameMode* const GameMode = World ? World->GetAuthGameMode() : nullptr;
 
 	MaxPlayers = UGameplayStatics::GetIntOption( Options, TEXT("MaxPlayers"), MaxPlayers );
 	MaxSpectators = UGameplayStatics::GetIntOption( Options, TEXT("MaxSpectators"), MaxSpectators );
-	SessionName = GetDefault<APlayerState>(GameMode->PlayerStateClass)->SessionName;
+	
+	if (GameMode)
+	{
+		APlayerState const* const DefaultPlayerState = GetDefault<APlayerState>(GameMode->PlayerStateClass);
+		if (DefaultPlayerState)
+		{
+			SessionName = DefaultPlayerState->SessionName;
+		}
+		else
+		{
+			UE_LOG(LogGameSession, Error, TEXT("Player State class is invalid for game mode: %s!"), *GameMode->GetName());
+		}
+	}
 }
 
 bool AGameSession::ProcessAutoLogin()

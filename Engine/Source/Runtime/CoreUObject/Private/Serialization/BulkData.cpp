@@ -3,9 +3,7 @@
 
 #include "CoreUObjectPrivate.h"
 #include "TargetPlatform.h"
-#if WITH_EDITOR
 #include "DebugSerializationFlags.h"
-#endif
 
 /*-----------------------------------------------------------------------------
 	Constructors and operators

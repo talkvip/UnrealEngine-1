@@ -204,6 +204,7 @@ FString					GSystemStartTime;
 bool					GIsInitialLoad					= true;
 /** Steadily increasing frame counter.																		*/
 uint64					GFrameCounter					= 0;
+uint64					GLastGCFrame					= 0;
 /** Incremented once per frame before the scene is being rendered. In split screen mode this is incremented once for all views (not for each view). */
 uint32					GFrameNumber					= 1;
 /** Render Thread copy of the frame number. */
@@ -215,8 +216,8 @@ uint32					GFrameNumberRenderThread		= 1;
 bool					GIsFirstInstance				= true;
 #endif
 #endif
-/** Threshold for a frame to be considered a hitch (in seconds. */
-float GHitchThreshold = 0.075f;
+/** Threshold for a frame to be considered a hitch (in milliseconds). */
+float GHitchThresholdMS = 60.0f;
 /** Size to break up data into when saving compressed data													*/
 int32					GSavingCompressionChunkSize		= SAVING_COMPRESSION_CHUNK_SIZE;
 /** Whether we are using the seekfree/ cooked loading codepath.												*/

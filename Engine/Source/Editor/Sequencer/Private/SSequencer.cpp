@@ -489,21 +489,7 @@ void SSequencer::BindCommands(TSharedRef<FUICommandList> SequencerCommandBinding
 	SequencerCommandBindings->MapAction(
 		FSequencerCommands::Get().MarqueeTool,
 		FExecuteAction::CreateLambda( [&]{
-
-			if (IsEditToolEnabled("Selection"))
-			{
-				// If the selection tool is already enabled, we toggle the selection mode
-				auto* SelectionTool = static_cast<FSequencerEditTool_Selection*>(EditTool.Get());
-
-				ESequencerSelectionMode CurrentMode = SelectionTool->GetSelectionMode();
-				SelectionTool->SetSelectionMode(CurrentMode == ESequencerSelectionMode::Keys ? ESequencerSelectionMode::Sections : ESequencerSelectionMode::Keys);
-			}
-			else
-			{
-				// Otherwise, switch the tool
-				EditTool.Reset( new FSequencerEditTool_Selection(Sequencer.Pin(), SharedThis(this)) );
-			}
-
+			EditTool.Reset( new FSequencerEditTool_Selection(Sequencer.Pin(), SharedThis(this)) );
 		} ),
 		FCanExecuteAction::CreateLambda( []{ return true; } ),
 		FIsActionChecked::CreateSP( this, &SSequencer::IsEditToolEnabled, FName("Selection") )
@@ -677,43 +663,7 @@ TSharedRef<SWidget> SSequencer::MakeToolBar()
 		ToolBarBuilder.SetLabelVisibility( EVisibility::Collapsed );
 
 		ToolBarBuilder.AddToolBarButton( FSequencerCommands::Get().MoveTool );
-
-		// The marquee selection button is a little more complicated as toggling it when enabled causes it to toggle between key/section selection
-		TAttribute<FSlateIcon> MarqueeIcon;
-		MarqueeIcon.Bind(TAttribute<FSlateIcon>::FGetter::CreateLambda([]{
-			static FSlateIcon MarqueeTool_Keys(FEditorStyle::GetStyleSetName(), "Sequencer.MarqueeTool_Keys");
-			static FSlateIcon MarqueeTool_Sections(FEditorStyle::GetStyleSetName(), "Sequencer.MarqueeTool_Sections");
-
-			return FSequencerEditTool_Selection::GetGlobalSelectionMode() == ESequencerSelectionMode::Keys ? MarqueeTool_Keys : MarqueeTool_Sections;
-		}));
-
-		TAttribute<FText> MarqueeTooltip;
-		MarqueeTooltip.Bind(TAttribute<FText>::FGetter::CreateLambda([&]{
-			if (FSequencerEditTool_Selection::GetGlobalSelectionMode() == ESequencerSelectionMode::Keys)
-			{
-				if (IsEditToolEnabled("Selection"))
-				{
-					return LOCTEXT("MarqueeTooltip_Enabled_Keys", "Change marquee selection to operate on keys rather than sections");
-				}
-				else
-				{
-					return LOCTEXT("MarqueeTooltip_Key", "Activate marquee key selection tool");
-				}
-			}
-			else
-			{
-				if (IsEditToolEnabled("Selection"))
-				{
-					return LOCTEXT("MarqueeTooltip_Enabled_Sections", "Change marquee selection to operate on sections rather than keys");
-				}
-				else
-				{
-					return LOCTEXT("MarqueeTooltip_Section", "Activate marquee section selection tool");
-				}
-			}
-		}));
-
-		ToolBarBuilder.AddToolBarButton( FSequencerCommands::Get().MarqueeTool, NAME_None, TAttribute<FText>(), MarqueeTooltip, MarqueeIcon );
+		ToolBarBuilder.AddToolBarButton( FSequencerCommands::Get().MarqueeTool );
 	}
 	ToolBarBuilder.EndSection();
 
@@ -967,7 +917,7 @@ void SSequencer::UpdateBreadcrumbs(const TArray< TWeakObjectPtr<class UMovieScen
 
 	if( BreadcrumbTrail->PeekCrumb().BreadcrumbType == FSequencerBreadcrumb::MovieSceneType && BreadcrumbTrail->PeekCrumb().MovieSceneInstance.Pin() != FocusedMovieSceneInstance )
 	{
-		FText CrumbName = FText::FromString( FocusedMovieSceneInstance->GetSequence()->GetName() );
+		FText CrumbName = FocusedMovieSceneInstance->GetSequence()->GetDisplayName();
 		// The current breadcrumb is not a moviescene so we need to make a new breadcrumb in order return to the parent moviescene later
 		BreadcrumbTrail->PushCrumb( CrumbName, FSequencerBreadcrumb( FocusedMovieSceneInstance ) );
 	}
@@ -1335,7 +1285,7 @@ void SSequencer::OnCrumbClicked(const FSequencerBreadcrumb& Item)
 
 FText SSequencer::GetRootAnimationName() const
 {
-	return FText::FromName(Sequencer.Pin()->GetRootMovieSceneSequence()->GetFName());
+	return Sequencer.Pin()->GetRootMovieSceneSequence()->GetDisplayName();
 }
 
 FText SSequencer::GetShotSectionTitle(UMovieSceneSection* ShotSection) const

@@ -57,7 +57,6 @@ XAUDIO2_DEVICE_DETAILS FXAudioDeviceProperties::DeviceDetails;
 
 #define DEBUG_XAUDIO2 0
 
-FSpatializationHelper FXAudio2Device::SpatializationHelper;
 
 bool FXAudio2Device::InitializeHardware()
 {
@@ -182,7 +181,7 @@ bool FXAudio2Device::InitializeHardware()
 	}
 #endif	//XAUDIO_SUPPORTS_DEVICE_DETAILS
 
-	SpatializationHelper.Init();
+	DeviceProperties->SpatializationHelper.Init();
 
 	// Initialize permanent memory stack for initial & always loaded sound allocations.
 	if( CommonAudioPoolSize )
@@ -218,14 +217,6 @@ void FXAudio2Device::TeardownHardware()
 
 void FXAudio2Device::UpdateHardware()
 {
-	if (Listeners.Num() > 0)
-	{
-		// Caches the matrix used to transform a sounds position into local space so we can just look
-		// at the Y component after normalization to determine spatialization.
-		const FVector Up = Listeners[0].GetUp();
-		const FVector Right = Listeners[0].GetFront();
-		InverseListenerTransform = FMatrix(Up, Right, Up ^ Right, Listeners[0].Transform.GetTranslation()).InverseFast();
-	}
 }
 
 FAudioEffectsManager* FXAudio2Device::CreateEffectsManager()

@@ -45,8 +45,6 @@ FXAudio2SoundSource::FXAudio2SoundSource(FAudioDevice* InAudioDevice)
 	, bResourcesNeedFreeing(false)
 	, VoiceId(-1)
 	, bUsingHRTFSpatialization(false)
-	, LeftChannelSourceLocation(0)
-	, RightChannelSourceLocation(0)
 {
 	AudioDevice = ( FXAudio2Device* )InAudioDevice;
 	check( AudioDevice );
@@ -584,54 +582,13 @@ FVector FXAudio2SoundSource::ConvertToXAudio2Orientation(const FVector& InputVec
 
 }
 
-FVector FXAudio2SoundSource::GetListenerTransformedDirection(const FVector& Position, float* OutDistance)
-{
-	FVector UnnormalizedDirection = AudioDevice->InverseListenerTransform.TransformPosition(Position);
-	if (OutDistance)
-	{
-		*OutDistance = UnnormalizedDirection.Size();
-	}
-	return UnnormalizedDirection.GetSafeNormal();
-}
-
-void FXAudio2SoundSource::GetSpatializationParams(FSpatializationParams& Params)
-{
-	// Calculate direction from listener to sound, where the sound is at the origin if unspatialised.
-	if (WaveInstance->bUseSpatialization)
-	{
-		FVector EmitterDirection = GetListenerTransformedDirection(WaveInstance->Location, &Params.Distance);
-		Params.NormalizedOmniRadius = (Params.Distance > 0) ? (WaveInstance->OmniRadius / Params.Distance) : FLT_MAX;
-
-		if (Buffer->NumChannels == 2)
-		{
-			FVector EmitterDirection = GetListenerTransformedDirection(LeftChannelSourceLocation, nullptr);
-			Params.LeftChannelPosition = ConvertToXAudio2Orientation(EmitterDirection);
-
-			EmitterDirection = GetListenerTransformedDirection(RightChannelSourceLocation, nullptr);
-			Params.RightChannelPosition = ConvertToXAudio2Orientation(EmitterDirection);
-
-			Params.EmitterPosition = FVector::ZeroVector;
-		}
-		else
-		{
-			Params.EmitterPosition = ConvertToXAudio2Orientation(EmitterDirection);
-		}
-	}
-	else
-	{
-		Params.NormalizedOmniRadius = 0.0f;
-		Params.Distance = 0.0f;
-		Params.EmitterPosition = FVector::ZeroVector;
-	}
-
-	// We are currently always computing spatialization for XAudio2 relative to the listener!
-	Params.ListenerOrientation = FVector::UpVector;
-	Params.ListenerPosition = FVector::ZeroVector;
-}
-
-
 void FXAudio2SoundSource::GetMonoChannelVolumes(float ChannelVolumes[CHANNEL_MATRIX_COUNT], float AttenuatedVolume)
 {
+	FSpatializationParams SpatializationParams = GetSpatializationParams();
+
+	// Convert to xaudio2 coordinates
+	SpatializationParams.EmitterPosition = ConvertToXAudio2Orientation(SpatializationParams.EmitterPosition);
+
 	if (IsUsingHrtfSpatializer())
 	{
 		// If we are using a HRTF spatializer, we are going to be using an XAPO effect that takes a mono stream and splits it into stereo
@@ -640,19 +597,11 @@ void FXAudio2SoundSource::GetMonoChannelVolumes(float ChannelVolumes[CHANNEL_MAT
 		check(WaveInstance->SpatializationAlgorithm == SPATIALIZATION_HRTF);
 		check(AudioDevice->SpatializeProcessor != nullptr);
 
-		// If we're using an HRTF spatialization algorithm, we need to find the position of the emitter and set it as a parameter
-		FVector EmitterPosition = FVector::ZeroVector;
-		FVector UnnormalizedDirection = AudioDevice->InverseListenerTransform.TransformPosition(WaveInstance->Location);
-		EmitterPosition = UnnormalizedDirection.GetSafeNormal();
-
-		AudioDevice->SpatializeProcessor->SetSpatializationParameters(VoiceId, FAudioSpatializationParams(EmitterPosition, (ESpatializationEffectType)WaveInstance->SpatializationAlgorithm));
+		AudioDevice->SpatializeProcessor->SetSpatializationParameters(VoiceId, FAudioSpatializationParams(SpatializationParams.EmitterPosition, (ESpatializationEffectType)WaveInstance->SpatializationAlgorithm));
 		GetStereoChannelVolumes(ChannelVolumes, AttenuatedVolume);
 	}
 	else // Spatialize the mono stream using the normal 3d audio algorithm
 	{
-		FSpatializationParams SpatializationParams;
-		GetSpatializationParams(SpatializationParams);
-
 		// Calculate 5.1 channel dolby surround rate/multipliers.
 		ChannelVolumes[CHANNELOUT_FRONTLEFT] = AttenuatedVolume;
 		ChannelVolumes[CHANNELOUT_FRONTRIGHT] = AttenuatedVolume;
@@ -667,8 +616,8 @@ void FXAudio2SoundSource::GetMonoChannelVolumes(float ChannelVolumes[CHANNEL_MAT
 
 		ChannelVolumes[CHANNELOUT_RADIO] = 0.0f;
 
-		// Call the spatialisation magic
-		AudioDevice->SpatializationHelper.CalculateDolbySurroundRate(SpatializationParams.ListenerOrientation, SpatializationParams.ListenerPosition, SpatializationParams.EmitterPosition, SpatializationParams.NormalizedOmniRadius, ChannelVolumes);
+		AudioDevice->DeviceProperties->SpatializationHelper.CalculateDolbySurroundRate(SpatializationParams.ListenerOrientation, SpatializationParams.ListenerPosition, SpatializationParams.EmitterPosition, SpatializationParams.NormalizedOmniRadius, ChannelVolumes);
+
 
 		// Handle any special post volume processing
 		if (WaveInstance->bApplyRadioFilter)
@@ -709,26 +658,6 @@ void FXAudio2SoundSource::GetMonoChannelVolumes(float ChannelVolumes[CHANNEL_MAT
 	}
 }
 
-void FXAudio2SoundSource::UpdateStereoEmitterPositions()
-{
-	// We need to compute the stereo left/right channel positions using the audio component position and the spread 
-	const FVector& ListenerPosition = AudioDevice->Listeners[0].Transform.GetLocation();
-	FVector ListenerToSourceDir = WaveInstance->Location - ListenerPosition;
-	ListenerToSourceDir.Normalize();
-
-	float HalfSpread = 0.5f * WaveInstance->StereoSpread;
-
-	// Get direction of left emitter from true emitter position (left hand rule)
-	FVector LeftEmitterDir = FVector::CrossProduct(ListenerToSourceDir, FVector::UpVector);
-	FVector LeftEmitterOffset = LeftEmitterDir * HalfSpread;
-
-	// Get position vector of left emitter by adding to true emitter the dir scaled by half the spread
-	LeftChannelSourceLocation = WaveInstance->Location + LeftEmitterOffset;
-
-	// Right emitter position is same as right but opposite direction
-	RightChannelSourceLocation = WaveInstance->Location - LeftEmitterOffset;
-}
-
 void FXAudio2SoundSource::GetStereoChannelVolumes(float ChannelVolumes[CHANNEL_MATRIX_COUNT], float AttenuatedVolume)
 {
 	// If we're doing 3d spatializaton of stereo sounds
@@ -765,16 +694,19 @@ void FXAudio2SoundSource::GetStereoChannelVolumes(float ChannelVolumes[CHANNEL_M
 		UpdateStereoEmitterPositions();
 
 		// Now get the spatialization params transformed into listener-space
-		FSpatializationParams SpatializationParams;
-		GetSpatializationParams(SpatializationParams);
+		FSpatializationParams SpatializationParams = GetSpatializationParams();
+		
+		// Convert to Xaudio2 coordinates
+		SpatializationParams.LeftChannelPosition = ConvertToXAudio2Orientation(SpatializationParams.LeftChannelPosition);
+		SpatializationParams.RightChannelPosition = ConvertToXAudio2Orientation(SpatializationParams.RightChannelPosition);
 
 		// Compute the speaker mappings for the left channel
 		float* ChannelMap = ChannelVolumes;
-		AudioDevice->SpatializationHelper.CalculateDolbySurroundRate(SpatializationParams.ListenerOrientation, SpatializationParams.ListenerPosition, SpatializationParams.LeftChannelPosition, SpatializationParams.NormalizedOmniRadius, ChannelMap);
+		AudioDevice->DeviceProperties->SpatializationHelper.CalculateDolbySurroundRate(SpatializationParams.ListenerOrientation, SpatializationParams.ListenerPosition, SpatializationParams.LeftChannelPosition, SpatializationParams.NormalizedOmniRadius, ChannelMap);
 		
 		// Now compute the speaker mappings for the right channel
 		ChannelMap = &ChannelVolumes[CHANNELOUT_COUNT];
-		AudioDevice->SpatializationHelper.CalculateDolbySurroundRate(SpatializationParams.ListenerOrientation, SpatializationParams.ListenerPosition, SpatializationParams.RightChannelPosition, SpatializationParams.NormalizedOmniRadius, ChannelMap);
+		AudioDevice->DeviceProperties->SpatializationHelper.CalculateDolbySurroundRate(SpatializationParams.ListenerOrientation, SpatializationParams.ListenerPosition, SpatializationParams.RightChannelPosition, SpatializationParams.NormalizedOmniRadius, ChannelMap);
 	}
 	else
 	{
@@ -1288,34 +1220,8 @@ void FXAudio2SoundSource::Update( void )
 		RouteToRadio( ChannelVolumes );
 	}
 
-	// Draw 3d Debug information about this source, if enabled
-	// TODO - Audio Threading. This won't work cross thread.
-	FAudioDeviceManager* DeviceManager = GEngine->GetAudioDeviceManager();
+	FSoundSource::DrawDebugInfo();
 
-	if (DeviceManager && DeviceManager->IsVisualizeDebug3dEnabled())
-	{
-		UAudioComponent* AudioComponent = (WaveInstance->ActiveSound ? WaveInstance->ActiveSound->GetAudioComponent() : nullptr);
-		if (AudioComponent)
-		{
-			UWorld* SoundWorld = AudioComponent->GetWorld();
-			if (SoundWorld)
-			{
-				FRotator SoundRotation = AudioComponent->GetComponentRotation();
-				DrawDebugCrosshairs(SoundWorld, WaveInstance->Location, SoundRotation, 20.0f, FColor::White, false, -1.0f, SDPG_Foreground);
-
-				FString Name;
-				WaveInstance->ActiveSound->Sound->GetName(Name);
-
-				if (Buffer->NumChannels == 2 && WaveInstance->bUseSpatialization)
-				{
-					DrawDebugCrosshairs(SoundWorld, LeftChannelSourceLocation, SoundRotation, 20.0f, FColor::Red, false, -1.0f, SDPG_Foreground);
-					DrawDebugCrosshairs(SoundWorld, RightChannelSourceLocation, SoundRotation, 20.0f, FColor::Green, false, -1.0f, SDPG_Foreground);
-				}
-
-				DrawDebugString(SoundWorld, AudioComponent->GetComponentLocation() + FVector(0, 0, 32), *Name, nullptr, FColor::White, 0.033, false);
-			}
-		}
-	}
 }
 
 
@@ -1595,6 +1501,7 @@ void FSpatializationHelper::Init()
 	Listener.Position.y = 0.0f;
 	Listener.Position.z = 0.0f;
 	Listener.Velocity = ZeroVector;
+	Listener.pCone = nullptr;
 
 	// Set up emitter parameters
 	Emitter.OrientFront.x = 0.0f;
@@ -1617,7 +1524,8 @@ void FSpatializationHelper::Init()
 
 	Emitter.ChannelCount = UE4_XAUDIO3D_INPUTCHANNELS;
 	Emitter.ChannelRadius = 0.0f;
-	Emitter.pChannelAzimuths = EmitterAzimuths;
+	// we aren't using the helper to spatialize multichannel files so we can set this nullptr
+	Emitter.pChannelAzimuths = nullptr;
 
 	// real volume -> 5.1-ch rate
 	VolumeCurvePoint[0].Distance = 0.0f;
@@ -1645,6 +1553,7 @@ void FSpatializationHelper::Init()
 	DSPSettings.SrcChannelCount = UE4_XAUDIO3D_INPUTCHANNELS;
 	DSPSettings.DstChannelCount = SPEAKER_COUNT;
 	DSPSettings.pMatrixCoefficients = MatrixCoefficients;
+	DSPSettings.pDelayTimes = nullptr;
 }
 
 void FSpatializationHelper::DumpSpatializationState() const
@@ -1727,7 +1636,6 @@ void FSpatializationHelper::DumpSpatializationState() const
 	// DSPSettings
 	UE_LOG(LogXAudio2, Log, TEXT("  DSPSettings"));
 	FLocal::DumpChannelArray(TEXT("    "), TEXT("pMatrixCoefficients"), ARRAY_COUNT(MatrixCoefficients), DSPSettings.pMatrixCoefficients);
-	FLocal::DumpChannelArray(TEXT("    "), TEXT("pDelayTimes"), ARRAY_COUNT(MatrixCoefficients), DSPSettings.pDelayTimes);
 	UE_LOG(LogXAudio2, Log, TEXT("    SrcChannelCount: %u"), DSPSettings.SrcChannelCount);
 	UE_LOG(LogXAudio2, Log, TEXT("    DstChannelCount: %u"), DSPSettings.DstChannelCount);
 	UE_LOG(LogXAudio2, Log, TEXT("    LPFDirectCoefficient: %f"), DSPSettings.LPFDirectCoefficient);
@@ -1831,6 +1739,12 @@ void FSpatializationHelper::CalculateDolbySurroundRate( const FVector& OrientFro
 			UE_LOG(LogXAudio2, Warning, TEXT("CalculateDolbySurroundRate generated a %s in channel %d. OmniRadius:%f MatrixCoefficient:%f"),
 				*NaNorINF, SpeakerIndex, OmniRadius, DSPSettings.pMatrixCoefficients[SpeakerIndex]);
 			//DumpSpatializationState();
+
+#if ENABLE_NAN_DIAGNOSTIC
+			DumpSpatializationState();
+			ensureMsgf(!GEnsureOnNANDiagnostic, TEXT("CalculateDolbySurroundRate generated a %s in channel %d. OmniRadius:%f MatrixCoefficient:%f"),
+				*NaNorINF, SpeakerIndex, OmniRadius, DSPSettings.pMatrixCoefficients[SpeakerIndex]);
+#endif
 		}
 #endif
 	}

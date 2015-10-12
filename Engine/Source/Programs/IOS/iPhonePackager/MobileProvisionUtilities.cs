@@ -149,7 +149,11 @@ namespace iPhonePackager
 					}
 					else
 					{
-						bPassesNameCheck = TestProvision.ApplicationIdentifier.Contains("*");
+						if (TestProvision.ApplicationIdentifier.Contains("*"))
+						{
+							string CompanyName = TestProvision.ApplicationIdentifier.Substring(TestProvision.ApplicationIdentifierPrefix.Length + 1);
+							bPassesNameCheck = CompanyName == "*";
+						}
 					}
 					if (!bPassesNameCheck && bCheckIdentifier)
 					{
@@ -157,11 +161,25 @@ namespace iPhonePackager
 						continue;
 					}
 
-					bool bPassesDebugCheck = (!Config.bForDistribution || ((TestProvision.ProvisionedDeviceIDs.Count == 0) && !TestProvision.bDebug));
-					if (!bPassesDebugCheck)
+					if (Config.bForDistribution)
 					{
-						Program.LogVerbose("  .. Failed debugging check (mode={0}, get-task-allow={1}, #devices={2})", Config.bForDistribution, TestProvision.bDebug, TestProvision.ProvisionedDeviceIDs.Count);
-						continue;
+						// check to see if this is a distribution provision
+						bool bDistroProv = (TestProvision.ProvisionedDeviceIDs.Count == 0) && !TestProvision.bDebug;
+						if (!bDistroProv)
+						{
+							Program.LogVerbose("  .. Failed distribution check (mode={0}, get-task-allow={1}, #devices={2})", Config.bForDistribution, TestProvision.bDebug, TestProvision.ProvisionedDeviceIDs.Count);
+							continue;
+						}
+					}
+					else
+					{
+						// check to see if we pass the debug check for non-distribution
+						bool bPassesDebugCheck = TestProvision.bDebug;
+						if (!bPassesDebugCheck)
+						{
+							Program.LogVerbose("  .. Failed debugging check (mode={0}, get-task-allow={1}, #devices={2})", Config.bForDistribution, TestProvision.bDebug, TestProvision.ProvisionedDeviceIDs.Count);
+							continue;
+						}
 					}
 
 					// Check to see if the provision is in date
@@ -177,7 +195,12 @@ namespace iPhonePackager
 					bool bPassesHasMatchingCertCheck = false;
 					if (bCheckCert)
 					{
-						bPassesHasMatchingCertCheck = (CodeSignatureBuilder.FindCertificate(TestProvision) != null);
+						X509Certificate2 Cert = CodeSignatureBuilder.FindCertificate(TestProvision);
+						bPassesHasMatchingCertCheck = (Cert != null);
+						if (bPassesHasMatchingCertCheck && Config.bCert)
+						{
+							bPassesHasMatchingCertCheck &= (Cert.FriendlyName == Config.Certificate);
+						}
 					}
 					else
 					{

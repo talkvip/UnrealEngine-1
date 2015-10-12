@@ -3074,6 +3074,11 @@ float FMath::FixedTurn(float InCurrent, float InDesired, float InDeltaRate)
 		return FRotator::ClampAxis(InCurrent);
 	}
 
+	if (InDeltaRate >= 360.f)
+	{
+		return FRotator::ClampAxis(InDesired);
+	}
+
 	float result = FRotator::ClampAxis(InCurrent);
 	InCurrent = result;
 	InDesired = FRotator::ClampAxis(InDesired);

@@ -118,37 +118,7 @@ void FTranslucentLightingParameters::Set(FRHICommandList& RHICmdList, FShader* S
 	FSceneRenderTargets& SceneContext = FSceneRenderTargets::Get(RHICmdList);
 	auto PixelShader = Shader->GetPixelShader();
 
-	SetTextureParameter(
-		RHICmdList, 
-		PixelShader, 
-		TranslucencyLightingVolumeAmbientInner, 
-		TranslucencyLightingVolumeAmbientInnerSampler, 
-		TStaticSamplerState<SF_Bilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI(), 
-		SceneContext.GetTranslucencyVolumeAmbient(TVC_Inner)->GetRenderTargetItem().ShaderResourceTexture);
-
-	SetTextureParameter(
-		RHICmdList, 
-		PixelShader, 
-		TranslucencyLightingVolumeAmbientOuter, 
-		TranslucencyLightingVolumeAmbientOuterSampler, 
-		TStaticSamplerState<SF_Bilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI(), 
-		SceneContext.GetTranslucencyVolumeAmbient(TVC_Outer)->GetRenderTargetItem().ShaderResourceTexture);
-
-	SetTextureParameter(
-		RHICmdList, 
-		PixelShader, 
-		TranslucencyLightingVolumeDirectionalInner, 
-		TranslucencyLightingVolumeDirectionalInnerSampler, 
-		TStaticSamplerState<SF_Bilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI(), 
-		SceneContext.GetTranslucencyVolumeDirectional(TVC_Inner)->GetRenderTargetItem().ShaderResourceTexture);
-
-	SetTextureParameter(
-		RHICmdList, 
-		PixelShader, 
-		TranslucencyLightingVolumeDirectionalOuter, 
-		TranslucencyLightingVolumeDirectionalOuterSampler, 
-		TStaticSamplerState<SF_Bilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI(), 
-		SceneContext.GetTranslucencyVolumeDirectional(TVC_Outer)->GetRenderTargetItem().ShaderResourceTexture);
+	TranslucentLightingVolumeParameters.Set(RHICmdList, PixelShader);
 
 	SkyLightReflectionParameters.SetParameters(RHICmdList, Shader->GetPixelShader(), (const FScene*)(View->Family->Scene), true);
 
@@ -190,6 +160,25 @@ void FTranslucentLightingParameters::Set(FRHICommandList& RHICmdList, FShader* S
 			);
 			
 		SetShaderValue(RHICmdList, PixelShader, HZBUvFactorAndInvFactor, HZBUvFactorAndInvFactorValue);
+	}
+	else
+	{
+		//set dummies for platforms that require bound resources.
+		SetTextureParameter(
+			RHICmdList,
+			PixelShader,
+			HZBTexture,
+			HZBSampler,
+			TStaticSamplerState<SF_Point, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI(),
+			GBlackTexture->TextureRHI);
+
+		SetTextureParameter(
+			RHICmdList,
+			PixelShader,
+			PrevSceneColor,
+			PrevSceneColorSampler,
+			TStaticSamplerState<SF_Bilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI(),
+			GBlackTexture->TextureRHI);
 	}
 }
 

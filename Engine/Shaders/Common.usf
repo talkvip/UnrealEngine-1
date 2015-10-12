@@ -1440,3 +1440,87 @@ uint ReverseBits32( uint bits )
 	return bits;
 #endif
 }
+
+SamplerState GetBilinearWrappedSampler()
+{
+#if PS4_PROFILE
+	sce::Gnm::Sampler BuiltinSampler = GetDefaultBuiltinSampler();
+	BuiltinSampler.setWrapMode(sce::Gnm::kWrapModeWrap, sce::Gnm::kWrapModeWrap, sce::Gnm::kWrapModeWrap);
+	BuiltinSampler.setXyFilterMode(sce::Gnm::kFilterModeBilinear, sce::Gnm::kFilterModeBilinear);
+	BuiltinSampler.setZFilterMode(sce::Gnm::kZFilterModeLinear);
+	BuiltinSampler.setMipFilterMode(sce::Gnm::kMipFilterModePoint);
+	return SamplerState(BuiltinSampler);
+#else
+	return BuiltinSamplers.Bilinear;
+#endif
+}
+
+SamplerState GetBilinearClampedSampler()
+{
+#if PS4_PROFILE
+	sce::Gnm::Sampler BuiltinSampler = GetDefaultBuiltinSampler();
+	BuiltinSampler.setXyFilterMode(sce::Gnm::kFilterModeBilinear, sce::Gnm::kFilterModeBilinear);
+	BuiltinSampler.setMipFilterMode(sce::Gnm::kMipFilterModePoint);
+	BuiltinSampler.setZFilterMode(sce::Gnm::kZFilterModeLinear);
+	BuiltinSampler.setWrapMode(sce::Gnm::kWrapModeClampLastTexel, sce::Gnm::kWrapModeClampLastTexel, sce::Gnm::kWrapModeClampLastTexel);
+	return SamplerState(BuiltinSampler);
+#else
+	return BuiltinSamplers.BilinearClamped;
+#endif
+}
+
+SamplerState GetPointWrappedSampler()
+{
+#if PS4_PROFILE
+	sce::Gnm::Sampler BuiltinSampler = GetDefaultBuiltinSampler();
+	BuiltinSampler.setXyFilterMode(sce::Gnm::kFilterModePoint, sce::Gnm::kFilterModePoint);
+	BuiltinSampler.setMipFilterMode(sce::Gnm::kMipFilterModePoint);
+	BuiltinSampler.setZFilterMode(sce::Gnm::kZFilterModePoint);
+	BuiltinSampler.setWrapMode(sce::Gnm::kWrapModeWrap, sce::Gnm::kWrapModeWrap, sce::Gnm::kWrapModeWrap);
+	return SamplerState(BuiltinSampler);
+#else
+	return BuiltinSamplers.Point;
+#endif
+}
+
+SamplerState GetPointClampedSampler()
+{
+#if PS4_PROFILE
+	sce::Gnm::Sampler BuiltinSampler = GetDefaultBuiltinSampler();
+	BuiltinSampler.setXyFilterMode(sce::Gnm::kFilterModePoint, sce::Gnm::kFilterModePoint);
+	BuiltinSampler.setMipFilterMode(sce::Gnm::kMipFilterModePoint);
+	BuiltinSampler.setZFilterMode(sce::Gnm::kZFilterModePoint);
+	BuiltinSampler.setWrapMode(sce::Gnm::kWrapModeClampLastTexel, sce::Gnm::kWrapModeClampLastTexel, sce::Gnm::kWrapModeClampLastTexel);
+	return SamplerState(BuiltinSampler);
+#else
+	return BuiltinSamplers.PointClamped;
+#endif
+}
+
+SamplerState GetTrilinearWrappedSampler()
+{
+#if PS4_PROFILE
+	sce::Gnm::Sampler BuiltinSampler = GetDefaultBuiltinSampler();
+	BuiltinSampler.setXyFilterMode(sce::Gnm::kFilterModeBilinear, sce::Gnm::kFilterModeBilinear);
+	BuiltinSampler.setMipFilterMode(sce::Gnm::kMipFilterModeLinear);
+	BuiltinSampler.setZFilterMode(sce::Gnm::kZFilterModeLinear);
+	BuiltinSampler.setWrapMode(sce::Gnm::kWrapModeWrap, sce::Gnm::kWrapModeWrap, sce::Gnm::kWrapModeWrap);
+	return SamplerState(BuiltinSampler);
+#else
+	return BuiltinSamplers.Trilinear;
+#endif
+}
+
+SamplerState GetTrilinearClampedSampler()
+{
+#if PS4_PROFILE
+	sce::Gnm::Sampler BuiltinSampler = GetDefaultBuiltinSampler();
+	BuiltinSampler.setXyFilterMode(sce::Gnm::kFilterModeBilinear, sce::Gnm::kFilterModeBilinear);
+	BuiltinSampler.setMipFilterMode(sce::Gnm::kMipFilterModeLinear);
+	BuiltinSampler.setZFilterMode(sce::Gnm::kZFilterModeLinear);
+	BuiltinSampler.setWrapMode(sce::Gnm::kWrapModeClampLastTexel, sce::Gnm::kWrapModeClampLastTexel, sce::Gnm::kWrapModeClampLastTexel);
+	return SamplerState(BuiltinSampler);
+#else
+	return BuiltinSamplers.TrilinearClamped;
+#endif
+}

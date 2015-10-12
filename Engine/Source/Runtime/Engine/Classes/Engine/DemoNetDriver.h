@@ -3,8 +3,7 @@
 #pragma once
 
 #include "NetDriver.h"
-#include "Runtime/Online/HTTP/Public/Interfaces/IHttpRequest.h"
-#include "Runtime/NetworkReplayStreaming/NetworkReplayStreaming/Public/NetworkReplayStreaming.h"
+#include "NetworkReplayStreaming.h"
 #include "DemoNetDriver.generated.h"
 
 DECLARE_LOG_CATEGORY_EXTERN( LogDemo, Log, All );

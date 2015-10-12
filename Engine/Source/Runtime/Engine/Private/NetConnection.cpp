@@ -15,6 +15,10 @@
 #include "Runtime/PacketHandlers/PacketHandler/Public/PacketHandler.h"
 
 #include "PerfCountersHelpers.h"
+#if WITH_EDITOR
+#include "UnrealEd.h"
+#endif
+
 #if !UE_BUILD_SHIPPING
 static TAutoConsoleVariable<int32> CVarPingExcludeFrameTime( TEXT( "net.PingExcludeFrameTime" ), 0, TEXT( "Calculate RTT time between NIC's of server and client." ) );
 static TAutoConsoleVariable<int32> CVarPingDisplayServerTime( TEXT( "net.PingDisplayServerTime" ), 0, TEXT( "Show server frame time" ) );

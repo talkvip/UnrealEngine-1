@@ -3102,10 +3102,7 @@ TMap<UObject*, UObject*> UnmarkExportTagFromDuplicates()
 
 	return RedirectDuplicatesToOriginals;
 }
-#endif // WITH_EDITOR
 
-
-#if WITH_EDITOR
 COREUOBJECT_API extern bool GOutputCookingWarnings;
 
 /**
@@ -3156,10 +3153,6 @@ struct FImportReplacementsHelper
 	}
 
 };
-
-#endif
-
-#if WITH_EDITOR
 
 class FDiffSerializeArchive : public FBufferArchive
 {

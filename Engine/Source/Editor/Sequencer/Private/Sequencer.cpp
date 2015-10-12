@@ -189,7 +189,7 @@ void FSequencer::Close()
 {
 	if (ActiveSequencer.IsValid() && ActiveSequencer.Get() == this)
 	{
-		RootMovieSceneSequenceInstance->RestoreState();
+		RootMovieSceneSequenceInstance->RestoreState(*this);
 
 		FEditorDelegates::PreSaveWorld.RemoveAll(this);
 		FEditorDelegates::PostSaveWorld.RemoveAll(this);
@@ -1555,20 +1555,23 @@ void FSequencer::OnRequestNodeDeleted( TSharedRef<const FSequencerDisplayNode> N
 		TSharedRef<const FTrackNode> SectionAreaNode = StaticCastSharedRef<const FTrackNode>( NodeToBeDeleted );
 		UMovieSceneTrack* Track = SectionAreaNode->GetTrack();
 
-		if( OwnerMovieScene->IsAMasterTrack( Track ) )
+		if (Track != nullptr)
 		{
-			OwnerMovieScene->RemoveMasterTrack( Track );
-		}
-		else if( OwnerMovieScene->GetShotTrack() == Track )
-		{
-			OwnerMovieScene->RemoveShotTrack();
-		}
-		else
-		{
-			OwnerMovieScene->RemoveTrack( Track );
-		}
+			if( OwnerMovieScene->IsAMasterTrack( *Track ) )
+			{
+				OwnerMovieScene->RemoveMasterTrack( Track );
+			}
+			else if( OwnerMovieScene->GetShotTrack() == Track )
+			{
+				OwnerMovieScene->RemoveShotTrack();
+			}
+			else
+			{
+				OwnerMovieScene->RemoveTrack( Track );
+			}
 		
-		bAnythingRemoved = true;
+			bAnythingRemoved = true;
+		}
 	}
 	else if ( NodeToBeDeleted->GetType() == ESequencerNode::Category )
 	{
@@ -1661,7 +1664,7 @@ void FSequencer::PostUndo(bool bSuccess)
 void FSequencer::OnPreSaveWorld(uint32 SaveFlags, class UWorld* World)
 {
 	// Restore the saved state so that the level save can save that instead of the animated state.
-	RootMovieSceneSequenceInstance->RestoreState();
+	RootMovieSceneSequenceInstance->RestoreState(*this);
 }
 
 void FSequencer::OnPostSaveWorld(uint32 SaveFlags, class UWorld* World, bool bSuccess)
@@ -1911,6 +1914,11 @@ void FSequencer::KeyProperty(FKeyPropertyParams KeyPropertyParams)
 FSequencerSelection& FSequencer::GetSelection()
 {
 	return Selection;
+}
+
+FSequencerSelectionPreview& FSequencer::GetSelectionPreview()
+{
+	return SelectionPreview;
 }
 
 float FSequencer::GetOverlayFadeCurve() const

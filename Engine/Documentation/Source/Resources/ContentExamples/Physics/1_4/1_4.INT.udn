@@ -3,11 +3,12 @@ Title:1.4 - Thruster
 Crumbs:%ROOT%, Resources, Resources/ContentExamples, Resources/ContentExamples/Physics
 Description:An overview of the Physics example level, example 1.4: Thruster
 Related: Engine/Physics/PhysicsBodies
-Related: Engine/Physics/PhAT/UserGuide
+Related: Engine/Physics/PhAT/HowTo
 Related: Engine/Physics/Constraints/ConstraintsReference
 Related: Engine/Physics/Constraints/ConstraintsUserGuide
 Related: Engine/Physics/Collision
 Related: Engine/Physics/PhysicalMaterials/Reference
+Version: 4.9
 
 [VAR:Steps]
 [OBJECT:Navigation]

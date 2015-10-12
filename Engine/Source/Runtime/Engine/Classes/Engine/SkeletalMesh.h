@@ -166,58 +166,61 @@ struct FSkeletalMeshOptimizationSettings
 {
 	GENERATED_USTRUCT_BODY()
 
-		/** The method to use when optimizing the skeletal mesh LOD */
-		UPROPERTY()
-		TEnumAsByte<enum SkeletalMeshOptimizationType> ReductionMethod;
+	/** The method to use when optimizing the skeletal mesh LOD */
+	UPROPERTY()
+	TEnumAsByte<enum SkeletalMeshOptimizationType> ReductionMethod;
 
 	/** If ReductionMethod equals SMOT_NumOfTriangles this value is the ratio of triangles [0-1] to remove from the mesh */
 	UPROPERTY()
-		float NumOfTrianglesPercentage;
+	float NumOfTrianglesPercentage;
 
 	/**If ReductionMethod equals SMOT_MaxDeviation this value is the maximum deviation from the base mesh as a percentage of the bounding sphere. */
 	UPROPERTY()
-		float MaxDeviationPercentage;
+	float MaxDeviationPercentage;
 
 	/** The welding threshold distance. Vertices under this distance will be welded. */
 	UPROPERTY()
-		float WeldingThreshold;
+	float WeldingThreshold;
 
 	/** Whether Normal smoothing groups should be preserved. If false then NormalsThreshold is used **/
 	UPROPERTY()
-		bool bRecalcNormals;
+	bool bRecalcNormals;
 
 	/** If the angle between two triangles are above this value, the normals will not be
 	smooth over the edge between those two triangles. Set in degrees. This is only used when PreserveNormals is set to false*/
 	UPROPERTY()
-		float NormalsThreshold;
+	float NormalsThreshold;
 
 	/** How important the shape of the geometry is. */
 	UPROPERTY()
-		TEnumAsByte<enum SkeletalMeshOptimizationImportance> SilhouetteImportance;
+	TEnumAsByte<enum SkeletalMeshOptimizationImportance> SilhouetteImportance;
 
 	/** How important texture density is. */
 	UPROPERTY()
-		TEnumAsByte<enum SkeletalMeshOptimizationImportance> TextureImportance;
+	TEnumAsByte<enum SkeletalMeshOptimizationImportance> TextureImportance;
 
 	/** How important shading quality is. */
 	UPROPERTY()
-		TEnumAsByte<enum SkeletalMeshOptimizationImportance> ShadingImportance;
+	TEnumAsByte<enum SkeletalMeshOptimizationImportance> ShadingImportance;
 
 	/** How important skinning quality is. */
 	UPROPERTY()
-		TEnumAsByte<enum SkeletalMeshOptimizationImportance> SkinningImportance;
+	TEnumAsByte<enum SkeletalMeshOptimizationImportance> SkinningImportance;
 
 	/** The ratio of bones that will be removed from the mesh */
 	UPROPERTY()
-		float BoneReductionRatio;
+	float BoneReductionRatio;
 
 	/** Maximum number of bones that can be assigned to each vertex. */
 	UPROPERTY()
-		int32 MaxBonesPerVertex;
+	int32 MaxBonesPerVertex;
 
 	UPROPERTY(EditAnywhere, Category = ReductionSettings)
-		TArray<FBoneReference> BonesToRemove;
+	TArray<FBoneReference> BonesToRemove;
 
+	/** Maximum number of bones that can be assigned to each vertex. */
+	UPROPERTY()
+	int32 BaseLOD;
 
 	FSkeletalMeshOptimizationSettings()
 		: ReductionMethod(SMOT_MaxDeviation)
@@ -232,6 +235,7 @@ struct FSkeletalMeshOptimizationSettings
 		, SkinningImportance(SMOI_Normal)
 		, BoneReductionRatio(100.0f)
 		, MaxBonesPerVertex(4)
+		, BaseLOD(0)
 	{
 	}
 
@@ -271,7 +275,8 @@ struct FSkeletalMeshOptimizationSettings
 			&& SkinningImportance == Other.SkinningImportance
 			&& bRecalcNormals == Other.bRecalcNormals
 			&& BoneReductionRatio == Other.BoneReductionRatio
-			&& MaxBonesPerVertex == Other.MaxBonesPerVertex;
+			&& MaxBonesPerVertex == Other.MaxBonesPerVertex
+			&& BaseLOD == Other.BaseLOD;
 	}
 
 	/** Inequality. */
@@ -409,6 +414,14 @@ struct FClothPhysicsProperties
 {
 	GENERATED_USTRUCT_BODY()
 
+	// vertical stiffness of the cloth in the range [0, 1].   usually set to 1.0
+	UPROPERTY(EditAnywhere, Category = Stiffness, meta = (ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
+	float VerticalResistance;
+
+	// Horizontal stiffness of the cloth in the range [0, 1].  usually set to 1.0
+	UPROPERTY(EditAnywhere, Category = Stiffness, meta = (ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
+	float HorizontalResistance;
+
 	// Bending stiffness of the cloth in the range [0, 1]. 
 	UPROPERTY(EditAnywhere, Category = Stiffness, meta = (ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
 	float BendResistance;
@@ -417,9 +430,10 @@ struct FClothPhysicsProperties
 	UPROPERTY(EditAnywhere, Category = Stiffness, meta = (ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
 	float ShearResistance;
 
-	// Make cloth simulation less stretchy. A value smaller than 1 will turn it off. 
-	UPROPERTY(EditAnywhere, Category = Stiffness, meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "4.0"))
-	float StretchLimit;
+	//  latest email from nvidia suggested this is not in use, my code search revealed the same.   will wait for nv engineering confirmation before deleting
+	// Make cloth simulation less stretchy. A value smaller than 1 will turn it off.  Apex parameter hardStretchLimitation.
+	//UPROPERTY(EditAnywhere, Category = Stiffness, meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "4.0"))
+	//float HardStretchLimitation;
 
 	// Friction coefficient in the range[0, 1]
 	UPROPERTY(EditAnywhere, Category = Stiffness, meta = (ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
@@ -428,20 +442,64 @@ struct FClothPhysicsProperties
 	UPROPERTY(EditAnywhere, Category = Stiffness, meta = (ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
 	float Damping;
 
+	// Tether stiffness of the cloth in the range[0, 1].  Equivalent to 1.0-Relax in autodesk plugin.
+	UPROPERTY(EditAnywhere, Category = Stiffness, meta = (ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
+	float TetherStiffness;
+	// Tether Limit, corresponds to 1.0+StretchLimit parameter on Autodesk plugin.  
+	UPROPERTY(EditAnywhere, Category = Stiffness, meta = (ClampMin = "0.0", UIMin = "1.0", UIMax = "2.0"))
+	float TetherLimit;
+
+
+
 	// Drag coefficient n the range [0, 1] 
 	UPROPERTY(EditAnywhere, Category = Stiffness, meta = (ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
 	float Drag;
 
-	// Amount of gravity that is applied to the cloth. 
-	UPROPERTY(EditAnywhere, Category = Scale, meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "5.0"))
+	// Frequency for stiffness 
+	UPROPERTY(EditAnywhere, Category = Stiffness, meta = (ClampMin = "1.0", UIMin = "1.0", UIMax = "1000"))
+	float StiffnessFrequency;
+
+	// Gravity multiplier for this cloth.  Also called Density in Autodesk plugin.
+	UPROPERTY(EditAnywhere, Category = Scale, meta = ( UIMin = "0.0", UIMax = "100.0"))
 	float GravityScale;
+
+	// A mass scaling that is applied to the cloth.   Corresponds to 100X the MotionAdaptation parameter in autodesk plugin.
+	UPROPERTY(EditAnywhere, Category = Scale, meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "100.0"))
+	float MassScale;
+
 	// Amount of inertia that is kept when using local space simulation. Internal name is inertia scale
-	UPROPERTY(EditAnywhere, Category = Scale, meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "5.0"))
+	UPROPERTY(EditAnywhere, Category = Scale, meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "1.0"))
 	float InertiaBlend;
 
 	// Minimal amount of distance particles will keep of each other.
-	UPROPERTY(EditAnywhere, Category = SelfCollision, meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "5.0"))
+	UPROPERTY(EditAnywhere, Category = SelfCollision, meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "10000.0"))
 	float SelfCollisionThickness;
+
+	// unclear what this actually does.
+	UPROPERTY(EditAnywhere, Category = SelfCollision, meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "5.0"))
+	float SelfCollisionSquashScale;
+
+	// Self collision stiffness.  0 off, 1 for on.
+	UPROPERTY(EditAnywhere, Category = SelfCollision, meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "1.0"))
+	float SelfCollisionStiffness;
+
+	// A computation parameter for the Solver.   Along with frame rate this probably specifies the number of solver iterations
+	UPROPERTY(EditAnywhere, Category = Solver, meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "1000.0"))
+	float SolverFrequency;
+
+
+	// Lower (compression) Limit of SoftZone (relative to rest length).  Applied for all fiber types.  If both compression and expansion are 1.0 then there is no deadzone.
+	UPROPERTY(EditAnywhere, Category = FiberSoftZone, meta = (UIMin = "0.0", UIMax = "1.0"))
+	float FiberCompression;
+
+	// Upper (expansion) Limit of SoftZone (relative to rest length).  Applied to all fiber types.   Also referred to as "stretch" range by apex internally.
+	UPROPERTY(EditAnywhere, Category = FiberSoftZone, meta = (UIMin = "1.0", UIMax = "2.0"))
+	float FiberExpansion;
+
+	// Resistance Multiplier that's applied to within SoftZone amount for all fiber types.  0.0 for a complete deadzone (no force).  At 1.0 the spring response within the softzone is as stiff it is elsewhere.  This parameter also known as scale by Apex internally.
+	UPROPERTY(EditAnywhere, Category = FiberSoftZone, meta = (UIMin = "0.0", UIMax = "1.0"))
+	float FiberResistance;
+
 };
 
 USTRUCT()

@@ -11,12 +11,8 @@
 #include "Animation/AnimNotifies/AnimNotifyState.h"
 #include "Animation/AnimNotifies/AnimNotify.h"
 #include "Animation/AnimSequenceBase.h"
-#include "Animation/AnimStats.h"
 #include "Animation/AnimSingleNodeInstance.h"
-
-DEFINE_STAT(STAT_AnimMontageInstance_Advance);
-DEFINE_STAT(STAT_AnimMontageInstance_TickBranchPoints);
-DEFINE_STAT(STAT_AnimMontageInstance_Advance_Iteration);
+#include "Animation/AnimStats.h"
 
 ///////////////////////////////////////////////////////////////////////////
 //
@@ -881,8 +877,8 @@ void FAnimMontageInstance::Stop(const FAlphaBlend& InBlendOut, bool bInterrupt)
 		bInterrupted = bInterrupt;
 	}
 
-	// if desired weight is > 0.f, turn that off
-	if (Blend.GetDesiredValue() > 0.f)
+	// if it hasn't stopped, stop now
+	if (IsStopped() == false)
 	{
 		// do not use default Montage->BlendOut 
 		// depending on situation, the BlendOut time can change 
@@ -1077,7 +1073,7 @@ bool FAnimMontageInstance::SetNextSectionID(int32 const & SectionID, int32 const
 
 void FAnimMontageInstance::OnMontagePositionChanged(FName const & ToSectionName) 
 {
-	if (bPlaying && (Blend.GetDesiredValue() == 0.f))
+	if (bPlaying && IsStopped())
 	{
 		UE_LOG(LogAnimation, Warning, TEXT("Changing section on Montage (%s) to '%s' during blend out. This can cause incorrect visuals!"),
 			*GetNameSafe(Montage), *ToSectionName.ToString());
@@ -1441,8 +1437,8 @@ void FAnimMontageInstance::Advance(float DeltaTime, struct FRootMotionMovementPa
 						}
 					}
 
-					// If current section is last one, check to trigger a blend out.
-					if( NextSectionIndex == INDEX_NONE )
+					// If current section is last one, check to trigger a blend out and if it hasn't stopped yet, see if we should stop
+					if (NextSectionIndex == INDEX_NONE && !IsStopped())
 					{
 						const float DeltaPosToEnd = bPlayingForward ? (CurrentSectionLength - PosInSection) : PosInSection;
 						const float DeltaTimeToEnd = DeltaPosToEnd / FMath::Abs(CombinedPlayRate);
@@ -1508,7 +1504,7 @@ void FAnimMontageInstance::Advance(float DeltaTime, struct FRootMotionMovementPa
 	}
 
 	// If this Montage has no weight, it should be terminated.
-	if ((Blend.GetDesiredValue()<= ZERO_ANIMWEIGHT_THRESH) && (Blend.IsComplete()))
+	if (IsStopped() && (Blend.IsComplete()))
 	{
 		// nothing else to do
 		Terminate();
@@ -1666,7 +1662,7 @@ void FAnimMontageInstance::SetMatineeAnimPositionInner(FName SlotName, USkeletal
 	UAnimInstance* AnimInst = SkeletalMeshComponent->GetAnimInstance();
 	if(AnimInst)
 	{
-		UAnimSingleNodeInstance * SingleNodeInst = SkeletalMeshComponent->GetSingleNodeInstance();
+		UAnimSingleNodeInstance* SingleNodeInst = SkeletalMeshComponent->GetSingleNodeInstance();
 		if(SingleNodeInst)
 		{
 			if(SingleNodeInst->CurrentAsset != InAnimSequence)
@@ -1776,7 +1772,7 @@ void FAnimMontageInstance::PreviewMatineeSetAnimPositionInner(FName SlotName, US
 
 			float OldMontagePosition = AnimInst->Montage_GetPosition(CurrentlyPlayingMontage.Get());
 			AnimInst->Montage_SetPosition(CurrentlyPlayingMontage.Get(), InPosition);
-			AnimInst->UpdateAnimation(DeltaTime);
+			AnimInst->UpdateAnimation(DeltaTime, false);
 
 			// since we don't advance montage in the tick, we manually have to handle notifies
 			AnimMontageInst->HandleEvents(OldMontagePosition, InPosition, NULL);

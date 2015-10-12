@@ -65,7 +65,7 @@ void FEventTrackEditor::BuildObjectBindingTrackMenu(FMenuBuilder& MenuBuilder, c
 }
 
 
-TSharedRef<ISequencerSection> FEventTrackEditor::MakeSectionInterface(UMovieSceneSection& SectionObject, UMovieSceneTrack* Track)
+TSharedRef<ISequencerSection> FEventTrackEditor::MakeSectionInterface(UMovieSceneSection& SectionObject, UMovieSceneTrack& Track)
 {
 	return MakeShareable(new FEventTrackSection(SectionObject/*, Track->GetTrackName()*/, GetSequencer()));
 }
@@ -84,14 +84,27 @@ void FEventTrackEditor::HandleAddEventTrackMenuEntryExecute()
 {
 	UMovieSceneSequence* FocusedSequence = GetSequencer()->GetFocusedMovieSceneSequence();
 	UMovieScene* MovieScene = FocusedSequence->GetMovieScene();
-
-	if (MovieScene != nullptr)
+	if (MovieScene == nullptr)
 	{
-		UMovieSceneTrack* NewTrack = MovieScene->AddMasterTrack(UMovieSceneEventTrack::StaticClass());
-		NewTrack->AddSection(NewTrack->CreateNewSection());
-
-		GetSequencer()->NotifyMovieSceneDataChanged();
+		return;
 	}
+
+	UMovieSceneTrack* EventTrack = MovieScene->FindMasterTrack( UMovieSceneEventTrack::StaticClass() );
+	if (EventTrack != nullptr)
+	{
+		return;
+	}
+
+	const FScopedTransaction Transaction(NSLOCTEXT("Sequencer", "AddEventTrack_Transaction", "Add Event Track"));
+
+	MovieScene->Modify();
+
+	EventTrack = GetMasterTrack( UMovieSceneEventTrack::StaticClass() );
+	ensure(EventTrack);
+
+	EventTrack->AddSection(EventTrack->CreateNewSection());
+
+	GetSequencer()->NotifyMovieSceneDataChanged();
 }
 
 

@@ -109,22 +109,6 @@ struct FRIENDSANDCHAT_API FFriendsChatStyle
 	FLinearColor PartyHyperlinkChatColor;
 	FFriendsChatStyle& SetPartyHyperlinkChatColor(const FLinearColor& InFontColor);
 
-	UPROPERTY(EditAnywhere, Category=Appearance)
-	FSlateBrush ChatGlobalBrush;
-	FFriendsChatStyle& SetChatGlobalBrush(const FSlateBrush& Brush);
-
-	UPROPERTY(EditAnywhere, Category=Appearance)
-	FSlateBrush ChatGameBrush;
-	FFriendsChatStyle& SetChatGameBrush(const FSlateBrush& Brush);
-
-	UPROPERTY(EditAnywhere, Category = Appearance)
-	FSlateBrush ChatPartyBrush;
-	FFriendsChatStyle& SetChatPartyBrush(const FSlateBrush& Brush);
-
-	UPROPERTY(EditAnywhere, Category=Appearance)
-	FSlateBrush ChatWhisperBrush;
-	FFriendsChatStyle& SetChatWhisperBrush(const FSlateBrush& Brush);
-
 	UPROPERTY(EditAnywhere, Category = Appearance)
 	FSlateBrush ChatInvalidBrush;
 	FFriendsChatStyle& SetChatInvalidBrush(const FSlateBrush& Brush);
@@ -165,7 +149,7 @@ struct FRIENDSANDCHAT_API FFriendsChatStyle
 	FSlateBrush MessageNotificationBrush;
 	FFriendsChatStyle& SetMessageNotificationBrush(const FSlateBrush& Brush);
 
-	UPROPERTY()
+	UPROPERTY(EditAnywhere, Category = Appearance)
 	FButtonStyle FriendsMinimizeButtonStyle;
 	FFriendsChatStyle& SetMinimizeButtonStyle(const FButtonStyle& ButtonStyle);
 

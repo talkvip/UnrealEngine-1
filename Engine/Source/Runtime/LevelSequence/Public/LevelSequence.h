@@ -97,16 +97,8 @@ public:
 
 #if WITH_EDITOR
 	virtual bool TryGetObjectDisplayName(const FGuid& ObjectId, FText& OutDisplayName) const override;
+	virtual FText GetDisplayName() const override;
 #endif
-
-protected:
-
-	/**
-	 * Deselect all proxy actors in the Editor.
-	 *
-	 * @todo sequencer: remove Editor dependencies from this class
-	 */
-	void DeselectAllActors();
 
 private:
 

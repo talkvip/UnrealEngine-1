@@ -2,12 +2,15 @@
 
 #include "MovieSceneCapturePCH.h"
 #include "MovieSceneCapture.h"
+#include "ActiveMovieSceneCaptures.h"
 
 #if WITH_EDITOR
 #include "ImageWrapper.h"
 #endif
 
 #include "MovieSceneCaptureModule.h"
+
+#define LOCTEXT_NAMESPACE "MovieSceneCapture"
 
 struct FUniqueMovieSceneCaptureHandle : FMovieSceneCaptureHandle
 {
@@ -23,7 +26,7 @@ FMovieSceneCaptureSettings::FMovieSceneCaptureSettings()
 	: Resolution(1280, 720)
 {
 	OutputDirectory.Path = FPaths::VideoCaptureDir();
-	OutputFormat = NSLOCTEXT("MovieCapture", "DefaultFormat", "MovieCapture_{width}x{height}_{quality}").ToString();
+	OutputFormat = NSLOCTEXT("MovieCapture", "DefaultFormat", "{world}_{width}x{height}").ToString();
 	FrameRate = 24;
 	CaptureType = EMovieCaptureType::AVI;
 	bUseCompression = true;
@@ -45,33 +48,101 @@ UMovieSceneCapture::UMovieSceneCapture(const FObjectInitializer& Initializer)
 	FCommandLine::Parse( FCommandLine::Get(), Tokens, Switches );
 	for (auto& Switch : Switches)
 	{
-		AdditionalCommandLineArguments.AppendChar('-');
-		AdditionalCommandLineArguments.Append(Switch);
-		AdditionalCommandLineArguments.AppendChar(' ');
+		InheritedCommandLineArguments.AppendChar('-');
+		InheritedCommandLineArguments.Append(Switch);
+		InheritedCommandLineArguments.AppendChar(' ');
 	}
-	AdditionalCommandLineArguments += TEXT("-PIEVIACONSOLE -nomovie ");
 
-	// renderer overrides - hack
-	AdditionalCommandLineArguments += FParse::Param(FCommandLine::Get(), TEXT("d3d11"))		?	TEXT("-d3d11 ")		: TEXT("");
-	AdditionalCommandLineArguments += FParse::Param(FCommandLine::Get(), TEXT("sm5"))		?	TEXT("-sm5 ")		: TEXT("");
-	AdditionalCommandLineArguments += FParse::Param(FCommandLine::Get(), TEXT("dx11"))		?	TEXT("-dx11 ")		: TEXT("");
-	AdditionalCommandLineArguments += FParse::Param(FCommandLine::Get(), TEXT("d3d10"))		?	TEXT("-d3d10 ")		: TEXT("");
-	AdditionalCommandLineArguments += FParse::Param(FCommandLine::Get(), TEXT("sm4"))		?	TEXT("-sm4 ")		: TEXT("");
-	AdditionalCommandLineArguments += FParse::Param(FCommandLine::Get(), TEXT("dx10"))		?	TEXT("-dx10 ")		: TEXT("");
-	AdditionalCommandLineArguments += FParse::Param(FCommandLine::Get(), TEXT("opengl"))	?	TEXT("-opengl ")	: TEXT("");
-	AdditionalCommandLineArguments += FParse::Param(FCommandLine::Get(), TEXT("opengl3"))	?	TEXT("-opengl3 ")	: TEXT("");
-	AdditionalCommandLineArguments += FParse::Param(FCommandLine::Get(), TEXT("opengl4"))	?	TEXT("-opengl4 ")	: TEXT("");
+	// the PIEVIACONSOLE parameter tells UGameEngine to add the auto-save dir to the paths array and repopulate the package file cache
+	// this is needed in order to support streaming levels as the streaming level packages will be loaded only when needed (thus
+	// their package names need to be findable by the package file caching system)
+	// (we add to EditorCommandLine because the URL is ignored by WindowsTools)
+	AdditionalCommandLineArguments += TEXT("-PIEVIACONSOLE -NoLoadingScreen ");
 
 	Handle = FUniqueMovieSceneCaptureHandle();
+
+	bHasOutstandingFrame = false;
+	LastFrameDelta = 0.f;
+	bCapturing = false;
 }
 
-void UMovieSceneCapture::Initialize(FViewport* InViewport)
+void UMovieSceneCapture::Initialize(TWeakPtr<FSceneViewport> InSceneViewport)
 {
-	Viewport = InViewport;
+	SceneViewport = InSceneViewport;
+
+	if (!HasAnyFlags(RF_ClassDefaultObject))
+	{
+		Ticker.Reset(new FTicker(this));
+	}
+}
+
+void UMovieSceneCapture::PrepareForScreenshot()
+{
+	auto Viewport = SceneViewport.Pin();
+	if (!Viewport.IsValid())
+	{
+		return;
+	}
+
+	auto ViewportWidget = Viewport->GetViewportWidget().Pin();
+	if (!ViewportWidget.IsValid())
+	{
+		return;
+	}
+
+	auto& Application = FSlateApplication::Get();
+
+	// We can't screenshot the widget unless there's a valid window handle to draw it in.
+	TSharedPtr<SWindow> WidgetWindow = Application.FindWidgetWindow(ViewportWidget.ToSharedRef());
+	if (!WidgetWindow.IsValid())
+	{
+		return;
+	}
+
+	bHasOutstandingFrame = true;
+
+	FWidgetPath WidgetPath;
+	FSlateApplication::Get().GeneratePathToWidgetChecked(ViewportWidget.ToSharedRef(), WidgetPath);
+
+	FArrangedWidget ArrangedWidget = WidgetPath.FindArrangedWidget(ViewportWidget.ToSharedRef()).Get(FArrangedWidget::NullWidget);
+
+	FVector2D Position = ArrangedWidget.Geometry.AbsolutePosition;
+	FVector2D WindowPosition = WidgetWindow->GetPositionInScreen();
+
+	const int32 RelativePositionX = Position.X - WindowPosition.X;
+	const int32 RelativePositionY = Position.Y - WindowPosition.Y;
+
+	FVector2D Size = ArrangedWidget.Geometry.GetDrawSize();
+
+	FIntRect ScreenshotRect(
+		RelativePositionX,
+		RelativePositionY,
+		RelativePositionX + Size.X,
+		RelativePositionY + Size.Y);
+
+	Application.GetRenderer()->PrepareToTakeScreenshot(ScreenshotRect, &ScratchBuffer);
+}
+
+void UMovieSceneCapture::Tick(float DeltaSeconds)
+{
+	if (bHasOutstandingFrame)
+	{
+		CaptureFrame(LastFrameDelta);
+		bHasOutstandingFrame = false;
+	}
+	LastFrameDelta = DeltaSeconds;
 }
 
 void UMovieSceneCapture::StartCapture()
 {
+	auto Viewport = SceneViewport.Pin();
+	if (!Viewport.IsValid())
+	{
+		return;
+	}
+
+	bCapturing = true;
+
 	if (!CaptureStrategy.IsValid())
 	{
 		CaptureStrategy = MakeShareable(new FRealTimeCaptureStrategy(Settings.FrameRate));
@@ -90,10 +161,8 @@ void UMovieSceneCapture::StartCapture()
 		}
 	}
 
-	CachedMetrics.Width = Viewport->GetSizeXY().X;
-	CachedMetrics.Height = Viewport->GetSizeXY().Y;
-
-	Viewport->SetMovieSceneCapture(Handle);
+	CachedMetrics.Width = Viewport->GetSize().X;
+	CachedMetrics.Height = Viewport->GetSize().Y;
 
 	if (Settings.CaptureType == EMovieCaptureType::AVI)
 	{
@@ -115,15 +184,20 @@ void UMovieSceneCapture::StartCapture()
 
 void UMovieSceneCapture::CaptureFrame(float DeltaSeconds)
 {
-	if (!CaptureStrategy.IsValid())
+	auto Viewport = SceneViewport.Pin();
+	if (!CaptureStrategy.IsValid() || !Viewport.IsValid() || !ScratchBuffer.Num())
 	{
 		return;
 	}
 
 	CachedMetrics.ElapsedSeconds += DeltaSeconds;
 
+	// By this point, the slate application has already populated our scratch buffer
 	if (CaptureStrategy->ShouldPresent(CachedMetrics.ElapsedSeconds, CachedMetrics.Frame))
 	{
+		TArray<FColor> ThisFrameBuffer;
+		Swap(ThisFrameBuffer, ScratchBuffer);
+
 		uint32 NumDroppedFrames = CaptureStrategy->GetDroppedFrames(CachedMetrics.ElapsedSeconds, CachedMetrics.Frame);
 		CachedMetrics.Frame += NumDroppedFrames;
 
@@ -133,14 +207,12 @@ void UMovieSceneCapture::CaptureFrame(float DeltaSeconds)
 		if (AVIWriter)
 		{
 			AVIWriter->DropFrames(NumDroppedFrames);
-			AVIWriter->Update(CachedMetrics.ElapsedSeconds);
+			AVIWriter->Update(CachedMetrics.ElapsedSeconds, MoveTemp(ThisFrameBuffer));
 		}
 #if WITH_EDITOR
 		else
 		{
-			TArray<FColor> Data;
-			Viewport->ReadPixels(Data, FReadSurfaceDataFlags());
-			CaptureSnapshot(Data);
+			SaveFrameToFile(MoveTemp(ThisFrameBuffer));
 		}
 #endif
 	}
@@ -148,24 +220,31 @@ void UMovieSceneCapture::CaptureFrame(float DeltaSeconds)
 
 void UMovieSceneCapture::StopCapture()
 {
-	CaptureStrategy->OnStop();
-	CaptureStrategy = nullptr;
+	Ticker.Reset();
 
-	if (AVIWriter)
+	if (bCapturing)
 	{
-		AVIWriter->StopCapture();
-		AVIWriter.Reset();
+		bCapturing = false;
+
+		CaptureStrategy->OnStop();
+		CaptureStrategy = nullptr;
+
+		if (AVIWriter)
+		{
+			AVIWriter->StopCapture();
+			AVIWriter.Reset();
+		}
 	}
 }
 
 void UMovieSceneCapture::Close()
 {
 	StopCapture();
-	IMovieSceneCaptureModule::Get().OnMovieSceneCaptureFinished(this);
+	FActiveMovieSceneCaptures::Get().Remove(this);
 }
 
 #if WITH_EDITOR
-void UMovieSceneCapture::CaptureSnapshot(const TArray<FColor>& Colors)
+void UMovieSceneCapture::SaveFrameToFile(TArray<FColor> Colors)
 {
 	if (Colors.Num() == 0)
 	{
@@ -192,14 +271,12 @@ void UMovieSceneCapture::CaptureSnapshot(const TArray<FColor>& Colors)
 	case EMovieCaptureType::PNG:
 		{
 			IImageWrapperPtr ImageWrapper = ImageWrapperModule.CreateImageWrapper(EImageFormat::PNG);
-
-			TArray<FColor> FinalColors = Colors;
-			for (FColor& Color : FinalColors)
+			for (FColor& Color : Colors)
 			{
 				Color.A = 255;
 			}
 
-			if (ImageWrapper.IsValid() && ImageWrapper->SetRaw(&FinalColors[0], FinalColors.Num() * sizeof(FColor), CachedMetrics.Width, CachedMetrics.Height, ERGBFormat::BGRA, 8))
+			if (ImageWrapper.IsValid() && ImageWrapper->SetRaw(&Colors[0], Colors.Num() * sizeof(FColor), CachedMetrics.Width, CachedMetrics.Height, ERGBFormat::BGRA, 8))
 			{
 				FFileHelper::SaveArrayToFile(ImageWrapper->GetCompressed(ImageCompressionQuality), *Filename);
 			}
@@ -244,6 +321,7 @@ FString UMovieSceneCapture::ResolveFileFormat(const FString& Folder, const FStri
 	Mappings.Add(TEXT("frame"), FString::Printf(TEXT("%04d"), CachedMetrics.Frame));
 	Mappings.Add(TEXT("width"), FString::Printf(TEXT("%d"), CachedMetrics.Width));
 	Mappings.Add(TEXT("height"), FString::Printf(TEXT("%d"), CachedMetrics.Height));
+	Mappings.Add(TEXT("world"), GWorld->GetName());
 
 	if (Settings.bUseCompression)
 	{
@@ -262,7 +340,24 @@ FString UMovieSceneCapture::ResolveUniqueFilename()
 	FString BaseFilename = ResolveFileFormat(Settings.OutputDirectory.Path, Settings.OutputFormat);
 	FString ThisTry = BaseFilename + GetDefaultFileExtension();
 
-	if (IFileManager::Get().FileSize(*ThisTry) != -1)
+	if (!IFileManager::Get().DirectoryExists(*Settings.OutputDirectory.Path))
+	{
+		IFileManager::Get().MakeDirectory(*Settings.OutputDirectory.Path);
+	}
+
+	if (Settings.bOverwriteExisting)
+	{
+		// Try and delete it first
+		while (IFileManager::Get().FileSize(*ThisTry) != -1 && !FPlatformFileManager::Get().GetPlatformFile().DeleteFile(*ThisTry))
+		{
+			// popup a message box
+			FText MessageText = FText::Format(LOCTEXT("UnableToRemoveFile_Format", "The destination file '{0}' could not be deleted because it's in use by another application.\n\nPlease close this application before continuing."), FText::FromString(ThisTry));
+			FPlatformMisc::MessageBoxExt(EAppMsgType::Ok, *MessageText.ToString(), *LOCTEXT("UnableToRemoveFile", "Unable to remove file").ToString());
+		}
+		return ThisTry;
+	}
+
+	if (IFileManager::Get().FileSize(*ThisTry) == -1)
 	{
 		return ThisTry;
 	}
@@ -345,3 +440,5 @@ int32 FRealTimeCaptureStrategy::GetDroppedFrames(double CurrentTimeSeconds, uint
 	}
 	return 0;
 }
+
+#undef LOCTEXT_NAMESPACE

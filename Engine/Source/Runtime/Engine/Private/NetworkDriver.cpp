@@ -34,6 +34,13 @@ DEFINE_STAT(STAT_Ping);
 DEFINE_STAT(STAT_Channels);
 DEFINE_STAT(STAT_InRate);
 DEFINE_STAT(STAT_OutRate);
+DEFINE_STAT(STAT_InRateClientMax);
+DEFINE_STAT(STAT_InRateClientMin);
+DEFINE_STAT(STAT_InRateClientAvg);
+DEFINE_STAT(STAT_OutRateClientMax);
+DEFINE_STAT(STAT_OutRateClientMin);
+DEFINE_STAT(STAT_OutRateClientAvg);
+DEFINE_STAT(STAT_NetNumClients);
 DEFINE_STAT(STAT_InPackets);
 DEFINE_STAT(STAT_OutPackets);
 DEFINE_STAT(STAT_InBunches);
@@ -197,9 +204,11 @@ void UNetDriver::TickFlush(float DeltaSeconds)
 	ProcessQueuedBunchesCurrentFrameMilliseconds = 0.0f;
 
 #if STATS
+	const double CurrentRealtimeSeconds = FPlatformTime::Seconds();
+
 	// Update network stats (only main game net driver for now)
 	if (NetDriverName == NAME_GameNetDriver && 
-		Time - StatUpdateTime > StatPeriod && ( ClientConnections.Num() > 0 || ServerConnection != NULL ))
+		 CurrentRealtimeSeconds - StatUpdateTime > StatPeriod && ( ClientConnections.Num() > 0 || ServerConnection != NULL ) )
 	{
 		int32 Ping = 0;
 		int32 NumOpenChannels = 0;
@@ -211,10 +220,17 @@ void UNetDriver::TickFlush(float DeltaSeconds)
 		int32 UnAckCount = 0;
 		int32 PendingCount = 0;
 		int32 NetSaturated = 0;
+		int32 ClientInBytesMax = 0;
+		int32 ClientInBytesMin = 0;
+		int32 ClientInBytesAvg = 0;
+		int32 ClientOutBytesMax = 0;
+		int32 ClientOutBytesMin = 0;
+		int32 ClientOutBytesAvg = 0;
+		int NumClients = 0;
 
 		if (FThreadStats::IsCollectingData())
 		{
-			float RealTime = Time - StatUpdateTime;
+			const float RealTime = CurrentRealtimeSeconds - StatUpdateTime;
 
 			// Use the elapsed time to keep things scaled to one measured unit
 			InBytes = FMath::TruncToInt(InBytes / RealTime);
@@ -268,7 +284,7 @@ void UNetDriver::TickFlush(float DeltaSeconds)
 				for (auto It = Connection->ActorChannels.CreateIterator(); It; ++It)
 				{
 					UActorChannel* Chan = It.Value();
-					if(Chan && Chan->ReadyForDormancy(true))
+					if (Chan && Chan->ReadyForDormancy(true))
 					{
 						NumActorChannelsReadyDormant++;
 					}
@@ -285,6 +301,34 @@ void UNetDriver::TickFlush(float DeltaSeconds)
 				Connection->PackageMap->GetNetGUIDStats(AckCount, UnAckCount, PendingCount);
 
 				NetSaturated = Connection->IsNetReady(false) ? 0 : 1;
+			}
+
+			for (UNetConnection * Client : ClientConnections)
+			{
+				if (Client)
+				{
+					ClientInBytesMax = FMath::Max(ClientInBytesMax, Client->InBytesPerSecond);
+					if (ClientInBytesMin == 0 || Client->InBytesPerSecond < ClientInBytesMin)
+					{
+						ClientInBytesMin = Client->InBytesPerSecond;
+					}
+					ClientInBytesAvg += Client->InBytesPerSecond;
+
+					ClientOutBytesMax = FMath::Max(ClientOutBytesMax, Client->OutBytesPerSecond);
+					if (ClientOutBytesMin == 0 || Client->OutBytesPerSecond < ClientOutBytesMin)
+					{
+						ClientOutBytesMin = Client->OutBytesPerSecond;
+					}
+					ClientOutBytesAvg += Client->OutBytesPerSecond;
+
+					++NumClients;
+				}
+			}
+
+			if (NumClients > 1)
+			{
+				ClientInBytesAvg /= NumClients;
+				ClientOutBytesAvg /= NumClients;
 			}
 		}
 
@@ -386,6 +430,14 @@ void UNetDriver::TickFlush(float DeltaSeconds)
 		SET_DWORD_STAT(STAT_InLoss, InPacketsLost);
 		SET_DWORD_STAT(STAT_InRate, InBytes);
 		SET_DWORD_STAT(STAT_OutRate, OutBytes);
+		SET_DWORD_STAT(STAT_InRateClientMax, ClientInBytesMax);
+		SET_DWORD_STAT(STAT_InRateClientMin, ClientInBytesMin);
+		SET_DWORD_STAT(STAT_InRateClientAvg, ClientInBytesAvg);
+		SET_DWORD_STAT(STAT_OutRateClientMax, ClientOutBytesMax);
+		SET_DWORD_STAT(STAT_OutRateClientMin, ClientOutBytesMin);
+		SET_DWORD_STAT(STAT_OutRateClientAvg, ClientOutBytesAvg);
+
+		SET_DWORD_STAT(STAT_NetNumClients, NumClients);
 		SET_DWORD_STAT(STAT_InPackets, InPackets);
 		SET_DWORD_STAT(STAT_OutPackets, OutPackets);
 		SET_DWORD_STAT(STAT_InBunches, InBunches);
@@ -428,7 +480,7 @@ void UNetDriver::TickFlush(float DeltaSeconds)
 		VoiceBytesRecv = 0;
 		VoiceInPercent = 0;
 		VoiceOutPercent = 0;
-		StatUpdateTime = Time;
+		StatUpdateTime = CurrentRealtimeSeconds;
 	}
 #endif // STATS
 
@@ -895,7 +947,12 @@ void UNetDriver::InternalProcessRemoteFunction
 	const int HeaderBits = Bunch.GetNumBits();
 
 #if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
-	Bunch.DebugString = FString::Printf(TEXT("%.2f RPC: %s - %s"), Connection->Driver->Time, *Actor->GetName(), *Function->GetName());
+	extern TAutoConsoleVariable< int32 > CVarNetReliableDebug;
+
+	if ( CVarNetReliableDebug.GetValueOnGameThread() > 0 )
+	{
+		Bunch.DebugString = FString::Printf( TEXT( "%.2f RPC: %s - %s" ), Connection->Driver->Time, *Actor->GetName(), *Function->GetName() );
+	}
 #endif
 
 	TArray< UProperty * > LocalOutParms;
@@ -1026,9 +1083,14 @@ void UNetDriver::InternalProcessRemoteFunction
 				UE_LOG(LogNetTraffic, Log,		TEXT("      Sent RPC: %s::%s [%.1f bytes]"), *Actor->GetName(), *Function->GetName(), Bunch.GetNumBits() / 8.f );
 			}
 
-			NETWORK_PROFILER(GNetworkProfiler.TrackSendRPC(Actor, Function, HeaderBits, ParameterBits, FooterBits));
+			NETWORK_PROFILER(GNetworkProfiler.TrackSendRPC(Actor, Function, HeaderBits, ParameterBits, FooterBits, Connection));
 			Ch->SendBunch( &Bunch, 1 );
 		}
+	}
+
+	if ( Connection->InternalAck )
+	{
+		Connection->FlushNet();
 	}
 }
 

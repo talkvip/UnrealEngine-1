@@ -77,7 +77,7 @@ namespace HLODOutliner
 
 		/** Creates the panel's Tree view widget*/
 		TSharedRef<SWidget> CreateTreeviewWidget();
-
+		
 		/** Initializes and creates the settings view */
 		void CreateSettingsView();
 
@@ -114,12 +114,8 @@ namespace HLODOutliner
 		void DeregisterDelegates();
 
 	protected:
-		/**
-		* Forces viewing the mesh of a Cluster (LODActor)
-		*
-		* @param Item - Treeview Item representation for LODActor
-		*/
-		void ForceViewLODActor(TSharedRef<ITreeItem> Item);
+		/** Forces viewing the mesh of a Cluster (LODActor) */
+		void ForceViewLODActor();
 
 		/**
 		* Determines if the HLOD slider is enabled, only if all HLODs are buil
@@ -180,68 +176,32 @@ namespace HLODOutliner
 		/** Resets the forced LOD level and the Slider value */
 		void ResetLODLevelForcing();
 
-		/**
-		* Creates a Hierarchical LOD Volume for the given LODActorItem, volume bounds correspond to those of the LODActor's SubActors
-		*
-		* @param Item - LODActorItem
-		*/
-		void CreateHierarchicalVolumeForActor(TSharedRef<ITreeItem> Item);
+		/** Creates a Hierarchical LOD Volume for the given LODActorItem, volume bounds correspond to those of the LODActor's SubActors */
+		void CreateHierarchicalVolumeForActor();
 	protected:
-		/**
-		* Builds the HLOD mesh for the given ALODActor (cluster)
-		*
-		* @param Item - (LODActor)TreeItem containing the ALODActor ptr
-		*/
-		void BuildLODActor(TSharedRef<ITreeItem> Item);	
+		/** Builds the HLOD mesh for the given ALODActor (cluster) */
+		void BuildLODActor();	
 
-		/**
-		* Rebuilds the HLOD mesh for the given ALODActor (cluster)
-		*
-		* @param Item - (LODActor)TreeItem containing the ALODActor ptr
-		*/
-		void RebuildLODActor(TSharedRef<ITreeItem> Item);
+		/** Rebuilds the HLOD mesh for the given ALODActor (cluster) */
+		void RebuildLODActor();
 
-		/**
-		* Select the LODActor in the Editor Viewport
-		*
-		* @param Item - (LODActor)TreeItem containing the ALODActor ptr
-		*/
-		void SelectLODActor(TSharedRef<ITreeItem> Item);
+		/** Select the LODActor in the Editor Viewport */
+		void SelectLODActor();
 
-		/**
-		* Deletes a cluster (LODActor)
-		*
-		* @param Item - Treeview Item representation for LODActor
-		*/
-		void DeleteCluster(TSharedRef<ITreeItem> Item);
+		/** Deletes a cluster (LODActor) */
+		void DeleteCluster();
 
-		/**
-		* Selects the contained actors (SubActors) for a specific LODActor
-		*
-		* @param Item - Treeview Item representation for LODActor
-		*/
-		void SelectContainedActors(TSharedRef<ITreeItem> Item);
+		/** Selects the contained actors (SubActors) for a specific LODActor */
+		void SelectContainedActors();
 
-		/**
-		* Removes the given StaticMeshActor from its parent's (ALODActor) sub-actors array
-		*
-		* @param Item - (StaticMeshActor)TreeItem containing the Actor ptr
-		*/
-		void RemoveStaticMeshActorFromCluster(TSharedRef<ITreeItem> Item);
+		/** Removes the given StaticMeshActor from its parent's (ALODActor) sub-actors array */
+		void RemoveStaticMeshActorFromCluster();
 		
-		/**
-		* Removes the given StaticMeshActor from its parent's (ALODActor) sub-actors array and excludes it from cluster generation
-		*
-		* @param Item - (StaticMeshActor)TreeItem containing the Actor ptr
-		*/
-		void ExcludeFromClusterGeneration(TSharedRef<ITreeItem> Item);		
+		/* Removes the given StaticMeshActor from its parent's (ALODActor) sub-actors array and excludes it from cluster generation */
+		void ExcludeFromClusterGeneration();		
 
-		/**
-		* Removes the given LODActor from its parent's (ALODActor) sub-actors array
-		*
-		* @param Item - Treeview Item representation for LODActor
-		*/
-		void RemoveLODActorFromCluster(TSharedRef<ITreeItem> Item);
+		/** Removes the given LODActor from its parent's (ALODActor) sub-actors array */
+		void RemoveLODActorFromCluster();
 		
 		/**
 		* Destroys an LODActor instance
@@ -396,13 +356,15 @@ namespace HLODOutliner
 		void OnHLODActorMarkedDirtyEvent(ALODActor* InActor);	
 
 		/** Called when a DrawDistance value within WorldSettings changed */
-		void OnHLODDrawDistanceChangedEvent();
+		void OnHLODTransitionScreenSizeChangedEvent();
 
 		/** Called when the HLOD Levels array within WorldSettings changed */
 		void OnHLODLevelsArrayChangedEvent();
 
 		/** End of Broadcast event delegates */
 
+		/** Callback function used to check if Hierarchical LOD functionality is enabled in the current world settings */
+		bool IsHLODEnabledInWorldSettings();
 	private:
 		/** Tells the scene outliner that it should do a full refresh, which will clear the entire tree and rebuild it from scratch. */
 		void FullRefresh();
@@ -464,6 +426,10 @@ namespace HLODOutliner
 		TSharedPtr<SHLODTree> TreeView;
 		/** Property viewing widget */
 		TSharedPtr<IDetailsView> SettingsView;
+		/** Content panel widget */
+		TSharedPtr<SVerticalBox> MainContentPanel;
+		/** Attribute determining if the outliner UI is enabled*/
+		TAttribute<bool> EnabledAttribute;
 	
 		/** Map containing all the nodes with their corresponding keys */
 		TMap<FTreeItemID, FTreeItemPtr> TreeItemsMap;
@@ -488,7 +454,7 @@ namespace HLODOutliner
 		TArray<bool> LODLevelBuildFlags;
 		/** Array of LODActors/Cluster per LOD level*/
 		TArray<TArray<ALODActor*>> LODLevelActors;
-		/** Array of DrawDistances for each LOD Level*/
-		TArray<float> LODLevelDrawDistances;
+		/** Array of TransitionScreenSizes for each LOD Level*/
+		TArray<float> LODLevelTransitionScreenSizes;		
 	};
 };

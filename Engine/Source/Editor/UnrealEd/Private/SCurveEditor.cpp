@@ -95,13 +95,16 @@ void SCurveEditor::Construct(const FArguments& InArgs)
 		FExecuteAction::CreateSP(this, &SCurveEditor::RedoAction));
 
 	Commands->MapAction(FRichCurveEditorCommands::Get().ZoomToFitHorizontal,
-		FExecuteAction::CreateSP(this, &SCurveEditor::ZoomToFitHorizontal));
+		FExecuteAction::CreateSP(this, &SCurveEditor::ZoomToFitHorizontal, false));
 
 	Commands->MapAction(FRichCurveEditorCommands::Get().ZoomToFitVertical,
-		FExecuteAction::CreateSP(this, &SCurveEditor::ZoomToFitVertical));
+		FExecuteAction::CreateSP(this, &SCurveEditor::ZoomToFitVertical, false));
 
 	Commands->MapAction(FRichCurveEditorCommands::Get().ZoomToFit,
-		FExecuteAction::CreateSP(this, &SCurveEditor::ZoomToFit));
+		FExecuteAction::CreateSP(this, &SCurveEditor::ZoomToFit, false));
+
+	Commands->MapAction(FRichCurveEditorCommands::Get().ZoomToFitAll,
+		FExecuteAction::CreateSP(this, &SCurveEditor::ZoomToFit, true));
 
 	Commands->MapAction(FRichCurveEditorCommands::Get().ToggleSnapping,
 		FExecuteAction::CreateSP(this, &SCurveEditor::ToggleSnapping),
@@ -231,7 +234,13 @@ void SCurveEditor::Construct(const FArguments& InArgs)
 		FIsActionChecked::CreateLambda( [this]{ return Settings->GetAutoFrameCurveEditor(); } ) );
 
 	Commands->MapAction(FRichCurveEditorCommands::Get().ToggleShowCurveEditorCurveToolTips,
-		FExecuteAction::CreateLambda( [this]{ Settings->SetShowCurveEditorCurveToolTips( !Settings->GetShowCurveEditorCurveToolTips() ); } ),
+		FExecuteAction::CreateLambda( [this]{ 
+		Settings->SetShowCurveEditorCurveToolTips( !Settings->GetShowCurveEditorCurveToolTips() ); 
+		if (!Settings->GetShowCurveEditorCurveToolTips())
+		{
+			CurveToolTip.Reset();
+			SetToolTip(CurveToolTip);
+		} } ),
 		FCanExecuteAction::CreateLambda( []{ return true; } ),
 		FIsActionChecked::CreateLambda( [this]{ return Settings->GetShowCurveEditorCurveToolTips(); } ) );
 
@@ -2307,7 +2316,7 @@ TArray<FRichCurve*> SCurveEditor::GetCurvesToFit() const
 }
 
 
-void SCurveEditor::ZoomToFitHorizontal()
+void SCurveEditor::ZoomToFitHorizontal(const bool bZoomToFitAll)
 {
 	TArray<FRichCurve*> CurvesToFit = GetCurvesToFit();
 
@@ -2317,7 +2326,7 @@ void SCurveEditor::ZoomToFitHorizontal()
 		float InMax = -FLT_MAX;
 		int32 TotalKeys = 0;
 
-		if (SelectedKeys.Num())
+		if (SelectedKeys.Num() && !bZoomToFitAll)
 		{
 			for (auto SelectedKey : SelectedKeys)
 			{
@@ -2395,7 +2404,7 @@ void SCurveEditor::SetDefaultOutput(const float MinZoomRange)
 	SetOutputMinMax(NewMinOutput, NewMaxOutput);
 }
 
-void SCurveEditor::ZoomToFitVertical()
+void SCurveEditor::ZoomToFitVertical(const bool bZoomToFitAll)
 {
 	TArray<FRichCurve*> CurvesToFit = GetCurvesToFit();
 
@@ -2405,7 +2414,7 @@ void SCurveEditor::ZoomToFitVertical()
 		float InMax = -FLT_MAX;
 		int32 TotalKeys = 0;
 
-		if (SelectedKeys.Num() != 0)
+		if (SelectedKeys.Num() != 0 && !bZoomToFitAll)
 		{
 			for (auto SelectedKey : SelectedKeys)
 			{
@@ -2476,10 +2485,10 @@ FReply SCurveEditor::ZoomToFitVerticalClicked()
 	return FReply::Handled();
 }
 
-void SCurveEditor::ZoomToFit()
+void SCurveEditor::ZoomToFit(const bool bZoomToFitAll)
 {
-	ZoomToFitHorizontal();
-	ZoomToFitVertical();
+	ZoomToFitHorizontal(bZoomToFitAll);
+	ZoomToFitVertical(bZoomToFitAll);
 }
 
 void SCurveEditor::ToggleSnapping()

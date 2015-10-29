@@ -11,10 +11,22 @@ class MOVIESCENECAPTURE_API ULevelCapture : public UMovieSceneCapture
 public:
 	GENERATED_BODY()
 
-	/** The level we want to load and capture */
-	UPROPERTY(EditAnywhere, Category="General", meta=(AllowedClasses="World"))
-	FStringAssetReference Level;
+	/** Specify a prerequisite actor that must be set up before we start capturing */
+	void SetPrerequisiteActor(AActor* Prereq);
 
-	virtual FString GetPackageName() const override { return Level.ToString(); }
-	virtual void Initialize(FViewport* InViewport) override;
+	virtual void Initialize(TWeakPtr<FSceneViewport> InViewport) override;
+	virtual void Tick(float DeltaSeconds) override;
+#if WITH_EDITOR
+	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
+#endif
+	
+private:
+
+	/** Specify a prerequisite actor that must be set up before we start capturing */
+	UPROPERTY()
+	TLazyObjectPtr<AActor> PrerequisiteActor;
+
+	/** Copy of the ID from PrerequisiteActor. Required because JSON serialization exports the path of the object, rather that its GUID */
+	UPROPERTY()
+	FGuid PrerequisiteActorId;
 };

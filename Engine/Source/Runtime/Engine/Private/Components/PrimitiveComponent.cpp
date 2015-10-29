@@ -1388,8 +1388,16 @@ void UPrimitiveComponent::InitSweepCollisionParams(FCollisionQueryParams &OutPar
 	OutParams.bTraceAsyncScene = bCheckAsyncSceneOnMove;
 	OutParams.bTraceComplex = bTraceComplexOnMove;
 	OutParams.bReturnPhysicalMaterial = bReturnMaterialOnMove;
+	OutParams.IgnoreMask = GetMoveIgnoreMask();
 }
 
+void UPrimitiveComponent::SetMoveIgnoreMask(FMaskFilter InMoveIgnoreMask)
+{
+	if (ensure(InMoveIgnoreMask < 16)) // TODO: don't assert, and make this a nicer exposed value.
+	{
+		MoveIgnoreMask = InMoveIgnoreMask;
+	}
+}
 
 FCollisionShape UPrimitiveComponent::GetCollisionShape(float Inflation) const
 {
@@ -1423,21 +1431,16 @@ bool UPrimitiveComponent::MoveComponentImpl( const FVector& Delta, const FQuat& 
 	{
 		if (OutHit)
 		{
-			*OutHit = FHitResult();
+			OutHit->Init();
 		}
 		return false;
 	}
 
 	ConditionalUpdateComponentToWorld();
 
-	// Init HitResult
-	FHitResult BlockingHit(1.f);
+	// Set up
 	const FVector TraceStart = GetComponentLocation();
 	const FVector TraceEnd = TraceStart + Delta;
-	BlockingHit.TraceStart = TraceStart;
-	BlockingHit.TraceEnd = TraceEnd;
-
-	// Set up.
 	float DeltaSizeSq = Delta.SizeSquared();
 	const FQuat InitialRotationQuat = ComponentToWorld.GetRotation();
 
@@ -1451,7 +1454,7 @@ bool UPrimitiveComponent::MoveComponentImpl( const FVector& Delta, const FQuat& 
 			// copy to optional output param
 			if (OutHit)
 			{
-				*OutHit = BlockingHit;
+				OutHit->Init(TraceStart, TraceEnd);
 			}
 			return true;
 		}
@@ -1460,6 +1463,11 @@ bool UPrimitiveComponent::MoveComponentImpl( const FVector& Delta, const FQuat& 
 
 	const bool bSkipPhysicsMove = ((MoveFlags & MOVECOMP_SkipPhysicsMove) != MOVECOMP_NoFlags);
 
+	// WARNING: HitResult is only partially initialized in some paths. All data is valid only if bFilledHitResult is true.
+	FHitResult BlockingHit(NoInit);
+	BlockingHit.bBlockingHit = false;
+	BlockingHit.Time = 1.f;
+	bool bFilledHitResult = false;
 	bool bMoved = false;
 	bool bIncludesOverlapsAtEnd = false;
 	bool bRotationOnly = false;
@@ -1579,6 +1587,7 @@ bool UPrimitiveComponent::MoveComponentImpl( const FVector& Delta, const FQuat& 
 				if (BlockingHitIndex >= 0)
 				{
 					BlockingHit = Hits[BlockingHitIndex];
+					bFilledHitResult = true;
 				}
 			}
 		
@@ -1589,6 +1598,7 @@ bool UPrimitiveComponent::MoveComponentImpl( const FVector& Delta, const FQuat& 
 			}
 			else
 			{
+				check(bFilledHitResult);
 				NewLocation = TraceStart + (BlockingHit.Time * (TraceEnd - TraceStart));
 
 				// Sanity check
@@ -1610,7 +1620,7 @@ bool UPrimitiveComponent::MoveComponentImpl( const FVector& Delta, const FQuat& 
 			bIncludesOverlapsAtEnd = AreSymmetricRotations(InitialRotationQuat, NewRotationQuat, GetComponentScale());
 
 #if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
-			if ( (BlockingHit.Time < 1.f) && !IsZeroExtent() )
+			if (UCheatManager::IsDebugCapsuleSweepPawnEnabled() && BlockingHit.bBlockingHit && !IsZeroExtent())
 			{
 				// this is sole debug purpose to find how capsule trace information was when hit 
 				// to resolve stuck or improve our movement system - To turn this on, use DebugCapsuleSweepPawn
@@ -1618,7 +1628,7 @@ bool UPrimitiveComponent::MoveComponentImpl( const FVector& Delta, const FQuat& 
 				if (ActorPawn && ActorPawn->Controller && ActorPawn->Controller->IsLocalPlayerController())
 				{
 					APlayerController const* const PC = CastChecked<APlayerController>(ActorPawn->Controller);
-					if (PC->CheatManager && PC->CheatManager->bDebugCapsuleSweepPawn)
+					if (PC->CheatManager)
 					{
 						FVector CylExtent = ActorPawn->GetSimpleCollisionCylinderExtent()*FVector(1.001f,1.001f,1.0f);							
 						FCollisionShape CapsuleShape = FCollisionShape::MakeCapsule(CylExtent);
@@ -1686,6 +1696,7 @@ bool UPrimitiveComponent::MoveComponentImpl( const FVector& Delta, const FQuat& 
 	// Handle blocking hit notifications. Avoid if pending kill (which could happen after overlaps).
 	if (BlockingHit.bBlockingHit && !IsPendingKill())
 	{
+		check(bFilledHitResult);
 		if (IsDeferringMovementUpdates())
 		{
 			FScopedMovementUpdate* ScopedUpdate = GetCurrentScopedMovement();
@@ -1716,7 +1727,14 @@ bool UPrimitiveComponent::MoveComponentImpl( const FVector& Delta, const FQuat& 
 	// copy to optional output param
 	if (OutHit)
 	{
-		*OutHit = BlockingHit;
+		if (bFilledHitResult)
+		{
+			*OutHit = BlockingHit;
+		}
+		else
+		{
+			OutHit->Init(TraceStart, TraceEnd);
+		}
 	}
 
 	// Return whether we moved at all.
@@ -2368,8 +2386,9 @@ void UPrimitiveComponent::UpdateOverlaps(const TArray<FOverlapInfo>* NewPendingO
 					TArray<FOverlapResult> Overlaps;
 					// note this will optionally include overlaps with components in the same actor (depending on bIgnoreChildren). 
 					FComponentQueryParams Params(PrimitiveComponentStatics::UpdateOverlapsName, bIgnoreChildren ? MyActor : nullptr);
-					Params.bTraceAsyncScene = bCheckAsyncSceneOnMove;
-					Params.AddIgnoredActors(MoveIgnoreActors);
+					Params.bIgnoreBlocks = true;	//We don't care about blockers since we only route overlap events to real overlaps
+					FCollisionResponseParams ResponseParam;
+					InitSweepCollisionParams(Params, ResponseParam);
 					MyWorld->ComponentOverlapMulti(Overlaps, this, GetComponentLocation(), GetComponentQuat(), Params);
 
 					for( int32 ResultIdx=0; ResultIdx<Overlaps.Num(); ResultIdx++ )
@@ -2377,7 +2396,7 @@ void UPrimitiveComponent::UpdateOverlaps(const TArray<FOverlapInfo>* NewPendingO
 						const FOverlapResult& Result = Overlaps[ResultIdx];
 
 						UPrimitiveComponent* const HitComp = Result.Component.Get();
-						if (!Result.bBlockingHit && HitComp && (HitComp != this) && HitComp->bGenerateOverlapEvents)
+						if (HitComp && (HitComp != this) && HitComp->bGenerateOverlapEvents)
 						{
 							if (!ShouldIgnoreOverlapResult(MyWorld, MyActor, *this, Result.GetActor(), *HitComp))
 							{

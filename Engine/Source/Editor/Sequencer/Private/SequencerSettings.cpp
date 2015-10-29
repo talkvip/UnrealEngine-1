@@ -8,7 +8,8 @@ USequencerSettings::USequencerSettings( const FObjectInitializer& ObjectInitiali
 	bAutoKeyEnabled = false;
 	bKeyAllEnabled = false;
 	bKeyInterpPropertiesOnly = false;
-	KeyInterpolation = MSKI_Auto;
+	KeyInterpolation = EMovieSceneKeyInterpolation::Auto;
+	SpawnPosition = SSP_Origin;
 	bShowFrameNumbers = true;
 	bShowRangeSlider = false;
 	bLockInOutToStartEndRange = false;
@@ -80,6 +81,20 @@ void USequencerSettings::SetKeyInterpolation(EMovieSceneKeyInterpolation InKeyIn
 	if ( KeyInterpolation != InKeyInterpolation)
 	{
 		KeyInterpolation = InKeyInterpolation;
+		SaveConfig();
+	}
+}
+
+ESequencerSpawnPosition USequencerSettings::GetSpawnPosition() const
+{
+	return SpawnPosition;
+}
+
+void USequencerSettings::SetSpawnPosition(ESequencerSpawnPosition InSpawnPosition)
+{
+	if ( SpawnPosition != InSpawnPosition)
+	{
+		SpawnPosition = InSpawnPosition;
 		SaveConfig();
 	}
 }

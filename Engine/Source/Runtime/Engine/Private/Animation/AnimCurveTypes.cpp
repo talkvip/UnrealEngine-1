@@ -231,6 +231,25 @@ bool FRawCurveTracks::DeleteCurveData(USkeleton::AnimCurveUID Uid, ESupportedCur
 	}
 }
 
+void FRawCurveTracks::DeleteAllCurveData(ESupportedCurveType SupportedCurveType /*= FloatType*/)
+{
+	switch(SupportedCurveType)
+	{
+#if WITH_EDITOR
+	case VectorType:
+		VectorCurves.Empty();
+		break;
+	case TransformType:
+		TransformCurves.Empty();
+		break;
+#endif // WITH_EDITOR
+	case FloatType:
+	default:
+		FloatCurves.Empty();
+		break;
+	}
+}
+
 bool FRawCurveTracks::AddCurveData(USkeleton::AnimCurveUID Uid, int32 CurveFlags /*= ACF_DefaultCurve*/, ESupportedCurveType SupportedCurveType /*= FloatType*/)
 {
 	switch(SupportedCurveType)
@@ -442,7 +461,7 @@ void FBlendedCurve::Reset(int32 Count)
 	Elements.Reserve(Count);
 }
 
-//@Todo curve flags won't transfer over - it only overwritees
+//@Todo curve flags won't transfer over - it only overwrites
 void FBlendedCurve::Blend(const FBlendedCurve& A, const FBlendedCurve& B, float Alpha)
 {
 	check(A.Num()==B.Num());
@@ -462,7 +481,7 @@ void FBlendedCurve::Blend(const FBlendedCurve& A, const FBlendedCurve& B, float 
 		for(int32 CurveId=0; CurveId<A.Elements.Num(); ++CurveId)
 		{
 			Elements[CurveId].Value = FMath::Lerp(A.Elements[CurveId].Value, B.Elements[CurveId].Value, Alpha); 
-			Elements[CurveId].Flags |= (B.Elements[CurveId].Flags);
+			Elements[CurveId].Flags = (A.Elements[CurveId].Flags) | (B.Elements[CurveId].Flags);
 		}
 	}
 

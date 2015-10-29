@@ -41,13 +41,13 @@ UWidgetAnimation* UWidgetAnimation::GetNullAnimation()
 
 float UWidgetAnimation::GetStartTime() const
 {
-	return MovieScene->GetTimeRange().GetLowerBoundValue();
+	return MovieScene->GetPlaybackRange().GetLowerBoundValue();
 }
 
 
 float UWidgetAnimation::GetEndTime() const
 {
-	return MovieScene->GetTimeRange().GetUpperBoundValue();
+	return MovieScene->GetPlaybackRange().GetUpperBoundValue();
 }
 
 
@@ -96,11 +96,6 @@ void UWidgetAnimation::Initialize(UUserWidget* InPreviewWidget)
 
 /* UMovieSceneAnimation overrides
  *****************************************************************************/
-
-bool UWidgetAnimation::AllowsSpawnableObjects() const
-{
-	return false;
-}
 
 
 void UWidgetAnimation::BindPossessableObject(const FGuid& ObjectId, UObject& PossessedObject)

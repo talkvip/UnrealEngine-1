@@ -34,9 +34,15 @@ FFriendsAndChatStyle& FFriendsAndChatStyle::SetFriendsListStyle(const FFriendsLi
 	return *this;
 }
 
-FFriendsAndChatStyle& FFriendsAndChatStyle::SetFriendsComboStyle(const FFriendsComboStyle& InFriendsComboStyle)
+FFriendsAndChatStyle& FFriendsAndChatStyle::SetCheckBoxStyle(const FCheckBoxStyle& InCheckBoxStyle)
 {
-	FriendsComboStyle = InFriendsComboStyle;
+	CheckBoxStyle = InCheckBoxStyle;
+	return *this;
+}
+
+FFriendsAndChatStyle& FFriendsAndChatStyle::SetRadioBoxStyle(const FCheckBoxStyle& InRadioBoxStyle)
+{
+	RadioBoxStyle = InRadioBoxStyle;
 	return *this;
 }
 

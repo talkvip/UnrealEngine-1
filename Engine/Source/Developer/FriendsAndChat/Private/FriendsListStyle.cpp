@@ -16,34 +16,54 @@ FFriendsListStyle& FFriendsListStyle::SetGlobalChatButtonStyle(const FButtonStyl
 	return *this;
 }
 
-FFriendsListStyle& FFriendsListStyle::SetButtonInvertedForegroundColor(const FSlateColor& Value)
-{
-	ButtonInvertedForegroundColor = Value;
-	return *this;
-}
-
-FFriendsListStyle& FFriendsListStyle::SetButtonForegroundColor(const FSlateColor& Value)
-{
-	ButtonForegroundColor = Value;
-	return *this;
-}
-
 FFriendsListStyle& FFriendsListStyle::SetFriendItemButtonStyle(const FButtonStyle& ButtonStyle)
 {
-	FriendListOpenButtonStyle = ButtonStyle;
+	FriendItemButtonStyle = ButtonStyle;
 	return *this;
 }
 
-FFriendsListStyle& FFriendsListStyle::SetFriendsListOpenButtonStyle(const FButtonStyle& ButtonStyle)
+
+FFriendsListStyle& FFriendsListStyle::SetConfirmButtonStyle(const FButtonStyle& ButtonStyle)
 {
-	FriendListOpenButtonStyle = ButtonStyle;
+	ConfirmButtonStyle = ButtonStyle;
 	return *this;
 }
 
-/** Friends General Purpose Button style */
-FFriendsListStyle& FFriendsListStyle::SetFriendGeneralButtonStyle(const FButtonStyle& ButtonStyle)
+
+FFriendsListStyle& FFriendsListStyle::SetCancelButtonStyle(const FButtonStyle& ButtonStyle)
 {
-	FriendGeneralButtonStyle = ButtonStyle;
+	CancelButtonStyle = ButtonStyle;
+	return *this;
+}
+
+
+FFriendsListStyle& FFriendsListStyle::SetButtonContentColor(const FSlateColor& InColor)
+{
+	ButtonContentColor = InColor;
+	return *this;
+}
+
+FFriendsListStyle& FFriendsListStyle::SetButtonHoverContentColor(const FSlateColor& InColor)
+{
+	ButtonHoverContentColor = InColor;
+	return *this;
+}
+
+FFriendsListStyle& FFriendsListStyle::SetActionMenuArrowBrush(const FSlateBrush& BrushStyle)
+{
+	ActionMenuArrowBrush = BrushStyle;
+	return *this;
+}
+
+FFriendsListStyle& FFriendsListStyle::SetBackButtonStyle(const FButtonStyle& ButtonStyle)
+{
+	BackButtonStyle = ButtonStyle;
+	return *this;
+}
+
+FFriendsListStyle& FFriendsListStyle::SetHeaderButtonStyle(const FButtonStyle& ButtonStyle)
+{
+	HeaderButtonStyle = ButtonStyle;
 	return *this;
 }
 
@@ -51,20 +71,6 @@ FFriendsListStyle& FFriendsListStyle::SetFriendGeneralButtonStyle(const FButtonS
 FFriendsListStyle& FFriendsListStyle::SetFriendListActionButtonStyle(const FButtonStyle& ButtonStyle)
 {
 	FriendListActionButtonStyle = ButtonStyle;
-	return *this;
-}
-
-/** Friends List Critical Button style */
-FFriendsListStyle& FFriendsListStyle::SetFriendsListCriticalButtonStyle(const FButtonStyle& ButtonStyle)
-{
-	FriendListCriticalButtonStyle = ButtonStyle;
-	return *this;
-}
-
-/** Friends List Emphasis Button style */
-FFriendsListStyle& FFriendsListStyle::SetFriendsListEmphasisButtonStyle(const FButtonStyle& ButtonStyle)
-{
-	FriendListEmphasisButtonStyle = ButtonStyle;
 	return *this;
 }
 
@@ -89,10 +95,9 @@ FFriendsListStyle& FFriendsListStyle::SetAddFriendButtonContentBrush(const FSlat
 	return *this;
 }
 
-/** Optional content for the Add Friend button (hovered) */
-FFriendsListStyle& FFriendsListStyle::SetAddFriendButtonContentHoveredBrush(const FSlateBrush& BrushStyle)
+FFriendsListStyle& FFriendsListStyle::SetStatusIconBrush(const FSlateBrush& BrushStyle)
 {
-	AddFriendButtonContentHoveredBrush = BrushStyle;
+	StatusIconBrush = BrushStyle;
 	return *this;
 }
 
@@ -157,31 +162,16 @@ FFriendsListStyle& FFriendsListStyle::SetAwayBrush(const FSlateBrush& BrushStyle
 	return *this;
 }
 
-/** Window background style */
-FFriendsListStyle& FFriendsListStyle::SetBackgroundBrush(const FSlateBrush& BrushStyle)
-{
-	Background = BrushStyle;
-	return *this;
-}
-
-/** Friend container header */
-FFriendsListStyle& FFriendsListStyle::SetFriendContainerHeader(const FSlateBrush& BrushStyle)
-{
-	FriendContainerHeader = BrushStyle;
-	return *this;
-}
-
-/** Friend list header */
-FFriendsListStyle& FFriendsListStyle::SetFriendListHeader(const FSlateBrush& BrushStyle)
-{
-	FriendListHeader = BrushStyle;
-	return *this;
-}
-
 /** Friends window background */
 FFriendsListStyle& FFriendsListStyle::SetFriendContainerBackground(const FSlateBrush& BrushStyle)
 {
 	FriendsContainerBackground = BrushStyle;
+	return *this;
+}
+
+FFriendsListStyle& FFriendsListStyle::SetFriendsListBackground(const FSlateBrush& BrushStyle)
+{
+	FriendsListBackground = BrushStyle;
 	return *this;
 }
 

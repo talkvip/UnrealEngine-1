@@ -58,6 +58,7 @@ public class UnrealEd : ModuleRules
                 "Niagara",
 				"SizeMap",
                 "LocalizationService",
+                "HierarchicalLODUtilities",
                 "MessagingRpc",
                 "PortalRpc",
                 "PortalServices",
@@ -99,6 +100,7 @@ public class UnrealEd : ModuleRules
                 "AppFramework",
 				"BlueprintGraph",
 				"OnlineSubsystem",
+				"OnlineSubsystemUtils",
 				"OnlineBlueprintSupport",
 				"DesktopPlatform",
 				"EditorStyle",
@@ -139,7 +141,8 @@ public class UnrealEd : ModuleRules
                 "MaterialUtilities",
                 "LocalizationService",
 				"AddContentDialog",
-				"GameProjectGeneration",                
+				"GameProjectGeneration",
+                "HierarchicalLODUtilities"
 			}
 		);
 

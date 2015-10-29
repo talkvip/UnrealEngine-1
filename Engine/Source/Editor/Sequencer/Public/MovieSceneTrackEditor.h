@@ -13,8 +13,12 @@
 
 class ISequencerSection;
 
+/** Delegate for adding keys for a property
+ * float - The time at which to add the key.
+ * return - True if any data was changed as a result of the call, otherwise false.
+ */
+DECLARE_DELEGATE_RetVal_OneParam(bool, FOnKeyProperty, float)
 
-DECLARE_DELEGATE_OneParam(FOnKeyProperty, float)
 DECLARE_DELEGATE_RetVal_OneParam(bool, FCanKeyProperty, float)
 
 
@@ -66,18 +70,8 @@ public:
 			SequencerPin->NotifyMovieSceneDataChanged();
 		}
 	}
-	
-	bool CanKeyProperty( FCanKeyProperty InCanKeyProperty )
-	{
-		UMovieSceneSequence* MovieSceneSequence = GetMovieSceneSequence();
-		check( MovieSceneSequence );
 
-		float KeyTime = GetTimeForKey(MovieSceneSequence);
-
-		return InCanKeyProperty.Execute(KeyTime);
-	}
-	
-	void AnimatablePropertyChanged( TSubclassOf<class UMovieSceneTrack> TrackClass, FOnKeyProperty OnKeyProperty )
+	void AnimatablePropertyChanged( FOnKeyProperty OnKeyProperty )
 	{
 		check(OnKeyProperty.IsBound());
 
@@ -96,12 +90,19 @@ public:
 			const bool bShouldActuallyTransact = !Sequencer.Pin()->IsRecordingLive();		// Don't transact if we're recording in a PIE world.  That type of keyframe capture cannot be undone.
 			FScopedTransaction AutoKeyTransaction( NSLOCTEXT("AnimatablePropertyTool", "PropertyChanged", "Animatable Property Changed"), bShouldActuallyTransact );
 
-			OnKeyProperty.ExecuteIfBound( KeyTime );
-
-			// Movie scene data has changed
-			NotifyMovieSceneDataChanged();
+			if( OnKeyProperty.Execute( KeyTime ) )
+			{
+				// Movie scene data has changed
+				NotifyMovieSceneDataChanged();
+			}
 		}
 	}
+
+	struct FFindOrCreateHandleResult
+	{
+		FGuid Handle;
+		bool bWasCreated;
+	};
 	
 	/**
 	 * Finds or creates a binding to an object
@@ -109,38 +110,71 @@ public:
 	 * @param Object	The object to create a binding for
 	 * @return A handle to the binding or an invalid handle if the object could not be bound
 	 */
-	FGuid FindOrCreateHandleToObject( UObject* Object, bool bCreateHandleIfMissing = true )
+	FFindOrCreateHandleResult FindOrCreateHandleToObject( UObject* Object, bool bCreateHandleIfMissing = true )
 	{
-		return GetSequencer()->GetHandleToObject( Object, bCreateHandleIfMissing );
+		FFindOrCreateHandleResult Result;
+		bool bHandleWasValid = GetSequencer()->GetHandleToObject( Object, false ).IsValid();
+		Result.Handle = GetSequencer()->GetHandleToObject( Object, bCreateHandleIfMissing );
+		Result.bWasCreated = bHandleWasValid == false && Result.Handle.IsValid();
+		return Result;
 	}
 
-	UMovieSceneTrack* GetTrackForObject( const FGuid& ObjectHandle, TSubclassOf<class UMovieSceneTrack> TrackClass, FName UniqueTypeName, bool bCreateTrackIfMissing = true )
+	struct FFindOrCreateTrackResult
 	{
+		UMovieSceneTrack* Track;
+		bool bWasCreated;
+	};
+
+	FFindOrCreateTrackResult FindOrCreateTrackForObject( const FGuid& ObjectHandle, TSubclassOf<class UMovieSceneTrack> TrackClass, FName UniqueTypeName, bool bCreateTrackIfMissing = true )
+	{
+		FFindOrCreateTrackResult Result;
+		bool bTrackExisted;
+
 		check( UniqueTypeName != NAME_None );
 
 		UMovieScene* MovieScene = GetSequencer()->GetFocusedMovieSceneSequence()->GetMovieScene();
+		Result.Track = MovieScene->FindTrack( TrackClass, ObjectHandle, UniqueTypeName );
+		bTrackExisted = Result.Track != nullptr;
 
-		UMovieSceneTrack* Type = MovieScene->FindTrack( TrackClass, ObjectHandle, UniqueTypeName );
-
-		if( !Type && bCreateTrackIfMissing )
+		if( !Result.Track && bCreateTrackIfMissing )
 		{
-			Type = AddTrack( MovieScene, ObjectHandle, TrackClass, UniqueTypeName );
+			Result.Track = AddTrack( MovieScene, ObjectHandle, TrackClass, UniqueTypeName );
 		}
 
-		return Type;
+		Result.bWasCreated = bTrackExisted == false && Result.Track != nullptr;
+		return Result;
 	}
 
-	UMovieSceneTrack* GetMasterTrack( TSubclassOf<UMovieSceneTrack> TrackClass )
+	template<typename TrackClass>
+	struct FFindOrCreateMasterTrackResult
 	{
-		UMovieScene* MovieScene = GetSequencer()->GetFocusedMovieSceneSequence()->GetMovieScene();
-		UMovieSceneTrack* Type = MovieScene->FindMasterTrack( TrackClass );
+		TrackClass* Track;
+		bool bWasCreated;
+	};
 
-		if( !Type )
+	/**
+	 * Find or add a master track of the specified type in the focused movie scene.
+	 *
+	 * @param TrackClass The class of the track to find or add.
+	 * @return The track results.
+	 */
+	template<typename TrackClass>
+	FFindOrCreateMasterTrackResult<TrackClass> FindOrCreateMasterTrack()
+	{
+		FFindOrCreateMasterTrackResult<TrackClass> Result;
+		bool bTrackExisted;
+
+		UMovieScene* MovieScene = GetSequencer()->GetFocusedMovieSceneSequence()->GetMovieScene();
+		Result.Track = MovieScene->FindMasterTrack<TrackClass>();
+		bTrackExisted = Result.Track != nullptr;
+
+		if (Result.Track == nullptr)
 		{
-			Type = MovieScene->AddMasterTrack( TrackClass );
+			Result.Track = MovieScene->AddMasterTrack<TrackClass>();
 		}
 
-		return Type;
+		Result.bWasCreated = bTrackExisted == false && Result.Track != nullptr;
+		return Result;
 	}
 
 
@@ -180,10 +214,29 @@ public:
 		return Sequencer.Pin()->IsRecordingLive() || Sequencer.Pin()->GetAutoKeyEnabled();
 	}
 
+	virtual TSharedRef<ISequencerSection> MakeSectionInterface(class UMovieSceneSection& SectionObject, UMovieSceneTrack& Track) = 0;
 	virtual void OnRelease() override { };
-	virtual TSharedRef<ISequencerSection> MakeSectionInterface( class UMovieSceneSection& SectionObject, UMovieSceneTrack& Track ) = 0;
+
+	virtual int32 PaintTrackArea(const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyClippingRect, FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle) override
+	{
+		return LayerId;
+	}
+
 	virtual bool SupportsType( TSubclassOf<class UMovieSceneTrack> TrackClass ) const = 0;
 	virtual void Tick(float DeltaTime) override { }
+
+protected:
+
+	/**
+	 * Gets the currently focused movie scene, if any.
+	 *
+	 * @result Focused movie scene, or nullptr if no movie scene is focused.
+	 */
+	UMovieScene* GetFocusedMovieScene() const
+	{
+		UMovieSceneSequence* FocusedSequence = GetSequencer()->GetFocusedMovieSceneSequence();
+		return FocusedSequence->GetMovieScene();
+	}
 
 private:
 

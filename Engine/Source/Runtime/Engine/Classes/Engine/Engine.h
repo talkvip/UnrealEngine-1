@@ -463,10 +463,10 @@ struct FGameNameRedirect
 	GENERATED_USTRUCT_BODY()
 
 	UPROPERTY()
-	FString OldGameName;
+	FName OldGameName;
 
 	UPROPERTY()
-	FString NewGameName;
+	FName NewGameName;
 };
 
 
@@ -476,19 +476,25 @@ struct FClassRedirect
 	GENERATED_USTRUCT_BODY()
 
 	UPROPERTY()
-	FString ObjectName;
+	FName ObjectName;
 
 	UPROPERTY()
-	FString OldClassName;
+	FName OldClassName;
 
 	UPROPERTY()
-	FString NewClassName;
+	FName NewClassName;
 
 	UPROPERTY()
-	FString OldSubobjName;
+	FName OldSubobjName;
 
 	UPROPERTY()
-	FString NewSubobjName;
+	FName NewSubobjName;
+
+	UPROPERTY()
+	FName NewClassClass; 
+
+	UPROPERTY()
+	FName NewClassPackage; 
 
 	UPROPERTY()
 	bool InstanceOnly;
@@ -501,10 +507,10 @@ struct FStructRedirect
 	GENERATED_USTRUCT_BODY()
 
 	UPROPERTY()
-	FString OldStructName;
+	FName OldStructName;
 
 	UPROPERTY()
-	FString NewStructName;
+	FName NewStructName;
 };
 
 
@@ -931,10 +937,6 @@ public:
 	UPROPERTY(globalconfig)
 	FLinearColor LightingOnlyBrightness;
 
-	/** The colors used to render light complexity. */
-	UPROPERTY(globalconfig)
-	TArray<FColor> LightComplexityColors;
-
 	/** The colors used to render shader complexity. */
 	UPROPERTY(globalconfig)
 	TArray<FLinearColor> ShaderComplexityColors;
@@ -946,6 +948,10 @@ public:
 	/** The colors used to render LOD coloration. */
 	UPROPERTY(globalconfig)
 	TArray<FLinearColor> LODColorationColors;
+
+	/** The colors used to render LOD coloration. */
+	UPROPERTY(globalconfig)
+	TArray<FLinearColor> HLODColorationColors;
 
 	/**
 	* Complexity limits for the various complexity view mode combinations.
@@ -1587,11 +1593,11 @@ public:
 	void BroadcastHLODActorMarkedDirty(class ALODActor* InActor) { HLODActorMarkedDirtyEvent.Broadcast(InActor); }
 
 	/** Editor-only event triggered when a HLOD Actor is marked dirty */
-	DECLARE_EVENT(UEngine, FHLODDrawDistanceChangedEvent);
-	FHLODDrawDistanceChangedEvent& OnHLODDrawDistanceChanged() { return HLODDrawDistanceChangedEvent; }
+	DECLARE_EVENT(UEngine, FHLODTransitionScreenSizeChangedEvent);
+	FHLODTransitionScreenSizeChangedEvent& OnHLODTransitionScreenSizeChanged() { return HLODTransitionScreenSizeChangedEvent; }
 
 	/** Called by internal engine systems after a HLOD Actor is marked dirty */
-	void BroadcastHLODDrawDistanceChanged() { HLODDrawDistanceChangedEvent.Broadcast(); }
+	void BroadcastHLODTransitionScreenSizeChanged() { HLODTransitionScreenSizeChangedEvent.Broadcast(); }
 
 	/** Editor-only event triggered when a HLOD level is added or removed */
 	DECLARE_EVENT(UEngine, FHLODLevelsArrayChangedEvent);
@@ -2330,7 +2336,7 @@ private:
 	FHLODActorMarkedDirtyEvent HLODActorMarkedDirtyEvent;
 
 	/** Broadcasts after a Draw distance value (World settings) is changed */
-	FHLODDrawDistanceChangedEvent HLODDrawDistanceChangedEvent;
+	FHLODTransitionScreenSizeChangedEvent HLODTransitionScreenSizeChangedEvent;
 
 	/** Broadcasts after the HLOD levels array is changed */
 	FHLODLevelsArrayChangedEvent HLODLevelsArrayChangedEvent;

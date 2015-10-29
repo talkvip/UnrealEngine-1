@@ -191,8 +191,6 @@ namespace FAnimUpdateRateManager
 
 	void AnimUpdateRateTick(FAnimUpdateRateParametersTracker* Tracker, float DeltaTime, bool bNeedsValidRootMotion)
 	{
-		const float RecentlyRenderedTime = (Tracker->RegisteredComponents[0]->GetWorld()->TimeSeconds - 1.f);
-
 		// Go through components and figure out if they've been recently rendered, and the biggest MaxDistanceFactor
 		bool bRecentlyRendered = false;
 		bool bPlayingRootMotion = false;
@@ -203,7 +201,7 @@ namespace FAnimUpdateRateManager
 
 		for (USkinnedMeshComponent* Component : SkinnedComponents)
 		{
-			bRecentlyRendered |= (Component->LastRenderTime > RecentlyRenderedTime);
+			bRecentlyRendered |= Component->bRecentlyRendered;
 			MaxDistanceFactor = FMath::Max(MaxDistanceFactor, Component->MaxDistanceFactor);
 			bPlayingRootMotion |= Component->IsPlayingRootMotion();
 			bUsingRootMotionFromEverything &= Component->IsPlayingRootMotionFromEverything();
@@ -952,7 +950,6 @@ FSkeletalMeshResource* USkinnedMeshComponent::GetSkeletalMeshResource() const
 	}
 	else if (SkeletalMesh)
 	{
-		ERHIFeatureLevel::Type SceneFeatureLevel = GetWorld()->FeatureLevel;
 		return SkeletalMesh->GetResourceForRendering();
 	}
 	else
@@ -1835,7 +1832,7 @@ bool USkinnedMeshComponent::UpdateLODStatus()
 	// Predict the best (min) LOD level we are going to need. Basically we use the Min (best) LOD the renderer desired last frame.
 	// Because we update bones based on this LOD level, we have to update bones to this LOD before we can allow rendering at it.
 
-	if(SkeletalMesh != NULL)
+	if (SkeletalMesh != nullptr)
 	{
 		int32 MaxLODIndex = 0;
 		if (MeshObject)
@@ -1844,14 +1841,14 @@ bool USkinnedMeshComponent::UpdateLODStatus()
 		}
 
 		// Support forcing to a particular LOD.
-		if(ForcedLodModel > 0)
+		if (ForcedLodModel > 0)
 		{
 			PredictedLODLevel = FMath::Clamp(ForcedLodModel - 1, 0, MaxLODIndex);
 		}
 		else
 		{
 			// If no MeshObject - just assume lowest LOD.
-			if(MeshObject)
+			if (MeshObject)
 			{
 				PredictedLODLevel = FMath::Clamp(MeshObject->MinDesiredLODLevel + GSkeletalMeshLODBias, 0, MaxLODIndex);
 			}
@@ -1859,12 +1856,12 @@ bool USkinnedMeshComponent::UpdateLODStatus()
 			{
 				PredictedLODLevel = MaxLODIndex;
 			}
-		}
 
-		// now check to see if we have a MinLODLevel
-		if( ( MinLodModel > 0 ) && ( MinLodModel <= MaxLODIndex ) )
-		{
-			PredictedLODLevel = FMath::Clamp(PredictedLODLevel, MinLodModel, MaxLODIndex);
+			// now check to see if we have a MinLODLevel and apply it
+			if ((MinLodModel > 0) && (MinLodModel <= MaxLODIndex))
+			{
+				PredictedLODLevel = FMath::Clamp(PredictedLODLevel, MinLodModel, MaxLODIndex);
+			}
 		}
 	}
 	else
@@ -2003,6 +2000,7 @@ void FAnimUpdateRateParameters::SetTrailMode(float DeltaTime, uint8 UpdateRateSh
 
 	bSkipUpdate = ((Counter % UpdateRate) > 0);
 	bSkipEvaluation = ((Counter % EvaluationRate) > 0);
+	check((bSkipEvaluation && bSkipUpdate) || (bSkipEvaluation && !bSkipUpdate) || (!bSkipEvaluation && !bSkipUpdate));
 
 	AdditionalTime = 0.f;
 

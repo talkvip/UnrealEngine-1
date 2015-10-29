@@ -49,6 +49,11 @@ struct FLightmassMaterialCompiler : public FProxyMaterialCompiler
 		return Compiler->Constant(1.0f);
 	}
 
+	virtual int32 ParticleRandom() override
+	{
+		return Compiler->Constant(0.0f);
+	}
+
 	virtual int32 ParticleDirection() override
 	{
 		return Compiler->Constant3(0.0f, 0.0f, 0.0f);
@@ -155,6 +160,8 @@ struct FLightmassMaterialCompiler : public FProxyMaterialCompiler
 	virtual int32 LightmassReplace(int32 Realtime, int32 Lightmass) override { return Lightmass; }
 
 	virtual int32 GIReplace(int32 Direct, int32 StaticIndirect, int32 DynamicIndirect) override { return StaticIndirect; }
+
+	virtual int32 MaterialProxyReplace(int32 Realtime, int32 MaterialProxy) override { return Realtime; }
 };
 
 /**

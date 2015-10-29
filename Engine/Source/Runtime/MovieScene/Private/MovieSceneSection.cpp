@@ -3,6 +3,7 @@
 #include "MovieScenePrivatePCH.h"
 #include "MovieSceneSection.h"
 
+
 UMovieSceneSection::UMovieSceneSection( const FObjectInitializer& ObjectInitializer )
 	: Super( ObjectInitializer )
 	, StartTime(0.0f)
@@ -10,26 +11,28 @@ UMovieSceneSection::UMovieSceneSection( const FObjectInitializer& ObjectInitiali
 	, RowIndex(0)
 	, bIsActive(true)
 	, bIsInfinite(false)
-{
-}
+{ }
+
 
 const UMovieSceneSection* UMovieSceneSection::OverlapsWithSections(const TArray<UMovieSceneSection*>& Sections, int32 TrackDelta, float TimeDelta) const
 {
 	int32 NewTrackIndex = RowIndex + TrackDelta;
 	TRange<float> NewSectionRange = TRange<float>(StartTime + TimeDelta, EndTime + TimeDelta);
-	for (int32 SectionIndex = 0; SectionIndex < Sections.Num(); ++SectionIndex)
+
+	for (const auto Section : Sections)
 	{
-		const UMovieSceneSection* InSection = Sections[SectionIndex];
-		if (this != InSection && InSection->GetRowIndex() == NewTrackIndex)
+		if ((this != Section) && (Section->GetRowIndex() == NewTrackIndex))
 		{
-			if (NewSectionRange.Overlaps(InSection->GetRange()))
+			if (NewSectionRange.Overlaps(Section->GetRange()))
 			{
-				return InSection;
+				return Section;
 			}
 		}
 	}
+
 	return nullptr;
 }
+
 
 void UMovieSceneSection::InitialPlacement(const TArray<UMovieSceneSection*>& Sections, float InStartTime, float InEndTime, bool bAllowMultipleRows)
 {
@@ -37,8 +40,8 @@ void UMovieSceneSection::InitialPlacement(const TArray<UMovieSceneSection*>& Sec
 
 	StartTime = InStartTime;
 	EndTime = InEndTime;
-
 	RowIndex = 0;
+
 	if (bAllowMultipleRows)
 	{
 		while (OverlapsWithSections(Sections) != nullptr)
@@ -63,52 +66,101 @@ void UMovieSceneSection::InitialPlacement(const TArray<UMovieSceneSection*>& Sec
 	}
 }
 
-void UMovieSceneSection::AddKeyToCurve( FRichCurve& InCurve, float Time, float Value, FKeyParams KeyParams, const bool bUnwindRotation )
+
+UMovieSceneSection* UMovieSceneSection::SplitSection(float SplitTime)
 {
-	if(IsTimeWithinSection(Time))
+	if (!IsTimeWithinSection(SplitTime))
 	{
+		return nullptr;
+	}
+
+	SetFlags(RF_Transactional);
+	Modify();
+
+	float SectionEndTime = GetEndTime();
+				
+	// Trim off the right
+	SetEndTime(SplitTime);
+
+	// Create a new section
+	UMovieSceneTrack* Track = CastChecked<UMovieSceneTrack>(GetOuter());
+	Track->Modify();
+
+	UMovieSceneSection* NewSection = DuplicateObject<UMovieSceneSection>(this, Track);
+	ensure(NewSection);
+
+	NewSection->SetStartTime(SplitTime);
+	NewSection->SetEndTime(SectionEndTime);
+	Track->AddSection(*NewSection);
+
+	return NewSection;
+}
+
+
+void UMovieSceneSection::TrimSection(float TrimTime, bool bTrimLeft)
+{
+	if (IsTimeWithinSection(TrimTime))
+	{
+		SetFlags(RF_Transactional);
 		Modify();
-		if (InCurve.GetNumKeys() == 0 && !KeyParams.bAddKeyEvenIfUnchanged)
+
+		if (bTrimLeft)
 		{
-			InCurve.SetDefaultValue(Value);
+			SetStartTime(TrimTime);
 		}
 		else
 		{
-			FKeyHandle ExistingKeyHandle = InCurve.FindKey(Time);
-			
-			FKeyHandle NewKeyHandle = InCurve.UpdateOrAddKey(Time, Value, bUnwindRotation);
+			SetEndTime(TrimTime);
+		}
+	}
+}
 
-			if (!InCurve.IsKeyHandleValid(ExistingKeyHandle) && InCurve.IsKeyHandleValid(NewKeyHandle))
+void UMovieSceneSection::AddKeyToCurve(FRichCurve& InCurve, float Time, float Value, EMovieSceneKeyInterpolation Interpolation, const bool bUnwindRotation)
+{
+	if (IsTimeWithinSection(Time))
+	{
+		Modify();
+		FKeyHandle ExistingKeyHandle = InCurve.FindKey(Time);
+			
+		FKeyHandle NewKeyHandle = InCurve.UpdateOrAddKey(Time, Value, bUnwindRotation);
+
+		if (!InCurve.IsKeyHandleValid(ExistingKeyHandle) && InCurve.IsKeyHandleValid(NewKeyHandle))
+		{
+			// Set the default key interpolation only if a new key was created
+			switch (Interpolation)
 			{
-				// Set the default key interpolation only if a new key was created
-				switch (KeyParams.KeyInterpolation)
-				{
-					case MSKI_Auto:
-						InCurve.SetKeyInterpMode(NewKeyHandle, RCIM_Cubic);
-						InCurve.SetKeyTangentMode(NewKeyHandle, RCTM_Auto);
-						break;
-					case MSKI_User:
-						InCurve.SetKeyInterpMode(NewKeyHandle, RCIM_Cubic);
-						InCurve.SetKeyTangentMode(NewKeyHandle, RCTM_User);
-						break;
-					case MSKI_Break:
-						InCurve.SetKeyInterpMode(NewKeyHandle, RCIM_Cubic);
-						InCurve.SetKeyTangentMode(NewKeyHandle, RCTM_Break);
-						break;
-					case MSKI_Linear:
-						InCurve.SetKeyInterpMode(NewKeyHandle, RCIM_Linear);
-						InCurve.SetKeyTangentMode(NewKeyHandle, RCTM_Auto);
-						break;
-					case MSKI_Constant:
-						InCurve.SetKeyInterpMode(NewKeyHandle, RCIM_Constant);
-						InCurve.SetKeyTangentMode(NewKeyHandle, RCTM_Auto);
-						break;
-					default:
-						InCurve.SetKeyInterpMode(NewKeyHandle, RCIM_Cubic);
-						InCurve.SetKeyTangentMode(NewKeyHandle, RCTM_Auto);
-						break;
-				}
+				case EMovieSceneKeyInterpolation::Auto:
+					InCurve.SetKeyInterpMode(NewKeyHandle, RCIM_Cubic);
+					InCurve.SetKeyTangentMode(NewKeyHandle, RCTM_Auto);
+					break;
+				case EMovieSceneKeyInterpolation::User:
+					InCurve.SetKeyInterpMode(NewKeyHandle, RCIM_Cubic);
+					InCurve.SetKeyTangentMode(NewKeyHandle, RCTM_User);
+					break;
+				case EMovieSceneKeyInterpolation::Break:
+					InCurve.SetKeyInterpMode(NewKeyHandle, RCIM_Cubic);
+					InCurve.SetKeyTangentMode(NewKeyHandle, RCTM_Break);
+					break;
+				case EMovieSceneKeyInterpolation::Linear:
+					InCurve.SetKeyInterpMode(NewKeyHandle, RCIM_Linear);
+					InCurve.SetKeyTangentMode(NewKeyHandle, RCTM_Auto);
+					break;
+				case EMovieSceneKeyInterpolation::Constant:
+					InCurve.SetKeyInterpMode(NewKeyHandle, RCIM_Constant);
+					InCurve.SetKeyTangentMode(NewKeyHandle, RCTM_Auto);
+					break;
+				default:
+					InCurve.SetKeyInterpMode(NewKeyHandle, RCIM_Cubic);
+					InCurve.SetKeyTangentMode(NewKeyHandle, RCTM_Auto);
+					break;
 			}
 		}
 	}
 }
+
+void UMovieSceneSection::SetCurveDefault(FRichCurve& InCurve, float Value)
+{
+	Modify();
+	InCurve.SetDefaultValue(Value);
+}
+

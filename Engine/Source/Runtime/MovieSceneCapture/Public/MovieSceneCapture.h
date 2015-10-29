@@ -7,6 +7,7 @@
 #include "MovieSceneCaptureHandle.h"
 #include "MovieScene.h"
 #include "AVIWriter.h"
+#include "Tickable.h"
 #include "MovieSceneCapture.generated.h"
 
 /** Interface that defines when to capture or drop frames */
@@ -49,7 +50,7 @@ public:
 public:
 
 	// Begin IMovieSceneCaptureInterface
-	virtual void Initialize(FViewport* InViewport) override;
+	virtual void Initialize(TWeakPtr<FSceneViewport> InSceneViewport) override;
 	virtual void Close() override;
 	virtual FMovieSceneCaptureHandle GetHandle() const override { return Handle; }
 	const FMovieSceneCaptureSettings& GetSettings() const override { return Settings; }
@@ -62,8 +63,12 @@ public:
 	FMovieSceneCaptureSettings Settings;
 
 	/** Additional command line arguments to pass to the external process when capturing */
-	UPROPERTY(EditAnywhere, transient, Category=General, AdvancedDisplay)
+	UPROPERTY(EditAnywhere, config, Category=General, AdvancedDisplay)
 	FString AdditionalCommandLineArguments;
+
+	/** Command line arguments inherited from this process */
+	UPROPERTY(EditAnywhere, transient, Category=General, AdvancedDisplay)
+	FString InheritedCommandLineArguments;
 
 	/** Value used to control the BufferVisualizationDumpFrames cvar in the child process */
 	UPROPERTY()
@@ -80,15 +85,26 @@ public:
 	/** Finalize the capture, waiting for any outstanding processing */
 	void StopCapture();
 
-	/** Capture a frame from our bound viewport */
-	virtual void CaptureFrame(float DeltaSeconds);
+	/** Capture a frame from our previously populated color buffer (populated by slate) */
+	void CaptureFrame(float DeltaSeconds);
 
 protected:
 
 #if WITH_EDITOR
 	/** Implementation function that saves out a snapshot file from the specified color data */
-	void CaptureSnapshot(const TArray<FColor>& Colors);
+	void SaveFrameToFile(TArray<FColor> Colors);
 #endif
+
+	/** Prepare the slate renderer for a screenshot */
+	void PrepareForScreenshot();
+
+	/** Called at the end of a frame, before a frame is presented by slate */
+	virtual void Tick(float DeltaSeconds);
+
+private:
+
+	/** Internal function that calls the virtual */
+	void OnPreWorldTickInternal(ELevelTick TickType, float DeltaSeconds) {}
 
 protected:
 
@@ -101,10 +117,30 @@ protected:
 	/** Calculate a unique index for the {unique} formatting rule */
 	FString ResolveUniqueFilename();
 
+private:
+
+	struct FTicker : public FTickableGameObject
+	{
+		FTicker(UMovieSceneCapture* InCapture) : Capture(InCapture) {}
+
+	private:
+		virtual bool IsTickableInEditor() const override { return false; }
+		virtual bool IsTickable() const override { return true; }
+		virtual bool IsTickableWhenPaused() const override { return false; }
+		virtual TStatId GetStatId() const override { RETURN_QUICK_DECLARE_CYCLE_STAT(UMovieSceneCapture, STATGROUP_Tickables); }
+		virtual void Tick(float DeltaSeconds) override
+		{
+			Capture->Tick(DeltaSeconds);
+		}
+
+		UMovieSceneCapture* Capture;
+	};
+	friend FTicker;
+
 protected:
 	
 	/** The viewport we are bound to */
-	FViewport* Viewport;
+	TWeakPtr<FSceneViewport> SceneViewport;
 	/** Our unique handle, used for external representation without having to link to the MovieSceneCapture module */
 	FMovieSceneCaptureHandle Handle;
 	/** Cached metrics for this capture operation */
@@ -113,6 +149,16 @@ protected:
 	TUniquePtr<FAVIWriter> AVIWriter;
 	/** Strategy used for capture (real-time/fixed-time-step) */
 	TSharedPtr<ICaptureStrategy> CaptureStrategy;
+	/** Scratch space for per-frame screenshots */
+	TArray<FColor> ScratchBuffer;
+	/** Whether we need to capture this frame or not, set to true during a frame to capture it, then processed on the proceeding frame */
+	bool bHasOutstandingFrame;
+	/** The delta of the last frame */
+	float LastFrameDelta;
+	/** Whether we have started capturing or not */
+	bool bCapturing;
+	/** Class responsible for ticking this instance */
+	TUniquePtr<FTicker> Ticker;
 };
 
 /** A strategy that employs a fixed frame time-step, and as such never drops a frame. Potentially accelerated.  */

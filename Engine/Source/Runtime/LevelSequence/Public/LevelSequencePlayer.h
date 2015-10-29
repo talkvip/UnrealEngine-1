@@ -54,11 +54,11 @@ public:
 	/**
 	 * Initialize the player.
 	 *
-	 * @param InLevelSequenceInstance The level sequence instance to play.
+	 * @param InLevelSequence The level sequence to play.
 	 * @param InWorld The world that the animation is played in.
 	 * @param Settings The desired playback settings
 	 */
-	void Initialize(ULevelSequenceInstance* InLevelSequenceInstance, UWorld* InWorld, const FLevelSequencePlaybackSettings& Settings);
+	void Initialize(ULevelSequence* InLevelSequence, UWorld* InWorld, const FLevelSequencePlaybackSettings& Settings);
 
 public:
 
@@ -125,9 +125,6 @@ public:
 protected:
 
 	// IMovieScenePlayer interface
-
-	virtual void SpawnActorsForMovie(TSharedRef<FMovieSceneSequenceInstance> MovieSceneInstance);
-	virtual void DestroyActorsForMovie(TSharedRef<FMovieSceneSequenceInstance> MovieSceneInstance);
 	virtual void GetRuntimeObjects(TSharedRef<FMovieSceneSequenceInstance> MovieSceneInstance, const FGuid& ObjectHandle, TArray<UObject*>& OutObjects) const override;
 	virtual void UpdateCameraCut(UObject* ObjectToViewThrough, bool bNewCameraCut) const override;
 	virtual void SetViewportSettings(const TMap<FViewportClient*, EMovieSceneViewportParams>& ViewportParamsMap) override;
@@ -141,6 +138,9 @@ public:
 
 	void Update(const float DeltaSeconds);
 
+	/** Instruct this player to start playing next frame update */
+	void AutoPlayNextFrame();
+
 private:
 
 	/** Called when the cursor position has changed to implement looping */
@@ -149,8 +149,8 @@ private:
 private:
 
 	/** The level sequence to play. */
-	UPROPERTY()
-	ULevelSequenceInstance* LevelSequenceInstance;
+	UPROPERTY(transient)
+	ULevelSequence* LevelSequence;
 
 	/** Whether we're currently playing. If false, then sequence playback is paused or was never started. */
 	UPROPERTY()
@@ -169,21 +169,15 @@ private:
 
 private:
 
-	struct FSpawnedActorInfo
-	{
-		/** Identifier that maps this actor to a movie scene spawnable */
-		FGuid RuntimeGuid;
-
-		/** The spawned actor */
-		TWeakObjectPtr<AActor> SpawnedActor;
-	};
-
-	/** Maps spawnable GUIDs to their spawned actor in the world */
-	TMap<TWeakPtr<FMovieSceneSequenceInstance>, TArray<FSpawnedActorInfo>> InstanceToSpawnedActorMap;
+	/** The offset from 0 that the sequence we're playing starts */
+	float SequenceStartOffset;
 
 	/** The root movie scene instance to update when playing. */
 	TSharedPtr<FMovieSceneSequenceInstance> RootMovieSceneInstance;
 
 	/** The world this player will spawn actors in, if needed */
 	TWeakObjectPtr<UWorld> World;
+
+	/** If true, the sequence will begin playing when it is next updated */
+	bool bAutoPlayNextFrame;
 };

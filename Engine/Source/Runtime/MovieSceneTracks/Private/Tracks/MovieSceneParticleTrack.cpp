@@ -39,21 +39,21 @@ void UMovieSceneParticleTrack::RemoveAllAnimationData()
 }
 
 
-bool UMovieSceneParticleTrack::HasSection( UMovieSceneSection* Section ) const
+bool UMovieSceneParticleTrack::HasSection(const UMovieSceneSection& Section) const
 {
-	return ParticleSections.Find( Section ) != INDEX_NONE;
+	return ParticleSections.Contains(&Section);
 }
 
 
-void UMovieSceneParticleTrack::AddSection( UMovieSceneSection* Section )
+void UMovieSceneParticleTrack::AddSection(UMovieSceneSection& Section)
 {
-	ParticleSections.Add( Section );
+	ParticleSections.Add(&Section);
 }
 
 
-void UMovieSceneParticleTrack::RemoveSection( UMovieSceneSection* Section )
+void UMovieSceneParticleTrack::RemoveSection(UMovieSceneSection& Section)
 {
-	ParticleSections.Remove( Section );
+	ParticleSections.Remove(&Section);
 }
 
 
@@ -73,28 +73,17 @@ TRange<float> UMovieSceneParticleTrack::GetSectionBoundaries() const
 	return TRange<float>::Hull(Bounds);
 }
 
-void UMovieSceneParticleTrack::AddNewKey( float KeyTime )
+void UMovieSceneParticleTrack::AddNewSection( float SectionTime )
 {
-	UMovieSceneParticleSection* NearestSection = Cast<UMovieSceneParticleSection>( MovieSceneHelpers::FindNearestSectionAtTime( ParticleSections, KeyTime ) );
-	if ( NearestSection == nullptr )
+	if ( MovieSceneHelpers::FindSectionAtTime( ParticleSections, SectionTime ) == nullptr )
 	{
-		NearestSection = NewObject<UMovieSceneParticleSection>( this );
-		NearestSection->SetStartTime( KeyTime );
-		NearestSection->SetEndTime( KeyTime );
-		ParticleSections.Add(NearestSection);
+		UMovieSceneParticleSection* NewSection = NewObject<UMovieSceneParticleSection>( this );
+		NewSection->SetStartTime( SectionTime );
+		NewSection->SetEndTime( SectionTime );
+		NewSection->SetStartTime( SectionTime );
+		NewSection->SetEndTime( SectionTime );
+		ParticleSections.Add(NewSection);
 	}
-	else
-	{
-		if ( NearestSection->GetStartTime() > KeyTime )
-		{
-			NearestSection->SetStartTime( KeyTime );
-		}
-		if ( NearestSection->GetEndTime() < KeyTime )
-		{
-			NearestSection->SetEndTime( KeyTime );
-		}
-	}
-	NearestSection->AddKey( KeyTime, EParticleKey::Active );
 }
 
 

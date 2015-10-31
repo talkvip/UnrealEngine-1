@@ -16,8 +16,11 @@ const FString DefaultPresenceKey = "RichPresence";
 /** Custom presence data that is not seen by users but can be polled */
 const FString CustomPresenceDataKey = "CustomData";
 
-/** Id of the client that sent the presence update */
-const FString DefaultClientIdKey = "ClientId";
+/** Name of the client that sent the presence update */
+const FString DefaultAppIdKey = "AppId";
+
+/** Override Id of the client to set the presence state to */
+const FString OverrideClientIdKey = "OverrideClientId";
 
 /** Id of the session for the presence update. @todo samz - SessionId on presence data should be FUniqueNetId not uint64 */
 const FString DefaultSessionIdKey = "SessionId";
@@ -165,4 +168,15 @@ public:
 	 * @return Whether the data was found or not.
 	 */
 	virtual EOnlineCachedResult::Type GetCachedPresence(const FUniqueNetId& User, TSharedPtr<FOnlineUserPresence>& OutPresence) = 0;
+
+	/**
+	* Gets the cached presence information for a user.
+	*
+	* @param LocalUserId The unique id of the local user
+	* @param User The unique id of the user from which to get presence information.
+	* @param ClientId The id of the application you want to get the presence of
+	* @param OutPresence If found, a shared pointer to the cached presence data for User will be stored here.
+	* @return Whether the data was found or not.
+	*/
+	virtual EOnlineCachedResult::Type GetCachedPresenceForClient(const FUniqueNetId& LocalUserId, const FUniqueNetId& User, const FString& ClientId, TSharedPtr<FOnlineUserPresence>& OutPresence) = 0;
 };

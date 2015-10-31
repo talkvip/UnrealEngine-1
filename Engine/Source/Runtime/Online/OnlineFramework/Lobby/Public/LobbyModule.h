@@ -13,7 +13,7 @@ DECLARE_STATS_GROUP(TEXT("Lobby"), STATGROUP_Lobby, STATCAT_Advanced);
 //DECLARE_CYCLE_STAT_EXTERN(TEXT("LobbyStat1"), STAT_LobbyStat, STATGROUP_Lobby, Lobby_API);
 
 /**
- * Module for Voice capture/compression/decompression implementations
+ * Module for lobbies via online beacon
  */
 class FLobbyModule : 
 	public IModuleInterface, public FSelfRegisteringExec
@@ -50,13 +50,13 @@ private:
 	// IModuleInterface
 
 	/**
-	 * Called when voice module is loaded
+	 * Called when lobby module is loaded
 	 * Initialize platform specific parts of Lobby handling
 	 */
 	virtual void StartupModule() override;
 	
 	/**
-	 * Called when voice module is unloaded
+	 * Called when lobby module is unloaded
 	 * Shutdown platform specific parts of Lobby handling
 	 */
 	virtual void ShutdownModule() override;

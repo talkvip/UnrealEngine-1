@@ -155,6 +155,8 @@ public:
 	 * returns a unique key for the view state, non-zero
 	 */
 	virtual uint32 GetViewKey() const = 0;
+	//
+	virtual uint32 GetCurrentTemporalAASampleIndex() const = 0;
 	/** 
 	 * returns the occlusion frame counter 
 	 */
@@ -228,6 +230,9 @@ static const int32 NUM_LQ_LIGHTMAP_COEF = 2;
 
 /** The index at which simple coefficients are stored in any array containing all NUM_STORED_LIGHTMAP_COEF coefficients. */ 
 static const int32 LQ_LIGHTMAP_COEF_INDEX = 2;
+
+/** The maximum value between NUM_LQ_LIGHTMAP_COEF and NUM_HQ_LIGHTMAP_COEF. */ 
+static const int32 MAX_NUM_LIGHTMAP_COEF = 2;
 
 /** Compile out low quality lightmaps to save memory */
 // @todo-mobile: Need to fix this!
@@ -523,6 +528,10 @@ public:
 	virtual FLightInteraction GetInteraction(const class FLightSceneProxy* LightSceneProxy) const = 0;
 	virtual FLightMapInteraction GetLightMapInteraction(ERHIFeatureLevel::Type InFeatureLevel) const = 0;
 	virtual FShadowMapInteraction GetShadowMapInteraction() const { return FShadowMapInteraction::None(); }
+	virtual FUniformBufferRHIRef GetPrecomputedLightingBuffer() const = 0;
+
+	 // WARNING : This can be called with buffers valid for a single frame only, don't cache anywhere. See FPrimitiveSceneInfo::UpdatePrecomputedLightingBuffer()
+	virtual void SetPrecomputedLightingBuffer(FUniformBufferRHIParamRef InPrecomputedLightingUniformBuffer) = 0;
 };
 
 // Information about a single shadow cascade.
@@ -832,6 +841,7 @@ public:
 	inline bool UseRayTracedDistanceFieldShadows() const { return bUseRayTracedDistanceFieldShadows; }
 	inline float GetRayStartOffsetDepthScale() const { return RayStartOffsetDepthScale; }
 	inline uint8 GetLightType() const { return LightType; }
+	inline uint8 GetLightingChannelMask() const { return LightingChannelMask; }
 	inline FName GetComponentName() const { return ComponentName; }
 	inline FName GetLevelName() const { return LevelName; }
 	FORCEINLINE TStatId GetStatId() const 
@@ -958,6 +968,8 @@ protected:
 	/** The light type (ELightComponentType) */
 	const uint8 LightType;
 
+	uint8 LightingChannelMask;
+
 	/** The name of the light component. */
 	FName ComponentName;
 
@@ -999,16 +1011,16 @@ public:
 
 	/**
 	 * Updates the decal proxy's cached transform.
-	 * @param InComponentToWorld - The new component-to-world transform.
+	 * @param InComponentToWorldIncludingDecalSize - The new component-to-world transform including the DecalSize
 	 */
-	void SetTransform(const FTransform& InComponentToWorld);
+	void SetTransformIncludingDecalSize(const FTransform& InComponentToWorldIncludingDecalSize);
 
 	/** Pointer back to the game thread decal component. */
 	const UDecalComponent* Component;
 
 	UMaterialInterface* DecalMaterial;
 
-	/** Used to compute the projection matrix on the render thread side  */
+	/** Used to compute the projection matrix on the render thread side, includes the DecalSize  */
 	FTransform ComponentTrans;
 
 	/** 

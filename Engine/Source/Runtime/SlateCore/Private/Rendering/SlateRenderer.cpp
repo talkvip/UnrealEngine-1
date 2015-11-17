@@ -147,7 +147,21 @@ void FSlateRenderer::ReleaseCachingResourcesFor(const ILayoutCache* Cacher)
 /* Global functions
  *****************************************************************************/
 
-bool IsThreadSafeForSlateRendering( )
+bool IsThreadSafeForSlateRendering()
 {
-	return ((GSlateLoadingThreadId != 0) || IsInGameThread());
+	return ( ( GSlateLoadingThreadId != 0 ) || IsInGameThread() );
+}
+
+bool DoesThreadOwnSlateRendering()
+{
+	if ( IsInGameThread() )
+	{
+		return GSlateLoadingThreadId == 0;
+	}
+	else
+	{
+		return FPlatformTLS::GetCurrentThreadId() == GSlateLoadingThreadId;
+	}
+
+	return false;
 }

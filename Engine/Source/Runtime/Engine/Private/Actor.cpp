@@ -29,6 +29,7 @@
 DEFINE_LOG_CATEGORY(LogActor);
 
 DEFINE_STAT(STAT_GetComponentsTime);
+DECLARE_CYCLE_STAT(TEXT("PostActorConstruction"), STAT_PostActorConstruction, STATGROUP_Engine);
 
 #if UE_BUILD_SHIPPING
 #define DEBUG_CALLSPACE(Format, ...)
@@ -1103,12 +1104,16 @@ bool AActor::IsOverlappingActor(const AActor* Other) const
 		// push children on the stack so they get tested later
 		ComponentStack.Append(CurrentComponent->AttachChildren);
 
-		UPrimitiveComponent const* const PrimComp = Cast<const UPrimitiveComponent>(CurrentComponent);
-		if (PrimComp && PrimComp->IsOverlappingActor(Other))
+		if(CurrentComponent->GetOwner() == this)	//The component could be attached but be from a different actor
 		{
-			// found one, finished
-			return true;
+			UPrimitiveComponent const* const PrimComp = Cast<const UPrimitiveComponent>(CurrentComponent);
+			if (PrimComp && PrimComp->IsOverlappingActor(Other))
+			{
+				// found one, finished
+				return true;
+			}
 		}
+		
 
 		// advance to next component
 		const bool bAllowShrinking = false;
@@ -2631,7 +2636,11 @@ void AActor::FinishSpawning(const FTransform& UserTransform, bool bIsDefaultTran
 		}
 
 		ExecuteConstruction(FinalRootComponentTransform, nullptr, bIsDefaultTransform);
-		PostActorConstruction();
+
+		{
+			SCOPE_CYCLE_COUNTER(STAT_PostActorConstruction);
+			PostActorConstruction();
+		}
 	}
 }
 
@@ -2711,6 +2720,7 @@ void AActor::PostActorConstruction()
 
 			if (World->HasBegunPlay() && !deferBeginPlayAndUpdateOverlaps)
 			{
+				SCOPE_CYCLE_COUNTER(STAT_ActorBeginPlay);
 				BeginPlay();
 			}
 		}
@@ -2798,6 +2808,7 @@ void AActor::PostNetInit()
 		const UWorld* MyWorld = GetWorld();
 		if (MyWorld && MyWorld->HasBegunPlay())
 		{
+			SCOPE_CYCLE_COUNTER(STAT_ActorBeginPlay);
 			BeginPlay();
 		}
 	}

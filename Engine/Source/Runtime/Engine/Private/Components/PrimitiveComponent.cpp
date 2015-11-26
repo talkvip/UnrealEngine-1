@@ -285,12 +285,9 @@ void UPrimitiveComponent::GetUsedTextures(TArray<UTexture*>& OutTextures, EMater
 **/
 void FPrimitiveComponentPostPhysicsTickFunction::ExecuteTick(float DeltaTime, enum ELevelTick TickType, ENamedThreads::Type CurrentThread, const FGraphEventRef& MyCompletionGraphEvent)
 {
-	if ( (TickType == LEVELTICK_All) && Target && !Target->IsPendingKillOrUnreachable())
-	{
-		FScopeCycleCounterUObject ComponentScope(Target);
-		FScopeCycleCounterUObject AdditionalScope(Target->AdditionalStatObject());
-		Target->PostPhysicsTick(*this);	
-	}
+	PRAGMA_DISABLE_DEPRECATION_WARNINGS
+	FActorComponentTickFunction::ExecuteTickHelper(Target, DeltaTime, TickType, [this](float DilatedTime){ Target->PostPhysicsTick(*this); });
+	PRAGMA_ENABLE_DEPRECATION_WARNINGS
 }
 
 /** Abstract function to describe this tick. Used to print messages about illegal cycles in the dependency graph **/
@@ -428,6 +425,11 @@ FPrimitiveComponentInstanceData::FPrimitiveComponentInstanceData(const UPrimitiv
 void FPrimitiveComponentInstanceData::ApplyToComponent(UActorComponent* Component, const ECacheApplyPhase CacheApplyPhase)
 {
 	FSceneComponentInstanceData::ApplyToComponent(Component, CacheApplyPhase);
+
+#if WITH_EDITOR
+	// This is needed to restore transient collision profile data.
+	CastChecked<UPrimitiveComponent>(Component)->UpdateCollisionProfile();
+#endif // #if WITH_EDITOR
 
 	if (ContainsSavedProperties() && Component->IsRegistered())
 	{

@@ -172,6 +172,8 @@ private:
 
 	TArray<FPoseContext*> StateCachedPoses;
 
+	TArray<FGraphTraversalCounter> StateCacheBoneCounters;
+
 public:
 	FAnimNode_StateMachine()
 		: MaxTransitionsPerFrame(3)
@@ -189,6 +191,8 @@ public:
 	virtual void GatherDebugData(FNodeDebugData& DebugData) override;
 	// End of FAnimNode_Base interface
 
+	void ConditionallyCacheBonesForState(int32 StateIndex, FAnimationBaseContext Context);
+
 	// Returns the blend weight of the specified state, as calculated by the last call to Update()
 	float GetStateWeight(int32 StateIndex) const;
 
@@ -198,7 +202,7 @@ public:
 	bool IsValidTransitionIndex(int32 TransitionIndex) const;
 
 	/** Cache the internal machine description */
-	void CacheMachineDescription(UAnimBlueprintGeneratedClass* AnimBlueprintClass);
+	void CacheMachineDescription(IAnimClassInterface* AnimBlueprintClass);
 
 protected:
 	// Tries to get the instance information for the state machine

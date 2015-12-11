@@ -1896,6 +1896,32 @@ bool UParticleModuleSubUV::IsValidForLODLevel(UParticleLODLevel* LODLevel, FStri
 		}
 	}
 
+	if (Animation && Animation->SubUVTexture)
+	{
+		bool bFoundTexture = false;
+
+		if (LODLevel->RequiredModule->Material)
+		{
+			TArray<UTexture*> UsedTextures;
+			LODLevel->RequiredModule->Material->GetUsedTextures(UsedTextures, EMaterialQualityLevel::High, true, GMaxRHIFeatureLevel, false);
+
+			for (int32 TextureIndex = 0; TextureIndex < UsedTextures.Num(); TextureIndex++)
+			{
+				if (UsedTextures[TextureIndex] == Animation->SubUVTexture)
+				{
+					bFoundTexture = true;
+					break;
+				}
+			}
+		}		
+
+		if (!bFoundTexture)
+		{
+			OutErrorString = NSLOCTEXT("UnrealEd", "SubUVAnimationMismatch", "SubUV module has an Animation set whose texture doesn't match what the material is using.  Particles may not appear or have visible clipping.").ToString();
+			return false;
+		}
+	}
+
 	return true;
 }
 #endif // WITH_EDITOR
@@ -1979,8 +2005,12 @@ float UParticleModuleSubUV::DetermineImageIndex(FParticleEmitterInstance* Owner,
 {
 	UParticleLODLevel* LODLevel	= Owner->SpriteTemplate->GetCurrentLODLevel(Owner);
 	check(LODLevel);
-	
-	int32 TotalSubImages	= LODLevel->RequiredModule->SubImages_Horizontal * LODLevel->RequiredModule->SubImages_Vertical;
+
+	USubUVAnimation* RESTRICT SubUVAnimation = Owner->SpriteTemplate->SubUVAnimation;
+
+	const int32 TotalSubImages = SubUVAnimation 
+		? SubUVAnimation->SubImages_Horizontal * SubUVAnimation->SubImages_Vertical
+		: LODLevel->RequiredModule->SubImages_Horizontal * LODLevel->RequiredModule->SubImages_Vertical;
 
 	float ImageIndex = SubUVPayload.ImageIndex;
 
@@ -2121,10 +2151,15 @@ void UParticleModuleSubUVMovie::Spawn(FParticleEmitterInstance* Owner, int32 Off
 	bool bSpawn = (TypeDataBase == NULL) ? true : TypeDataBase->SupportsSubUV();
 	if (bSpawn == true)
 	{
-		int32 iTotalSubImages = LODLevel->RequiredModule->SubImages_Horizontal * LODLevel->RequiredModule->SubImages_Vertical;
-		if (iTotalSubImages == 0)
+		USubUVAnimation* RESTRICT SubUVAnimation = Owner->SpriteTemplate->SubUVAnimation;
+
+		int32 TotalSubImages = SubUVAnimation 
+			? SubUVAnimation->SubImages_Horizontal * SubUVAnimation->SubImages_Vertical
+			: LODLevel->RequiredModule->SubImages_Horizontal * LODLevel->RequiredModule->SubImages_Vertical;
+
+		if (TotalSubImages == 0)
 		{
-			iTotalSubImages = 1;
+			TotalSubImages = 1;
 		}
 
 		SPAWN_INIT;
@@ -2140,11 +2175,11 @@ void UParticleModuleSubUVMovie::Spawn(FParticleEmitterInstance* Owner, int32 Off
 			if (StartingFrame > 1)
 			{
 				// Clamp to the max...
-				MoviePayload.Time = FMath::Clamp<float>(StartingFrame, 0, iTotalSubImages-1);
+				MoviePayload.Time = FMath::Clamp<float>(StartingFrame, 0, TotalSubImages-1);
 			}
 			else if (StartingFrame == 0)
 			{
-				MoviePayload.Time = FMath::TruncToFloat(FMath::SRand() * (iTotalSubImages-1));
+				MoviePayload.Time = FMath::TruncToFloat(FMath::SRand() * (TotalSubImages-1));
 			}
 
 			// Update the payload
@@ -2345,7 +2380,7 @@ void UParticleModuleAccelerationConstant::Update(FParticleEmitterInstance* Owner
 	UParticleLODLevel* LODLevel	= Owner->SpriteTemplate->GetCurrentLODLevel(Owner);
 	check(LODLevel);
 	FPlatformMisc::Prefetch(Owner->ParticleData, (Owner->ParticleIndices[0] * Owner->ParticleStride));
-	FPlatformMisc::Prefetch(Owner->ParticleData, (Owner->ParticleIndices[0] * Owner->ParticleStride) + CACHE_LINE_SIZE);
+	FPlatformMisc::Prefetch(Owner->ParticleData, (Owner->ParticleIndices[0] * Owner->ParticleStride) + PLATFORM_CACHE_LINE_SIZE);
 	if (bAlwaysInWorldSpace && LODLevel->RequiredModule->bUseLocalSpace)
 	{
 		FTransform Mat = Owner->Component->ComponentToWorld;
@@ -2353,7 +2388,7 @@ void UParticleModuleAccelerationConstant::Update(FParticleEmitterInstance* Owner
 		BEGIN_UPDATE_LOOP;
 		{
 			FPlatformMisc::Prefetch(ParticleData, (ParticleIndices[i+1] * ParticleStride));
-			FPlatformMisc::Prefetch(ParticleData, (ParticleIndices[i+1] * ParticleStride) + CACHE_LINE_SIZE);
+			FPlatformMisc::Prefetch(ParticleData, (ParticleIndices[i+1] * ParticleStride) + PLATFORM_CACHE_LINE_SIZE);
 			Particle.Velocity		+= LocalAcceleration * DeltaTime;
 			Particle.BaseVelocity	+= LocalAcceleration * DeltaTime;
 		}
@@ -2369,7 +2404,7 @@ void UParticleModuleAccelerationConstant::Update(FParticleEmitterInstance* Owner
 		BEGIN_UPDATE_LOOP;
 		{
 			FPlatformMisc::Prefetch(ParticleData, (ParticleIndices[i+1] * ParticleStride));
-			FPlatformMisc::Prefetch(ParticleData, (ParticleIndices[i+1] * ParticleStride) + CACHE_LINE_SIZE);
+			FPlatformMisc::Prefetch(ParticleData, (ParticleIndices[i+1] * ParticleStride) + PLATFORM_CACHE_LINE_SIZE);
 			Particle.Velocity		+= LocalAcceleration * DeltaTime;
 			Particle.BaseVelocity	+= LocalAcceleration * DeltaTime;
 		}
@@ -2635,7 +2670,7 @@ void UParticleModuleAcceleration::Update(FParticleEmitterInstance* Owner, int32 
 	UParticleLODLevel* LODLevel	= Owner->SpriteTemplate->GetCurrentLODLevel(Owner);
 	check(LODLevel);
 	FPlatformMisc::Prefetch(Owner->ParticleData, (Owner->ParticleIndices[0] * Owner->ParticleStride));
-	FPlatformMisc::Prefetch(Owner->ParticleData, (Owner->ParticleIndices[0] * Owner->ParticleStride) + CACHE_LINE_SIZE);
+	FPlatformMisc::Prefetch(Owner->ParticleData, (Owner->ParticleIndices[0] * Owner->ParticleStride) + PLATFORM_CACHE_LINE_SIZE);
 	if (bAlwaysInWorldSpace && LODLevel->RequiredModule->bUseLocalSpace)
 	{
 		FTransform Mat = Owner->Component->ComponentToWorld;
@@ -2644,7 +2679,7 @@ void UParticleModuleAcceleration::Update(FParticleEmitterInstance* Owner, int32 
 			FVector& UsedAcceleration = *((FVector*)(ParticleBase + CurrentOffset));																\
 			FVector TransformedUsedAcceleration = Mat.InverseTransformVector(UsedAcceleration);
 			FPlatformMisc::Prefetch(ParticleData, (ParticleIndices[i+1] * ParticleStride));
-			FPlatformMisc::Prefetch(ParticleData, (ParticleIndices[i+1] * ParticleStride) + CACHE_LINE_SIZE);
+			FPlatformMisc::Prefetch(ParticleData, (ParticleIndices[i+1] * ParticleStride) + PLATFORM_CACHE_LINE_SIZE);
 			Particle.Velocity		+= TransformedUsedAcceleration * DeltaTime;
 			Particle.BaseVelocity	+= TransformedUsedAcceleration * DeltaTime;
 		}
@@ -2656,7 +2691,7 @@ void UParticleModuleAcceleration::Update(FParticleEmitterInstance* Owner, int32 
 		{
 			FVector& UsedAcceleration = *((FVector*)(ParticleBase + CurrentOffset));																\
 			FPlatformMisc::Prefetch(ParticleData, (ParticleIndices[i+1] * ParticleStride));
-			FPlatformMisc::Prefetch(ParticleData, (ParticleIndices[i+1] * ParticleStride) + CACHE_LINE_SIZE);
+			FPlatformMisc::Prefetch(ParticleData, (ParticleIndices[i+1] * ParticleStride) + PLATFORM_CACHE_LINE_SIZE);
 			Particle.Velocity		+= UsedAcceleration * DeltaTime;
 			Particle.BaseVelocity	+= UsedAcceleration * DeltaTime;
 		}
@@ -2964,7 +2999,7 @@ void UParticleModuleLight::Update(FParticleEmitterInstance* Owner, int32 Offset,
 	UParticleLODLevel* LODLevel	= Owner->SpriteTemplate->GetCurrentLODLevel(Owner);
 	check(LODLevel);
 	FPlatformMisc::Prefetch(Owner->ParticleData, (Owner->ParticleIndices[0] * Owner->ParticleStride));
-	FPlatformMisc::Prefetch(Owner->ParticleData, (Owner->ParticleIndices[0] * Owner->ParticleStride) + CACHE_LINE_SIZE);
+	FPlatformMisc::Prefetch(Owner->ParticleData, (Owner->ParticleIndices[0] * Owner->ParticleStride) + PLATFORM_CACHE_LINE_SIZE);
 	const bool bUseLocalSpace = Owner->UseLocalSpace();
 	int32 ScreenAlignment;
 	FVector ComponentScale;

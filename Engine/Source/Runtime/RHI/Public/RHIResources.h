@@ -21,8 +21,11 @@ public:
 	{
 	}
 	virtual ~FRHIResource() 
-	{ 
-		check(NumRefs.GetValue() == 0 && (CurrentlyDeleting == this || bDoNotDeferDelete || Bypass())); // this should not have any outstanding refs
+	{
+		if (!PlatformNeedsExtraDeletionLatency())
+		{
+			check(NumRefs.GetValue() == 0 && (CurrentlyDeleting == this || bDoNotDeferDelete || Bypass())); // this should not have any outstanding refs
+		}
 	}
 	uint32 AddRef() const
 	{
@@ -66,6 +69,11 @@ public:
 
 	static void FlushPendingDeletes();
 
+	static bool PlatformNeedsExtraDeletionLatency()
+	{
+		return (PLATFORM_XBOXONE == 1);
+	}
+
 #if DISABLE_RHI_DEFFERED_DELETE
 	FORCEINLINE static bool Bypass()
 	{
@@ -81,6 +89,33 @@ private:
 	bool bDoNotDeferDelete;
 	static TLockFreePointerListUnordered<FRHIResource> PendingDeletes;
 	static FRHIResource* CurrentlyDeleting;
+
+	// Some APIs don't do internal reference counting, so we have to wait an extra couple of frames before deleting resources
+	// to ensure the GPU has completely finished with them. This avoids expensive fences, etc.
+	struct ResourceToDelete
+	{
+		ResourceToDelete()
+			: Resource(nullptr)
+			, FrameDeleted(0)
+		{
+
+		}
+
+		ResourceToDelete(
+			FRHIResource* InResource,
+			uint32 InFrameDeleted)
+			: Resource(InResource)
+			, FrameDeleted(InFrameDeleted)
+		{
+
+		}
+
+		FRHIResource*	Resource;
+		uint32			FrameDeleted;
+	};
+
+	static TQueue<ResourceToDelete> DeferredDeletionQueue;
+	static uint32 CurrentFrame;
 };
 
 
@@ -327,7 +362,14 @@ public:
 	FLastRenderTimeContainer() : LastRenderTime(-FLT_MAX) {}
 
 	double GetLastRenderTime() const { return LastRenderTime; }
-	void SetLastRenderTime(double InLastRenderTime) { LastRenderTime = InLastRenderTime; }
+	FORCEINLINE_DEBUGGABLE void SetLastRenderTime(double InLastRenderTime) 
+	{ 
+		// avoid dirty caches from redundant writes
+		if (LastRenderTime != InLastRenderTime)
+		{
+			LastRenderTime = InLastRenderTime;
+		}
+	}
 
 private:
 	/** The last time the resource was rendered. */
@@ -397,7 +439,7 @@ public:
 	FRHIResourceInfo ResourceInfo;
 
 	/** sets the last time this texture was cached in a resource table. */
-	void SetLastRenderTime(float InLastRenderTime)
+	FORCEINLINE_DEBUGGABLE void SetLastRenderTime(float InLastRenderTime)
 	{
 		LastRenderTime.SetLastRenderTime(InLastRenderTime);
 	}

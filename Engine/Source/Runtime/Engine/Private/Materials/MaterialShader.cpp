@@ -43,7 +43,7 @@ namespace MaterialStats
 			FCookingStatsModule* CookingStatsModule = FModuleManager::LoadModulePtr<FCookingStatsModule>(TEXT("CookingStats"));
 			if (CookingStatsModule)
 			{
-				CookingStats = &CookingStatsModule->Get();
+				CookingStats = CookingStatsModule->Get();
 			}
 			bInitialized = true;
 		}
@@ -132,7 +132,7 @@ namespace MaterialStats
 			double Duration = FPlatformTime::Seconds() - *StartTime;
 			TimingInfo->TagStartTime.Remove(TagName);
 
-			CookingStats->AddTagValue(TimingInfo->TransactionGuid, TagName, FString::Printf(TEXT("%fms"), Duration*1000.0f));
+			CookingStats->AddTagValue(TimingInfo->TransactionGuid, TagName, (float)(Duration*1000.0f));
 		}
 	}
 
@@ -867,7 +867,7 @@ FShader* FMaterialShaderType::FinishCompileShader(
 	const FUniformExpressionSet& UniformExpressionSet,
 	const FSHAHash& MaterialShaderMapHash,
 	const FShaderCompileJob& CurrentJob,
-	const FShaderPipelineType* ShaderPipeline,
+	const FShaderPipelineType* ShaderPipelineType,
 	const FString& InDebugDescription
 	)
 {
@@ -879,13 +879,19 @@ FShader* FMaterialShaderType::FinishCompileShader(
 	// This allows FShaders to share compiled bytecode and RHI shader references
 	FShaderResource* Resource = FShaderResource::FindOrCreateShaderResource(CurrentJob.Output, SpecificType);
 
+	if (ShaderPipelineType && !ShaderPipelineType->ShouldOptimizeUnusedOutputs())
+	{
+		// If sharing shaders in this pipeline, remove it from the type/id so it uses the one in the shared shadermap list
+		ShaderPipelineType = nullptr;
+	}
+
 	// Find a shader with the same key in memory
-	FShader* Shader = CurrentJob.ShaderType->FindShaderById(FShaderId(MaterialShaderMapHash, ShaderPipeline, CurrentJob.VFType, CurrentJob.ShaderType, CurrentJob.Input.Target));
+	FShader* Shader = CurrentJob.ShaderType->FindShaderById(FShaderId(MaterialShaderMapHash, ShaderPipelineType, CurrentJob.VFType, CurrentJob.ShaderType, CurrentJob.Input.Target));
 
 	// There was no shader with the same key so create a new one with the compile output, which will bind shader parameters
 	if (!Shader)
 	{
-		Shader = (*ConstructCompiledRef)(CompiledShaderInitializerType(this, CurrentJob.Output, Resource, UniformExpressionSet, MaterialShaderMapHash, ShaderPipeline, nullptr, InDebugDescription));
+		Shader = (*ConstructCompiledRef)(CompiledShaderInitializerType(this, CurrentJob.Output, Resource, UniformExpressionSet, MaterialShaderMapHash, ShaderPipelineType, nullptr, InDebugDescription));
 		CurrentJob.Output.ParameterMap.VerifyBindingsAreComplete(GetName(), (EShaderFrequency)CurrentJob.Output.Target.Frequency, CurrentJob.VFType);
 	}
 

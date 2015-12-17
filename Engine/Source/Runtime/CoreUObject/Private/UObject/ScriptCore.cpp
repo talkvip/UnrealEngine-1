@@ -62,6 +62,7 @@ COREUOBJECT_API void GInitRunaway() {}
 // FBlueprintCoreDelegates
 
 FBlueprintCoreDelegates::FOnScriptDebuggingEvent FBlueprintCoreDelegates::OnScriptException;
+FBlueprintCoreDelegates::FOnScriptExecutionEnd FBlueprintCoreDelegates::OnScriptExecutionEnd;
 FBlueprintCoreDelegates::FOnScriptInstrumentEvent FBlueprintCoreDelegates::OnScriptProfilingEvent;
 FBlueprintCoreDelegates::FOnToggleScriptProfiler FBlueprintCoreDelegates::OnToggleScriptProfiler;
 
@@ -260,7 +261,7 @@ void FFrame::KismetExecutionMessage(const TCHAR* Message, ELogVerbosity::Type Ve
 	// Treat errors/warnings as bad
 	if (Verbosity == ELogVerbosity::Warning)
 	{
-#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+#if !UE_BUILD_SHIPPING
 		static bool GTreatScriptWarningsFatal = FParse::Param(FCommandLine::Get(),TEXT("FATALSCRIPTWARNINGS"));
 		if (GTreatScriptWarningsFatal)
 		{
@@ -286,7 +287,7 @@ void FFrame::KismetExecutionMessage(const TCHAR* Message, ELogVerbosity::Type Ve
 
 	if (Verbosity == ELogVerbosity::Error)
 	{
-#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+#if DO_BLUEPRINT_GUARD
 		UE_LOG(LogScriptCore, Fatal,TEXT("%s\n%s"), Message, *ScriptStack);
 #else
 		UE_LOG(LogScriptCore, Fatal,TEXT("%s"), Message);
@@ -294,7 +295,7 @@ void FFrame::KismetExecutionMessage(const TCHAR* Message, ELogVerbosity::Type Ve
 	}
 	else
 	{
-#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+#if DO_BLUEPRINT_GUARD
 		static bool GScriptStackForScriptWarning = FParse::Param(FCommandLine::Get(),TEXT("SCRIPTSTACKONWARNINGS"));
 		UE_LOG(LogScript, Warning, TEXT("%s%s"), Message, GScriptStackForScriptWarning ? *FString::Printf(TEXT("\n%s"), *ScriptStack) : TEXT(""));
 #endif
@@ -306,7 +307,7 @@ void FFrame::Serialize( const TCHAR* V, ELogVerbosity::Type Verbosity, const cla
 	// Treat errors/warnings as bad
 	if (Verbosity == ELogVerbosity::Warning)
 	{
-#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+#if !UE_BUILD_SHIPPING
 		static bool GTreatScriptWarningsFatal = FParse::Param(FCommandLine::Get(),TEXT("FATALSCRIPTWARNINGS"));
 		if (GTreatScriptWarningsFatal)
 		{
@@ -327,7 +328,7 @@ void FFrame::Serialize( const TCHAR* V, ELogVerbosity::Type Verbosity, const cla
 	}
 	else
 	{
-#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+#if DO_BLUEPRINT_GUARD
 		static bool GScriptStackForScriptWarning = FParse::Param(FCommandLine::Get(),TEXT("SCRIPTSTACKONWARNINGS"));
 		UE_LOG(LogScript, Warning,
 			TEXT("%s\r\n\t%s\r\n\t%s:%04X%s"),
@@ -1160,6 +1161,9 @@ void UObject::ProcessEvent( UFunction* Function, void* Parms )
 		EScriptInstrumentationEvent EventInstrumentationInfo(EScriptInstrumentation::Stop, this);
 		FBlueprintCoreDelegates::InstrumentScriptEvent(EventInstrumentationInfo);
 	}
+#if WITH_EDITORONLY_DATA
+	FBlueprintCoreDelegates::OnScriptExecutionEnd.Broadcast();
+#endif
 #endif
 
 #if DO_BLUEPRINT_GUARD

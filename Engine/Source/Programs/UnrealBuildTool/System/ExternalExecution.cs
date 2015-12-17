@@ -742,6 +742,15 @@ namespace UnrealBuildTool
 							UBTArguments.Append(" -2013");
 						}
 
+						// Add UHT plugins to UBT command line as external plugins
+						if (Target.ProjectDescriptor != null && Target.UnrealHeaderToolPlugins != null)
+						{
+							foreach (PluginInfo Plugin in Target.UnrealHeaderToolPlugins)
+							{
+								UBTArguments.Append(" -PLUGIN \"" + Plugin.File + "\"");
+							}
+						}
+
 						if (RunExternalExecutable(UnrealBuildTool.GetUBTPath(), UBTArguments.ToString()) != 0)
 						{
 							return false;
@@ -764,7 +773,7 @@ namespace UnrealBuildTool
 					System.IO.File.WriteAllText(ModuleInfoFileName.FullName, fastJSON.JSON.Instance.ToJSON(Manifest, new fastJSON.JSONParameters { UseExtensions = false }));
 
 					string CmdLine = (Target.ProjectFile != null) ? "\"" + Target.ProjectFile.FullName + "\"" : Target.GetTargetName();
-					CmdLine += " \"" + ModuleInfoFileName + "\" -LogCmds=\"loginit warning, logexit warning, logdatabase error\"";
+					CmdLine += " \"" + ModuleInfoFileName + "\" -LogCmds=\"loginit warning, logexit warning, logdatabase error\" -Unattended";
 					if (UnrealBuildTool.IsEngineInstalled())
 					{
 						CmdLine += " -installed";

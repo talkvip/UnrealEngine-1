@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 /*=============================================================================
 	BasePassVertexShader.usf: Base pass vertex shader
@@ -27,6 +27,8 @@ void Main(
 	OutCullDistance = OutClipDistance = 0.0;
 	const uint EyeIndex = VertexFactoryGetEyeIndex(InstanceId);
 	ResolvedView = ResolveView(EyeIndex);
+#else
+	ResolvedView = ResolveView();
 #endif
 
 	FVertexFactoryIntermediates VFIntermediates = GetVertexFactoryIntermediates(Input);

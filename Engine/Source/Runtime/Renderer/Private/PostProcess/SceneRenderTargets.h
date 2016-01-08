@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 /*=============================================================================
 	SceneRenderTargets.h: Scene render target definitions.
@@ -271,6 +271,11 @@ public:
 	{
 		SeparateTranslucencyRT.SafeRelease();
 		check(!SeparateTranslucencyRT);
+
+		if (SeparateTranslucencyDepthRT.GetReference())
+		{
+			SeparateTranslucencyDepthRT.SafeRelease();
+		}
 	}
 
 	void ResolveSceneDepthTexture(FRHICommandList& RHICmdList);

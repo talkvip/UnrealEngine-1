@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 // ActorComponent.cpp: Actor component implementation.
 
 #include "AbilitySystemPrivatePCH.h"
@@ -52,12 +52,12 @@ void UAbilitySystemComponent::UninitializeComponent()
 	}
 }
 
-void UAbilitySystemComponent::OnComponentDestroyed()
+void UAbilitySystemComponent::OnComponentDestroyed(bool bDestroyingHierarchy)
 {
 	DestroyActiveState();
 
 	// Call the super at the end, after we've done what we needed to do
-	Super::OnComponentDestroyed();
+	Super::OnComponentDestroyed(bDestroyingHierarchy);
 }
 
 void UAbilitySystemComponent::TickComponent(float DeltaTime, enum ELevelTick TickType, FActorComponentTickFunction *ThisTickFunction)

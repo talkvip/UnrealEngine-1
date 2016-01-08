@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 
 #include "GameProjectGenerationPrivatePCH.h"
@@ -3184,7 +3184,7 @@ GameProjectUtils::EAddCodeToProjectResult GameProjectUtils::AddCodeToProject_Int
 {
 	if ( !ParentClassInfo.IsSet() )
 	{
-		OutFailReason = LOCTEXT("NoParentClass", "You must specify a parent class");
+		OutFailReason = LOCTEXT("MissingParentClass", "You must specify a parent class");
 		return EAddCodeToProjectResult::InvalidInput;
 	}
 

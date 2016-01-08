@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 /*=============================================================================
 	LightMapDensityShader.hlsl: Shader for rendering lightmap density as a color
@@ -73,11 +73,7 @@ void MainVertexShader(
 	out FLightMapDensityVSOutput Output
 	)
 {
-
-// Instanced stereo not implemented
-#if INSTANCED_STEREO
 	ResolvedView = ResolveView();
-#endif
 
 	FVertexFactoryIntermediates VFIntermediates = GetVertexFactoryIntermediates(Input);
 	float4 WorldPosition = VertexFactoryGetWorldPosition(Input, VFIntermediates);
@@ -163,11 +159,7 @@ void MainPixelShader(
 	out float4 OutColor		: SV_Target0
 	)
 {
-
-// Instanced stereo not implemented
-#if INSTANCED_STEREO
 	ResolvedView = ResolveView();
-#endif
 
 	FMaterialPixelParameters MaterialParameters = GetMaterialPixelParameters(FactoryInterpolants, SvPosition);
 	FPixelMaterialInputs PixelMaterialInputs;

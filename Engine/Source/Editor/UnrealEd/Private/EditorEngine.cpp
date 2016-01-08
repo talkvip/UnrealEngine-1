@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 #include "UnrealEd.h"
 #include "Matinee/MatineeActor.h"
@@ -452,7 +452,7 @@ void UEditorEngine::InitEditor(IEngineLoop* InEngineLoop)
 		IDesktopPlatform* DesktopPlatform = FDesktopPlatformModule::Get();
 		if ( DesktopPlatform != NULL )
 		{
-			DesktopPlatform->OpenLauncher(false, FString(), FString());
+			DesktopPlatform->OpenLauncher(false, FString(), FString("-silent"));
 		}
 	}
 

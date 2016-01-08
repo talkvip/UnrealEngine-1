@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 using System;
 using System.Collections.Generic;
@@ -397,11 +397,6 @@ namespace UnrealBuildTool
 
 				if (BuildConfiguration.bAllowXGE || BuildConfiguration.bXGEExport)
 				{
-					Log.TraceInformation("{0} {1} action{2} to XGE",
-						BuildConfiguration.bXGEExport ? "Exporting" : "Distributing",
-						ActionsToExecute.Count,
-						ActionsToExecute.Count == 1 ? "" : "s");
-
 					XGE.ExecutionResult XGEResult = XGE.ExecutionResult.TasksSucceeded;
 
 					// Batch up XGE execution by actions with the same output event handler.

@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 #include "SlateReflectorPrivatePCH.h"
 #include "ISlateReflectorModule.h"
@@ -51,7 +51,7 @@ struct FLoggedEvent
 
 	FText ToText()
 	{
-		return FText::Format(NSLOCTEXT("","","{0}  |  {1}"), EventText, HandlerText);
+		return FText::Format(LOCTEXT("LoggedEvent","{0}  |  {1}"), EventText, HandlerText);
 	}
 	
 	FInputEvent Event;
@@ -930,7 +930,7 @@ TSharedRef<SDockTab> SWidgetReflector::SpawnSlateStatsTab(const FSpawnTabArgs& A
 						[
 							SNew(STextBlock)
 							.WrapTextAt(200.0f)
-							.Text( LOCTEXT("StatsSamplingIntervalTooltip", "the interval (in seconds) to integrate stats before updating the averages.") )
+							.Text( LOCTEXT("StatsSamplingIntervalLabelTooltip", "the interval (in seconds) to integrate stats before updating the averages.") )
 						]
 					)
 					.Text(LOCTEXT("StatsSampleWindow", "Sampling Interval: "))

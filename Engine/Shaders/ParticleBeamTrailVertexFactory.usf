@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 /*=============================================================================
 	ParticleBeamTrailVertexFactory.hlsl: Particle vertex factory shader code.
@@ -41,7 +41,7 @@ struct FVertexFactoryInterpolantsVSToPS
 #endif	//USE_DYNAMIC_PARAMETERS
 
 #if INSTANCED_STEREO
-	uint EyeIndex : EYE_INDEX;
+	nointerpolation uint EyeIndex : EYE_INDEX;
 #endif
 };
 
@@ -236,6 +236,6 @@ float3x3 VertexFactoryGetTangentToLocal( FVertexFactoryInput Input, FVertexFacto
 #if INSTANCED_STEREO
 uint VertexFactoryGetEyeIndex(uint InstanceId)
 {
-	return 0;
+	return InstanceId & 1;
 }
 #endif

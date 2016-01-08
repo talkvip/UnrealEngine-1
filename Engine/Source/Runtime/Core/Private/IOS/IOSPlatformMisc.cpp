@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 /*=============================================================================
 	IOSPlatformMisc.mm: iOS implementations of misc functions
@@ -316,6 +316,13 @@ EAppReturnType::Type FIOSPlatformMisc::MessageBoxExt( EAppMsgType::Type MsgType,
 
 	return Result;
 #endif
+}
+
+bool FIOSPlatformMisc::ControlScreensaver(EScreenSaverAction Action)
+{
+	IOSAppDelegate* AppDelegate = [IOSAppDelegate GetDelegate];
+	[AppDelegate EnableIdleTimer : (Action == FGenericPlatformMisc::Enable)];
+	return true;
 }
 
 int32 FIOSPlatformMisc::NumberOfCores()

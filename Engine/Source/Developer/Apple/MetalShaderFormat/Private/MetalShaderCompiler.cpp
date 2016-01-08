@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 // ..
 
 #include "MetalShaderFormat.h"
@@ -565,6 +565,9 @@ void CompileShader_Metal(const FShaderCompilerInput& Input,FShaderCompilerOutput
 
 	if (PreprocessShader(PreprocessedShader, Output, Input, AdditionalDefines))
 	{
+		// Disable instanced stereo until supported for metal
+		StripInstancedStereo(PreprocessedShader);
+
 		char* MetalShaderSource = NULL;
 		char* ErrorLog = NULL;
 

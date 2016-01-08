@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 #include "HierarchicalLODOutlinerPrivatePCH.h"
 #include "HLODOutliner.h"
@@ -1591,4 +1591,4 @@ namespace HLODOutliner
 
 };
 
-#undef LOCTEXT_NAMESPACE // LOCTEXT_NAMESPACE "HLODOutliner"
+#undef LOCTEXT_NAMESPACE

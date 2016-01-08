@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 /*=============================================================================
 
@@ -340,7 +340,7 @@ void StandardDeferredReflectionPS(
 	)
 {
 	OutColor = 0;
-	float2 ScreenUV = InScreenPosition.xy / InScreenPosition.w * Frame.ScreenPositionScaleBias.xy + Frame.ScreenPositionScaleBias.wz;
+	float2 ScreenUV = InScreenPosition.xy / InScreenPosition.w * View.ScreenPositionScaleBias.xy + View.ScreenPositionScaleBias.wz;
 	FScreenSpaceData ScreenSpaceData = GetScreenSpaceData(ScreenUV);
 
 	BRANCH

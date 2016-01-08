@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 // Core includes.
 #include "CorePrivatePCH.h"
@@ -14,6 +14,7 @@
 #include "ModuleManager.h"
 #include "Ticker.h"
 #include "DerivedDataCacheInterface.h"
+#include "ITargetPlatformManagerModule.h"
 
 DEFINE_LOG_CATEGORY(LogSHA);
 DEFINE_LOG_CATEGORY(LogStats);

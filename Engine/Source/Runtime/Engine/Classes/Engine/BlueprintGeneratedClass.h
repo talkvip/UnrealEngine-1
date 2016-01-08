@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 #pragma once
 
@@ -507,6 +507,9 @@ public:
 	static UDynamicBlueprintBinding* GetDynamicBindingObject(const UClass* ThisClass, UClass* BindingClass);
 
 #if WITH_EDITOR
+	/** Unbind functions on supplied actor from delegates */
+	static void UnbindDynamicDelegates(const UClass* ThisClass, UObject* InInstance);
+
 	/** Unbind functions on supplied actor from delegates tied to a specific property */
 	void UnbindDynamicDelegatesForProperty(UObject* InInstance, const UObjectProperty* InObjectProperty);
 #endif

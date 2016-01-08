@@ -1,8 +1,10 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 #include "CorePrivatePCH.h"
 #include "IOSInputInterface.h"
 #include "IOSAppDelegate.h"
+
+#import <AudioToolbox/AudioToolbox.h>
 
 DECLARE_LOG_CATEGORY_EXTERN(LogIOSInput, Log, All);
 
@@ -575,4 +577,25 @@ bool FIOSInputInterface::IsControllerAssignedToGamepad(int32 ControllerId)
 	return ControllerId < ARRAY_COUNT(Controllers) &&
 		(Controllers[ControllerId].bIsGamepadConnected ||
 		 Controllers[ControllerId].bIsRemoteConnected);
+}
+
+void FIOSInputInterface::SetForceFeedbackChannelValue(int32 ControllerId, FForceFeedbackChannelType ChannelType, float Value)
+{
+	if (Value >= 0.3f)
+	{
+		AudioServicesPlaySystemSound(kSystemSoundID_Vibrate);
+	}
+}
+
+void FIOSInputInterface::SetForceFeedbackChannelValues(int32 ControllerId, const FForceFeedbackValues &Values)
+{
+	// Use largest vibration state as value
+	float MaxLeft = Values.LeftLarge > Values.LeftSmall ? Values.LeftLarge : Values.LeftSmall;
+	float MaxRight = Values.RightLarge > Values.RightSmall ? Values.RightLarge : Values.RightSmall;
+	float Value = MaxLeft > MaxRight ? MaxLeft : MaxRight;
+
+	if (Value >= 0.3f)
+	{
+		AudioServicesPlaySystemSound(kSystemSoundID_Vibrate);
+	}
 }

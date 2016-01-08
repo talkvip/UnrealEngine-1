@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 #include "EnginePrivate.h"
 #include "ComponentInstanceDataCache.h"
@@ -86,11 +86,12 @@ void UChildActorComponent::OnComponentCreated()
 	CreateChildActor();
 }
 
-void UChildActorComponent::OnComponentDestroyed()
+void UChildActorComponent::OnComponentDestroyed(bool bDestroyingHierarchy)
 {
-	Super::OnComponentDestroyed();
+	Super::OnComponentDestroyed(bDestroyingHierarchy);
 
-	DestroyChildActor(GetWorld() && !GetWorld()->IsGameWorld());
+	const UWorld* const MyWorld = GetWorld();
+	DestroyChildActor(MyWorld && !MyWorld->IsGameWorld());
 }
 
 class FChildActorComponentInstanceData : public FSceneComponentInstanceData

@@ -18,7 +18,7 @@ namespace D3D12RHI
 	const uint32 GConstantBufferSizes[MAX_CONSTANT_BUFFER_SLOTS] =
 	{
 		// CBs must be a multiple of 16
-		Align(MAX_GLOBAL_CONSTANT_BUFFER_SIZE, 16),
+		(uint32)Align(MAX_GLOBAL_CONSTANT_BUFFER_SIZE, 16),
 	};
 }
 

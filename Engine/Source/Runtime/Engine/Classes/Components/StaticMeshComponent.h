@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 #pragma once
 
@@ -487,6 +487,12 @@ public:
 	int32 GetBlueprintCreatedComponentIndex() const;
 
 	void ApplyComponentInstanceData(class FStaticMeshComponentInstanceData* ComponentInstanceData);
+
+	/** Register this component's render data with the scene for SpeedTree wind */
+	void AddSpeedTreeWind();
+
+	/** Unregister this component's render data with the scene for SpeedTree wind */
+	void RemoveSpeedTreeWind();
 };
 
 

@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 
 #include "BlueprintEditorPrivatePCH.h"
@@ -542,7 +542,7 @@ FText SMyBlueprint::OnGetSectionTitle( int32 InSectionID )
 	case NodeSectionID::LOCAL_VARIABLE:
 		if ( GetFocusedGraph() )
 		{
-			SeperatorTitle = FText::Format(NSLOCTEXT("GraphActionNode", "LocalVariables", "Local Variables <TinyText.Subdued>({0})</>"), FText::FromName(GetFocusedGraph()->GetFName()));
+			SeperatorTitle = FText::Format(NSLOCTEXT("GraphActionNode", "LocalVariables_Focused", "Local Variables <TinyText.Subdued>({0})</>"), FText::FromName(GetFocusedGraph()->GetFName()));
 		}
 		else
 		{

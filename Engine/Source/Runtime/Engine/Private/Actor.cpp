@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 #include "EnginePrivate.h"
 #include "Engine/InputDelegateBinding.h"
@@ -3827,19 +3827,16 @@ bool AActor::HasValidRootComponent()
 void AActor::MarkComponentsAsPendingKill()
 {
 	// Iterate components and mark them all as pending kill.
-	TInlineComponentArray<UActorComponent*> Components;
-	GetComponents(Components);
+	TInlineComponentArray<UActorComponent*> Components(this);
 
-	for (int32 Index = 0; Index < Components.Num(); Index++)
+	for (UActorComponent* Component : Components)
 	{
-		UActorComponent* Component = Components[Index];
-
 		// Modify component so undo/ redo works in the editor.
-		if( GIsEditor )
+		if (GIsEditor)
 		{
 			Component->Modify();
 		}
-		Component->OnComponentDestroyed();
+		Component->OnComponentDestroyed(true);
 		Component->MarkPendingKill();
 	}
 }

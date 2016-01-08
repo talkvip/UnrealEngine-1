@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 #include "MainFramePrivatePCH.h"
 
@@ -219,7 +219,7 @@ void FMainMenu::FillWindowMenu( FMenuBuilder& MenuBuilder, const TSharedRef< FEx
 				{
 					MenuBuilder.AddMenuEntry(
 						LOCTEXT("LocalizationDashboardLabel", "Localization Dashboard"),
-						LOCTEXT("BlutilityShelfToolTip", "Open the Localization Dashboard for this Project."),
+						LOCTEXT("LocalizationDashboardToolTip", "Open the Localization Dashboard for this Project."),
 						FSlateIcon(),
 						FUIAction(FExecuteAction::CreateStatic(&FMainMenu::OpenLocalizationDashboard))
 						);

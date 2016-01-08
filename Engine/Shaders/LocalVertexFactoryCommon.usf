@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 /*=============================================================================
 	LocalVertexFactoryCommon.usf: Local vertex factory common functionality
@@ -32,7 +32,7 @@ struct FVertexFactoryInterpolantsVSToPS
 #endif
 
 #if INSTANCED_STEREO
-	uint EyeIndex : EYE_INDEX;
+	nointerpolation uint EyeIndex : EYE_INDEX;
 #endif
 };
 
@@ -151,7 +151,7 @@ struct FVertexFactoryInterpolantsVSToPS
 #endif
 
 #if INSTANCED_STEREO
-	uint EyeIndex : EYE_INDEX;
+	nointerpolation uint EyeIndex : EYE_INDEX;
 #endif
 };
 

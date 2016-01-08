@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 #include "EnginePrivate.h"
 #include "EditorSupportDelegates.h"
@@ -28,7 +28,7 @@ void AActor::PreEditChange(UProperty* PropertyThatWillChange)
 	}
 
 	// During SIE, allow components to be unregistered here, and then reregistered and reconstructed in PostEditChangeProperty.
-	if (GEditor->bIsSimulatingInEditor || ReregisterComponentsWhenModified())
+	if ((GEditor && GEditor->bIsSimulatingInEditor) || ReregisterComponentsWhenModified())
 	{
 		UnregisterAllComponents();
 	}

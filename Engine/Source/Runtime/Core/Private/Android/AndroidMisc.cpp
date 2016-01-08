@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 #include "CorePrivatePCH.h"
 #include "AndroidInputInterface.h"
@@ -361,6 +361,12 @@ bool FAndroidMisc::AllowRenderThread()
 	// come back and revisit this later 
 	// https://code.google.com/p/android/issues/detail?id=32636
 	if (FAndroidMisc::GetGPUFamily() == FString(TEXT("NVIDIA Tegra")) && FPlatformMisc::NumberOfCores() <= 2 && FAndroidMisc::GetGLVersion().StartsWith(TEXT("OpenGL ES 2.")))
+	{
+		return false;
+	}
+
+	// Vivante GC1000 with 2.x driver has issues with render thread
+	if (FAndroidMisc::GetGPUFamily().StartsWith(TEXT("Vivante GC1000")) && FAndroidMisc::GetGLVersion().StartsWith(TEXT("OpenGL ES 2.")))
 	{
 		return false;
 	}

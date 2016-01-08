@@ -1,4 +1,6 @@
-﻿namespace UnrealGameSync
+﻿// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
+
+namespace UnrealGameSync
 {
 	partial class ClobberWindow
 	{

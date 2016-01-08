@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 #include "DetailCustomizationsPrivatePCH.h"
 #include "HierarchicalSimplificationCustomizations.h"
@@ -114,4 +114,4 @@ EVisibility FHierarchicalSimplificationCustomizations::IsMergeMeshSettingVisible
 	return EVisibility::Hidden;
 }
 
-#undef LOCTEXT_NAMESPACE // HierarchicalSimplificationCustomizations
+#undef LOCTEXT_NAMESPACE

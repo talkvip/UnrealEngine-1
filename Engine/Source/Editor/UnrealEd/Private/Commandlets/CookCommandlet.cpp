@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 /*=============================================================================
 	CookCommandlet.cpp: Commandlet for cooking content
@@ -31,6 +31,7 @@ DEFINE_LOG_CATEGORY_STATIC(LogCookCommandlet, Log, All);
 
 UCookerSettings::UCookerSettings(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
+	, bCompileBlueprintsInDevelopmentMode(true)
 {
 	SectionName = TEXT("Cooker");
 	DefaultPVRTCQuality = 1;

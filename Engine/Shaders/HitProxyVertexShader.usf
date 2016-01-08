@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 /*=============================================================================
 	HitProxyVertexShader.hlsl: Vertex shader for rendering hit proxies.
@@ -91,11 +91,7 @@ void Main(
 	out FHitProxyVSOutput Output
 	)
 {
-
-// Instanced stereo not implemented
-#if INSTANCED_STEREO
 	ResolvedView = ResolveView();
-#endif
 
 	FVertexFactoryIntermediates VFIntermediates = GetVertexFactoryIntermediates(Input);
 	float4	WorldPosition = VertexFactoryGetWorldPosition(Input, VFIntermediates);

@@ -1,21 +1,15 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 #include "PluginWardenPrivatePCH.h"
 
 #include "PluginWardenModule.h"
 #include "SAuthorizingPlugin.h"
 
-#include "SThrobber.h"
-#include "IPortalApplicationWindow.h"
-#include "IPortalServiceLocator.h"
-#include "Application/IPortalApplicationWindow.h"
-#include "DesktopPlatformModule.h"
-
 IMPLEMENT_MODULE( FPluginWardenModule, PluginWarden );
 
 #define LOCTEXT_NAMESPACE "PluginWarden"
 
-static TSet<FString> AuthorizedPlugins;
+TSet<FString> AuthorizedPlugins;
 
 void FPluginWardenModule::StartupModule()
 {

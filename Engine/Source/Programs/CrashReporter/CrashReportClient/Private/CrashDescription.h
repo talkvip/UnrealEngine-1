@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 #pragma once
 #include "GenericPlatformCrashContext.h"
@@ -80,11 +80,6 @@ namespace LexicalConversion
 	inline void FromString( FEngineVersion& OutValue, const TCHAR* Buffer )
 	{
 		FEngineVersion::Parse( Buffer, OutValue );
-	}
-
-	inline void FromString( FString& OutValue, const TCHAR* Buffer )
-	{
-		OutValue = Buffer;
 	}
 }
 

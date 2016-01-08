@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 /*=============================================================================
 	ShaderCompiler.cpp: Platform independent shader compilations.
@@ -2202,7 +2202,7 @@ void GlobalBeginCompileShader(
 		Input.Environment.SetDefine(TEXT("COMPUTESHADER"),	Target.Frequency == SF_Compute);
 	}
 
-	// We need to know if instanced stereo is enabled before setting up uniform buffer includes. If it's not we can strip out InstancedView.
+	// Set instanced stereo define
 	{
 		static const auto CVar = IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("vr.InstancedStereo"));
 		const bool bIsInstancedStereo = CVar ? (CVar->GetValueOnGameThread() != false) : false;

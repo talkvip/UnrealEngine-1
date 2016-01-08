@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 #include "LauncherServicesPrivatePCH.h"
 #include "PlatformInfo.h"
@@ -454,7 +454,7 @@ FString FLauncherWorker::CreateUATCommand( const ILauncherProfileRef& InProfile,
 			UATCommand += MapList;
 
 			FCommandDesc Desc;
-			FText Command = LOCTEXT("LauncherCookDesc", "Starting cook on the fly server");
+			FText Command = LOCTEXT("LauncherCookOnTheFlyDesc", "Starting cook on the fly server");
 			Desc.Name = "Cook Server Task";
 			Desc.Desc = Command.ToString();
 			Desc.EndText = TEXT("********** COOK COMMAND COMPLETED **********");

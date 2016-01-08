@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 // .
 
 #include "ShaderCompilerCommon.h"
@@ -269,15 +269,8 @@ static void WholeWordReplaceInline(FString& String, TCHAR* StartPtr, const TCHAR
 }
 
 
-bool RemoveUniformBuffersFromSource(FString& SourceCode, const bool bInstancedStereoEnabled)
+bool RemoveUniformBuffersFromSource(FString& SourceCode)
 {
-
-	// If instanced stereo is not enabled, fall back to the main View uniform. We don't need to dynamically resolve between View and InstancedView.
-	if (!bInstancedStereoEnabled)
-	{
-		SourceCode.ReplaceInline(TEXT("ResolvedView"), TEXT("View"));
-	}
-	
 	static const FString StaticStructToken(TEXT("static const struct"));
 	int32 StaticStructTokenPos = SourceCode.Find(StaticStructToken, ESearchCase::CaseSensitive, ESearchDir::FromStart);
 	while (StaticStructTokenPos != INDEX_NONE)

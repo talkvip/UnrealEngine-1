@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 #pragma once
 
@@ -213,6 +213,10 @@ public:
 
 	DECLARE_DELEGATE_RetVal_OneParam(bool, FLoadStringAssetReferenceInCook, FString&);
 	static FLoadStringAssetReferenceInCook LoadStringAssetReferenceInCook;
+
+	/** Sent when the platform requests a low-level VR recentering */
+	DECLARE_MULTICAST_DELEGATE(FVRHeadsetRecenter);
+	static FVRHeadsetRecenter VRHeadsetRecenter;
 
 private:
 

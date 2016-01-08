@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 /*
 * Copyright 2009 - 2010 Autodesk, Inc.  All Rights Reserved.
@@ -1167,7 +1167,7 @@ void FFbxImporter::FillFbxMeshArray(FbxNode* Node, TArray<FbxNode*>& outMeshArra
 {
 	if (Node->GetMesh())
 	{
-		if (!FFbxImporter->FillCollisionModelList(Node))
+		if (!FFbxImporter->FillCollisionModelList(Node) && Node->GetMesh()->GetPolygonVertexCount() > 0)
 		{ 
 			outMeshArray.Add(Node);
 		}

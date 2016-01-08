@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 #include "EnginePrivate.h"
 #include "Engine/GameEngine.h"
@@ -763,6 +763,18 @@ void UKismetSystemLibrary::SetClassPropertyByName(UObject* Object, FName Propert
 		if (ClassProp != NULL && Value->IsChildOf(ClassProp->MetaClass)) // check it's the right type
 		{
 			ClassProp->SetObjectPropertyValue_InContainer(Object, *Value);
+		}
+	}
+}
+
+void UKismetSystemLibrary::SetInterfacePropertyByName(UObject* Object, FName PropertyName, const FScriptInterface& Value)
+{
+	if (Object)
+	{
+		UInterfaceProperty* InterfaceProp = FindField<UInterfaceProperty>(Object->GetClass(), PropertyName);
+		if (InterfaceProp != NULL && Value.GetObject()->GetClass()->ImplementsInterface(InterfaceProp->InterfaceClass)) // check it's the right type
+		{
+			InterfaceProp->SetPropertyValue_InContainer(Object, Value);
 		}
 	}
 }

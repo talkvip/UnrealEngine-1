@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 #include "BlueprintEditorPrivatePCH.h"
 #include "Engine/LevelScriptBlueprint.h"
@@ -2648,7 +2648,7 @@ void FBlueprintEditor::ReparentBlueprint_NewParentChosen(UClass* ChosenClass)
 			{
 				const FText Title = LOCTEXT("CommonInterfacesTitle", "Common interfaces");
 				const FText Message = FText::Format(
-					LOCTEXT("ReparentWarning", "Following interfaces are already implemented. Continue reparenting? \n {0}"),
+					LOCTEXT("ReparentWarning_InterfacesImplemented", "Following interfaces are already implemented. Continue reparenting? \n {0}"),
 					FText::FromString(CommonInterfacesNames));
 
 				FSuppressableWarningDialog::FSetupInfo Info(Message, Title, "Warning_CommonInterfacesWhileReparenting");

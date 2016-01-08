@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 #include "EnginePrivate.h"
 #include "MessageLog.h"
@@ -55,17 +55,17 @@ void UCameraComponent::AddReferencedObjects(UObject* InThis, FReferenceCollector
 	Super::AddReferencedObjects(InThis, Collector);
 }
 
-void UCameraComponent::OnComponentDestroyed()
+void UCameraComponent::OnComponentDestroyed(bool bDestroyingHierarchy)
 {
-	Super::OnComponentDestroyed();
+	Super::OnComponentDestroyed(bDestroyingHierarchy);
 
 	if (ProxyMeshComponent)
 	{
-		ProxyMeshComponent->DestroyComponent();
+		ProxyMeshComponent->DestroyComponent(bDestroyingHierarchy);
 	}
 	if (DrawFrustum)
 	{
-		DrawFrustum->DestroyComponent();
+		DrawFrustum->DestroyComponent(bDestroyingHierarchy);
 	}
 }
 #endif

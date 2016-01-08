@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 // Core includes.
 #include "CorePrivatePCH.h"
@@ -69,3 +69,5 @@ FCoreDelegates::FApplicationLicenseChange FCoreDelegates::ApplicationLicenseChan
 FCoreDelegates::FPlatformChangedLaptopMode FCoreDelegates::PlatformChangedLaptopMode;
 
 FCoreDelegates::FLoadStringAssetReferenceInCook FCoreDelegates::LoadStringAssetReferenceInCook;
+
+FCoreDelegates::FVRHeadsetRecenter FCoreDelegates::VRHeadsetRecenter;

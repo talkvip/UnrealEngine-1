@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 #pragma once
 #include "Camera/CameraTypes.h"
@@ -87,7 +87,7 @@ class ENGINE_API UCameraComponent : public USceneComponent
 	virtual void OnRegister() override;
 	virtual void PostLoad() override;
 #if WITH_EDITOR
-	virtual void OnComponentDestroyed() override;
+	virtual void OnComponentDestroyed(bool bDestroyingHierarchy) override;
 	virtual void CheckForErrors() override;
 #endif
 	// End of UActorComponent interface

@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 
 #include "SlatePrivatePCH.h"
@@ -2330,15 +2330,6 @@ void FSlateApplication::ResetToDefaultPointerInputSettings()
 	if ( PlatformApplication->Cursor.IsValid() )
 	{
 		PlatformApplication->Cursor->SetType(EMouseCursor::Default);
-	}
-
-	// Clear user focus entries, so SetUserFocus restores mouse capture etc. after the app regains focus
-	for (int32 UserIndex = 0; UserIndex < SlateApplicationDefs::MaxUsers; ++UserIndex)
-	{
-		FUserFocusEntry& UserFocusEntry = UserFocusEntries[UserIndex];
-		UserFocusEntry.WidgetPath = FWidgetPath();
-		UserFocusEntry.FocusCause = EFocusCause::Cleared;
-		UserFocusEntry.ShowFocus = false;
 	}
 }
 
@@ -5502,6 +5493,15 @@ bool FSlateApplication::ProcessWindowActivatedEvent( const FWindowActivateEvent&
 
 		// A window was deactivated; mouse capture should be cleared
 		ResetToDefaultPointerInputSettings();
+
+		// Clear user focus entries, so SetUserFocus restores mouse capture etc. after the window regains focus
+		for (int32 UserIndex = 0; UserIndex < SlateApplicationDefs::MaxUsers; ++UserIndex)
+		{
+			FUserFocusEntry& UserFocusEntry = UserFocusEntries[UserIndex];
+			UserFocusEntry.WidgetPath = FWidgetPath();
+			UserFocusEntry.FocusCause = EFocusCause::Cleared;
+			UserFocusEntry.ShowFocus = false;
+		}
 	}
 
 	return true;

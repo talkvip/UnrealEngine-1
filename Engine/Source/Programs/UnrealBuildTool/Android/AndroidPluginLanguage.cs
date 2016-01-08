@@ -1,4 +1,4 @@
-﻿// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+﻿// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 using System;
 using System.Collections.Generic;
@@ -1452,6 +1452,10 @@ namespace UnrealBuildTool
 										Directory.CreateDirectory(Path.GetDirectoryName(Dst));
 										File.Copy(Src, Dst, true);
 										Log.TraceInformation("\nFile {0} copied to {1}", Src, Dst);
+
+										// remove any read only flags
+										FileInfo DestFileInfo = new FileInfo(Dst);
+										DestFileInfo.Attributes = DestFileInfo.Attributes & ~FileAttributes.ReadOnly;
 									}
 								}
 							}

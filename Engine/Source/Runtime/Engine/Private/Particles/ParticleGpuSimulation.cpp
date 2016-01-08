@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 /*==============================================================================
 	ParticleGpuSimulation.cpp: Implementation of GPU particle simulation.
@@ -2957,6 +2957,7 @@ struct FGPUSpriteDynamicEmitterData : FDynamicEmitterDataBase
 					BatchElement.NumPrimitives = MAX_PARTICLES_PER_INSTANCE * 2;
 					BatchElement.NumInstances = ParticleCount / MAX_PARTICLES_PER_INSTANCE;
 					BatchElement.FirstIndex = 0;
+					BatchElement.bIsInstancedMesh = true;
 					Mesh.VertexFactory = &VertexFactory;
 					Mesh.LCI = NULL;
 					if ( bUseLocalSpace )

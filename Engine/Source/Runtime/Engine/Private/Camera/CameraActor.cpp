@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 #include "EnginePrivate.h"
 #include "Camera/CameraComponent.h"
@@ -55,25 +55,23 @@ void ACameraActor::Serialize(FArchive& Ar)
 
 void ACameraActor::PostLoadSubobjects(FObjectInstancingGraph* OuterInstanceGraph)
 {
+	USceneComponent* OldRoot = RootComponent;
+	USceneComponent* OldAttachParent = OldRoot->AttachParent;
+	const FName OldSocketName = OldRoot->AttachSocketName;
+
+	Super::PostLoadSubobjects(OuterInstanceGraph);
+	
 	if (GetLinkerUE4Version() < VER_UE4_CAMERA_ACTOR_USING_CAMERA_COMPONENT)
 	{
-		USceneComponent* OldRoot = RootComponent;
-		USceneComponent* OldAttachParent = OldRoot->AttachParent;
-
-		Super::PostLoadSubobjects(OuterInstanceGraph);
-
 		CameraComponent->AttachParent = OldAttachParent;
 		OldRoot->AttachParent = NULL;
-	}
-	else
-	{
-		Super::PostLoadSubobjects(OuterInstanceGraph);
 	}
 
 	if (GetLinkerUE4Version() < VER_UE4_CAMERA_COMPONENT_ATTACH_TO_ROOT)
 	{
 		RootComponent = SceneComponent;
 		CameraComponent->AttachTo(RootComponent);
+		RootComponent->AttachTo(OldAttachParent, OldSocketName);
 	}
 }
 

@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 #include "HierarchicalLODOutlinerPrivatePCH.h"
 #include "StaticMeshActorItem.h"
@@ -81,4 +81,4 @@ void HLODOutliner::FStaticMeshActorDropTarget::OnDrop(FDragDropPayload& DraggedO
 
 }
 
-#undef LOCTEXT_NAMESPACE // "StaticMeshActorItem"
+#undef LOCTEXT_NAMESPACE

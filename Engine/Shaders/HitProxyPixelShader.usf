@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 /*=============================================================================
 	HitProxyPixelShader.hlsl: Pixel shader for rendering scene hit proxies.
@@ -25,11 +25,7 @@ void Main(
 	,out float4 OutColor		: SV_Target0
 	)
 {
-
-// Instanced stereo not implemented
-#if INSTANCED_STEREO
 	ResolvedView = ResolveView();
-#endif
 
 	FMaterialPixelParameters MaterialParameters = GetMaterialPixelParameters(Interpolants, SvPosition);
 	FPixelMaterialInputs PixelMaterialInputs;

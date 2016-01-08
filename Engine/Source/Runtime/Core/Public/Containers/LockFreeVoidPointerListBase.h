@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 #pragma once
 
@@ -1529,6 +1529,7 @@ public:
 				break;
 			}
 			uint32 Slot = LocalNumPopped % DequeueCacheSize;
+			FPlatformMisc::MemoryBarrier();
 			void *ReturnPtr = Available[Slot];
 			TCounter Result = (TCounter)FPlatformAtomics::InterlockedCompareExchange((volatile TSignedCounter*)&NumPopped, LocalNumPopped + 1, LocalNumPopped);
 			if (Result == LocalNumPopped)

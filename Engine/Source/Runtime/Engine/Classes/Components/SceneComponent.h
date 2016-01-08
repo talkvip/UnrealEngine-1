@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 #pragma once
 #include "Components/ActorComponent.h"
@@ -697,7 +697,7 @@ public:
 		UpdateComponentToWorldWithParent(AttachParent, AttachSocketName, bSkipPhysicsMove, RelativeRotationCache.RotatorToQuat(RelativeRotation), Teleport);
 	}
 	virtual void DestroyComponent(bool bPromoteChildren = false) override;
-	virtual void OnComponentDestroyed() override;
+	virtual void OnComponentDestroyed(bool bDestroyingHierarchy) override;
 	virtual void ApplyWorldOffset(const FVector& InOffset, bool bWorldShift) override;
 	virtual class FActorComponentInstanceData* GetComponentInstanceData() const override;
 	//~ End ActorComponent Interface

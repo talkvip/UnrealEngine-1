@@ -1,6 +1,5 @@
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
-
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
 #pragma once
 
 #include "GameplayAbility.h"
@@ -75,7 +74,7 @@ class GAMEPLAYABILITIES_API UAbilitySystemComponent : public UGameplayTasksCompo
 
 	virtual void InitializeComponent() override;
 	virtual void UninitializeComponent() override;
-	virtual void OnComponentDestroyed() override;
+	virtual void OnComponentDestroyed(bool bDestroyingHierarchy) override;
 	virtual void TickComponent(float DeltaTime, enum ELevelTick TickType, FActorComponentTickFunction *ThisTickFunction) override;
 
 	/** retrieves information whether this component should be ticking taken current

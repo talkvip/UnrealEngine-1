@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 using System;
 using System.Collections.Generic;
@@ -334,6 +334,12 @@ namespace UnrealBuildTool
 		/// </summary>
 		/// <returns>true if supports</returns>
 		protected override bool PlatformSupportsAutoSDKs()
+		{
+			return true;
+		}
+
+		// platforms can choose if they prefer a correct the the AutoSDK install over the manual install.
+		protected override bool PreferAutoSDK()
 		{
 			return false;
 		}

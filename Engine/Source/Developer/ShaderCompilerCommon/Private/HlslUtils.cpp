@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 /*=============================================================================
 	HlslUtils.cpp - Utils for HLSL.
@@ -1232,4 +1232,10 @@ bool RemoveUnusedInputs(FString& InOutSourceCode, const TArray<FString>& InInput
 
 	OutErrors = Data.Errors;
 	return false;
+}
+
+void StripInstancedStereo(FString& ShaderSource)
+{
+	ShaderSource.ReplaceInline(TEXT("ResolvedView = ResolveView();"), TEXT(""));
+	ShaderSource.ReplaceInline(TEXT("ResolvedView"), TEXT("View"));
 }

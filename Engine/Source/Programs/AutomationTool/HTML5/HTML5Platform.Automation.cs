@@ -1,4 +1,4 @@
-﻿// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+﻿// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 using System;
 using Ionic.Zip;
 using System.IO;
@@ -487,13 +487,6 @@ public class HTML5Platform : Platform
 	public override string GetCookExtraCommandLine(ProjectParams Params)
 	{
 		return HTMLPakAutomation.CanCreateMapPaks(Params) ? " -GenerateDependenciesForMaps " : ""; 
-	}
-
-	public override List<string> GetCookExtraMaps()
-	{
-		var Maps = new List<string>();
-		Maps.Add("/Engine/Maps/Entry");
-		return Maps; 
 	}
 
 	public override bool DeployPakInternalLowerCaseFilenames()

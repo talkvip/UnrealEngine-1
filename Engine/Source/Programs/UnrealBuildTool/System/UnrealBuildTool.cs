@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 using System;
 using System.Collections.Generic;
@@ -387,6 +387,11 @@ namespace UnrealBuildTool
 		/// <returns>true if valid, false if not</returns>
 		static public bool IsValidPlatform(UnrealTargetPlatform InPlatform)
 		{
+			if (UnrealBuildTool.CommandLineContains("-validateplatform"))
+			{
+				// We need all platforms to be registered when we run this command to check SDK status of each
+				return true;
+			}
 			return InstalledPlatformInfo.Current.IsValidPlatform(InPlatform, EProjectType.Code);
 		}
 

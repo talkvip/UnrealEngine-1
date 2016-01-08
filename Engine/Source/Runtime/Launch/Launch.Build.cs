@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 using UnrealBuildTool;
 using System.IO;
@@ -165,7 +165,7 @@ public class Launch : ModuleRules
 			Target.Platform == UnrealTargetPlatform.TVOS)
 		{
 			PrivateDependencyModuleNames.Add("OpenGLDrv");
-			DynamicallyLoadedModuleNames.Add("IOSAudio");
+			PrivateDependencyModuleNames.Add("IOSAudio");
 			DynamicallyLoadedModuleNames.Add("IOSRuntimeSettings");
 			PublicFrameworks.Add("OpenGLES");
 			// this is weak for IOS8 support for CAMetalLayer that is in QuartzCore

@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 
 #include "LevelEditor.h"
@@ -289,7 +289,7 @@ void FLevelEditorContextMenu::FillMenu( FMenuBuilder& MenuBuilder, TWeakPtr<SLev
 							MenuBuilder.AddMenuEntry(
 								Actions.EjectActorPilot,
 								NAME_None,
-								FText::Format(LOCTEXT("PilotActor", "Stop piloting '{0}'"), FText::FromString(SelectedActors[0]->GetActorLabel()))
+								FText::Format(LOCTEXT("PilotActor_Stop", "Stop piloting '{0}'"), FText::FromString(SelectedActors[0]->GetActorLabel()))
 								);
 						}
 						else

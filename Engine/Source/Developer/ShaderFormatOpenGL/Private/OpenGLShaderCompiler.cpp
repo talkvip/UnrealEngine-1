@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 // 
 
 #include "ShaderFormatOpenGL.h"
@@ -1262,6 +1262,9 @@ void CompileShader_Windows_OGL(const FShaderCompilerInput& Input,FShaderCompiler
 	}
 	if (PreprocessShader(PreprocessedShader, Output, Input, AdditionalDefines))
 	{
+		// Disable instanced stereo until supported for glsl
+		StripInstancedStereo(PreprocessedShader);
+
 		char* GlslShaderSource = NULL;
 		char* ErrorLog = NULL;
 

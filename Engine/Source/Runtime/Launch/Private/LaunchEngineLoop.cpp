@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 #include "LaunchPrivatePCH.h"
 #include "Internationalization/Internationalization.h"
@@ -2045,6 +2045,9 @@ bool FEngineLoop::LoadStartupCoreModules()
 		FModuleManager::Get().LoadModule(TEXT("IntroTutorials"));
 		FModuleManager::Get().LoadModule(TEXT("Blutility"));
 	}
+
+	// Needed for extra Blueprint nodes that can be used in standalone.
+	FModuleManager::Get().LoadModule(TEXT("GameplayTagsEditor"));
 
 #endif //(WITH_EDITOR && !(UE_BUILD_SHIPPING || UE_BUILD_TEST))
 

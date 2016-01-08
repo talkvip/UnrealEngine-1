@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 #include "CoreUObjectPrivate.h"
 #include "SecureHash.h"
 #include "DebuggingDefines.h"
@@ -3597,6 +3597,10 @@ UObject* FLinkerLoad::CreateExport( int32 Index )
 #endif // USE_DEFERRED_DEPENDENCY_CHECK_VERIFICATION_TESTS
 					return Export.Object;
 				}				
+			}
+			else if (Cast<ULinkerPlaceholderExportObject>(Export.Object))
+			{
+				return Export.Object;
 			}
 #else  // USE_CIRCULAR_DEPENDENCY_LOAD_DEFERRING
 			Preload(LoadClass);

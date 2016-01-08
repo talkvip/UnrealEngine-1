@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 #pragma once
 
@@ -57,8 +57,8 @@ public:
 	/**
 	 * IForceFeedbackSystem implementation
 	 */
-	virtual void SetForceFeedbackChannelValue(int32 ControllerId, FForceFeedbackChannelType ChannelType, float Value) override {}
-	virtual void SetForceFeedbackChannelValues(int32 ControllerId, const FForceFeedbackValues &values) override {}
+	virtual void SetForceFeedbackChannelValue(int32 ControllerId, FForceFeedbackChannelType ChannelType, float Value) override;
+	virtual void SetForceFeedbackChannelValues(int32 ControllerId, const FForceFeedbackValues &values) override;
 	virtual void SetLightColor(int32 ControllerId, FColor Color) override {}
 
 	bool IsControllerAssignedToGamepad(int32 ControllerId);

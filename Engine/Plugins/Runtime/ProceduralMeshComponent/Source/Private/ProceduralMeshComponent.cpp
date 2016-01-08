@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved. 
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved. 
 
 #include "ProceduralMeshComponentPluginPrivatePCH.h"
 #include "ProceduralMeshComponent.h"
@@ -517,9 +517,9 @@ void UProceduralMeshComponent::UpdateMeshSection(int32 SectionIndex, const TArra
 				// If section has collision, copy it
 				if (CollisionSection.bEnableCollision)
 				{
-					for (int32 VertIdx = 0; VertIdx < Section.ProcVertexBuffer.Num(); VertIdx++)
+					for (int32 VertIdx = 0; VertIdx < CollisionSection.ProcVertexBuffer.Num(); VertIdx++)
 					{
-						CollisionPositions.Add(Section.ProcVertexBuffer[VertIdx].Position);
+						CollisionPositions.Add(CollisionSection.ProcVertexBuffer[VertIdx].Position);
 					}
 				}
 			}

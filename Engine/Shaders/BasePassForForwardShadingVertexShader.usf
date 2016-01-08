@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 /*=============================================================================
 	BasePassForForwardShadingVertexShader.usf: Base pass vertex shader used with forward shading
@@ -31,11 +31,7 @@ void Main(
 	out FForwardShadingBasePassVSOutput Output
 	)
 {
-
-// Instanced stereo not implemented
-#if INSTANCED_STEREO
 	ResolvedView = ResolveView();
-#endif
 
 #if PACK_INTERPOLANTS
 	float4 PackedInterps[NUM_VF_PACKED_INTERPOLANTS];

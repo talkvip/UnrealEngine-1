@@ -1,4 +1,4 @@
-// Copyright 1998-2015 Epic Games, Inc. All Rights Reserved.
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 #include "MainFramePrivatePCH.h"
 #include "CompilerResultsLog.h"
@@ -781,7 +781,7 @@ void FMainFrameModule::HandleLevelEditorModuleCompileFinished(const FString& Log
 			}
 			else if (CompilationResult == ECompilationResult::Canceled)
 			{
-				NotificationItem->SetText(NSLOCTEXT("MainFrame", "RecompileFailed", "Compile Canceled!"));
+				NotificationItem->SetText(NSLOCTEXT("MainFrame", "RecompileCanceled", "Compile Canceled!"));
 			}
 			else
 			{

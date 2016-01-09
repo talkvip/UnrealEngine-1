@@ -333,7 +333,7 @@ public:
 		const FMaterial& InMaterialResource,
 		bool bInDirectionalLight
 		):
-		FMeshDrawingPolicy(InVertexFactory,InMaterialRenderProxy,InMaterialResource,false,false)
+		FMeshDrawingPolicy(InVertexFactory,InMaterialRenderProxy,InMaterialResource)
 	{
 		const bool bUsePerspectiveCorrectShadowDepths = !bInDirectionalLight;
 
@@ -930,13 +930,27 @@ public:
 		{
 			SetShaderValue(RHICmdList, ShaderRHI, DepthBiasParameters, FVector2D(ShadowMap->GetShaderDepthBias(), 1.0f / (ShadowMap->MaxSubjectZ - ShadowMap->MinSubjectZ)));
 
+			FTexture2DRHIParamRef ShadowDepthTextureResource = nullptr;
+			if (InjectionType == LightType_Point)
+			{
+				if (GBlackTexture && GBlackTexture->TextureRHI)
+				{
+					ShadowDepthTextureResource = GBlackTexture->TextureRHI->GetTexture2D();
+				}
+			}
+			else
+			{
+				ShadowDepthTextureResource = FSceneRenderTargets::Get(RHICmdList).GetShadowDepthZTexture().GetReference();
+			}
+
+			
 			SetTextureParameter(
 				RHICmdList, 
 				ShaderRHI,
 				ShadowDepthTexture,
 				ShadowDepthTextureSampler,
 				TStaticSamplerState<SF_Point,AM_Clamp,AM_Clamp,AM_Clamp>::GetRHI(),
-				FSceneRenderTargets::Get(RHICmdList).GetShadowDepthZTexture()
+				ShadowDepthTextureResource
 				);
 		}
 

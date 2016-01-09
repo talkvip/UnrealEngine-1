@@ -434,9 +434,23 @@ ENGINE_API void InitializeRenderingCVarsCaching()
 	ScalabilityCVarsSinkCallback();
 }
 
-void ShutdownRenderingCVarsCaching()
+static void ShutdownRenderingCVarsCaching()
 {
 	IConsoleManager::Get().UnregisterConsoleVariableSink_Handle(GRefreshEngineSettingsSinkHandle);
+}
+
+static bool HandleDumpShaderPipelineStatsCommand(const TCHAR* Cmd, FOutputDevice& Ar)
+{
+	FString FlagStr(FParse::Token(Cmd, 0));
+	EShaderPlatform Platform = GMaxRHIShaderPlatform;
+	if (FlagStr.Len() > 0)
+	{
+		Platform = ShaderFormatToLegacyShaderPlatform(FName(*FlagStr));
+	}
+	Ar.Logf(TEXT("Dumping shader pipeline stats for platform %s"), *LegacyShaderPlatformToShaderFormat(Platform).ToString());
+
+	DumpShaderPipelineStats(Platform);
+	return true;
 }
 
 namespace
@@ -922,6 +936,7 @@ void UEngine::Init(IEngineLoop* InEngineLoop)
 	// games can override these to provide proper behavior in each error case
 	OnTravelFailure().AddUObject(this, &UEngine::HandleTravelFailure);
 	OnNetworkFailure().AddUObject(this, &UEngine::HandleNetworkFailure);
+	OnNetworkLagStateChanged().AddUObject(this, &UEngine::HandleNetworkLagStateChanged);
 
 	UE_LOG(LogInit, Log, TEXT("Texture streaming: %s"), IStreamingManager::Get().IsTextureStreamingEnabled() ? TEXT("Enabled") : TEXT("Disabled") );
 
@@ -1501,7 +1516,7 @@ void UEngine::InitializeObjectReferences()
 	}
 
 	// set the font object pointers, unless on server
-	if (!UE_SERVER)
+	if (!IsRunningDedicatedServer())
 	{
 		if (TinyFont == NULL && TinyFontName.ToString().Len())
 		{
@@ -2526,6 +2541,10 @@ bool UEngine::Exec( UWorld* InWorld, const TCHAR* Cmd, FOutputDevice& Ar )
 	else if( FParse::Command(&Cmd,TEXT("DUMPMATERIALSTATS")) )
 	{
 		return HandleDumpMaterialStatsCommand( Cmd, Ar );	
+	}
+	else if (FParse::Command(&Cmd, TEXT("DumpShaderPipelineStats")))
+	{
+		return HandleDumpShaderPipelineStatsCommand(Cmd, Ar);
 	}
 	else if( FParse::Command(&Cmd,TEXT("PROFILEGPU")) )
 	{
@@ -8431,6 +8450,11 @@ void UEngine::HandleNetworkFailure(UWorld *World, UNetDriver *NetDriver, ENetwor
 			CallHandleDisconnectForFailure(World, NetDriver);
 		}
 	}
+}
+
+void UEngine::HandleNetworkLagStateChanged(UWorld* World, UNetDriver* NetDriver, ENetworkLagState::Type LagType)
+{
+	// Stub. Implement in subclasses
 }
 
 void UEngine::HandleNetworkFailure_NotifyGameInstance(UWorld *World, UNetDriver *NetDriver, ENetworkFailure::Type FailureType)

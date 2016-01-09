@@ -532,6 +532,34 @@ namespace ENetworkFailure
 	}
 }
 
+UENUM()
+namespace ENetworkLagState
+{
+	enum Type
+	{
+		/** The net driver is operating normally or it is not possible to tell if it is lagging */
+		NotLagging,
+		/** The net driver is in the process of timing out all of the client connections */
+		Lagging
+	};
+}
+
+
+namespace ENetworkLagState
+{
+	inline const TCHAR* ToString(ENetworkLagState::Type LagType)
+	{
+		switch (LagType)
+		{
+			case NotLagging:
+				return TEXT("NotLagging");
+			case Lagging:
+				return TEXT("Lagging");
+		}
+		return TEXT("Unknown lag type occurred.");
+	}
+}
+
 /** Types of server travel failures broadcast by the engine */
 UENUM(BlueprintType)
 namespace ETravelFailure
@@ -845,6 +873,10 @@ enum EViewModeIndex
 	VMI_LODColoration = 18,
 	/** Colored according to the quad coverage. */
 	VMI_QuadComplexity = 19,
+	/** Colored according to the accuracy of the texture streamer wanted mips computation. */
+	VMI_WantedMipsAccuracy = 20,
+	/** Colored according to the texel factor accuracy. */
+	VMI_TexelFactorAccuracy = 21,
 
 	VMI_Max UMETA(Hidden),
 

@@ -2310,8 +2310,6 @@ void FEngineLoop::Exit()
 	}
 #endif
 
-	DerivedDataCachePrint();
-
 	// Unload all modules.  Note that this doesn't actually unload the module DLLs (that happens at
 	// process exit by the OS), but it does call ShutdownModule() on all loaded modules in the reverse
 	// order they were loaded in, so that systems can unregister and perform general clean up.
@@ -2546,7 +2544,7 @@ void FEngineLoop::Tick()
 		{
 			GRHICommandList.LatchBypass();
 			GFrameNumberRenderThread++;
-			RHICmdList.PushEvent(*FString::Printf(TEXT("Frame%d"),GFrameNumberRenderThread));
+			RHICmdList.PushEvent(*FString::Printf(TEXT("Frame%d"),GFrameNumberRenderThread), FColor(0, 255, 0, 255));
 			RHICmdList.BeginFrame();
 		});
 

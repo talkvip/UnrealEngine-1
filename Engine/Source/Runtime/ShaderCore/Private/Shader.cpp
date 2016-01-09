@@ -1469,6 +1469,45 @@ void DumpShaderStats(EShaderPlatform Platform, EShaderFrequency Frequency)
 #endif
 }
 
+void DumpShaderPipelineStats(EShaderPlatform Platform)
+{
+#if ALLOW_DEBUG_FILES
+	FDiagnosticTableViewer ShaderTypeViewer(*FDiagnosticTableViewer::GetUniqueTemporaryFilePath(TEXT("ShaderPipelineStats")));
+
+	int32 TotalNumPipelines = 0;
+	int32 TotalSize = 0;
+	float TotalSizePerType = 0;
+
+	// Write a row of headings for the table's columns.
+	ShaderTypeViewer.AddColumn(TEXT("Type"));
+	ShaderTypeViewer.AddColumn(TEXT("Shared/Unique"));
+
+	// Exclude compute
+	for (int32 Index = 0; Index < SF_NumFrequencies - 1; ++Index)
+	{
+		ShaderTypeViewer.AddColumn(GetShaderFrequencyString((EShaderFrequency)Index));
+	}
+	ShaderTypeViewer.CycleRow();
+
+	int32 TotalTypeCount = 0;
+	for (TLinkedList<FShaderPipelineType*>::TIterator It(FShaderPipelineType::GetTypeList()); It; It.Next())
+	{
+		const FShaderPipelineType* Type = *It;
+
+		// Write a row for the shader type.
+		ShaderTypeViewer.AddColumn(Type->GetName());
+		ShaderTypeViewer.AddColumn(Type->ShouldOptimizeUnusedOutputs() ? TEXT("U") : TEXT("S"));
+
+		for (int32 Index = 0; Index < SF_NumFrequencies - 1; ++Index)
+		{
+			const FShaderType* ShaderType = Type->GetShader((EShaderFrequency)Index);
+			ShaderTypeViewer.AddColumn(ShaderType ? ShaderType->GetName() : TEXT(""));
+		}
+
+		ShaderTypeViewer.CycleRow();
+	}
+#endif
+}
 
 FShaderType* FindShaderTypeByName(FName ShaderTypeName)
 {
@@ -1609,6 +1648,11 @@ void ShaderMapAppendKeyString(EShaderPlatform Platform, FString& KeyString)
 	{
 		static const auto CVar = IConsoleManager::Get().FindConsoleVariable(TEXT("r.Shaders.Optimize"));
 		KeyString += (CVar && CVar->GetInt() != 0) ? TEXT("") : TEXT("_NoOpt");
+	}
+	
+	{
+		static const auto CVar = IConsoleManager::Get().FindConsoleVariable(TEXT("r.Shaders.AvoidFlowControl"));
+		KeyString += (CVar && CVar->GetInt() != 0) ? TEXT("_Unroll") : TEXT("_Flow");
 	}
 
 	if (Platform == SP_PS4)

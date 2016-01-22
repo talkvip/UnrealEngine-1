@@ -305,6 +305,8 @@ public:
 
 		void ReleaseBoneData()
 		{
+			ensure(IsInRenderingThread());
+
 			UniformBuffer.SafeRelease();
 
 			for(uint32 i = 0; i < 2; ++i)
@@ -769,6 +771,7 @@ public:
 		}
 	};
 
+	virtual ~FGPUBaseSkinAPEXClothVertexFactory() {}
 
 	/** accessor */
 	FORCEINLINE ClothShaderType& GetClothShaderData()

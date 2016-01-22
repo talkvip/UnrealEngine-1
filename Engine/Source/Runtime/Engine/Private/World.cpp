@@ -4757,7 +4757,18 @@ void FSeamlessTravelHandler::StartLoadingDestination()
 
 void FSeamlessTravelHandler::CopyWorldData()
 {
-	CurrentWorld->DestroyDemoNetDriver();
+	// If we are doing seamless travel for replay playback, then make sure to transfer the replay driver over to the new world
+	if ( CurrentWorld->DemoNetDriver && CurrentWorld->DemoNetDriver->IsPlaying() )
+	{
+		UDemoNetDriver* OldDriver = CurrentWorld->DemoNetDriver;
+		CurrentWorld->DemoNetDriver = nullptr;
+		OldDriver->SetWorld( LoadedWorld );
+		LoadedWorld->DemoNetDriver = OldDriver;
+	}
+	else
+	{
+		CurrentWorld->DestroyDemoNetDriver();
+	}
 
 	UNetDriver* const NetDriver = CurrentWorld->GetNetDriver();
 	LoadedWorld->SetNetDriver(NetDriver);
@@ -5345,27 +5356,37 @@ FString UWorld::GetAddressURL() const
 
 FString UWorld::RemovePIEPrefix(const FString &Source)
 {
-	// PIE prefix is: UEDPIE_X_MapName (where X is 0-9)
+	// PIE prefix is: UEDPIE_X_MapName (where X is some decimal number)
 	const FString LookFor = PLAYWORLD_PACKAGE_PREFIX;
-	FString FixedName;
 
 	int32 idx = Source.Find(LookFor);
 	if (idx >= 0)
 	{
-		FixedName = Source.Left( idx );
-
-		FString Blah = Source.Right( idx );
-		FString Blah2 = Source.Right( Source.Len() - idx );
-		FString RightS = Source.Right( Source.Len() - (idx + LookFor.Len() + 3) );
-		
-		FixedName += RightS;
+		int32 end = idx + LookFor.Len();
+		if ((end >= Source.Len()) || (Source[end] != '_'))
+		{
+			UE_LOG(LogWorld, Warning, TEXT("Looks like World path invalid PIE prefix (expected '_' characeter after PIE prefix): %s"), *Source);
+			return Source;
+		}
+		for (++end; (end < Source.Len()) && (Source[end] != '_'); ++end)
+		{
+			if ((Source[end] < '0') || (Source[end] > '9'))
+			{
+				UE_LOG(LogWorld, Warning, TEXT("Looks like World have invalid PIE prefix (PIE instance not number): %s"), *Source);
+				return Source;
+			}
+		}
+		if (end >= Source.Len())
+		{
+			UE_LOG(LogWorld, Warning, TEXT("Looks like World path invalid PIE prefix (can't find end of PIE prefix): %s"), *Source);
+			return Source;
+		}
+		const FString Prefix = Source.Left(idx);
+		const FString Suffix = Source.Right(Source.Len() - end - 1);
+		return Prefix + Suffix;
 	}
-	else
-	{
-		FixedName = Source;
-	}
 
-	return FixedName;
+	return Source;
 }
 
 UWorld* UWorld::FindWorldInPackage(UPackage* Package)

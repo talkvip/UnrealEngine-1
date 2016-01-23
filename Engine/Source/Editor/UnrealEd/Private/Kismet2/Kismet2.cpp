@@ -1221,6 +1221,7 @@ void FKismetEditorUtilities::AddComponentsToBlueprint(UBlueprint* Blueprint, con
 			if (AsSceneComponent != nullptr)
 			{
 				NewSceneComponents.Add(AsSceneComponent, NewSCSNode);
+				Cast<USceneComponent>(NewSCSNode->ComponentTemplate)->SetMobility(EComponentMobility::Movable);
 			}
 			return NewSCSNode;
 		}
@@ -1242,6 +1243,11 @@ void FKismetEditorUtilities::AddComponentsToBlueprint(UBlueprint* Blueprint, con
 				check(Actor);
 			}
 
+			if (!ActorComponent->GetClass()->HasMetaData(FBlueprintMetadata::MD_BlueprintSpawnableComponent))
+			{
+				continue;
+			}
+
 			USCS_Node* SCSNode = FAddComponentsToBlueprintImpl::MakeComponentCopy(ActorComponent, SCS, InstanceComponentToNodeMap);
 
 			USceneComponent* SceneComponent = Cast<USceneComponent>(ActorComponent);
@@ -1261,6 +1267,20 @@ void FKismetEditorUtilities::AddComponentsToBlueprint(UBlueprint* Blueprint, con
 					else
 					{
 						SCS->AddNode(SCSNode);
+					}
+				}
+				// If we're not attached to a blueprint component, add ourself to the root node or the SCS root component:
+				else if (SceneComponent->AttachParent == nullptr)
+				{
+					if (OptionalNewRootNode != nullptr)
+					{
+						OptionalNewRootNode->AddChildNode(SCSNode);
+					}
+					else
+					{
+						// Continuation of convention from FCreateConstructionScriptFromSelectedActors::Execute, perhaps more elegant
+						// to provide OptionalNewRootNode in both cases.
+						SCS->GetRootNodes()[0]->AddChildNode(SCSNode);
 					}
 				}
 				// If we're attached to a blueprint component look it up as the variable name is the component name

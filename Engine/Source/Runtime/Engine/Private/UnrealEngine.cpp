@@ -9406,6 +9406,8 @@ bool UEngine::LoadMap( FWorldContext& WorldContext, FURL URL, class UPendingNetG
 		const FName URLMapFName = FName(*URL.Map);
 		UWorld::WorldTypePreLoadMap.FindOrAdd( URLMapFName ) = WorldContext.WorldType;
 
+		const bool bPackageAlreadyLoaded = (WorldPackage != nullptr);
+
 		// See if the level is already in memory
 		WorldPackage = FindPackage(nullptr, *URL.Map);
 
@@ -9450,7 +9452,7 @@ bool UEngine::LoadMap( FWorldContext& WorldContext, FURL URL, class UPendingNetG
 		{
 			// If we are a PIE world and the world we just found is already initialized, then we're probably reloading the editor world and we
 			// need to create a PIE world by duplication instead
-			if (NewWorld->bIsWorldInitialized)
+			if (bPackageAlreadyLoaded)
 			{
 				NewWorld = CreatePIEWorldByDuplication(WorldContext, NewWorld, URL.Map);
 				// CreatePIEWorldByDuplication clears GIsPlayInEditorWorld so set it again

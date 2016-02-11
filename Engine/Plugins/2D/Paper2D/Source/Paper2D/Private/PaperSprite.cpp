@@ -1397,7 +1397,7 @@ void UPaperSprite::RebuildData()
 	RebuildRenderData();
 }
 
-void UPaperSprite::InitializeSprite(const FSpriteAssetInitParameters& InitParams, bool bRebuildData /*= true*/))
+void UPaperSprite::InitializeSprite(const FSpriteAssetInitParameters& InitParams, bool bRebuildData /*= true*/)
 {
 	if (InitParams.bOverridePixelsPerUnrealUnit)
 	{

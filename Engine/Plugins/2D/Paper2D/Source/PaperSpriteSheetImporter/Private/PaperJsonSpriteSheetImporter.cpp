@@ -612,10 +612,10 @@ bool FPaperJsonSpriteSheetImporter::PerformImport(const FString& LongPackagePath
 
 		GetDefault<UPaperImporterSettings>()->ApplySettingsForSpriteInit(/*inout*/ SpriteInitParams, (NormalMapTexture != nullptr) ? ESpriteInitMaterialLightingMode::ForceLit : ESpriteInitMaterialLightingMode::Automatic);
 
-		TargetSprite->InitializeSprite(SpriteInitParams, false);
+		TargetSprite->InitializeSprite(SpriteInitParams);
 
-		TargetSprite->SetRotated(Frame.bRotated, false);
-		TargetSprite->SetTrim(Frame.bTrimmed, Frame.SpriteSourcePos, Frame.ImageSourceSize, false);
+		TargetSprite->SetRotated(Frame.bRotated);
+		TargetSprite->SetTrim(Frame.bTrimmed, Frame.SpriteSourcePos, Frame.ImageSourceSize);
 
 		// Set up pivot on object based on Texture Packer json
 		ESpritePivotMode::Type PivotType = GetBestPivotType(Frame.Pivot);
@@ -625,9 +625,7 @@ bool FPaperJsonSpriteSheetImporter::PerformImport(const FString& LongPackagePath
 			TextureSpacePivotPoint.X = Frame.SpritePosInSheet.X - Frame.SpriteSourcePos.X + Frame.ImageSourceSize.X * Frame.Pivot.X;
 			TextureSpacePivotPoint.Y = Frame.SpritePosInSheet.Y - Frame.SpriteSourcePos.Y + Frame.ImageSourceSize.Y * Frame.Pivot.Y;
 		}
-		TargetSprite->SetPivotMode(PivotType, TextureSpacePivotPoint, false);
-
-		TargetSprite->RebuildData();
+		TargetSprite->SetPivotMode(PivotType, TextureSpacePivotPoint);
 
 		// Create the entry in the animation
 		SpriteSheet->SpriteNames.Add(Frame.FrameName.ToString());

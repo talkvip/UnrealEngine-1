@@ -1391,13 +1391,7 @@ void UPaperSprite::ExtractRectsFromTexture(UTexture2D* Texture, TArray<FIntRect>
 	SpriteTextureBitmap.ExtractRects(/*out*/ OutRects);
 }
 
-void UPaperSprite::RebuildData()
-{
-	RebuildCollisionData();
-	RebuildRenderData();
-}
-
-void UPaperSprite::InitializeSprite(const FSpriteAssetInitParameters& InitParams, bool bRebuildData /*= true*/)
+void UPaperSprite::InitializeSprite(const FSpriteAssetInitParameters& InitParams)
 {
 	if (InitParams.bOverridePixelsPerUnrealUnit)
 	{
@@ -1428,40 +1422,35 @@ void UPaperSprite::InitializeSprite(const FSpriteAssetInitParameters& InitParams
 	SourceUV = InitParams.Offset;
 	SourceDimension = InitParams.Dimension;
 
-	if (bRebuildData)
-	{
-		RebuildData();
-	}
+	RebuildCollisionData();
+	RebuildRenderData();
 }
 
-void UPaperSprite::SetTrim(bool bTrimmed, const FVector2D& OriginInSourceImage, const FVector2D& SourceImageDimension, bool bRebuildData /*= true*/)
+void UPaperSprite::SetTrim(bool bTrimmed, const FVector2D& OriginInSourceImage, const FVector2D& SourceImageDimension)
 {
 	this->bTrimmedInSourceImage = bTrimmed;
 	this->OriginInSourceImageBeforeTrimming = OriginInSourceImage;
 	this->SourceImageDimensionBeforeTrimming = SourceImageDimension;
-	if (bRebuildData)
-	{
-		RebuildData();
-	}
+
+	RebuildCollisionData();
+	RebuildRenderData();
 }
 
-void UPaperSprite::SetRotated(bool bRotated, bool bRebuildData /*= true*/)
+void UPaperSprite::SetRotated(bool bRotated)
 {
 	this->bRotatedInSourceImage = bRotated;
-	if (bRebuildData)
-	{
-		RebuildData();
-	}
+
+	RebuildCollisionData();
+	RebuildRenderData();
 }
 
-void UPaperSprite::SetPivotMode(ESpritePivotMode::Type InPivotMode, FVector2D InCustomTextureSpacePivot, bool bRebuildData /*= true*/)
+void UPaperSprite::SetPivotMode(ESpritePivotMode::Type InPivotMode, FVector2D InCustomTextureSpacePivot)
 {
 	PivotMode = InPivotMode;
 	CustomPivotPoint = InCustomTextureSpacePivot;
-	if (bRebuildData)
-	{
-		RebuildData();
-	}
+
+	RebuildCollisionData();
+	RebuildRenderData();
 }
 
 FVector2D UPaperSprite::ConvertTextureSpaceToPivotSpace(FVector2D Input) const

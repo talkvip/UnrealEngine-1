@@ -252,25 +252,25 @@ bool UInternationalizationExportCommandlet::DoExport( const FString& SourcePath,
 						{
 							{
 								const TSharedPtr<FArchiveEntry> ArchiveEntry = InternationalizationArchive->FindEntryBySource( Namespace, Source, ContextIter->KeyMetadataObj );
-							if( ArchiveEntry.IsValid() )
-							{
-								const FString ConditionedArchiveSource = ConditionArchiveStrForPo(ArchiveEntry->Source.Text);
-								const FString ConditionedArchiveTranslation = ConditionArchiveStrForPo(ArchiveEntry->Translation.Text);
+								if( ArchiveEntry.IsValid() )
+								{
+									const FString ConditionedArchiveSource = ConditionArchiveStrForPo(ArchiveEntry->Source.Text);
+									const FString ConditionedArchiveTranslation = ConditionArchiveStrForPo(ArchiveEntry->Translation.Text);
 
-								TSharedRef<FPortableObjectEntry> PoEntry = MakeShareable( new FPortableObjectEntry );
-								//@TODO: We support additional metadata entries that can be translated.  How do those fit in the PO file format?  Ex: isMature
-								PoEntry->MsgId = ConditionedArchiveSource;
-								//@TODO: Take into account optional entries and entries that differ by keymetadata.  Ex. Each optional entry needs a unique msgCtxt
-								PoEntry->MsgCtxt = Namespace;
-								PoEntry->MsgStr.Add( ConditionedArchiveTranslation );
+									TSharedRef<FPortableObjectEntry> PoEntry = MakeShareable( new FPortableObjectEntry );
+									//@TODO: We support additional metadata entries that can be translated.  How do those fit in the PO file format?  Ex: isMature
+									PoEntry->MsgId = ConditionedArchiveSource;
+									//@TODO: Take into account optional entries and entries that differ by keymetadata.  Ex. Each optional entry needs a unique msgCtxt
+									PoEntry->MsgCtxt = Namespace;
+									PoEntry->MsgStr.Add( ConditionedArchiveTranslation );
 
-								FString PORefString = ConvertSrcLocationToPORef( ContextIter->SourceLocation );
-								PoEntry->AddReference( PORefString ); // Source location.
-								PoEntry->AddExtractedComment( ContextIter->Key ); // "Notes from Programmer" in the form of the Key.
-								PoEntry->AddExtractedComment( PORefString ); // "Notes from Programmer" in the form of the Source Location, since this comes in handy too and OneSky doesn't properly show references, only comments.
-								PortableObj.AddEntry( PoEntry );
+									FString PORefString = ConvertSrcLocationToPORef( ContextIter->SourceLocation );
+									PoEntry->AddReference( PORefString ); // Source location.
+									PoEntry->AddExtractedComment( ContextIter->Key ); // "Notes from Programmer" in the form of the Key.
+									PoEntry->AddExtractedComment( PORefString ); // "Notes from Programmer" in the form of the Source Location, since this comes in handy too and OneSky doesn't properly show references, only comments.
+									PortableObj.AddEntry( PoEntry );
+								}
 							}
-						}
 
 							if (CultureName != NativeCultureName)
 							{
@@ -290,26 +290,28 @@ bool UInternationalizationExportCommandlet::DoExport( const FString& SourcePath,
 									if (!NativeArchiveEntry->Source.IsExactMatch(NativeArchiveEntry->Translation))
 									{
 										const TSharedPtr<FArchiveEntry> ArchiveEntry = InternationalizationArchive->FindEntryBySource( Namespace, NativeArchiveEntry->Translation, NativeArchiveEntry->KeyMetadataObj );
+										if( ArchiveEntry.IsValid() )
+										{
+											const FString ConditionedArchiveSource = ConditionArchiveStrForPo(ArchiveEntry->Source.Text);
+											const FString ConditionedArchiveTranslation = ConditionArchiveStrForPo(ArchiveEntry->Translation.Text);
 
-										const FString ConditionedArchiveSource = ConditionArchiveStrForPo(ArchiveEntry->Source.Text);
-										const FString ConditionedArchiveTranslation = ConditionArchiveStrForPo(ArchiveEntry->Translation.Text);
+											TSharedRef<FPortableObjectEntry> PoEntry = MakeShareable( new FPortableObjectEntry );
+											//@TODO: We support additional metadata entries that can be translated.  How do those fit in the PO file format?  Ex: isMature
+											PoEntry->MsgId = ConditionedArchiveSource;
+											//@TODO: Take into account optional entries and entries that differ by keymetadata.  Ex. Each optional entry needs a unique msgCtxt
+											PoEntry->MsgCtxt = Namespace;
+											PoEntry->MsgStr.Add( ConditionedArchiveTranslation );
 
-										TSharedRef<FPortableObjectEntry> PoEntry = MakeShareable( new FPortableObjectEntry );
-										//@TODO: We support additional metadata entries that can be translated.  How do those fit in the PO file format?  Ex: isMature
-										PoEntry->MsgId = ConditionedArchiveSource;
-										//@TODO: Take into account optional entries and entries that differ by keymetadata.  Ex. Each optional entry needs a unique msgCtxt
-										PoEntry->MsgCtxt = Namespace;
-										PoEntry->MsgStr.Add( ConditionedArchiveTranslation );
-
-										FString PORefString = ConvertSrcLocationToPORef( ContextIter->SourceLocation );
-										PoEntry->AddReference( PORefString ); // Source location.
-										PoEntry->AddExtractedComment( ContextIter->Key ); // "Notes from Programmer" in the form of the Key.
-										PoEntry->AddExtractedComment( PORefString ); // "Notes from Programmer" in the form of the Source Location, since this comes in handy too and OneSky doesn't properly show references, only comments.
-										PortableObj.AddEntry( PoEntry );
+											FString PORefString = ConvertSrcLocationToPORef( ContextIter->SourceLocation );
+											PoEntry->AddReference( PORefString ); // Source location.
+											PoEntry->AddExtractedComment( ContextIter->Key ); // "Notes from Programmer" in the form of the Key.
+											PoEntry->AddExtractedComment( PORefString ); // "Notes from Programmer" in the form of the Source Location, since this comes in handy too and OneSky doesn't properly show references, only comments.
+											PortableObj.AddEntry( PoEntry );
+										}
 									}
 								}
-					}
-				}
+							}
+						}
 					}
 				}
 

@@ -233,7 +233,7 @@ namespace AutomationTool
 				// find if there are any plugins enabled or disabled which differ from the default
 				foreach(PluginInfo Plugin in AvailablePlugins)
 				{
-					bool bPluginEnabledForProject = UProjectInfo.IsPluginEnabledForProject(Plugin, Project, TargetPlatformType);
+					bool bPluginEnabledForProject = UProjectInfo.IsPluginEnabledForProject(Plugin, Project, TargetPlatformType, TargetRules.TargetType.Game);
 					if ((bPluginEnabledForProject && !Plugin.Descriptor.bEnabledByDefault) || (bPluginEnabledForProject && Plugin.Descriptor.bInstalled))
 					{
 						if(Plugin.Descriptor.Modules.Any(Module => Module.IsCompiledInConfiguration(TargetPlatformType, TargetRules.TargetType.Game, bBuildDeveloperTools: false, bBuildEditor: false)))
@@ -611,7 +611,7 @@ namespace AutomationTool
     public class BranchInfo
     {
 
-        public static TargetRules.TargetType[] MonolithicKinds = new TargetRules.TargetType[]
+        public static List<TargetRules.TargetType> MonolithicKinds = new List<TargetRules.TargetType>
         {
             TargetRules.TargetType.Game,
             TargetRules.TargetType.Client,
@@ -691,7 +691,7 @@ namespace AutomationTool
 						CommandUtils.LogVerbose("              bUsesSteam  : " + (ThisTarget.Value.Rules.bUsesSteam ? "YES" : "NO"));
 						CommandUtils.LogVerbose("              bUsesCEF3   : " + (ThisTarget.Value.Rules.bUsesCEF3 ? "YES" : "NO"));
 						CommandUtils.LogVerbose("              bUsesSlate  : " + (ThisTarget.Value.Rules.bUsesSlate ? "YES" : "NO"));
-                        if (Array.IndexOf(MonolithicKinds, ThisTarget.Key) >= 0)
+                        if (MonolithicKinds.Contains(ThisTarget.Key))
                         {
                             var Platforms = ThisTarget.Value.Rules.GUBP_GetPlatforms_MonolithicOnly(HostPlatform);
                             var AdditionalPlatforms = ThisTarget.Value.Rules.GUBP_GetBuildOnlyPlatforms_MonolithicOnly(HostPlatform);

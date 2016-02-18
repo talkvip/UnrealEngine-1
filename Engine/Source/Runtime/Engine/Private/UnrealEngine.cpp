@@ -9406,10 +9406,10 @@ bool UEngine::LoadMap( FWorldContext& WorldContext, FURL URL, class UPendingNetG
 		const FName URLMapFName = FName(*URL.Map);
 		UWorld::WorldTypePreLoadMap.FindOrAdd( URLMapFName ) = WorldContext.WorldType;
 
-		const bool bPackageAlreadyLoaded = (WorldPackage != nullptr);
-
 		// See if the level is already in memory
 		WorldPackage = FindPackage(nullptr, *URL.Map);
+
+		const bool bPackageAlreadyLoaded = (WorldPackage != nullptr);
 
 		// If the level isn't already in memory, load level from disk
 		if (WorldPackage == NULL)

@@ -604,7 +604,10 @@ void USkeletalMeshComponent::TickAnimation(float DeltaTime, bool bNeedsValidRoot
 
 void USkeletalMeshComponent::UpdateMaterialParameters()
 {
-	AnimScriptInstance->UpdateComponentsMaterialParameters(this);
+	if(AnimScriptInstance != nullptr)
+	{
+		AnimScriptInstance->UpdateComponentsMaterialParameters(this);
+	}
 }
 
 bool USkeletalMeshComponent::UpdateLODStatus()
@@ -1393,7 +1396,7 @@ FBoxSphereBounds USkeletalMeshComponent::CalcBounds(const FTransform& LocalToWor
 		FBoxSphereBounds NewBounds = CalcMeshBound( RootBoneOffset, bHasValidBodies, LocalToWorld );
 
 #if WITH_APEX_CLOTHING
-		AddClothingBounds(NewBounds);
+		AddClothingBounds(NewBounds, LocalToWorld);
 #endif// #if WITH_APEX_CLOTHING
 
 		bCachedLocalBoundsUpToDate = true;

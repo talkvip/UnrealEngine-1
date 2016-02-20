@@ -2355,7 +2355,7 @@ MSVC_PRAGMA(warning(disable : 4717))
 // clang can optimize this out (http://stackoverflow.com/questions/18478078/clang-infinite-tail-recursion-optimization), make the function do some useful work
 
 volatile int GInfiniteRecursionCount = 0;
-static int InfiniteRecursionFunction(int B)
+int InfiniteRecursionFunction(int B)
 {
 	GInfiniteRecursionCount += InfiniteRecursionFunction(B + 1);
 	return GInfiniteRecursionCount;
@@ -4505,7 +4505,7 @@ bool UEngine::HandleMemCommand( const TCHAR* Cmd, FOutputDevice& Ar )
 static bool GDebugAllocMemEveryFrame = false;
 
 /** Helper function to cause a stack overflow crash */
-FORCENOINLINE static void StackOverflowFunction(int32* DummyArg)
+FORCENOINLINE void StackOverflowFunction(int32* DummyArg)
 {
 	int32 StackArray[8196];
 	FMemory::Memset(StackArray, 0, sizeof(StackArray));
@@ -4756,10 +4756,33 @@ bool UEngine::HandleDebugCommand( const TCHAR* Cmd, FOutputDevice& Ar )
 	}
 	else if( FParse::Command( &Cmd, TEXT("RECURSE") ) )
 	{
-		Ar.Logf( TEXT("Recursing") );
+		Ar.Logf( TEXT("Recursing to create a very deep callstack.") );
 		GLog->Flush();
 		InfiniteRecursionFunction(1);
 		Ar.Logf(TEXT("You will never see this log line."));
+		return true;
+	}
+	else if (FParse::Command(&Cmd, TEXT("THREADRECURSE")))
+	{
+		Ar.Log(TEXT("Recursing to create a very deep callstack (in a separate thread)."));
+		struct FThread
+		{
+			static void InfiniteRecursion(ENamedThreads::Type, const FGraphEventRef&)
+			{
+				InfiniteRecursionFunction(1);
+			}
+		};
+
+		DECLARE_CYCLE_STAT(TEXT("FThread::InfiniteRecursion"),
+		STAT_FThread__InfiniteRecursion,
+			STATGROUP_TaskGraphTasks);
+
+		FTaskGraphInterface::Get().WaitUntilTaskCompletes(
+			FDelegateGraphTask::CreateAndDispatchWhenReady(
+			FDelegateGraphTask::FDelegate::CreateStatic(FThread::InfiniteRecursion),
+			GET_STATID(STAT_FThread__InfiniteRecursion)),
+			ENamedThreads::GameThread
+			);
 		return true;
 	}
 	else if( FParse::Command( &Cmd, TEXT("EATMEM") ) )
@@ -4780,8 +4803,31 @@ bool UEngine::HandleDebugCommand( const TCHAR* Cmd, FOutputDevice& Ar )
 	}
 	else if (FParse::Command(&Cmd, TEXT("STACKOVERFLOW")))
 	{
-		Ar.Log(TEXT("Inifnite recursion to cause stack overflow"));
+		Ar.Log(TEXT("Infinite recursion to cause stack overflow"));
 		StackOverflowFunction(nullptr);
+		return true;
+	}
+	else if (FParse::Command(&Cmd, TEXT("THREADSTACKOVERFLOW")))
+	{
+		Ar.Log(TEXT("Infinite recursion to cause stack overflow will happen in a separate thread."));
+		struct FThread
+		{
+			static void StackOverflow(ENamedThreads::Type, const FGraphEventRef&)
+			{
+				StackOverflowFunction(nullptr);
+			}
+		};
+
+		DECLARE_CYCLE_STAT(TEXT("FThread::StackOverflow"),
+		STAT_FThread__StackOverflow,
+			STATGROUP_TaskGraphTasks);
+
+		FTaskGraphInterface::Get().WaitUntilTaskCompletes(
+			FDelegateGraphTask::CreateAndDispatchWhenReady(
+			FDelegateGraphTask::FDelegate::CreateStatic(FThread::StackOverflow),
+			GET_STATID(STAT_FThread__StackOverflow)),
+			ENamedThreads::GameThread
+			);
 		return true;
 	}
 
@@ -11013,29 +11059,19 @@ void UEngine::CopyPropertiesForUnrelatedObjects(UObject* OldObject, UObject* New
 	TArray<UObject*> ComponentsOnNewObject;
 	{
 		TArray<UObject*> EditInlineSubobjectsOfComponents;
-
-		// Find all instanced objects of the old CDO, and save off their modified properties to be later applied to the newly instanced objects of the new CDO
 		NewObject->CollectDefaultSubobjects(ComponentsOnNewObject,true);
 
-		// Serialize in the modified properties from the old CDO to the new CDO
-		if (SavedProperties.Num() > 0)
-		{
-			FObjectReader Reader(NewObject, SavedProperties, true, true);
-		}
-
+		// populate the ReferenceReplacementMap 
 		for (int32 Index = 0; Index < ComponentsOnNewObject.Num(); Index++)
 		{
 			UObject* NewInstance = ComponentsOnNewObject[Index];
 			if (int32* pOldInstanceIndex = OldInstanceMap.Find(NewInstance->GetFName()))
 			{
-				// Restore modified properties into the new instance
 				FInstancedObjectRecord& Record = SavedInstances[*pOldInstanceIndex];
 				ReferenceReplacementMap.Add(Record.OldInstance, NewInstance);
 				if (Params.bAggressiveDefaultSubobjectReplacement)
 				{
 					UClass* Class = OldObject->GetClass()->GetSuperClass();
-					//UClass* Class = OldObject->GetClass();
-					//while (Class)
 					if (Class)
 					{
 						UObject *CDOInst = Class->GetDefaultSubobjectByName(NewInstance->GetFName());
@@ -11054,15 +11090,8 @@ void UEngine::CopyPropertiesForUnrelatedObjects(UObject* OldObject, UObject* New
 							}
 #endif // WITH_EDITOR
 						}
-						else
-						{
-							//break;
-						}
-						//Class = Class->GetSuperClass();
 					}
 				}
-				FObjectReader Reader(NewInstance, Record.SavedProperties, true, true);
-				FFindInstancedReferenceSubobjectHelper::Duplicate(Record.OldInstance, NewInstance, ReferenceReplacementMap, EditInlineSubobjectsOfComponents);
 			}
 			else
 			{
@@ -11079,8 +11108,26 @@ void UEngine::CopyPropertiesForUnrelatedObjects(UObject* OldObject, UObject* New
 				if (!bContainedInsideNewInstance)
 				{
 					// A bad thing has happened and cannot be reasonably fixed at this point
-					UE_LOG(LogEngine, Log, TEXT("Warning: The CDO '%s' references a component that does not have the CDO in its outer chain!"), *NewObject->GetFullName(), *NewInstance->GetFullName()); 	
+					UE_LOG(LogEngine, Log, TEXT("Warning: The CDO '%s' references a component that does not have the CDO in its outer chain!"), *NewObject->GetFullName(), *NewInstance->GetFullName());
 				}
+			}
+		}
+
+		// Serialize in the modified properties from the old CDO to the new CDO
+		if (SavedProperties.Num() > 0)
+		{
+			FObjectReader Reader(NewObject, SavedProperties, true, true);
+		}
+
+		for (int32 Index = 0; Index < ComponentsOnNewObject.Num(); Index++)
+		{
+			UObject* NewInstance = ComponentsOnNewObject[Index];
+			if (int32* pOldInstanceIndex = OldInstanceMap.Find(NewInstance->GetFName()))
+			{
+				// Restore modified properties into the new instance
+				FInstancedObjectRecord& Record = SavedInstances[*pOldInstanceIndex];
+				FObjectReader Reader(NewInstance, Record.SavedProperties, true, true);
+				FFindInstancedReferenceSubobjectHelper::Duplicate(Record.OldInstance, NewInstance, ReferenceReplacementMap, EditInlineSubobjectsOfComponents);
 			}
 		}
 		ComponentsOnNewObject.Append(EditInlineSubobjectsOfComponents);

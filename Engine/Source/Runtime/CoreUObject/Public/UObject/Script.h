@@ -255,6 +255,7 @@ enum EExprToken
 	EX_CallMath				= 0x68, // static pure function from on local call space
 	EX_SwitchValue			= 0x69,
 	EX_InstrumentationEvent	= 0x6A, // Instrumentation event
+	EX_ArrayGetByRef		= 0x6B,
 	EX_Max					= 0x100,
 };
 
@@ -296,6 +297,9 @@ namespace EScriptInstrumentation
 		PureNodeEntry,
 		NodeEntry,
 		NodeExit,
+		PushState,
+		RestoreState,
+		PopState,
 		NodePin,
 		Stop
 	};
@@ -310,7 +314,7 @@ public:
 	{
 	}
 
-	FBlueprintExceptionInfo(EBlueprintExceptionType::Type InEventType, const FString& InDescription)
+	FBlueprintExceptionInfo(EBlueprintExceptionType::Type InEventType, const FText& InDescription)
 		: EventType(InEventType)
 		, Description(InDescription)
 	{
@@ -321,13 +325,13 @@ public:
 		return EventType;
 	}
 
-	const FString& GetDescription() const
+	const FText& GetDescription() const
 	{
 		return Description;
 	}
 protected:
 	EBlueprintExceptionType::Type EventType;
-	FString Description;
+	FText Description;
 };
 
 // Information about a blueprint instrumentation event

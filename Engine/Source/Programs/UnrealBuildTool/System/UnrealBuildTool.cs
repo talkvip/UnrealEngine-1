@@ -502,6 +502,7 @@ namespace UnrealBuildTool
 			string LowercaseArg = InArg.ToLowerInvariant();
 
 			string ProjectArg = null;
+            FileReference TryProjectFile;
 			if (LowercaseArg.StartsWith("-project="))
 			{
 				if (BuildHostPlatform.Current.Platform == UnrealTargetPlatform.Linux)
@@ -522,7 +523,14 @@ namespace UnrealBuildTool
 				RemoteIniPath = InArg.Substring(11);
 			}
 			else
-			{
+            if (UProjectInfo.TryGetProjectForTarget(LowercaseArg, out TryProjectFile))
+            {
+                ProjectFile = TryProjectFile;
+                OutGameName = InArg;
+                return true;
+            }
+            else
+            {
 				return false;
 			}
 
@@ -885,6 +893,7 @@ namespace UnrealBuildTool
 				{
 					// This is to allow relative paths for the project file
 					Log.TraceVerbose("UBT Running for Rocket: " + ProjectFile);
+                    break;
 				}
 			}
 
@@ -1034,7 +1043,7 @@ namespace UnrealBuildTool
 					{
 						string LowercaseArg = Arg.ToLowerInvariant();
 						const string OnlyPlatformSpecificForArg = "-onlyplatformspecificfor=";
-						if (ParseRocketCommandlineArg(Arg, ref GameName, ref ProjectFile))
+						if (ProjectFile == null && ParseRocketCommandlineArg(Arg, ref GameName, ref ProjectFile))
 						{
 							// Already handled at startup. Calling now just to properly set the game name
 							continue;
@@ -1348,25 +1357,27 @@ namespace UnrealBuildTool
 								(UEBuildConfiguration.bGenerateManifest == false) && (UEBuildConfiguration.bGenerateExternalFileList == false) && (UEBuildConfiguration.bCleanProject == false))
 							{
 								List<TargetDescriptor> TargetDescs = UEBuildTarget.ParseTargetCommandLine(Arguments, ref ProjectFile);
-
-								UEBuildPlatform BuildPlatform = UEBuildPlatform.GetBuildPlatform(CheckPlatform);
-								UEBuildPlatformContext PlatformContext = BuildPlatform.CreateContext(TargetDescs[0].ProjectFile);
-
-								UEBuildDeploy DeploymentHandler = PlatformContext.CreateDeploymentHandler();
-								if (DeploymentHandler != null)
+								if (TargetDescs[0].OnlyModules.Count == 0)
 								{
-									// We need to be able to identify the Target.Type we can derive it from the Arguments.
-									BuildConfiguration.bFlushBuildDirOnRemoteMac = false;
-									UEBuildTarget CheckTarget = UEBuildTarget.CreateTarget(TargetDescs[0]);	// @todo ubtmake: This may not work in assembler only mode.  We don't want to be loading target rules assemblies here either.
-									UEToolChain ToolChain = PlatformContext.CreateToolChainForDefaultCppPlatform();
-									CheckTarget.SetupGlobalEnvironment(ToolChain);
-									if ((CheckTarget.TargetType == TargetRules.TargetType.Game) ||
-										(CheckTarget.TargetType == TargetRules.TargetType.Server) ||
-										(CheckTarget.TargetType == TargetRules.TargetType.Client))
+									UEBuildPlatform BuildPlatform = UEBuildPlatform.GetBuildPlatform(CheckPlatform);
+									UEBuildPlatformContext PlatformContext = BuildPlatform.CreateContext(TargetDescs[0].ProjectFile);
+
+									UEBuildDeploy DeploymentHandler = PlatformContext.CreateDeploymentHandler();
+									if (DeploymentHandler != null)
 									{
-										CheckTarget.AppName = CheckTarget.TargetName;
+										// We need to be able to identify the Target.Type we can derive it from the Arguments.
+										BuildConfiguration.bFlushBuildDirOnRemoteMac = false;
+										UEBuildTarget CheckTarget = UEBuildTarget.CreateTarget(TargetDescs[0]); // @todo ubtmake: This may not work in assembler only mode.  We don't want to be loading target rules assemblies here either.
+										UEToolChain ToolChain = PlatformContext.CreateToolChainForDefaultCppPlatform();
+										CheckTarget.SetupGlobalEnvironment(ToolChain);
+										if ((CheckTarget.TargetType == TargetRules.TargetType.Game) ||
+											(CheckTarget.TargetType == TargetRules.TargetType.Server) ||
+											(CheckTarget.TargetType == TargetRules.TargetType.Client))
+										{
+											CheckTarget.AppName = CheckTarget.TargetName;
+										}
+										DeploymentHandler.PrepTargetForDeployment(CheckTarget);
 									}
-									DeploymentHandler.PrepTargetForDeployment(CheckTarget);
 								}
 							}
 						}

@@ -55,7 +55,7 @@
 		Output.TangentToWorld1 = TangentToWorld[1];
 		Output.TangentToWorld2 = TangentToWorld[2];
 
-#if NUM_MATERIAL_TEXCOORDS > 0
+#if NUM_MATERIAL_TEXCOORDS_VERTEX > 0
 		Output.TexCoord0 = MaterialParameters.TexCoords[0];
 #else
 		Output.TexCoord0 = 0;
@@ -64,7 +64,7 @@
 #if INSTANCED_STEREO
 		Output.EyeIndex = Interpolants.FactoryInterpolants.EyeIndex;
 #endif
-
+		
 		return Output;
 	}
 	
@@ -133,7 +133,7 @@ void Main(
 			Output.Position.x *= 0.5 * Frame.HMDEyePaddingOffset;
 
 			// Shift to the eye viewport
-			Output.Position.x += (EyeOffsetScale[EyeIndex] * Output.Position.w) / Frame.HMDEyePaddingOffset;
+			Output.Position.x += (EyeOffsetScale[EyeIndex] * Output.Position.w) * (1.0f - 0.5 * Frame.HMDEyePaddingOffset);
 		}
 		#endif
 	}
@@ -145,7 +145,7 @@ void Main(
 	Output.TangentToWorld1 = float3(TangentToWorld[1]);
 	Output.TangentToWorld2 = float3(TangentToWorld[2]);
 
-#if NUM_MATERIAL_TEXCOORDS > 0
+#if NUM_MATERIAL_TEXCOORDS_VERTEX > 0
 	Output.TexCoord0 = VertexParameters.TexCoords[0];
 #else
 	Output.TexCoord0 = 0;

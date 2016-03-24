@@ -25,7 +25,6 @@ FSceneViewport::FSceneViewport( FViewportClient* InViewportClient, TSharedPtr<SV
 	, MouseDelta( 0, 0 )
 	, bIsCursorVisible( true )
 	, bShouldCaptureMouseOnActivate( true )
-	, bIgnoreCaptureClick( true )
 	, bRequiresVsync( false )
 	, bUseSeparateRenderTarget( InViewportWidget.IsValid() ? !InViewportWidget->ShouldRenderDirectly() : true )
 	, bIsResizing( false )
@@ -385,7 +384,7 @@ FReply FSceneViewport::OnMouseButtonDown( const FGeometry& InGeometry, const FPo
 			(ViewportClient->CaptureMouseOnClick() == EMouseCaptureMode::CaptureDuringRightMouseDown && InMouseEvent.GetEffectingButton() == EKeys::RightMouseButton);
 
 		// Process primary input if we aren't currently a game viewport, we already have capture, or we are permanent capture that dosn't consume the mouse down.
-		const bool bProcessInputPrimary = !IsCurrentlyGameViewport() || !bIgnoreCaptureClick || HasMouseCapture() || (ViewportClient->CaptureMouseOnClick() == EMouseCaptureMode::CapturePermanently_IncludingInitialMouseDown);
+		const bool bProcessInputPrimary = !IsCurrentlyGameViewport() || HasMouseCapture() || (ViewportClient->CaptureMouseOnClick() == EMouseCaptureMode::CapturePermanently_IncludingInitialMouseDown);
 
 		const bool bAnyMenuWasVisible = FSlateApplication::Get().AnyMenusVisible();
 
@@ -884,34 +883,6 @@ FReply FSceneViewport::OnFocusReceived(const FFocusEvent& InFocusEvent)
 	{
 		FScopedConditionalWorldSwitcher WorldSwitcher(ViewportClient);
 		ViewportClient->ReceivedFocus(this);
-
-		if ((FApp::IsGame() && !GIsEditor) || bIsPlayInEditorViewport)
-		{
-			if (IsForegroundWindow() || FApp::UseVRFocus())
-			{
-				bool bIsCursorForcedVisible = false;
-				if (ViewportClient->GetWorld() && ViewportClient->GetWorld()->GetGameInstance() && ViewportClient->GetWorld()->GetGameInstance()->GetFirstLocalPlayerController())
-				{
-					bIsCursorForcedVisible = ViewportClient->GetWorld()->GetGameInstance()->GetFirstLocalPlayerController()->GetMouseCursor() != EMouseCursor::None;
-				}
-
-				const bool bPlayInEditorCapture = !bIsPlayInEditorViewport || InFocusEvent.GetCause() != EFocusCause::SetDirectly || bPlayInEditorGetsMouseControl;
-
-				// capturing the mouse interferes with slate UI (like the virtual joysticks)
-				if (FPlatformProperties::SupportsWindowedMode() && bPlayInEditorCapture && !bIsCursorForcedVisible && !FSlateApplication::Get().IsFakingTouchEvents())
-				{
-					// Only require the user to click in the window the first time - after that return focus to the game so long as it was the last focused widget.
-					// Means that tabbing in/out will return the mouse control to where it was & the in-game console won't leave the mouse under editor control.
-					bPlayInEditorGetsMouseControl = true;
-					CurrentReplyState.UseHighPrecisionMouseMovement(ViewportWidget.Pin().ToSharedRef());
-					CurrentReplyState.LockMouseToWidget(ViewportWidget.Pin().ToSharedRef());
-				}
-			}
-			else
-			{
-				CurrentReplyState.ClearUserFocus(true);
-			}
-		}
 	}
 
 	// Update key state mappings so that the the viewport modifier states are valid upon focus.

@@ -682,8 +682,10 @@ void ULevel::ClearLevelComponents()
 	}
 
 	// Remove the actors' components from the scene and build a list of relevant worlds
-	for( AActor* Actor : Actors )
+	// In theory (though it is a terrible idea), users could spawn Actors from an OnUnregister event so don't use ranged-for
+	for (int32 ActorIndex = 0; ActorIndex < Actors.Num(); ++ActorIndex)
 	{
+		AActor* Actor = Actors[ActorIndex];
 		if (Actor)
 		{
 			Actor->UnregisterAllComponents();
@@ -1549,6 +1551,8 @@ void ULevel::BuildStreamingData(UTexture2D* UpdateSpecificTextureOnly/*=NULL*/)
 	TArray<UObject *> ObjectsInOuter;
 	GetObjectsWithOuter(this, ObjectsInOuter);
 
+	FStreamingTextureLevelContext LevelContext(this);
+
 	for( int32 Index = 0; Index < ObjectsInOuter.Num(); Index++ )
 	{
 		UPrimitiveComponent* Primitive = Cast<UPrimitiveComponent>(ObjectsInOuter[Index]);
@@ -1563,7 +1567,7 @@ void ULevel::BuildStreamingData(UTexture2D* UpdateSpecificTextureOnly/*=NULL*/)
 				TArray<FStreamingTexturePrimitiveInfo> PrimitiveStreamingTextures;
 
 				// Ask the primitive to enumerate the streaming textures it uses.
-				Primitive->GetStreamingTextureInfoWithNULLRemoval(PrimitiveStreamingTextures);
+				Primitive->GetStreamingTextureInfoWithNULLRemoval(LevelContext, PrimitiveStreamingTextures);
 
 				for(int32 TextureIndex = 0;TextureIndex < PrimitiveStreamingTextures.Num();TextureIndex++)
 				{

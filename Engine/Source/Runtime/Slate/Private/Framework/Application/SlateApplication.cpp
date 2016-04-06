@@ -280,9 +280,14 @@ DECLARE_CYCLE_STAT( TEXT("TickWidgets"), STAT_SlateTickWidgets, STATGROUP_Slate 
 DECLARE_CYCLE_STAT( TEXT("TickRegisteredWidgets"), STAT_SlateTickRegisteredWidgets, STATGROUP_Slate );
 DECLARE_CYCLE_STAT( TEXT("Slate::PreTickEvent"), STAT_SlatePreTickEvent, STATGROUP_Slate );
 
+DECLARE_CYCLE_STAT(TEXT("ShowVirtualKeyboard"), STAT_ShowVirtualKeyboard, STATGROUP_Slate);
+
 DECLARE_CYCLE_STAT(TEXT("ProcessKeyDown"), STAT_ProcessKeyDown, STATGROUP_Slate);
 DECLARE_CYCLE_STAT(TEXT("ProcessKeyUp"), STAT_ProcessKeyUp, STATGROUP_Slate);
 DECLARE_CYCLE_STAT(TEXT("ProcessKeyChar"), STAT_ProcessKeyChar, STATGROUP_Slate);
+DECLARE_CYCLE_STAT(TEXT("ProcessKeyChar (route focus)"), STAT_ProcessKeyChar_RouteAlongFocusPath, STATGROUP_Slate);
+DECLARE_CYCLE_STAT(TEXT("ProcessKeyChar (call OnKeyChar)"), STAT_ProcessKeyChar_Call_OnKeyChar, STATGROUP_Slate);
+
 DECLARE_CYCLE_STAT(TEXT("ProcessAnalogInput"), STAT_ProcessAnalogInput, STATGROUP_Slate);
 DECLARE_CYCLE_STAT(TEXT("ProcessMouseButtonDown"), STAT_ProcessMouseButtonDown, STATGROUP_Slate);
 DECLARE_CYCLE_STAT(TEXT("ProcessMouseButtonDoubleClick"), STAT_ProcessMouseButtonDoubleClick, STATGROUP_Slate);
@@ -2159,10 +2164,28 @@ void FSlateApplication::InvalidateAllViewports()
 
 void FSlateApplication::RegisterGameViewport( TSharedRef<SViewport> InViewport )
 {
-	InViewport->SetActive(true);
-	GameViewportWidget = InViewport;
+	RegisterViewport(InViewport);
+	
+	if (GameViewportWidget != InViewport)
+	{
+		InViewport->SetActive(true);
+		GameViewportWidget = InViewport;
+	}
 	
 	ActivateGameViewport();
+}
+
+void FSlateApplication::RegisterViewport(TSharedRef<SViewport> InViewport)
+{
+	TSharedPtr<SWindow> ParentWindow = FindWidgetWindow(InViewport);
+	if (ParentWindow.IsValid())
+	{
+		TWeakPtr<ISlateViewport> SlateViewport = InViewport->GetViewportInterface();
+		if (ensure(SlateViewport.IsValid()))
+		{
+			ParentWindow->SetViewport(SlateViewport.Pin().ToSharedRef());
+		}
+	}
 }
 
 void FSlateApplication::UnregisterGameViewport()
@@ -3649,6 +3672,8 @@ const FSlateBrush* FSlateApplication::GetAppIcon() const
 
 void FSlateApplication::ShowVirtualKeyboard( bool bShow, int32 UserIndex, TSharedPtr<IVirtualKeyboardEntry> TextEntryWidget )
 {
+	SCOPE_CYCLE_COUNTER(STAT_ShowVirtualKeyboard);
+
 	if(SlateTextField == nullptr)
 	{
 		SlateTextField = new FPlatformTextField();
@@ -4083,16 +4108,20 @@ bool FSlateApplication::ProcessKeyCharEvent( FCharacterEvent& InCharacterEvent )
 
 	// Bubble the key event
 	FWidgetPath EventPath = UserFocusEntries[InCharacterEvent.GetUserIndex()].WidgetPath.ToWidgetPath();
-	
+
 	// Switch worlds for widgets in the current path
 	FScopedSwitchWorldHack SwitchWorld( EventPath );
 
-	Reply = FEventRouter::RouteAlongFocusPath( this, FEventRouter::FBubblePolicy(EventPath), InCharacterEvent, []( const FArrangedWidget& SomeWidgetGettingEvent, const FCharacterEvent& Event )
 	{
-		return SomeWidgetGettingEvent.Widget->IsEnabled()
-			? SomeWidgetGettingEvent.Widget->OnKeyChar( SomeWidgetGettingEvent.Geometry, Event )
-			: FReply::Unhandled();
-	});
+		SCOPE_CYCLE_COUNTER(STAT_ProcessKeyChar_RouteAlongFocusPath);
+		Reply = FEventRouter::RouteAlongFocusPath( this, FEventRouter::FBubblePolicy(EventPath), InCharacterEvent, [](const FArrangedWidget& SomeWidgetGettingEvent, const FCharacterEvent& Event )
+		{
+			SCOPE_CYCLE_COUNTER(STAT_ProcessKeyChar_Call_OnKeyChar);
+			return SomeWidgetGettingEvent.Widget->IsEnabled()
+				? SomeWidgetGettingEvent.Widget->OnKeyChar( SomeWidgetGettingEvent.Geometry, Event )
+				: FReply::Unhandled();
+		});
+	}
 
 	LOG_EVENT_CONTENT( EEventLog::KeyChar, FString::Printf(TEXT("%c"), InCharacterEvent.GetCharacter()), Reply );
 
@@ -5507,6 +5536,8 @@ bool FSlateApplication::OnWindowActivationChanged( const TSharedRef< FGenericWin
 
 bool FSlateApplication::ProcessWindowActivatedEvent( const FWindowActivateEvent& ActivateEvent )
 {
+	//UE_LOG(LogSlate, Warning, TEXT("Window being %s: %p"), ActivateEvent.GetActivationType() == FWindowActivateEvent::EA_Deactivate ? TEXT("Deactivated") : TEXT("Activated"), &(ActivateEvent.GetAffectedWindow().Get()));
+
 	TSharedPtr<SWindow> ActiveModalWindow = GetActiveModalWindow();
 
 	if ( ActivateEvent.GetActivationType() != FWindowActivateEvent::EA_Deactivate )
@@ -5572,18 +5603,22 @@ bool FSlateApplication::ProcessWindowActivatedEvent( const FWindowActivateEvent&
 			ActiveModalWindow->FlashWindow();
 		}
 
-		// Notify the GameViewport that it's been activated if it's a descendant of the top level window were activating 
-		if (GameViewportWidget.IsValid())
+		
+		TSharedRef<SWindow> Window = ActivateEvent.GetAffectedWindow();
+		TSharedPtr<ISlateViewport> Viewport = Window->GetViewport();
+		if (Viewport.IsValid())
 		{
-			TSharedPtr<SViewport> GameViewportWidgetPtr = GameViewportWidget.Pin();
-			FWidgetPath PathToViewport;
-			// If we cannot find the window it could have been destroyed.
-			if (FSlateWindowHelper::FindPathToWidget(SlateWindows, GameViewportWidgetPtr.ToSharedRef(), PathToViewport, EVisibility::All))
+			TSharedPtr<SWidget> ViewportWidgetPtr = Viewport->GetWidget().Pin();
+			if (ViewportWidgetPtr.IsValid())
 			{
-				if (PathToViewport.GetWindow() == ActiveTopLevelWindow)
+				TArray< TSharedRef<SWindow> > JustThisWindow;
+				JustThisWindow.Add(Window);
+
+				FWidgetPath PathToViewport;
+				if (FSlateWindowHelper::FindPathToWidget(JustThisWindow, ViewportWidgetPtr.ToSharedRef(), PathToViewport, EVisibility::All))
 				{
 					// Activate the viewport and process the reply 
-					FReply ViewportActivatedReply = GameViewportWidgetPtr->OnViewportActivated(ActivateEvent);
+					FReply ViewportActivatedReply = Viewport->OnViewportActivated(ActivateEvent);
 					if (ViewportActivatedReply.IsEventHandled())
 					{
 						ProcessReply(PathToViewport, ViewportActivatedReply, nullptr, nullptr);
@@ -5609,11 +5644,12 @@ bool FSlateApplication::ProcessWindowActivatedEvent( const FWindowActivateEvent&
 		// Switch worlds for the activated window
 		FScopedSwitchWorldHack SwitchWorld( ActivateEvent.GetAffectedWindow() );
 		ActivateEvent.GetAffectedWindow()->OnIsActiveChanged( ActivateEvent );
-		
-		// Notify the GameViewport that it's been deactivated
-		if (GameViewportWidget.IsValid())
+
+		TSharedRef<SWindow> Window = ActivateEvent.GetAffectedWindow();
+		TSharedPtr<ISlateViewport> Viewport = Window->GetViewport();
+		if (Viewport.IsValid())
 		{
-			GameViewportWidget.Pin()->OnViewportDeactivated(ActivateEvent);
+			Viewport->OnViewportDeactivated(ActivateEvent);
 		}
 
 		// A window was deactivated; mouse capture should be cleared

@@ -860,6 +860,7 @@ void FConsoleManager::UnregisterConsoleObject(IConsoleObject* CVar, bool bKeepSt
 	{
 		return;
 	}
+	FScopeLock ScopeLock(&ConsoleObjectsSynchronizationObject);
 
 	// Slow search for console object
 	const FString ObjName = FindConsoleObjectName( CVar );
@@ -872,12 +873,12 @@ void FConsoleManager::UnregisterConsoleObject(IConsoleObject* CVar, bool bKeepSt
 
 void FConsoleManager::UnregisterConsoleObject(const TCHAR* Name, bool bKeepState)
 {
+	FScopeLock ScopeLock(&ConsoleObjectsSynchronizationObject);
+
 	IConsoleObject* Object = FindConsoleObject(Name);
 
 	if(Object)
 	{
-		FScopeLock ScopeLock(&ConsoleObjectsSynchronizationObject);
-
 		IConsoleVariable* CVar = Object->AsVariable();
 
 		if(CVar && bKeepState)
@@ -1848,34 +1849,6 @@ static TAutoConsoleVariable<int32> CVarNumBufferedOcclusionQueries(
 	TEXT("More frames reduces the chance of stalling the CPU waiting for results, but increases out of date query artifacts."),
 	ECVF_RenderThreadSafe);
 
-static TAutoConsoleVariable<int32> CVarDistField(
-	TEXT("r.GenerateMeshDistanceFields"),
-	0,	
-	TEXT("Whether to build distance fields of static meshes, needed for distance field AO, which is used to implement Movable SkyLight shadows.\n")
-	TEXT("Enabling will increase mesh build times and memory usage.  Changing this value will cause a rebuild of all static meshes."),
-	ECVF_ReadOnly);
-
-static TAutoConsoleVariable<int32> CVarDistFieldRes(
-	TEXT("r.DistanceFields.MaxPerMeshResolution"),
-	128,	
-	TEXT("Highest resolution (in one dimension) allowed for a single static mesh asset, used to cap the memory usage of meshes with a large scale.\n")
-	TEXT("Changing this will cause all distance fields to be rebuilt.  Large values such as 512 can consume memory very quickly! (128Mb for one asset at 512)"),
-	ECVF_ReadOnly);
-
-static TAutoConsoleVariable<float> CVarDistFieldResScale(
-	TEXT("r.DistanceFields.DefaultVoxelDensity"),
-	.1f,	
-	TEXT("Determines how the default scale of a mesh converts into distance field voxel dimensions.\n")
-	TEXT("Changing this will cause all distance fields to be rebuilt.  Large values can consume memory very quickly!"),
-	ECVF_ReadOnly);
-
-static TAutoConsoleVariable<int32> CVarLandscapeGI(
-	TEXT("r.GenerateLandscapeGIData"),
-	1,
-	TEXT("Whether to generate a low-resolution base color texture for landscapes for rendering real-time global illumination.\n")
-	TEXT("This feature requires GenerateMeshDistanceFields is also enabled, and will increase mesh build times and memory usage.\n"),
-	ECVF_Default);
-
 static TAutoConsoleVariable<int32> CVarMinLogVerbosity(
 	TEXT("con.MinLogVerbosity"),
 	0,
@@ -2198,9 +2171,3 @@ static TAutoConsoleVariable<int32> CVarCheckSRVTransitions(
 	0,
 	TEXT("Tests that render targets are properly transitioned to SRV when SRVs are set."),
 	ECVF_RenderThreadSafe);  
-
-static TAutoConsoleVariable<int32> CVarHLODSystemEnabled(
-	TEXT("r.HLODEnabled"), 
-	1,
-	TEXT("Toggles whether or not the Hierarchical LOD system is enabled."),
-	ECVF_Scalability | ECVF_RenderThreadSafe);

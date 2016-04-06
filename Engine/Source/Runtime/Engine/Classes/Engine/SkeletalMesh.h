@@ -547,13 +547,15 @@ struct FSkeletalMaterial
 	FSkeletalMaterial()
 		: MaterialInterface( NULL )
 		, bEnableShadowCasting( true )
+		, bRecomputeTangent( false )
 	{
 
 	}
 
-	FSkeletalMaterial( class UMaterialInterface* InMaterialInterface, bool bInEnableShadowCasting = true )
+	FSkeletalMaterial( class UMaterialInterface* InMaterialInterface, bool bInEnableShadowCasting = true, bool bInRecomputeTangent = false )
 		: MaterialInterface( InMaterialInterface )
 		, bEnableShadowCasting( bInEnableShadowCasting )
+		, bRecomputeTangent( bInRecomputeTangent )
 	{
 
 	}
@@ -568,6 +570,8 @@ struct FSkeletalMaterial
 	class UMaterialInterface *	MaterialInterface;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category=SkeletalMesh, Category=SkeletalMesh)
 	bool						bEnableShadowCasting;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = SkeletalMesh, Category = SkeletalMesh)
+	bool						bRecomputeTangent;
 };
 
 class FSkeletalMeshResource;
@@ -862,6 +866,22 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, Category="Animation")
 	ENGINE_API USkeletalMeshSocket* FindSocket(FName InSocketName) const;
+
+	/**
+	*	Find a socket object in this SkeletalMesh by name.
+	*	Entering NAME_None will return NULL. If there are multiple sockets with the same name, will return the first one.
+	*   Also returns the index for the socket allowing for future fast access via GetSocketByIndex()
+	*/
+	UFUNCTION(BlueprintCallable, Category = "Animation")
+	ENGINE_API USkeletalMeshSocket* FindSocketAndIndex(FName InSocketName, int32& OutIndex) const;
+
+	/** Returns the number of sockets available. Both on this mesh and it's skeleton. */
+	UFUNCTION(BlueprintCallable, Category = "Animation")
+	ENGINE_API int32 NumSockets() const;
+
+	/** Returns a socket by index. Max index is NumSockets(). The meshes sockets are accessed first, then the skeletons.  */
+	UFUNCTION(BlueprintCallable, Category = "Animation")
+	ENGINE_API USkeletalMeshSocket* GetSocketByIndex(int32 Index) const;
 
 	// @todo document
 	ENGINE_API FMatrix GetRefPoseMatrix( int32 BoneIndex ) const;

@@ -201,6 +201,12 @@ namespace UnrealBuildTool
 					UEBuildConfiguration.bCompileSimplygon = bValue;
 				}
 
+                bValue = UEBuildConfiguration.bCompileSimplygonSSF;
+                if (Ini.GetBool("/Script/BuildSettings.BuildSettings", "bCompileSimplygonSSF", out bValue))
+                {
+                    UEBuildConfiguration.bCompileSimplygonSSF = bValue;
+                }
+
 				bValue = UEBuildConfiguration.bCompileLeanAndMeanUE;
 				if (Ini.GetBool("/Script/BuildSettings.BuildSettings", "bCompileLeanAndMeanUE", out bValue))
 				{
@@ -781,7 +787,7 @@ namespace UnrealBuildTool
 		public virtual bool HasDefaultBuildConfig(UnrealTargetPlatform Platform, DirectoryReference ProjectDirectoryName)
 		{
 			string[] BoolKeys = new string[] {
-				"bCompileApex", "bCompileBox2D", "bCompileICU", "bCompileSimplygon", 
+				"bCompileApex", "bCompileBox2D", "bCompileICU", "bCompileSimplygon", "bCompileSimplygonSSF",
 				"bCompileLeanAndMeanUE", "bIncludeADO", "bCompileRecast", "bCompileSpeedTree", 
 				"bCompileWithPluginSupport", "bCompilePhysXVehicle", "bCompileFreeType", 
 				"bCompileForSize", "bCompileCEF3"
@@ -1204,10 +1210,18 @@ namespace UnrealBuildTool
 					}
 
 
-					// actually perform the PATH stripping / adding.
-					String OrigPathVar = Environment.GetEnvironmentVariable("PATH");
-					String PathDelimiter = UEBuildPlatform.GetPathVarDelimiter();
-					String[] PathVars = OrigPathVar.Split(PathDelimiter.ToCharArray());
+                    // actually perform the PATH stripping / adding.
+                    String OrigPathVar = Environment.GetEnvironmentVariable("PATH");
+                    String PathDelimiter = UEBuildPlatform.GetPathVarDelimiter();
+                    String[] PathVars = { };
+                    if (!String.IsNullOrEmpty(OrigPathVar))
+                    {
+                        PathVars = OrigPathVar.Split(PathDelimiter.ToCharArray());
+                    }
+                    else
+                    {
+                        LogAutoSDK("Path environment variable is null during AutoSDK");
+                    }
 
 					List<String> ModifiedPathVars = new List<string>();
 					ModifiedPathVars.AddRange(PathVars);
@@ -1225,7 +1239,7 @@ namespace UnrealBuildTool
 						}
 					}
 
-					// remove all the of ADDs so that if this function is executed multiple times, the paths will be guarateed to be in the same order after each run.
+					// remove all the of ADDs so that if this function is executed multiple times, the paths will be guaranteed to be in the same order after each run.
 					// If we did not do this, a 'remove' that matched some, but not all, of our 'adds' would cause the order to change.
 					foreach (String PathAdd in PathAdds)
 					{

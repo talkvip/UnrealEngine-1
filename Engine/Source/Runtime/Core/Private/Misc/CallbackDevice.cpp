@@ -26,6 +26,12 @@ FCoreDelegates::FObjectArrayForDebugVisualizersDelegate& FCoreDelegates::GetObje
 	return StaticDelegate;
 }
 
+FCoreDelegates::FOnPreMainInit& FCoreDelegates::GetPreMainInitDelegate()
+{
+	static FOnPreMainInit StaticDelegate;
+	return StaticDelegate;
+}
+
 FCoreDelegates::FOnMountPak FCoreDelegates::OnMountPak;
 FCoreDelegates::FOnUnmountPak FCoreDelegates::OnUnmountPak;
 FCoreDelegates::FOnUserLoginChangedEvent FCoreDelegates::OnUserLoginChangedEvent; 
@@ -73,8 +79,8 @@ FCoreDelegates::FLoadStringAssetReferenceInCook FCoreDelegates::LoadStringAssetR
 FCoreDelegates::FVRHeadsetRecenter FCoreDelegates::VRHeadsetRecenter;
 
 FCoreDelegates::FOnUserActivityStringChanged FCoreDelegates::UserActivityStringChanged;
-
 FCoreDelegates::FOnGameSessionIDChange FCoreDelegates::GameSessionIDChanged;
+FCoreDelegates::FOnCrashOverrideParamsChanged FCoreDelegates::CrashOverrideParamsChanged;
 
 FCoreDelegates::FOnAsyncLoadingFlush FCoreDelegates::OnAsyncLoadingFlush;
 FCoreDelegates::FRenderingThreadChanged FCoreDelegates::PostRenderingThreadCreated;

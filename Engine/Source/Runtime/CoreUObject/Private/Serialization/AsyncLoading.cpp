@@ -270,6 +270,22 @@ static FAutoConsoleVariableRef CVarPreloadPackageDependencies(
 	ECVF_Default
 	);
 
+uint32 FAsyncLoadingThread::AsyncLoadingThreadID = 0;
+
+static void IsTimeLimitExceededPrint(double InTickStartTime, double CurrentTime, float InTimeLimit, const TCHAR* InLastTypeOfWorkPerformed = nullptr, UObject* InLastObjectWorkWasPerformedOn = nullptr)
+{
+	// Log single operations that take longer than time limit (but only in cooked builds)
+	if (
+		(CurrentTime - InTickStartTime) > GTimeLimitExceededMinTime &&
+		(CurrentTime - InTickStartTime) > (GTimeLimitExceededMultiplier * InTimeLimit))
+	{
+		UE_LOG(LogStreaming, Warning, TEXT("IsTimeLimitExceeded: %s %s took (less than) %5.2f ms"),
+			InLastTypeOfWorkPerformed ? InLastTypeOfWorkPerformed : TEXT("unknown"),
+			InLastObjectWorkWasPerformedOn ? *InLastObjectWorkWasPerformedOn->GetFullName() : TEXT("nullptr"),
+			(CurrentTime - InTickStartTime) * 1000);
+	}
+}
+
 static FORCEINLINE bool IsTimeLimitExceeded(double InTickStartTime, bool bUseTimeLimit, float InTimeLimit, const TCHAR* InLastTypeOfWorkPerformed = nullptr, UObject* InLastObjectWorkWasPerformedOn = nullptr)
 {
 	bool bTimeLimitExceeded = false;
@@ -278,21 +294,17 @@ static FORCEINLINE bool IsTimeLimitExceeded(double InTickStartTime, bool bUseTim
 		double CurrentTime = FPlatformTime::Seconds();
 		bTimeLimitExceeded = CurrentTime - InTickStartTime > InTimeLimit;
 
-		// Log single operations that take longer than time limit (but only in cooked builds)
-		if (GWarnIfTimeLimitExceeded && 
-			(CurrentTime - InTickStartTime) > GTimeLimitExceededMinTime &&
-			(CurrentTime - InTickStartTime) > (GTimeLimitExceededMultiplier * InTimeLimit))
-		{			
-			UE_LOG(LogStreaming, Warning, TEXT("IsTimeLimitExceeded: %s %s took (less than) %5.2f ms"),
-				InLastTypeOfWorkPerformed ? InLastTypeOfWorkPerformed : TEXT("unknown"),
-				InLastObjectWorkWasPerformedOn ? *InLastObjectWorkWasPerformedOn->GetFullName() : TEXT("nullptr"),
-				(CurrentTime - InTickStartTime) * 1000);
+		if (GWarnIfTimeLimitExceeded)
+		{
+			IsTimeLimitExceededPrint(InTickStartTime, CurrentTime, InTimeLimit, InLastTypeOfWorkPerformed, InLastObjectWorkWasPerformedOn);
 		}
 	}
 	return bTimeLimitExceeded;
 }
-
-uint32 FAsyncLoadingThread::AsyncLoadingThreadID = 0;
+FORCEINLINE bool FAsyncPackage::IsTimeLimitExceeded()
+{
+	return AsyncLoadingThread.IsAsyncLoadingSuspended() || ::IsTimeLimitExceeded(TickStartTime, bUseTimeLimit, TimeLimit, LastTypeOfWorkPerformed, LastObjectWorkWasPerformedOn);
+}
 
 #if LOOKING_FOR_PERF_ISSUES
 FThreadSafeCounter FAsyncLoadingThread::BlockingCycles = 0;
@@ -1154,16 +1166,6 @@ void FAsyncPackage::DetachLinker()
 }
 
 /**
- * Returns whether time limit has been exceeded.
- *
- * @return true if time limit has been exceeded (and is used), false otherwise
- */
-bool FAsyncPackage::IsTimeLimitExceeded()
-{
-	return AsyncLoadingThread.IsAsyncLoadingSuspended() || ::IsTimeLimitExceeded(TickStartTime, bUseTimeLimit, TimeLimit, LastTypeOfWorkPerformed, LastObjectWorkWasPerformedOn);
-}
-
-/**
  * Gives up time slice if time limit is enabled.
  *
  * @return true if time slice can be given up, false otherwise
@@ -1411,36 +1413,17 @@ EAsyncPackageState::Type FAsyncPackage::CreateLinker()
 
 		if (!Linker)
 		{
-			const FString NameToLoad = Desc.NameToLoad.ToString();
+			// The editor must not redirect packages for localization.
+			FString NameToLoad = Desc.NameToLoad.ToString();
+			if (!GIsEditor)
+			{
+				NameToLoad = FPackageName::GetLocalizedPackagePath(NameToLoad);
+			}
+
 			const FGuid* const Guid = Desc.Guid.IsValid() ? &Desc.Guid : nullptr;
-			FString NativeFilename, LocalizedFilename;
-			FPackageName::DoesPackageExistWithLocalization(NameToLoad, Guid, &NativeFilename, &LocalizedFilename);
-			const bool DoesNativePackageExist = NativeFilename.Len() > 0;
-			const bool DoesLocalizedPackageExist = LocalizedFilename.Len() > 0;
 
 			FString PackageFileName;
-			bool DoesPackageExist = false;
-			// The editor must not redirect packages for localization.
-			if (GIsEditor)
-			{
-				PackageFileName = NativeFilename;
-				DoesPackageExist = DoesNativePackageExist;
-			}
-			else
-			{
-				// Use the localized package if possible.
-				if (DoesLocalizedPackageExist)
-				{
-					PackageFileName = LocalizedFilename;
-					DoesPackageExist = DoesLocalizedPackageExist;
-				}
-				// If we are the game, we can fallback to the native package.
-				else
-				{
-					PackageFileName = NativeFilename;
-					DoesPackageExist = DoesNativePackageExist;
-				}
-			}
+			const bool DoesPackageExist = FPackageName::DoesPackageExist(NameToLoad, Guid, &PackageFileName);
 
 			if (Desc.NameToLoad == NAME_None ||
 				(!GetConvertedDynamicPackageNameToTypeName().Contains(Desc.Name) &&

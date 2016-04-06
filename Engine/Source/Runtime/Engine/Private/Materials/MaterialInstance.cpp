@@ -276,37 +276,40 @@ void FMaterialInstanceResource::GameThread_SetParent(UMaterialInterface* ParentM
 	}
 }
 
-ENQUEUE_UNIQUE_RENDER_COMMAND_THREEPARAMETER_DECLARE_TEMPLATE(
-	SetMIParameterValue,ParameterType,
-	const UMaterialInstance*,Instance,Instance,
-	FName,ParameterName,Parameter.ParameterName,
-	typename ParameterType::ValueType,Value,ParameterType::GetValue(Parameter),
-{
-	Instance->Resources[0]->RenderThread_UpdateParameter(ParameterName, Value);
-	if (Instance->Resources[1])
+ENQUEUE_UNIQUE_RENDER_COMMAND_FIVEPARAMETER_DECLARE_TEMPLATE(
+	SetMIParameterValue, ParameterType,
+	FMaterialInstanceResource*, Resource0, Resource0,
+	FMaterialInstanceResource*, Resource1, Resource1,
+	FMaterialInstanceResource*, Resource2, Resource2,
+	FName, ParameterName, Parameter.ParameterName,
+	typename ParameterType::ValueType, Value, ParameterType::GetValue(Parameter),
 	{
-		Instance->Resources[1]->RenderThread_UpdateParameter(ParameterName, Value);
-	}
-	if (Instance->Resources[2])
-	{
-		Instance->Resources[2]->RenderThread_UpdateParameter(ParameterName, Value);
-	}
-});
+		Resource0->RenderThread_UpdateParameter(ParameterName, Value);
+		if (Resource1)
+		{
+			Resource1->RenderThread_UpdateParameter(ParameterName, Value);
+		}
+		if (Resource2)
+		{
+			Resource2->RenderThread_UpdateParameter(ParameterName, Value);
+		}
+	});
 
 /**
- * Updates a parameter on the material instance from the game thread.
- */
+* Updates a parameter on the material instance from the game thread.
+*/
 template <typename ParameterType>
 void GameThread_UpdateMIParameter(const UMaterialInstance* Instance, const ParameterType& Parameter)
 {
-	ENQUEUE_UNIQUE_RENDER_COMMAND_THREEPARAMETER_CREATE_TEMPLATE(
-		SetMIParameterValue,ParameterType,
-		const UMaterialInstance*,Instance,
-		FName,Parameter.ParameterName,
-		typename ParameterType::ValueType,ParameterType::GetValue(Parameter)
+	ENQUEUE_UNIQUE_RENDER_COMMAND_FIVEPARAMETER_CREATE_TEMPLATE(
+		SetMIParameterValue, ParameterType,
+		FMaterialInstanceResource*, Instance->Resources[0],
+		FMaterialInstanceResource*, Instance->Resources[1],
+		FMaterialInstanceResource*, Instance->Resources[2],
+		FName, Parameter.ParameterName,
+		typename ParameterType::ValueType, ParameterType::GetValue(Parameter)
 		);
 }
-
 
 bool UMaterialInstance::UpdateParameters()
 {
@@ -647,7 +650,7 @@ bool UMaterialInstance::GetRefractionSettings(float& OutBiasValue) const
 	}
 }
 
-void UMaterialInstance::GetTextureExpressionValues(const FMaterialResource* MaterialResource, TArray<UTexture*>& OutTextures) const
+void UMaterialInstance::GetTextureExpressionValues(const FMaterialResource* MaterialResource, TArray<UTexture*>& OutTextures, TArray< TArray<int32> >* OutIndices) const
 {
 	const TArray<TRefCountPtr<FMaterialUniformExpressionTexture> >* ExpressionsByType[2];
 
@@ -655,6 +658,11 @@ void UMaterialInstance::GetTextureExpressionValues(const FMaterialResource* Mate
 
 	ExpressionsByType[0] = &MaterialResource->GetUniform2DTextureExpressions();
 	ExpressionsByType[1] = &MaterialResource->GetUniformCubeTextureExpressions();
+
+	if (OutIndices) // Try to prevent resizing since this would be expensive.
+	{
+		OutIndices->Empty(ExpressionsByType[0]->Num() + ExpressionsByType[1]->Num());
+	}
 
 	for(int32 TypeIndex = 0;TypeIndex < ARRAY_COUNT(ExpressionsByType);TypeIndex++)
 	{
@@ -668,7 +676,20 @@ void UMaterialInstance::GetTextureExpressionValues(const FMaterialResource* Mate
 			// Evaluate the expression in terms of this material instance.
 			UTexture* Texture = NULL;
 			Expression->GetGameThreadTextureValue(this,*MaterialResource,Texture, true);
-			OutTextures.AddUnique(Texture);
+			
+			if (Texture)
+			{
+				int32 InsertIndex = OutTextures.AddUnique(Texture);
+
+				if (OutIndices)
+				{
+					if (InsertIndex >= OutIndices->Num())
+					{
+						OutIndices->AddDefaulted(InsertIndex - OutIndices->Num() + 1);
+					}
+					(*OutIndices)[InsertIndex].Add(Expression->GetTextureIndex());
+				}
+			}
 		}
 	}
 }
@@ -821,6 +842,47 @@ void UMaterialInstance::LogMaterialsAndTextures(FOutputDevice& Ar, int32 Indent)
 	}
 }
 #endif
+
+void UMaterialInstance::GetUsedTexturesAndIndices(TArray<UTexture*>& OutTextures, TArray< TArray<int32> >& OutIndices, EMaterialQualityLevel::Type QualityLevel, ERHIFeatureLevel::Type FeatureLevel) const
+{
+	OutTextures.Empty();
+	OutIndices.Empty();
+
+	if (!FPlatformProperties::IsServerOnly())
+	{
+		const UMaterialInstance* MaterialInstanceToUse = this;
+		// Walk up the material instance chain to the first parent that has static parameters
+		while (MaterialInstanceToUse && !MaterialInstanceToUse->bHasStaticPermutationResource)
+		{
+			MaterialInstanceToUse = Cast<const UMaterialInstance>(MaterialInstanceToUse->Parent);
+		}
+
+		if (MaterialInstanceToUse && MaterialInstanceToUse->bHasStaticPermutationResource)
+		{
+			const FMaterialResource* CurrentResource = MaterialInstanceToUse->StaticPermutationMaterialResources[QualityLevel][FeatureLevel];
+			if (CurrentResource)
+			{
+				GetTextureExpressionValues(CurrentResource, OutTextures, &OutIndices);
+			}
+		}
+		else // Use the uniform expressions from the base material
+		{ 
+			const UMaterial* Material = GetMaterial();
+			if (Material)
+			{
+				const FMaterialResource* MaterialResource = Material->GetMaterialResource(FeatureLevel, QualityLevel);
+				if( MaterialResource )
+				{
+					GetTextureExpressionValues(MaterialResource, OutTextures, &OutIndices);
+				}
+			}
+			else // If the material instance has no material, use the default material.
+			{
+				UMaterial::GetDefaultMaterial(MD_Surface)->GetUsedTexturesAndIndices(OutTextures, OutIndices, QualityLevel, FeatureLevel);
+			}
+		}
+	}
+}
 
 void UMaterialInstance::OverrideTexture(const UTexture* InTextureToOverride, UTexture* OverrideTexture, ERHIFeatureLevel::Type InFeatureLevel)
 {

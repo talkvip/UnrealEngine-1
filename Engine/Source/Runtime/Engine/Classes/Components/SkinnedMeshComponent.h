@@ -203,6 +203,9 @@ public:
 
 	const TArray<int32>& GetMasterBoneMap() const { return MasterBoneMap; }
 
+	/** update Recalculate Normal flag in matching section */
+	void UpdateRecomputeTangent(int32 MaterialIndex);
+
 	/** 
 	 * When true, we will just using the bounds from our MasterPoseComponent.  This is useful for when we have a Mesh Parented
 	 * to the main SkelMesh (e.g. outline mesh or a full body overdraw effect that is toggled) that is always going to be the same
@@ -404,6 +407,12 @@ public:
 	void SetForcedLOD(int32 InNewForcedLOD);
 
 	/**
+	*  Returns the number of bones in the skeleton.
+	*/
+	UFUNCTION(BlueprintCallable, Category = "Components|SkinnedMesh")
+	int32 GetNumBones() const;
+
+	/**
 	 * Find the index of bone by name. Looks in the current SkeletalMesh being used by this SkeletalMeshComponent.
 	 * 
 	 * @param BoneName Name of bone to look up
@@ -499,7 +508,7 @@ public:
 	virtual UMaterialInterface* GetMaterial(int32 MaterialIndex) const override;
 	virtual FPrimitiveSceneProxy* CreateSceneProxy() override;
 	virtual void GetUsedMaterials(TArray<UMaterialInterface*>& OutMaterials) const override;
-	virtual void GetStreamingTextureInfo(TArray<FStreamingTexturePrimitiveInfo>& OutStreamingTextures) const override;
+	virtual void GetStreamingTextureInfo(FStreamingTextureLevelContext& LevelContext, TArray<FStreamingTexturePrimitiveInfo>& OutStreamingTextures) const override;
 	virtual int32 GetNumMaterials() const override;
 	//~ End UPrimitiveComponent Interface
 

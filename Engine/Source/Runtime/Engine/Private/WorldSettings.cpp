@@ -20,6 +20,10 @@
 #include "Editor.h"
 #endif 
 
+// @todo vreditor urgent: Temporary hack to allow world-to-meters to be set before
+// input is polled for motion controller devices each frame.
+ENGINE_API float GNewWorldToMetersScale = 0.0f;
+
 AWorldSettings::AWorldSettings(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer.DoNotCreateDefaultSubobject(TEXT("Sprite")))
 {
@@ -64,6 +68,7 @@ AWorldSettings::AWorldSettings(const FObjectInitializer& ObjectInitializer)
 
 	DefaultColorScale = FVector(1.0f, 1.0f, 1.0f);
 	DefaultMaxDistanceFieldOcclusionDistance = 600;
+	GlobalDistanceFieldViewDistance = 20000;
 	bPlaceCellsOnlyAlongCameraTracks = false;
 	VisibilityCellSize = 200;
 	VisibilityAggressiveness = VIS_LeastAggressive;
@@ -259,6 +264,36 @@ void AWorldSettings::CheckForErrors()
 			->AddToken(FTextToken::Create(LOCTEXT( "MapCheck_Message_RebuildLighting", "Maps need lighting rebuilt" ) ))
 			->AddToken(FMapErrorToken::Create(FMapErrors::RebuildLighting));
 	}
+}
+
+bool AWorldSettings::CanEditChange(const UProperty* InProperty) const
+{
+	if (InProperty)
+	{
+		FString PropertyName = InProperty->GetName();
+
+		if (InProperty->GetOuter()
+			&& InProperty->GetOuter()->GetName() == TEXT("LightmassWorldInfoSettings"))
+		{
+			if (PropertyName == GET_MEMBER_NAME_STRING_CHECKED(FLightmassWorldInfoSettings, bGenerateAmbientOcclusionMaterialMask)
+				|| PropertyName == GET_MEMBER_NAME_STRING_CHECKED(FLightmassWorldInfoSettings, DirectIlluminationOcclusionFraction)
+				|| PropertyName == GET_MEMBER_NAME_STRING_CHECKED(FLightmassWorldInfoSettings, IndirectIlluminationOcclusionFraction)
+				|| PropertyName == GET_MEMBER_NAME_STRING_CHECKED(FLightmassWorldInfoSettings, OcclusionExponent)
+				|| PropertyName == GET_MEMBER_NAME_STRING_CHECKED(FLightmassWorldInfoSettings, FullyOccludedSamplesFraction)
+				|| PropertyName == GET_MEMBER_NAME_STRING_CHECKED(FLightmassWorldInfoSettings, MaxOcclusionDistance)
+				|| PropertyName == GET_MEMBER_NAME_STRING_CHECKED(FLightmassWorldInfoSettings, bVisualizeAmbientOcclusion))
+			{
+				return LightmassSettings.bUseAmbientOcclusion;
+			}
+
+			if (PropertyName == GET_MEMBER_NAME_STRING_CHECKED(FLightmassWorldInfoSettings, EnvironmentColor))
+			{
+				return LightmassSettings.EnvironmentIntensity > 0;
+			}
+		}
+	}
+
+	return Super::CanEditChange(InProperty);
 }
 
 void AWorldSettings::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)

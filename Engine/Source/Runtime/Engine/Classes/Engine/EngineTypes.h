@@ -221,6 +221,22 @@ inline uint8 GetDefaultLightingChannelMask()
 	return 1;
 }
 
+/*
+* Enumerates available GBufferFormats.
+*/
+UENUM()
+namespace EGBufferFormat
+{
+	// When this enum is updated please update CVarGBufferFormat comments 
+	enum Type
+	{
+		Force8BitsPerChannel = 0 UMETA(DisplayName = "Force 8 Bits Per Channel", ToolTip = "Forces all GBuffers to 8 bits per channel. Intended as profiling for best performance."),
+		Default = 1 UMETA(ToolTip = "See GBuffer allocation function for layout details."),
+		HighPrecisionNormals = 3 UMETA(ToolTip = "Same as Default except normals are encoded at 16 bits per channel."),
+		Force16BitsPerChannel = 5 UMETA(DisplayName = "Force 16 Bits Per Channel", ToolTip = "Forces all GBuffers to 16 bits per channel. Intended as profiling for best quality."),
+	};
+}
+
 /** Controls the way that the width scale property affects animation trails. */
 UENUM()
 enum ETrailWidthMode
@@ -403,9 +419,10 @@ enum ECollisionChannel
 	ECC_PhysicsBody UMETA(DisplayName="PhysicsBody"),
 	ECC_Vehicle UMETA(DisplayName="Vehicle"),
 	ECC_Destructible UMETA(DisplayName="Destructible"),
+	ECC_EditorGizmo UMETA(Hidden, DisplayName="EditorGizmo", TraceQuery="1"),
 	// @NOTE : when you add more here for predefined engine channel
 	// please change the max in the CollisionProfile
-	// search ECC_Destructible
+	// search ECC_EditorGizmo
 
 	// Unspecified Engine Trace Channels
 	ECC_EngineTraceChannel1 UMETA(Hidden),
@@ -413,7 +430,6 @@ enum ECollisionChannel
 	ECC_EngineTraceChannel3 UMETA(Hidden),
 	ECC_EngineTraceChannel4 UMETA(Hidden), 
 	ECC_EngineTraceChannel5 UMETA(Hidden),
-	ECC_EngineTraceChannel6 UMETA(Hidden),
 
 	// in order to use this custom channels
 	// we recommend to define in your local file
@@ -690,6 +706,8 @@ struct ENGINE_API FCollisionResponseContainer
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category=CollisionResponseContainer, meta=(DisplayName="Destructible"))
 	TEnumAsByte<enum ECollisionResponse> Destructible;    // 7
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category=CollisionResponseContainer, meta=(DisplayName="EditorGizmo"))
+	TEnumAsByte<enum ECollisionResponse> EditorGizmo;    // 7
 
 	///////////////////////////////////////
 	// Unspecified Engine Trace Channels
@@ -708,9 +726,6 @@ struct ENGINE_API FCollisionResponseContainer
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category=CollisionResponseContainer)
 	TEnumAsByte<enum ECollisionResponse> EngineTraceChannel5;    // 12
-
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category=CollisionResponseContainer)
-	TEnumAsByte<enum ECollisionResponse> EngineTraceChannel6;    // 13
 
 	///////////////////////////////////////
 	// in order to use this custom channels
@@ -796,14 +811,14 @@ struct ENGINE_API FCollisionResponseContainer
 			uint8 PhysicsBody;			// 5
 			uint8 Vehicle;				// 6
 			uint8 Destructible;			// 7
+			uint8 EditorGizmo;			// 8
 
 			// Unspecified Engine Trace Channels
-			uint8 EngineTraceChannel1;   // 8
-			uint8 EngineTraceChannel2;   // 9
-			uint8 EngineTraceChannel3;   // 10
-			uint8 EngineTraceChannel4;   // 11
-			uint8 EngineTraceChannel5;   // 12
-			uint8 EngineTraceChannel6;   // 13
+			uint8 EngineTraceChannel1;   // 9
+			uint8 EngineTraceChannel2;   // 10
+			uint8 EngineTraceChannel3;   // 11
+			uint8 EngineTraceChannel4;   // 12
+			uint8 EngineTraceChannel5;   // 13
 
 			// Unspecified Game Trace Channels
 			uint8 GameTraceChannel1;     // 14

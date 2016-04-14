@@ -354,24 +354,45 @@ namespace UnrealBuildTool
 			CreateDirectoriesForProducedItems(OutdatedActionDictionary);
 
 			// Build a list of actions that are both needed for this target and outdated.
-			List<Action> ActionsToExecute = new List<Action>();
-			bool bHasOutdatedNonLinkActions = false;
-			foreach (Action Action in AllActions)
-			{
-				if (Action.CommandPath != null && IsActionOutdatedMap.ContainsKey(Action) && OutdatedActionDictionary[Action])
-				{
-					ActionsToExecute.Add(Action);
-					if (Action.ActionType != ActionType.Link)
-					{
-						bHasOutdatedNonLinkActions = true;
-					}
-				}
-			}
+			HashSet<Action> ActionsToExecute = AllActions.Where(Action => Action.CommandPath != null && IsActionOutdatedMap.ContainsKey(Action) && OutdatedActionDictionary[Action]).ToHashSet();
 
 			// Remove link actions if asked to
-			if (UEBuildConfiguration.bSkipLinkingWhenNothingToCompile && !bHasOutdatedNonLinkActions)
+			if (UEBuildConfiguration.bSkipLinkingWhenNothingToCompile)
 			{
-				ActionsToExecute.Clear();
+				// Get all items produced by a compile action
+				HashSet<FileItem> ProducedItems = ActionsToExecute.Where(Action => Action.ActionType == ActionType.Compile).SelectMany(x => x.ProducedItems).ToHashSet();
+
+				// Get all link actions which have no out-of-date prerequisites
+				HashSet<Action> UnlinkedActions = ActionsToExecute.Where(Action => Action.ActionType == ActionType.Link && !ProducedItems.Overlaps(Action.PrerequisiteItems)).ToHashSet();
+
+				// Remove unlinked items
+				ActionsToExecute.ExceptWith(UnlinkedActions);
+
+				// Re-add unlinked items which produce things which are dependencies of other actions
+				for (;;)
+				{
+					// Get all prerequisite items of a link action
+					HashSet<Action> PrerequisiteLinkActions = ActionsToExecute.Where(Action => Action.ActionType == ActionType.Link).SelectMany(x => x.PrerequisiteItems).Select(Item => Item.ProducingAction).ToHashSet();
+
+					// Find all unlinked actions that need readding
+					HashSet<Action> UnlinkedActionsToReadd = UnlinkedActions.Where(Action => PrerequisiteLinkActions.Contains(Action)).ToHashSet();
+					if (UnlinkedActionsToReadd.Count == 0)
+					{
+						break;
+					}
+
+					ActionsToExecute.UnionWith(UnlinkedActionsToReadd);
+					UnlinkedActions.ExceptWith(UnlinkedActionsToReadd);
+
+					// Break early if there are no more unlinked actions to readd
+					if (UnlinkedActions.Count == 0)
+					{
+						break;
+					}
+				}
+
+				// Remove actions that are wholly dependent on unlinked actions
+				ActionsToExecute = ActionsToExecute.Where(Action => Action.PrerequisiteItems.Count == 0 || !Action.PrerequisiteItems.Select(Item => Item.ProducingAction).ToHashSet().IsSubsetOf(UnlinkedActions)).ToHashSet();
 			}
 
 			if (BuildConfiguration.bPrintPerformanceInfo)
@@ -380,7 +401,7 @@ namespace UnrealBuildTool
 				Log.TraceInformation("Checking outdatedness took " + CheckOutdatednessTime + "s");
 			}
 
-			return ActionsToExecute;
+			return ActionsToExecute.ToList();
 		}
 
 		/// <summary>

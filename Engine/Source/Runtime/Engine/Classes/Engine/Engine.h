@@ -963,7 +963,7 @@ public:
 	UPROPERTY(globalconfig)
 	TArray<FLinearColor> HLODColorationColors;
 
-	/** The colors used for TexelFactorAccuracy, WantedMipsAccuracy and TexCoordScaleAccuracy. */
+	/** The colors used for texture streaming accuracy debug view modes. */
 	UPROPERTY(globalconfig)
 	TArray<FLinearColor> StreamingAccuracyColors;
 
@@ -1491,9 +1491,6 @@ public:
 
 	/** Extensions that can modify view parameters on the render thread. */
 	TArray<TSharedPtr<class ISceneViewExtension, ESPMode::ThreadSafe> > ViewExtensions;
-
-	/** Reference to the Motion Control devices that are attached, if any */
-	TArray < class IMotionController*> MotionControllerDevices;
 
 	/** Triggered when a world is added. */	
 	DECLARE_EVENT_OneParam( UEngine, FWorldAddedEvent , UWorld* );
@@ -2296,8 +2293,6 @@ protected:
 	 *	@return true if there is an initialized device, false otherwise
 	 */
 	virtual bool InitializeHMDDevice();
-
-	virtual bool InitializeMotionControllers();
 
 	/**	Record EngineAnalytics information for attached HMD devices. */
 	virtual void RecordHMDAnalytics();

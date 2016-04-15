@@ -24,12 +24,12 @@ UVREditorUniformScaleGizmoHandleGroup::UVREditorUniformScaleGizmoHandleGroup()
 
 	UniformScaleHandle->SetStaticMesh( UniformScaleMesh );
 	UniformScaleHandle->SetMobility( EComponentMobility::Movable );
-	UniformScaleHandle->AttachTo( this );
+	UniformScaleHandle->SetupAttachment( this );
 
 	UniformScaleHandle->SetCollisionEnabled( ECollisionEnabled::QueryOnly );
 	UniformScaleHandle->SetCollisionResponseToAllChannels( ECR_Ignore );
-	UniformScaleHandle->SetCollisionResponseToChannel( ECC_EditorGizmo, ECollisionResponse::ECR_Block );
-	UniformScaleHandle->SetCollisionObjectType( ECC_EditorGizmo );
+	UniformScaleHandle->SetCollisionResponseToChannel( COLLISION_GIZMO, ECollisionResponse::ECR_Block );
+	UniformScaleHandle->SetCollisionObjectType( COLLISION_GIZMO );
 
 	UniformScaleHandle->bGenerateOverlapEvents = false;
 	UniformScaleHandle->SetCanEverAffectNavigation( false );

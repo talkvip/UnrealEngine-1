@@ -19,13 +19,13 @@ namespace AutomationTool
 	/// - Tasks:        Building blocks which can be executed as part of the build process. Many predefined tasks are provided ('Cook', 'Compile', 'Copy', 'Stage', 'Log', 'PakFile', etc...), and additional tasks may be 
 	///                 added be declaring classes derived from AutomationTool.CustomTask in other UAT modules. 
 	/// - Nodes:        A named sequence of tasks which are executed in order to produce outputs. Nodes may have dependencies on other nodes for their outputs before they can be executed. Declared with the 'Node' element.
-	/// - Agent Groups: A set of nodes nodes which is executed on the same machine if running as part of a build system. Has no effect when building locally. Declared with the 'Group' element.
-	/// - Triggers:     Container for groups which should only be executed when explicitly triggered (using the -Trigger=... or -SkipTriggers command line argument). Declared with the 'Trigger' element.
+	/// - Agents:		A machine which can execute a sequence of nodes, if running as part of a build system. Has no effect when building locally. Declared with the 'Agent' element.
+	/// - Triggers:     Container for agents which should only be executed when explicitly triggered (using the -Trigger=... or -SkipTriggers command line argument). Declared with the 'Trigger' element.
 	/// - Notifiers:    Specifies email recipients for failures in one or more nodes, whether they should receive notifications on warnings, and so on.
 	/// 
 	/// Properties can be passed in to a script on the command line, or set procedurally with the &ltProperty Name="Foo" Value="Bar"/&gt; syntax. Properties referenced with the $(Property Name) notation are valid within 
 	/// all strings, and will be expanded as macros when the script is read. If a property name is not set explicitly, it defaults to the contents of an environment variable with the same name. 
-	/// Local properties, which only affect the scope of the containing XML element (node, group, etc...) are declared with the &lt;Local Name="Foo" Value="Bar"/&gt; element, and will override a similarly named global 
+	/// Local properties, which only affect the scope of the containing XML element (node, agent, etc...) are declared with the &lt;Local Name="Foo" Value="Bar"/&gt; element, and will override a similarly named global 
 	/// property for the local property's scope.
 	///
 	/// Any elements can be conditionally defined via the "If" attribute, which follows a syntax similar to MSBuild. Literals in conditions may be quoted with single (') or double (") quotes, or an unquoted sequence of 
@@ -56,12 +56,13 @@ namespace AutomationTool
 	[Help("ShowNotifications", "Show notifications that will be sent for each node in the output")]
 	[Help("Trigger=<Name>[+<Name>...]", "Activates the given triggers, including all the nodes behind them in the graph")]
 	[Help("SkipTriggers", "Activate all triggers")]
+	[Help("Preprocess=<FileName>", "Writes the preprocessed graph to the given file")]
 	[Help("Export=<FileName>", "Exports a JSON file containing the preprocessed build graph, for use as part of a build system")]
 	[Help("PublicTasksOnly", "Only include built-in tasks in the schema, excluding any other UAT modules")]
 	[Help("SharedStorageDir=<DirName>", "Sets the directory to use to transfer build products between agents in a build farm")]
 	[Help("SingleNode=<Name>", "Run only the given node. Intended for use on a build system after running with -Export.")]
 	[Help("WriteToSharedStorage", "Allow writing to shared storage. If not set, but -SharedStorageDir is specified, build products will read but not written")]
-	public class Build : BuildCommand
+	public class BuildGraph : BuildCommand
 	{
 		/// <summary>
 		/// Main entry point for the BuildGraph command
@@ -85,6 +86,7 @@ namespace AutomationTool
 
 			string SchemaFileName = ParseParamValue("Schema", null);
 			string ExportFileName = ParseParamValue("Export", null);
+			string PreprocessedFileName = ParseParamValue("Preprocess", null);
 
 			string SharedStorageDir = ParseParamValue("SharedStorageDir", null);
 			string SingleNodeName = ParseParamValue("SingleNode", null);
@@ -196,6 +198,12 @@ namespace AutomationTool
 
 			// Cull the graph to include only those nodes
 			Graph.Select(TargetNodes);
+
+			// Write out the preprocessed script
+			if (PreprocessedFileName != null)
+			{
+				Graph.Write(new FileReference(PreprocessedFileName), (SchemaFileName != null)? new FileReference(SchemaFileName) : null);
+			}
 
 			// Find the triggers which are explicitly activated, and all of its upstream triggers.
 			HashSet<ManualTrigger> Triggers = new HashSet<ManualTrigger>();
@@ -339,7 +347,7 @@ namespace AutomationTool
 		HashSet<Node> FindCompletedNodes(Graph Graph, TempStorage Storage)
 		{
 			HashSet<Node> CompletedNodes = new HashSet<Node>();
-			foreach(Node Node in Graph.Groups.SelectMany(x => x.Nodes))
+			foreach(Node Node in Graph.Agents.SelectMany(x => x.Nodes))
 			{
 				if(Storage.IsComplete(Node.Name))
 				{
@@ -358,7 +366,7 @@ namespace AutomationTool
 		bool BuildAllNodes(JobContext Job, Graph Graph, TempStorage Storage)
 		{
 			// Build a flat list of nodes to execute, in order
-			Node[] NodesToExecute = Graph.Groups.SelectMany(x => x.Nodes).ToArray();
+			Node[] NodesToExecute = Graph.Agents.SelectMany(x => x.Nodes).ToArray();
 
 			// Check the integrity of any local nodes that have been completed. It's common to run formal builds locally between regular development builds, so we may have 
 			// stale local state. Rather than failing later, detect and clean them up now.
@@ -401,7 +409,7 @@ namespace AutomationTool
 		{
 			// Create a mapping from tag name to the files it contains, and seed it with invalid entries for everything in the graph
 			Dictionary<string, HashSet<FileReference>> TagNameToFileSet = new Dictionary<string,HashSet<FileReference>>();
-			foreach(NodeOutput Output in Graph.Groups.SelectMany(x => x.Nodes).SelectMany(x => x.Outputs))
+			foreach(NodeOutput Output in Graph.Agents.SelectMany(x => x.Nodes).SelectMany(x => x.Outputs))
 			{
 				TagNameToFileSet[Output.Name] = null;
 			}
@@ -436,14 +444,14 @@ namespace AutomationTool
 				Console.WriteLine();
 			}
 
-			// Determine all the outputs which are required to be copied to temp storage (because they're referenced by nodes in another agent group)
+			// Determine all the outputs which are required to be copied to temp storage (because they're referenced by nodes in another agent)
 			HashSet<NodeOutput> ReferencedOutputs = new HashSet<NodeOutput>();
-			foreach(AgentGroup Group in Graph.Groups)
+			foreach(Agent Agent in Graph.Agents)
 			{
-				bool bSameGroup = Group.Nodes.Contains(Node);
-				foreach(Node OtherNode in Group.Nodes)
+				bool bSameAgent = Agent.Nodes.Contains(Node);
+				foreach(Node OtherNode in Agent.Nodes)
 				{
-					if(!bSameGroup || Node.ControllingTrigger != OtherNode.ControllingTrigger)
+					if(!bSameAgent || Node.ControllingTrigger != OtherNode.ControllingTrigger)
 					{
 						ReferencedOutputs.UnionWith(OtherNode.Inputs);
 					}
@@ -460,5 +468,12 @@ namespace AutomationTool
 			Storage.MarkAsComplete(Node.Name);
 			return true;
 		}
+	}
+
+	/// <summary>
+	/// Legacy command name for compatibility.
+	/// </summary>
+	public class Build : BuildGraph
+	{
 	}
 }

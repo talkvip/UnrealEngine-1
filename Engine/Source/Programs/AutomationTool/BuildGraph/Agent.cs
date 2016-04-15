@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.Xml;
 
 namespace AutomationTool
 {
@@ -11,10 +12,10 @@ namespace AutomationTool
 	/// Stores a list of nodes which can be executed on a single agent
 	/// </summary>
 	[DebuggerDisplay("{Name}")]
-	class AgentGroup
+	class Agent
 	{
 		/// <summary>
-		/// Name of this agent group. Used for display purposes in a build system.
+		/// Name of this agent. Used for display purposes in a build system.
 		/// </summary>
 		public string Name;
 
@@ -34,10 +35,33 @@ namespace AutomationTool
 		/// </summary>
 		/// <param name="InName">Name of this agent group</param>
 		/// <param name="InPossibleTypes">Array of valid agent types. See comment for AgentTypes member.</param>
-		public AgentGroup(string InName, string[] InPossibleTypes)
+		public Agent(string InName, string[] InPossibleTypes)
 		{
 			Name = InName;
 			PossibleTypes = InPossibleTypes;
+		}
+
+		/// <summary>
+		/// Writes this agent group out to a file, filtering nodes by a controlling trigger
+		/// </summary>
+		/// <param name="Writer">The XML writer to output to</param>
+		/// <param name="ControllingTrigger">The controlling trigger to filter by</param>
+		public void Write(XmlWriter Writer, ManualTrigger ControllingTrigger)
+		{
+			if (Nodes.Any(x => x.ControllingTrigger == ControllingTrigger))
+			{
+				Writer.WriteStartElement("Agent");
+				Writer.WriteAttributeString("Name", Name);
+				Writer.WriteAttributeString("Type", String.Join(";", PossibleTypes));
+				foreach (Node Node in Nodes)
+				{
+					if (Node.ControllingTrigger == ControllingTrigger)
+					{
+						Node.Write(Writer);
+					}
+				}
+				Writer.WriteEndElement();
+			}
 		}
 	}
 }

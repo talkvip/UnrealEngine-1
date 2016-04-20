@@ -60,13 +60,10 @@ FArchive& FDuplicateDataWriter::operator<<(UObject*& Object)
 
 FArchive& FDuplicateDataWriter::operator<<(FLazyObjectPtr& LazyObjectPtr)
 {
-	if ( (GetPortFlags() & PPF_DuplicateForPIE) == 0 )
+	if (UObject* DuplicatedObject = GetDuplicatedObject(LazyObjectPtr.Get(), false))
 	{
-		if (UObject* DuplicatedObject = GetDuplicatedObject(LazyObjectPtr.Get(), false))
-		{
-			FLazyObjectPtr Ptr(DuplicatedObject);
-			return *this << Ptr.GetUniqueID();
-		}
+		FLazyObjectPtr Ptr(DuplicatedObject);
+		return *this << Ptr.GetUniqueID();
 	}
 
 	FUniqueObjectGuid ID = LazyObjectPtr.GetUniqueID();

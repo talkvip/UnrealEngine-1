@@ -362,7 +362,7 @@ void UAudioComponent::PlaybackCompleted(bool bFailedToStart)
 	}
 
 	// Auto destruction is handled via marking object for deletion.
-	if (bAutoDestroy && !bIsActive)
+	if (bAutoDestroy)
 	{
 		DestroyComponent();
 	}

@@ -3,6 +3,7 @@
 #include "CorePrivatePCH.h"
 #include "ExceptionHandling.h"
 #include "VarargsHelper.h"
+#include "OutputDeviceHelper.h"
 #include "HAL/ThreadHeartBeat.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogOutputDevice, Log, All);
@@ -23,81 +24,12 @@ namespace
 
 const TCHAR* FOutputDevice::VerbosityToString(ELogVerbosity::Type Verbosity)
 {
-	switch (Verbosity & ELogVerbosity::VerbosityMask)
-	{
-	case ELogVerbosity::NoLogging:
-		return TEXT("NoLogging");
-	case ELogVerbosity::Fatal:
-		return TEXT("Fatal");
-	case ELogVerbosity::Error:
-		return TEXT("Error");
-	case ELogVerbosity::Warning:
-		return TEXT("Warning");
-	case ELogVerbosity::Display:
-		return TEXT("Display");
-	case ELogVerbosity::Log:
-		return TEXT("Log");
-	case ELogVerbosity::Verbose:
-		return TEXT("Verbose");
-	case ELogVerbosity::VeryVerbose:
-		return TEXT("VeryVerbose");
-	}
-	return TEXT("UknownVerbosity");
+	return FOutputDeviceHelper::VerbosityToString(Verbosity);
 }
 
 FString FOutputDevice::FormatLogLine( ELogVerbosity::Type Verbosity, const class FName& Category, const TCHAR* Message /*= nullptr*/, ELogTimes::Type LogTime /*= ELogTimes::None*/, const double Time /*= -1.0*/ )
 {
-	const bool bShowCategory = GPrintLogCategory && Category != NAME_None;
-	FString Format;
-
-	switch (LogTime)
-	{
-		case ELogTimes::SinceGStartTime:
-		{																	
-			const double RealTime = Time == -1.0f ? FPlatformTime::Seconds() - GStartTime : Time;
-			Format = FString::Printf( TEXT( "[%07.2f][%3d]" ), RealTime, GFrameCounter % 1000 );
-			break;
-		}
-
-		case ELogTimes::UTC:
-			Format = FString::Printf(TEXT("[%s][%3d]"), *FDateTime::UtcNow().ToString(TEXT("%Y.%m.%d-%H.%M.%S:%s")), GFrameCounter % 1000);
-			break;
-
-		default:
-			break;
-	}	
-
-	if (bShowCategory)
-	{
-		if (Verbosity != ELogVerbosity::Log)
-		{
-			Format += Category.ToString();
-			Format += TEXT(":");
-			Format += VerbosityToString(Verbosity);
-			Format += TEXT(": ");
-		}
-		else
-		{
-			Format += Category.ToString();
-			Format += TEXT(": ");
-		}
-	}
-	else
-	{
-		if (Verbosity != ELogVerbosity::Log)
-		{
-#if !HACK_HEADER_GENERATOR
-			Format += VerbosityToString(Verbosity);
-			Format += TEXT(": ");
-#endif
-		}
-	}
-
-	if (Message)
-	{
-		Format += Message;
-	}
-	return Format;
+	return FOutputDeviceHelper::FormatLogLine(Verbosity, Category, Message, LogTime, Time);
 }
 
 void FOutputDevice::Log( ELogVerbosity::Type Verbosity, const TCHAR* Str )
@@ -210,21 +142,46 @@ void StaticFailDebug( const TCHAR* Error, const ANSICHAR* File, int32 Line, cons
 	FCString::Strncat( GErrorHist, TEXT( "\r\n\r\n" ), ARRAY_COUNT( GErrorHist ) );
 }
 
-void FDebug::ConditionallyEmitBeginCrashUATMarker()
+void FDebug::OutputMultiLineCallstack(const ANSICHAR* File, int32 Line, const FName& LogName, const TCHAR* Heading, TCHAR* Message, ELogVerbosity::Type Verbosity)
 {
-	const bool bWriteUATMarkers = FParse::Param( FCommandLine::Get(), TEXT( "CrashForUAT" ) ) && FParse::Param( FCommandLine::Get(), TEXT( "stdout" ) );
-	if (bWriteUATMarkers)
-	{
-		UE_LOG( LogOutputDevice, Error, TEXT( "\nbegin: stack for UAT" ) );
-	}
-}
+	const bool bWriteUATMarkers = FParse::Param(FCommandLine::Get(), TEXT("CrashForUAT")) && FParse::Param(FCommandLine::Get(), TEXT("stdout"));
 
-void FDebug::ConditionallyEmitEndCrashUATMarker()
-{
-	const bool bWriteUATMarkers = FParse::Param( FCommandLine::Get(), TEXT( "CrashForUAT" ) ) && FParse::Param( FCommandLine::Get(), TEXT( "stdout" ) );
 	if (bWriteUATMarkers)
 	{
-		UE_LOG( LogOutputDevice, Error, TEXT( "\nend: stack for UAT" ) );
+		FMsg::Logf(File, Line, LogName, Verbosity, TEXT("begin: stack for UAT"));
+	}
+
+	FMsg::Logf(File, Line, LogName, Verbosity, TEXT("%s"), Heading);
+	FMsg::Logf(File, Line, LogName, Verbosity, TEXT(""));
+
+	for (TCHAR* LineStart = Message;; )
+	{
+		// Find the end of the current line
+		TCHAR* LineEnd = LineStart;
+		while (*LineEnd != 0 && *LineEnd != '\r' && *LineEnd != '\n')
+		{
+			LineEnd++;
+		}
+
+		// Output it
+		TCHAR LineEndCharacter = *LineEnd;
+		*LineEnd = 0;
+		FMsg::Logf(File, Line, LogName, Verbosity, TEXT("%s"), LineStart);
+		*LineEnd = LineEndCharacter;
+
+		// Quit if this was the last line
+		if (*LineEnd == 0)
+		{
+			break;
+		}
+
+		// Move to the next line
+		LineStart = (LineEnd[0] == '\r' && LineEnd[1] == '\n') ? (LineEnd + 2) : (LineEnd + 1);
+	}
+
+	if (bWriteUATMarkers)
+	{
+		FMsg::Logf(File, Line, LogName, Verbosity, TEXT("end: stack for UAT"));
 	}
 }
 
@@ -336,9 +293,9 @@ void FDebug::EnsureFailed(const ANSICHAR* Expr, const ANSICHAR* File, int32 Line
 		FMemory::SystemFree( StackTrace );
 
 		// Dump the error and flush the log.
-		FDebug::ConditionallyEmitBeginCrashUATMarker();
-		UE_LOG(LogOutputDevice, Warning, TEXT("=== Handled error: ===") LINE_TERMINATOR LINE_TERMINATOR TEXT("%s"), ErrorMsg);
-		FDebug::ConditionallyEmitEndCrashUATMarker();
+#if !NO_LOGGING
+		FDebug::OutputMultiLineCallstack(__FILE__, __LINE__, LogOutputDevice.GetCategoryName(), TEXT("=== Handled ensure: ==="), ErrorMsg, ELogVerbosity::Warning);
+#endif
 		GLog->Flush();
 
 		// Submit the error report to the server! (and display a balloon in the system tray)
@@ -542,16 +499,18 @@ EAppReturnType::Type FMessageDialog::Open( EAppMsgType::Type MessageType, const 
 //
 // Throw a string exception with a message.
 //
-VARARG_BODY( void VARARGS, FError::Throwf, const TCHAR*, VARARG_NONE )
+#if HACK_HEADER_GENERATOR
+void VARARGS FError::ThrowfImpl(const TCHAR* Fmt, ...)
 {
 	static TCHAR TempStr[4096];
 	GET_VARARGS( TempStr, ARRAY_COUNT(TempStr), ARRAY_COUNT(TempStr)-1, Fmt, Fmt );
-#if HACK_HEADER_GENERATOR && !PLATFORM_EXCEPTIONS_DISABLED
+#if !PLATFORM_EXCEPTIONS_DISABLED
 	throw( TempStr );
 #else
-	UE_LOG(LogOutputDevice, Error, TEXT("THROW: %s"), TempStr);
+	UE_LOG(LogOutputDevice, Fatal, TEXT("THROW: %s"), TempStr);
 #endif
 }					
+#endif
 
 /** Statics to prevent FMsg::Logf from allocating too much stack memory. */
 static FCriticalSection					MsgLogfStaticBufferGuard;

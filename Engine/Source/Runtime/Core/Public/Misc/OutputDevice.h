@@ -5,6 +5,8 @@
 #include "HAL/Platform.h"
 #include "HAL/PlatformMisc.h"
 #include "Misc/CoreMiscDefines.h"
+#include "Templates/IsValidVariadicFunctionArg.h"
+#include "Templates/AndOr.h"
 
 class FText;
 class FString;
@@ -293,7 +295,10 @@ public:
 #endif
 
 	// static helpers
+	DEPRECATED(4.12, "Please use FOutputDeviceHelper::VerbosityToString.")
 	static const TCHAR* VerbosityToString(ELogVerbosity::Type Verbosity);
+
+	DEPRECATED(4.12, "Please use FOutputDeviceHelper::FormatLogLine.")
 	static FString FormatLogLine(ELogVerbosity::Type Verbosity, const class FName& Category, const TCHAR* Message = nullptr, ELogTimes::Type LogTime = ELogTimes::None, const double Time = -1.0);
 
 
@@ -404,11 +409,8 @@ struct CORE_API FMsg
  **/
 struct CORE_API FDebug
 {
-	/** Conditionally emits a special UAT marker. */
-	static void ConditionallyEmitBeginCrashUATMarker();
-
-	/** Conditionally emits a special UAT marker. */
-	static void ConditionallyEmitEndCrashUATMarker();
+	/** Outputs a callstack message, separating out each line into a separate log call by modifying the buffer in-place */
+	static void OutputMultiLineCallstack(const ANSICHAR* File, int32 Line, const FName& LogName, const TCHAR* Heading, TCHAR* Message, ELogVerbosity::Type Verbosity);
 
 	/** Logs final assert message and exits the program. */
 	static void VARARGS AssertFailed(const ANSICHAR* Expr, const ANSICHAR* File, int32 Line, const TCHAR* Format = TEXT(""), ...);
@@ -479,14 +481,30 @@ struct CORE_API FMessageDialog
  **/
 struct CORE_API FError
 {
-	/** low level fater error handler. */
+	/** low level fatal error handler. */
 	static void VARARGS LowLevelFatal(const ANSICHAR* File, int32 Line, const TCHAR* Format=TEXT(""), ... );
 
-	/** @name Exception handling */
-	//@{
-	/** For throwing string-exceptions which safely propagate through guard/unguard. */
-	VARARG_DECL( static void VARARGS, static void, VARARG_NONE, Throwf, VARARG_NONE, const TCHAR*, VARARG_NONE, VARARG_NONE );
-	//@}
+#if HACK_HEADER_GENERATOR
+	/**
+	 * Throws a printf-formatted exception as a const TCHAR*.
+	 */
+	template <typename... Types>
+	FUNCTION_NO_RETURN_START
+	static void VARARGS Throwf(const TCHAR* Fmt, Types... Args)
+	FUNCTION_NO_RETURN_END
+	{
+		static_assert(TAnd<TIsValidVariadicFunctionArg<Types>...>::Value, "Invalid argument(s) passed to FError::Throwf");
+
+		ThrowfImpl(Fmt, Args...);
+	}
+#endif
+
+private:
+#if HACK_HEADER_GENERATOR
+	FUNCTION_NO_RETURN_START
+	static void VARARGS ThrowfImpl(const TCHAR* Fmt, ...)
+	FUNCTION_NO_RETURN_END;
+#endif
 };
 
 

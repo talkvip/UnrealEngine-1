@@ -323,6 +323,7 @@ FSignedArchiveReader::FSignedArchiveReader(FArchive* InPakReader, FChunkCacheWor
 	, SignatureChecker(InSignatureChecker)
 {
 	// Cache global info about the archive
+	ArIsLoading = true;
 	SizeOnDisk = PakReader->TotalSize();
 	ChunkCount = SizeOnDisk / FPakInfo::MaxChunkDataSize + ((SizeOnDisk % FPakInfo::MaxChunkDataSize) ? 1 : 0);
 	PakSize = SizeOnDisk;
@@ -464,7 +465,8 @@ void FSignedArchiveReader::Serialize(void* Data, int64 Length)
 		if (ChunksReadThisLoop == 0)
 		{
 			// No chunks read, avoid tight spinning loops and give up some time to the other threads
-			FPlatformProcess::Sleep(0.0f);
+			QUICK_SCOPE_CYCLE_COUNTER(STAT_FSignedArchiveReader_Spin);
+			FPlatformProcess::SleepNoStats(0.001f);
 		}
 	}
 	while (ChunksToRead > 0);

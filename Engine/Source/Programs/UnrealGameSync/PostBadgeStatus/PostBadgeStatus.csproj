@@ -7,8 +7,8 @@
     <ProjectGuid>{DCBE3437-5DBF-41B4-B854-967BC0C93C48}</ProjectGuid>
     <OutputType>Exe</OutputType>
     <AppDesignerFolder>Properties</AppDesignerFolder>
-    <RootNamespace>PostBuildInfoTool</RootNamespace>
-    <AssemblyName>PostBuildInfoTool</AssemblyName>
+    <RootNamespace>PostBadgeStatus</RootNamespace>
+    <AssemblyName>PostBadgeStatus</AssemblyName>
     <TargetFrameworkVersion>v4.5</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
   </PropertyGroup>

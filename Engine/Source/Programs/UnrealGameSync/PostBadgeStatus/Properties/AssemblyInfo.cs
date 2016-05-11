@@ -7,12 +7,12 @@ using System.Runtime.InteropServices;
 // General Information about an assembly is controlled through the following 
 // set of attributes. Change these attribute values to modify the information
 // associated with an assembly.
-[assembly: AssemblyTitle("UnrealGameSyncCIS")]
+[assembly: AssemblyTitle("WriteBadgeStatus")]
 [assembly: AssemblyDescription("")]
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("")]
-[assembly: AssemblyProduct("UnrealGameSyncCIS")]
-[assembly: AssemblyCopyright("Copyright ©  2015")]
+[assembly: AssemblyProduct("WriteBadgeStatus")]
+[assembly: AssemblyCopyright("Copyright © Epic Games 2016")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
 
@@ -22,7 +22,7 @@ using System.Runtime.InteropServices;
 [assembly: ComVisible(false)]
 
 // The following GUID is for the ID of the typelib if this project is exposed to COM
-[assembly: Guid("fb419a69-e06d-420c-bb0a-321faf3f99a1")]
+[assembly: Guid("fb419b69-e06d-420c-bb0a-321faf3f99a1")]
 
 // Version information for an assembly consists of the following four values:
 //

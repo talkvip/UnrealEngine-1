@@ -218,8 +218,6 @@ public:
 	FMatrix EmitterToSimulation;
 	/** Transform from simulation space to world space.					*/
 	FMatrix SimulationToWorld;
-	/** Component can disable Tick and Rendering of this emitter. */
-	uint32 bEnabled : 1;
 	/** If true, kill this emitter instance when it is deactivated.		*/
 	uint32 bKillOnDeactivate:1;
 	/** if true, kill this emitter instance when it has completed.		*/

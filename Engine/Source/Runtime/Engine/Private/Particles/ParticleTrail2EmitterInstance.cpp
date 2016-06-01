@@ -2571,7 +2571,7 @@ FDynamicEmitterDataBase* FParticleRibbonEmitterInstance::GetDynamicData(bool bSe
 	QUICK_SCOPE_CYCLE_COUNTER(STAT_ParticleRibbonEmitterInstance_GetDynamicData);
 
 	UParticleLODLevel* LODLevel = SpriteTemplate->GetLODLevel(0);
-	if (IsDynamicDataRequired(LODLevel) == false || !bEnabled)
+	if (IsDynamicDataRequired(LODLevel) == false)
 	{
 		return NULL;
 	}
@@ -2626,7 +2626,7 @@ bool FParticleRibbonEmitterInstance::UpdateDynamicData(FDynamicEmitterDataBase* 
 {
 	QUICK_SCOPE_CYCLE_COUNTER(STAT_ParticleRibbonEmitterInstance_UpdateDynamicData);
 
-	if (ActiveParticles <= 0 || !bEnabled)
+	if (ActiveParticles <= 0)
 	{
 		return false;
 	}
@@ -2664,7 +2664,7 @@ bool FParticleRibbonEmitterInstance::UpdateDynamicData(FDynamicEmitterDataBase* 
  */
 FDynamicEmitterReplayDataBase* FParticleRibbonEmitterInstance::GetReplayData()
 {
-	if (ActiveParticles <= 0 || !bEnabled)
+	if (ActiveParticles <= 0)
 	{
 		return NULL;
 	}
@@ -2739,7 +2739,7 @@ bool FParticleRibbonEmitterInstance::FillReplayData(FDynamicEmitterReplayDataBas
 {
 	QUICK_SCOPE_CYCLE_COUNTER(STAT_ParticleRibbonEmitterInstance_FillReplayData);
 
-	if (ActiveParticles <= 0 || !bEnabled)
+	if (ActiveParticles <= 0)
 	{
 		return false;
 	}
@@ -3903,7 +3903,7 @@ FDynamicEmitterDataBase* FParticleAnimTrailEmitterInstance::GetDynamicData(bool 
 	QUICK_SCOPE_CYCLE_COUNTER(STAT_ParticleAnimTrailEmitterInstance_GetDynamicData);
 
 	UParticleLODLevel* LODLevel = SpriteTemplate->GetLODLevel(0);
-	if (IsDynamicDataRequired(LODLevel) == false || !bEnabled)
+	if (IsDynamicDataRequired(LODLevel) == false)
 	{
 		return NULL;
 	}
@@ -3967,7 +3967,7 @@ bool FParticleAnimTrailEmitterInstance::UpdateDynamicData(FDynamicEmitterDataBas
 {
 	QUICK_SCOPE_CYCLE_COUNTER(STAT_ParticleAnimTrailEmitterInstance_UpdateDynamicData);
 
-	if (ActiveParticles <= 0 || !bEnabled)
+	if (ActiveParticles <= 0)
 	{
 		return false;
 	}
@@ -4010,7 +4010,7 @@ bool FParticleAnimTrailEmitterInstance::UpdateDynamicData(FDynamicEmitterDataBas
  */
 FDynamicEmitterReplayDataBase* FParticleAnimTrailEmitterInstance::GetReplayData()
 {
-	if (ActiveParticles <= 0 || !bEnabled)
+	if (ActiveParticles <= 0)
 	{
 		return NULL;
 	}
@@ -4140,7 +4140,7 @@ bool FParticleAnimTrailEmitterInstance::FillReplayData( FDynamicEmitterReplayDat
 {
 	QUICK_SCOPE_CYCLE_COUNTER(STAT_ParticleAnimTrailEmitterInstance_FillReplayData);
 
-	if (ActiveParticles <= 0 || !bEnabled)
+	if (ActiveParticles <= 0)
 	{
 		return false;
 	}

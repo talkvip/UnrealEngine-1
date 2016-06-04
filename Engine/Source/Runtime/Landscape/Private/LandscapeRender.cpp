@@ -30,6 +30,14 @@ IMPLEMENT_UNIFORM_BUFFER_STRUCT(FLandscapeUniformShaderParameters, TEXT("Landsca
 #define LANDSCAPE_MAX_COMPONENT_SIZE 255
 #define LANDSCAPE_LOD_SQUARE_ROOT_FACTOR 1.5f
 
+int32 GLandscapeMeshLODBias = 0;
+FAutoConsoleVariableRef CVarLandscapeMeshLODBias(
+	TEXT("r.LandscapeLODBias"),
+	GLandscapeMeshLODBias,
+	TEXT("LOD bias for landscape/terrain meshes."),
+	ECVF_Scalability
+	);
+
 /*------------------------------------------------------------------------------
 	Forsyth algorithm for cache optimizing index buffers.
 ------------------------------------------------------------------------------*/
@@ -533,8 +541,10 @@ TMap<uint32, FLandscapeSharedBuffers*>FLandscapeComponentSceneProxy::SharedBuffe
 TMap<uint32, FLandscapeSharedAdjacencyIndexBuffer*>FLandscapeComponentSceneProxy::SharedAdjacencyIndexBufferMap;
 TMap<FLandscapeNeighborInfo::FLandscapeKey, TMap<FIntPoint, const FLandscapeNeighborInfo*> > FLandscapeNeighborInfo::SharedSceneProxyMap;
 
+const static FName NAME_LandscapeResourceNameForDebugging(TEXT("Landscape"));
+
 FLandscapeComponentSceneProxy::FLandscapeComponentSceneProxy(ULandscapeComponent* InComponent, FLandscapeEditToolRenderData* InEditToolRenderData)
-	: FPrimitiveSceneProxy(InComponent)
+	: FPrimitiveSceneProxy(InComponent, NAME_LandscapeResourceNameForDebugging)
 	, FLandscapeNeighborInfo(InComponent->GetWorld(), InComponent->GetLandscapeProxy()->GetLandscapeGuid(), InComponent->GetSectionBase() / InComponent->ComponentSizeQuads, InComponent->HeightmapTexture, InComponent->ForcedLOD, InComponent->LODBias)
 	, MaxLOD(FMath::CeilLogTwo(InComponent->SubsectionSizeQuads + 1) - 1)
 	, FirstLOD(0)
@@ -657,7 +667,7 @@ FLandscapeComponentSceneProxy::FLandscapeComponentSceneProxy(ULandscapeComponent
 	}
 #endif
 
-	bRequiresAdjacencyInformation = RequiresAdjacencyInformation(MaterialInterface, XYOffsetmapTexture == nullptr ? &FLandscapeVertexFactory::StaticType : &FLandscapeXYOffsetVertexFactory::StaticType, InComponent->GetWorld()->FeatureLevel);
+	bRequiresAdjacencyInformation = MaterialSettingsRequireAdjacencyInformation_GameThread(MaterialInterface, XYOffsetmapTexture == nullptr ? &FLandscapeVertexFactory::StaticType : &FLandscapeXYOffsetVertexFactory::StaticType, InComponent->GetWorld()->FeatureLevel);
 
 	const int8 SubsectionSizeLog2 = FMath::CeilLogTwo(InComponent->SubsectionSizeQuads + 1);
 	SharedBuffersKey = (SubsectionSizeLog2 & 0xf) | ((NumSubsections & 0xf) << 4) |
@@ -1076,27 +1086,6 @@ void FLandscapeComponentSceneProxy::OnTransformChanged()
 	LandscapeUniformShaderParameters.SetContents(LandscapeParams);
 }
 
-namespace
-{
-	inline bool RequiresAdjacencyInformation(FMaterialRenderProxy* MaterialRenderProxy, ERHIFeatureLevel::Type InFeatureLevel) // Assumes VertexFactory supports tessellation, and rendering thread with this function
-	{
-		if (RHISupportsTessellation(GShaderPlatformForFeatureLevel[InFeatureLevel]) && MaterialRenderProxy)
-		{
-			check(IsInRenderingThread());
-			const FMaterial* MaterialResource = MaterialRenderProxy->GetMaterial(InFeatureLevel);
-			check(MaterialResource);
-			EMaterialTessellationMode TessellationMode = MaterialResource->GetTessellationMode();
-			bool bEnableCrackFreeDisplacement = MaterialResource->IsCrackFreeDisplacementEnabled();
-
-			return TessellationMode == MTM_PNTriangles || (TessellationMode == MTM_FlatTessellation && bEnableCrackFreeDisplacement);
-		}
-		else
-		{
-			return false;
-		}
-	}
-};
-
 /**
 * Draw the scene proxy as a dynamic element
 *
@@ -1112,15 +1101,15 @@ void FLandscapeComponentSceneProxy::DrawStaticElements(FStaticPrimitiveDrawInter
 	FMeshBatch MeshBatch;
 	MeshBatch.Elements.Empty(NumBatches);
 
-	FMaterialRenderProxy* RenderProxy = MaterialInterface->GetRenderProxy(false);
-
 	// Could be different from bRequiresAdjacencyInformation during shader compilation
-	bool bCurrentRequiresAdjacencyInformation = RequiresAdjacencyInformation(RenderProxy, GetScene().GetFeatureLevel());
+	bool bCurrentRequiresAdjacencyInformation = MaterialRenderingRequiresAdjacencyInformation_RenderingThread(MaterialInterface, VertexFactory->GetType(), GetScene().GetFeatureLevel());
 
 	if (bCurrentRequiresAdjacencyInformation)
 	{
 		check(SharedBuffers->AdjacencyIndexBuffers);
 	}
+
+	FMaterialRenderProxy* RenderProxy = MaterialInterface->GetRenderProxy(false);
 
 	MeshBatch.VertexFactory = VertexFactory;
 	MeshBatch.MaterialRenderProxy = RenderProxy;
@@ -1321,6 +1310,8 @@ float FLandscapeComponentSceneProxy::CalcDesiredLOD(const class FSceneView& View
 		SubsectionLODBias   = Neighbors[3] ? Neighbors[3]->LODBias : 0;
 	}
 
+	SubsectionLODBias = FMath::Clamp<int8>(SubsectionLODBias + GLandscapeMeshLODBias, FirstLOD, LastLOD);
+
 	const int32 MinStreamedLOD = SubsectionHeightmapTexture ? FMath::Min<int32>(((FTexture2DResource*)SubsectionHeightmapTexture->Resource)->GetCurrentFirstMip(), FMath::CeilLogTwo(SubsectionSizeVerts) - 1) : 0;
 
 	float fLOD = FLT_MAX;
@@ -1418,8 +1409,7 @@ void FLandscapeComponentSceneProxy::GetDynamicMeshElements(const TArray<const FS
 			FMeshBatch& Mesh = Collector.AllocateMesh();
 
 			// Could be different from bRequiresAdjacencyInformation during shader compilation
-			FMaterialRenderProxy* RenderProxy = MaterialInterface->GetRenderProxy(false);
-			bool bCurrentRequiresAdjacencyInformation = RequiresAdjacencyInformation(RenderProxy, View->GetFeatureLevel());
+			bool bCurrentRequiresAdjacencyInformation = MaterialRenderingRequiresAdjacencyInformation_RenderingThread(MaterialInterface, VertexFactory->GetType(), View->GetFeatureLevel());
 			Mesh.Type = bCurrentRequiresAdjacencyInformation ? PT_12_ControlPointPatchList : PT_TriangleList;
 			Mesh.LCI = ComponentLightInfo.Get();
 			Mesh.CastShadow = true;

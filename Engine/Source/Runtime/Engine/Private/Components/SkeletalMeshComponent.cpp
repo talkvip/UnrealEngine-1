@@ -902,6 +902,18 @@ void USkeletalMeshComponent::RecalcRequiredBones(int32 LODIndex)
 	FSkeletalMeshResource* SkelMeshResource = GetSkeletalMeshResource();
 	check(SkelMeshResource);
 
+	// Make sure we access a valid LOD
+	// @fixme jira UE-30028 Avoid crash when called with partially loaded asset
+	if (SkelMeshResource->LODModels.Num() == 0)
+	{
+		//No LODS?
+		RequiredBones.Reset();
+		FillSpaceBasesRequiredBones.Reset();
+		UE_LOG(LogAnimation, Warning, TEXT("Skeletal Mesh asset '%s' has no LODs"), *SkeletalMesh->GetName());
+		return;
+	}
+	LODIndex = FMath::Clamp(LODIndex, 0, SkelMeshResource->LODModels.Num()-1);
+
 	// The list of bones we want is taken from the predicted LOD level.
 	FStaticLODModel& LODModel = SkelMeshResource->LODModels[LODIndex];
 	RequiredBones = LODModel.RequiredBones;
@@ -1021,21 +1033,14 @@ void USkeletalMeshComponent::RecalcRequiredBones(int32 LODIndex)
 	// Ensure that we have a complete hierarchy down to those bones.
 	FAnimationRuntime::EnsureParentsPresent(RequiredBones, SkeletalMesh);
 
-	FillSpaceBasesRequiredBones.Empty(RequiredBones.Num() + NeededBonesForFillSpaceBases.Num());
+	FillSpaceBasesRequiredBones.Reset(RequiredBones.Num() + NeededBonesForFillSpaceBases.Num());
 	FillSpaceBasesRequiredBones = RequiredBones;
 	
 	NeededBonesForFillSpaceBases.Sort();
 	MergeInBoneIndexArrays(FillSpaceBasesRequiredBones, NeededBonesForFillSpaceBases);
 	FAnimationRuntime::EnsureParentsPresent(FillSpaceBasesRequiredBones, SkeletalMesh);
 
-	// Sanitise bones that we aren't going to be updating
-	for (int32 BoneIndex = 0; BoneIndex < LocalAtoms.Num(); ++BoneIndex)
-	{
-		if (!RequiredBones.Contains(BoneIndex))
-		{
-			LocalAtoms[BoneIndex] = SkeletalMesh->RefSkeleton.GetRefBonePose()[BoneIndex];
-		}
-	}
+	LocalAtoms = SkeletalMesh->RefSkeleton.GetRefBonePose();
 
 	// make sure animation requiredBone to mark as dirty
 	if (AnimScriptInstance)

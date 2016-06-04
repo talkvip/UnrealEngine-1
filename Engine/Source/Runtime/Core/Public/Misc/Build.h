@@ -219,12 +219,6 @@
 	#error Exactly one of [UE_BUILD_DEBUG UE_BUILD_DEVELOPMENT UE_BUILD_TEST UE_BUILD_SHIPPING] should be defined to be 1
 #endif
 
-// ORION TEMP - turning on stats to judge perf
-#if UE_SERVER && UE_BUILD_TEST
-	#undef STATS
-	#define STATS 1
-#endif
-
 
 /**
  * This is a global setting which will turn on logging / checks for things which are
@@ -259,7 +253,7 @@
 #define USE_CIRCULAR_DEPENDENCY_LOAD_DEFERRING 1
 #define USE_DEFERRED_DEPENDENCY_CHECK_VERIFICATION_TESTS (USE_CIRCULAR_DEPENDENCY_LOAD_DEFERRING && 0)
 
-// 0 (default), set this to 1 to get draw events with "TOGGLEDRAWEVENTS" "SHOWMATERIALDRAWEVENTS" and the "ProfileGPU" command working in test
+// 0 (default), set this to 1 to get draw events with "TOGGLEDRAWEVENTS" "r.ShowMaterialDrawEvents" and the "ProfileGPU" command working in test
 #define ALLOW_PROFILEGPU_IN_TEST 0
-// draw events with "TOGGLEDRAWEVENTS" "SHOWMATERIALDRAWEVENTS" (for ProfileGPU, Pix, Razor, RenderDoc, ...) and the "ProfileGPU" command are normally compiled out for TEST and SHIPPING
+// draw events with "TOGGLEDRAWEVENTS" "r.ShowMaterialDrawEvents" (for ProfileGPU, Pix, Razor, RenderDoc, ...) and the "ProfileGPU" command are normally compiled out for TEST and SHIPPING
 #define WITH_PROFILEGPU (!(UE_BUILD_SHIPPING || UE_BUILD_TEST) || (UE_BUILD_TEST && ALLOW_PROFILEGPU_IN_TEST))

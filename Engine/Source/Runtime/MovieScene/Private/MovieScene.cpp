@@ -11,6 +11,8 @@ UMovieScene::UMovieScene(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 	, SelectionRange(FFloatRange::Empty())
 	, PlaybackRange(FFloatRange::Empty())
+	, bForceFixedFrameIntervalPlayback(false)
+	, FixedFrameInterval(0.0f)
 	, InTime_DEPRECATED(FLT_MAX)
 	, OutTime_DEPRECATED(-FLT_MAX)
 	, StartTime_DEPRECATED(FLT_MAX)
@@ -274,6 +276,30 @@ void UMovieScene::SetPlaybackRange(float Start, float End, bool bAlwaysMarkDirty
 		}
 #endif
 	}
+}
+
+
+bool UMovieScene::GetForceFixedFrameIntervalPlayback() const
+{
+	return bForceFixedFrameIntervalPlayback;
+}
+
+
+void UMovieScene::SetForceFixedFrameIntervalPlayback( bool bInForceFixedFrameIntervalPlayback )
+{
+	bForceFixedFrameIntervalPlayback = bInForceFixedFrameIntervalPlayback;
+}
+
+
+float UMovieScene::GetFixedFrameInterval() const
+{
+	return FixedFrameInterval;
+}
+
+
+void UMovieScene::SetFixedFrameInterval( float InFixedFrameInterval )
+{
+	FixedFrameInterval = InFixedFrameInterval;
 }
 
 
@@ -547,9 +573,9 @@ void UMovieScene::PostLoad()
 }
 
 
-void UMovieScene::PreSave()
+void UMovieScene::PreSave(const class ITargetPlatform* TargetPlatform)
 {
-	Super::PreSave();
+	Super::PreSave(TargetPlatform);
 
 #if WITH_EDITORONLY_DATA
 	// compress meta data mappings prior to saving

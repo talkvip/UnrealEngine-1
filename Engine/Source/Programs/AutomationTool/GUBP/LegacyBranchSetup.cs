@@ -628,6 +628,11 @@ partial class GUBP
 				BranchConfig.AddNode(new NonUnityTestNode(BranchConfig, HostPlatform));
 			}
 
+			if (HostPlatform == UnrealTargetPlatform.Win64 && !BranchOptions.ExcludePlatformsForEditor.Contains(HostPlatform) && !BranchOptions.ExcludeNodes.Contains("StaticAnalysis"))
+			{
+				BranchConfig.AddNode(new StaticAnalysisTestNode(BranchConfig, HostPlatform));
+			}
+
             if (DoASharedPromotable)
             {
                 var AgentSharingGroup = "Shared_EditorTests" + HostPlatformNode.StaticGetHostPlatformSuffix(HostPlatform);

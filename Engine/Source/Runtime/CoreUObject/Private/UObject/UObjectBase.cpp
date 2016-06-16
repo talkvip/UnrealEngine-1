@@ -561,7 +561,7 @@ void UClassCompiledInDefer(FFieldCompiledInInfo* ClassInfo, const TCHAR* Name, S
 	if (ExistingClassInfo)
 	{
 		// Class exists, this can only happen during hot-reload
-		check(GIsHotReload);
+		checkf(GIsHotReload, TEXT("Trying to recreate class '%s' outside of hot reload!"), *CPPClassName.ToString());
 
 		// Get the native name
 		FString NameWithoutPrefix(RemoveClassPrefix(Name));
@@ -1157,7 +1157,10 @@ UObject* ConstructDynamicType(FName TypePathName)
 	UObject* Result = nullptr;
 	if (FClassConstructFunctions* ClassConstructFn = GetDynamicClassMap().Find(TypePathName))
 	{
-		Result = ClassConstructFn->StaticClassFn();
+		UClass* DynamicClass = ClassConstructFn->StaticClassFn();
+		check(DynamicClass);
+		DynamicClass->AssembleReferenceTokenStream();
+		Result = DynamicClass;
 	}
 	else if (UScriptStruct *(**StaticStructFNPtr)() = GetDynamicStructMap().Find(TypePathName))
 	{

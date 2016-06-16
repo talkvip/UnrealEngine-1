@@ -3,15 +3,11 @@
 /*================================================================================
 	DelegateInstancesImpl.inl: Inline implementation of delegate bindings.
 
-	This file in re-included in DelegateCombinations.h for EVERY supported delegate signature.
-	Every combination of parameter count, return value presence or other function modifier will
-	include this file to generate a delegate interface type and implementation type for that signature.
-
 	The types declared in this file are for internal use only. 
 ================================================================================*/
 
 #pragma once
-#include "Delegates/DelegateInstanceInterface_Variadics.h"
+#include "Delegates/DelegateInstanceInterface.h"
 #include "UObject/NameTypes.h"
 
 class UFunction;
@@ -318,7 +314,7 @@ public:
 		// pointer-to-member function.
 		checkSlow(MethodPtr != nullptr);
 
-		return Payload.template ApplyAfter_ExplicitReturnType<RetValType>(TMemberFunctionCaller<MutableUserClass, FMethodPtr>(MutableUserObject, MethodPtr), Params...);
+		return Payload.ApplyAfter(TMemberFunctionCaller<MutableUserClass, FMethodPtr>(MutableUserObject, MethodPtr), Params...);
 	}
 
 	virtual FDelegateHandle GetHandle() const override
@@ -547,7 +543,7 @@ public:
 		// pointer-to-member function.
 		checkSlow(MethodPtr != nullptr);
 
-		return Payload.template ApplyAfter_ExplicitReturnType<RetValType>(TMemberFunctionCaller<MutableUserClass, FMethodPtr>(MutableUserObject, MethodPtr), Params...);
+		return Payload.ApplyAfter(TMemberFunctionCaller<MutableUserClass, FMethodPtr>(MutableUserObject, MethodPtr), Params...);
 	}
 
 	virtual FDelegateHandle GetHandle() const override
@@ -757,7 +753,7 @@ public:
 		// pointer-to-member function.
 		checkSlow(MethodPtr != nullptr);
 
-		return Payload.template ApplyAfter_ExplicitReturnType<RetValType>(TMemberFunctionCaller<MutableUserClass, FMethodPtr>(MutableUserObject, MethodPtr), Params...);
+		return Payload.ApplyAfter(TMemberFunctionCaller<MutableUserClass, FMethodPtr>(MutableUserObject, MethodPtr), Params...);
 	}
 
 	virtual FDelegateHandle GetHandle() const override
@@ -949,7 +945,7 @@ public:
 		// Call the static function
 		checkSlow(StaticFuncPtr != nullptr);
 
-		return Payload.template ApplyAfter_ExplicitReturnType<RetValType>(StaticFuncPtr, Params...);
+		return Payload.ApplyAfter(StaticFuncPtr, Params...);
 	}
 
 	virtual FDelegateHandle GetHandle() const override
@@ -1123,7 +1119,7 @@ public:
 
 	virtual RetValType Execute(ParamTypes... Params) const override
 	{
-		return Payload.template ApplyAfter_ExplicitReturnType<RetValType>(Functor, Params...);
+		return Payload.ApplyAfter(Functor, Params...);
 	}
 
 	virtual FDelegateHandle GetHandle() const override

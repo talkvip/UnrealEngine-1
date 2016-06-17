@@ -1144,9 +1144,16 @@ partial class GUBP
 				bBehindTrigger = true;
                 //AgentSharingGroup = "TemplateMonolithics" + StaticGetHostPlatformSuffix(InHostPlatform);
             }
-			if(!InBranchConfig.BranchOptions.bTargetPlatformsInParallel && !bBehindTrigger)
+			if(!InBranchConfig.BranchOptions.bTargetPlatformsInParallel)
 			{
-				AgentSharingGroup = "TargetPlatforms" + StaticGetHostPlatformSuffix(InHostPlatform);
+				if(bBehindTrigger)
+				{
+					AgentSharingGroup = "TargetPlatformsTest" + StaticGetHostPlatformSuffix(InHostPlatform);
+				}
+				else
+				{
+					AgentSharingGroup = "TargetPlatforms" + StaticGetHostPlatformSuffix(InHostPlatform);
+				}
 			}
         }
 
@@ -1433,6 +1440,72 @@ partial class GUBP
 			}
 			return false;
 		}	
+	}
+
+    public class SingleTargetNode : CompileNode
+    {
+        BranchInfo.BranchUProject GameProj;
+		string TargetName;
+        UnrealTargetPlatform TargetPlatform;
+		UnrealTargetConfiguration TargetConfiguration;
+
+		public SingleTargetNode(GUBPBranchConfig InBranchConfig, UnrealTargetPlatform InHostPlatform, BranchInfo.BranchUProject InGameProj, string InTargetName, UnrealTargetPlatform InTargetPlatform, UnrealTargetConfiguration InTargetConfiguration)
+            : base(InBranchConfig, InHostPlatform)
+        {
+            GameProj = InGameProj;
+			TargetName = InTargetName;
+            TargetPlatform = InTargetPlatform;
+			TargetConfiguration = InTargetConfiguration;
+
+			AddPseudodependency(RootEditorNode.StaticGetFullName(InHostPlatform));
+
+            if (TargetPlatform == UnrealTargetPlatform.PS4 || TargetPlatform == UnrealTargetPlatform.XboxOne)
+            {
+				// Required for PS4MapFileUtil/XboxOnePDBFileUtil
+				AddDependency(ToolsNode.StaticGetFullName(InHostPlatform));
+			}
+
+			if(!InBranchConfig.BranchOptions.bTargetPlatformsInParallel)
+			{
+				AgentSharingGroup = "TargetPlatforms" + StaticGetHostPlatformSuffix(InHostPlatform);
+			}
+        }
+
+        public static string StaticGetFullName(UnrealTargetPlatform InHostPlatform, BranchInfo.BranchUProject InGameProj, UnrealTargetPlatform InTargetPlatform, UnrealTargetConfiguration InTargetConfiguration)
+        {
+			return InGameProj.GameName + "_" + InTargetPlatform + "_" + InTargetConfiguration.ToString() + StaticGetHostPlatformSuffix(InHostPlatform);
+        }
+
+        public override string GetFullName()
+        {
+            return StaticGetFullName(HostPlatform, GameProj, TargetPlatform, TargetConfiguration);
+        }
+
+        public override bool DeleteBuildProducts()
+        {
+            return true;
+        }
+
+		public override int CISFrequencyQuantumShift(GUBP.GUBPBranchConfig BranchConfig)
+        {
+			return 15;
+        }
+
+        public override UE4Build.BuildAgenda GetAgenda(GUBP bp)
+        {
+           string Args = "-nobuilduht -skipactionhistory -CopyAppBundleBackToDevice";
+
+            UE4Build.BuildAgenda Agenda = new UE4Build.BuildAgenda();
+			if (GameProj.GameName == BranchConfig.Branch.BaseEngineProject.GameName)
+			{
+				Agenda.AddTargets(new string[] { TargetName }, TargetPlatform, TargetConfiguration, InAddArgs: Args);
+			}
+			else
+			{
+				Agenda.AddTargets(new string[] { TargetName }, TargetPlatform, TargetConfiguration, GameProj.FilePath, InAddArgs: Args);
+			}
+            return Agenda;
+        }
 	}
 
     public class SuccessNode : GUBPNode
@@ -2537,12 +2610,9 @@ partial class GUBP
 
     public class StaticAnalysisTestNode : TestNode
     {
-		GUBP.GUBPBranchConfig BranchConfig;
-
         public StaticAnalysisTestNode(GUBP.GUBPBranchConfig InBranchConfig, UnrealTargetPlatform InHostPlatform)
             : base(InHostPlatform)
         {
-			BranchConfig = InBranchConfig;
             AddDependency(ToolsForCompileNode.StaticGetFullName(HostPlatform));
             AddPseudodependency(RootEditorNode.StaticGetFullName(HostPlatform));
 			AgentSharingGroup = "TargetPlatforms" + StaticGetHostPlatformSuffix(InHostPlatform);

@@ -1,6 +1,4 @@
-using AutomationTool;
-using System;
-using System.Collections;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -8,15 +6,15 @@ using System.Threading.Tasks;
 using System.Xml;
 using UnrealBuildTool;
 
-namespace BuildGraph.Tasks
+namespace AutomationTool.Tasks
 {
 	/// <summary>
-	/// Parameters for a task that compiles a MsBuild project
+	/// Parameters for a task that compiles a C# project
 	/// </summary>
-	public class MsBuildTaskParameters
+	public class CsCompileTaskParameters
 	{
 		/// <summary>
-		/// The MsBuild project file to be compile. More than one project file can be specified by separating with semicolons.
+		/// The C# project file to be compile. More than one project file can be specified by separating with semicolons.
 		/// </summary>
 		[TaskParameter]
 		public string Project;
@@ -60,26 +58,26 @@ namespace BuildGraph.Tasks
 		/// <summary>
 		/// Tag to be applied to build products of this task
 		/// </summary>
-		[TaskParameter(Optional = true, ValidationType = TaskParameterValidationType.Tag)]
+		[TaskParameter(Optional = true, ValidationType = TaskParameterValidationType.TagList)]
 		public string Tag;
 	}
 
 	/// <summary>
-	/// Compile a MSBuild project file
+	/// Compile a C# project file
 	/// </summary>
-	[TaskElement("MsBuild", typeof(MsBuildTaskParameters))]
-	public class MsBuildTask : CustomTask
+	[TaskElement("CsCompile", typeof(CsCompileTaskParameters))]
+	public class CsCompileTask : CustomTask
 	{
 		/// <summary>
 		/// Parameters for the task
 		/// </summary>
-		MsBuildTaskParameters Parameters;
+		CsCompileTaskParameters Parameters;
 
 		/// <summary>
 		/// Constructor.
 		/// </summary>
 		/// <param name="InParameters">Parameters for this task</param>
-		public MsBuildTask(MsBuildTaskParameters InParameters)
+		public CsCompileTask(CsCompileTaskParameters InParameters)
 		{
 			Parameters = InParameters;
 		}
@@ -100,6 +98,11 @@ namespace BuildGraph.Tasks
 				if(!ProjectFile.Exists())
 				{
 					CommandUtils.LogError("Couldn't find project file '{0}'", ProjectFile.FullName);
+					return false;
+				}
+				if(!ProjectFile.HasExtension(".csproj"))
+				{
+					CommandUtils.LogError("File '{0}' is not a C# project", ProjectFile.FullName);
 					return false;
 				}
 			}
@@ -141,9 +144,9 @@ namespace BuildGraph.Tasks
 			}
 
 			// Apply the optional tag to the produced archive
-			if(!String.IsNullOrEmpty(Parameters.Tag))
+			foreach(string TagName in FindTagNamesFromList(Parameters.Tag))
 			{
-				FindOrAddTagSet(TagNameToFileSet, Parameters.Tag).UnionWith(ProjectBuildProducts);
+				FindOrAddTagSet(TagNameToFileSet, TagName).UnionWith(ProjectBuildProducts);
 			}
 
 			// Merge them into the standard set of build products
@@ -160,6 +163,24 @@ namespace BuildGraph.Tasks
 		}
 
 		/// <summary>
+		/// Find all the tags which are used as inputs to this task
+		/// </summary>
+		/// <returns>The tag names which are read by this task</returns>
+		public override IEnumerable<string> FindConsumedTagNames()
+		{
+			return FindTagNamesFromFilespec(Parameters.Project);
+		}
+
+		/// <summary>
+		/// Find all the tags which are modified by this task
+		/// </summary>
+		/// <returns>The tag names which are modified by this task</returns>
+		public override IEnumerable<string> FindProducedTagNames()
+		{
+			return FindTagNamesFromList(Parameters.Tag);
+		}
+
+		/// <summary>
 		/// Find all the build products created by compiling the given project file
 		/// </summary>
 		/// <param name="ProjectFile">Initial project file to read. All referenced projects will also be read.</param>
@@ -169,7 +190,7 @@ namespace BuildGraph.Tasks
 		static bool FindBuildProducts(HashSet<FileReference> ProjectFiles, Dictionary<string, string> InitialProperties, out HashSet<FileReference> OutBuildProducts)
 		{
 			// Read all the project information into a dictionary
-			Dictionary<FileReference, MsBuildProjectInfo> FileToProjectInfo = new Dictionary<FileReference,MsBuildProjectInfo>();
+			Dictionary<FileReference, CsProjectInfo> FileToProjectInfo = new Dictionary<FileReference,CsProjectInfo>();
 			foreach(FileReference ProjectFile in ProjectFiles)
 			{
 				if(!ReadProjectsRecursively(ProjectFile, InitialProperties, FileToProjectInfo))
@@ -181,9 +202,9 @@ namespace BuildGraph.Tasks
 
 			// Find all the build products
 			HashSet<FileReference> BuildProducts = new HashSet<FileReference>();
-			foreach(KeyValuePair<FileReference, MsBuildProjectInfo> Pair in FileToProjectInfo)
+			foreach(KeyValuePair<FileReference, CsProjectInfo> Pair in FileToProjectInfo)
 			{
-				MsBuildProjectInfo ProjectInfo = Pair.Value;
+				CsProjectInfo ProjectInfo = Pair.Value;
 
 				// Add the standard build products
 				DirectoryReference OutputDir = ProjectInfo.GetOutputDir(Pair.Key.Directory);
@@ -203,7 +224,7 @@ namespace BuildGraph.Tasks
 				}
 
 				// Add build products from all the referenced projects. MSBuild only copy the directly referenced build products, not recursive references or other assemblies.
-				foreach(MsBuildProjectInfo OtherProjectInfo in ProjectInfo.ProjectReferences.Where(x => x.Value).Select(x => FileToProjectInfo[x.Key]))
+				foreach(CsProjectInfo OtherProjectInfo in ProjectInfo.ProjectReferences.Where(x => x.Value).Select(x => FileToProjectInfo[x.Key]))
 				{
 					OtherProjectInfo.AddBuildProducts(OutputDir, BuildProducts);
 				}
@@ -221,7 +242,7 @@ namespace BuildGraph.Tasks
 		/// <param name="InitialProperties">Mapping of property name to value for the initial project</param>
 		/// <param name="FileToProjectInfo"></param>
 		/// <returns>True if the projects were read correctly, false (and prints an error to the log) if not</returns>
-		static bool ReadProjectsRecursively(FileReference File, Dictionary<string, string> InitialProperties, Dictionary<FileReference, MsBuildProjectInfo> FileToProjectInfo)
+		static bool ReadProjectsRecursively(FileReference File, Dictionary<string, string> InitialProperties, Dictionary<FileReference, CsProjectInfo> FileToProjectInfo)
 		{
 			// Early out if we've already read this project, return succes
 			if(FileToProjectInfo.ContainsKey(File))
@@ -230,8 +251,8 @@ namespace BuildGraph.Tasks
 			}
 
 			// Try to read this project
-			MsBuildProjectInfo ProjectInfo;
-			if(!MsBuildProjectInfo.TryRead(File, InitialProperties, out ProjectInfo))
+			CsProjectInfo ProjectInfo;
+			if(!CsProjectInfo.TryRead(File, InitialProperties, out ProjectInfo))
 			{
 				CommandUtils.LogError("Couldn't read project '{0}'", File.FullName);
 				return false;
@@ -244,9 +265,9 @@ namespace BuildGraph.Tasks
 	}
 
 	/// <summary>
-	/// Basic information from a preprocessed project file. Supports reading a project file, expanding simple conditions in it, parsing property values, assembly references and references to other projects.
+	/// Basic information from a preprocessed C# project file. Supports reading a project file, expanding simple conditions in it, parsing property values, assembly references and references to other projects.
 	/// </summary>
-	class MsBuildProjectInfo
+	class CsProjectInfo
 	{
 		/// <summary>
 		/// Evaluated properties from the project file
@@ -267,7 +288,7 @@ namespace BuildGraph.Tasks
 		/// Constructor
 		/// </summary>
 		/// <param name="InProperties">Initial mapping of property names to values</param>
-		MsBuildProjectInfo(Dictionary<string, string> InProperties)
+		CsProjectInfo(Dictionary<string, string> InProperties)
 		{
 			Properties = new Dictionary<string,string>(InProperties);
 		}
@@ -322,7 +343,7 @@ namespace BuildGraph.Tasks
 		/// <param name="Properties">Initial set of property values</param>
 		/// <param name="OutProjectInfo">If successful, the parsed project info</param>
 		/// <returns>True if the project was read successfully, false otherwise</returns>
-		public static bool TryRead(FileReference File, Dictionary<string, string> Properties, out MsBuildProjectInfo OutProjectInfo)
+		public static bool TryRead(FileReference File, Dictionary<string, string> Properties, out CsProjectInfo OutProjectInfo)
 		{
 			// Read the project file
 			XmlDocument Document = new XmlDocument();
@@ -337,7 +358,7 @@ namespace BuildGraph.Tasks
 			}
 
 			// Parse the basic structure of the document, updating properties and recursing into other referenced projects as we go
-			MsBuildProjectInfo ProjectInfo = new MsBuildProjectInfo(Properties);
+			CsProjectInfo ProjectInfo = new CsProjectInfo(Properties);
 			foreach(XmlElement Element in Document.DocumentElement.ChildNodes.OfType<XmlElement>())
 			{
 				switch(Element.Name)
@@ -385,7 +406,7 @@ namespace BuildGraph.Tasks
 		/// <param name="BaseDirectory">Base directory to resolve relative paths against</param>
 		/// <param name="ParentElement">The parent 'ItemGroup' element</param>
 		/// <param name="ProjectInfo">Project info object to be updated</param>
-		static void ParseItemGroup(DirectoryReference BaseDirectory, XmlElement ParentElement, MsBuildProjectInfo ProjectInfo)
+		static void ParseItemGroup(DirectoryReference BaseDirectory, XmlElement ParentElement, CsProjectInfo ProjectInfo)
 		{
 			// Parse any external assembly references
 			foreach(XmlElement ItemElement in ParentElement.ChildNodes.OfType<XmlElement>())
@@ -597,5 +618,4 @@ namespace BuildGraph.Tasks
 			return Tokens.ToArray();
 		}
 	}
-
 }

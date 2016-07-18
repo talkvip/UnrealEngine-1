@@ -2275,7 +2275,7 @@ void FMatinee::FinishAddKey(UInterpTrack* Track, bool bCommitKeys)
 		{
 			// Add key at current time, snapped to the grid if its on.
 			int32 NewKeyIndex = Track->AddKeyframe( fKeyTime, TrInst, InitialInterpMode );
-			check( NewKeyIndex != INDEX_NONE );
+			checkf( NewKeyIndex != INDEX_NONE, TEXT("Could not add a key at %f to Track %s "), fKeyTime, *Track->GetName());
 
 
 			// Check to see if this is going to be the event first key to have this name
@@ -3896,11 +3896,11 @@ void FMatinee::UpdateLevelViewport(AActor* InActor, FLevelEditorViewportClient* 
 		if (PreviousCamera != Cam)
 		{
 			PreviousCamera = Cam;
-			InViewportClient->bEditorCameraCut = true;
+			InViewportClient->SetIsCameraCut(true);
 		}
 		else
 		{
-			InViewportClient->bEditorCameraCut = false;
+			InViewportClient->SetIsCameraCut(false);
 		}
 	}
 	else
@@ -3910,7 +3910,7 @@ void FMatinee::UpdateLevelViewport(AActor* InActor, FLevelEditorViewportClient* 
 		InViewportClient->FadeAmount = InFadeAmount;
 		InViewportClient->bEnableFading = true;
 
-		InViewportClient->bEditorCameraCut = false;
+		InViewportClient->SetIsCameraCut(false);
 	}
 
 	// Set the actor lock.

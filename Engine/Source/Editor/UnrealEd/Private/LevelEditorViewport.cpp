@@ -1402,7 +1402,8 @@ bool FLevelEditorViewportClient::DropObjectsAtCoordinates(int32 MouseX, int32 Mo
  */
 bool FLevelEditorViewportClient::CanApplyMaterialToHitProxy( const HHitProxy* HitProxy ) const
 {
-	return ( HitProxy->IsA(HModel::StaticGetType()) || HitProxy->IsA(HActor::StaticGetType()) );
+	// The check for HWidgetAxis is made to prevent the transform widget from blocking an attempt at applying a material to a mesh.
+	return ( HitProxy->IsA(HModel::StaticGetType()) || HitProxy->IsA(HActor::StaticGetType()) || HitProxy->IsA(HWidgetAxis::StaticGetType()) );
 }
 
 FTrackingTransaction::FTrackingTransaction()
@@ -1503,7 +1504,6 @@ FLevelEditorViewportClient::FLevelEditorViewportClient(const TSharedPtr<SLevelVi
 	, FadeAmount(0.f)	
 	, bEnableFading(false)
 	, bEnableColorScaling(false)
-	, bEditorCameraCut(false)
 	, bDrawBaseInfo(false)
 	, bDuplicateOnNextDrag( false )
 	, bDuplicateActorsInProgress( false )
@@ -1520,6 +1520,8 @@ FLevelEditorViewportClient::FLevelEditorViewportClient(const TSharedPtr<SLevelVi
 	, bWasControlledByOtherViewport(false)
 	, ActorLockedByMatinee(nullptr)
 	, ActorLockedToCamera(nullptr)
+	, bEditorCameraCut(false)
+	, bWasEditorCameraCut(false)
 {
 	// By default a level editor viewport is pointed to the editor world
 	SetReferenceToWorldContext(GEditor->GetEditorWorldContext());
@@ -2002,6 +2004,12 @@ static FMatrix GPerspViewMatrix;
 
 void FLevelEditorViewportClient::Tick(float DeltaTime)
 {
+	if (bWasEditorCameraCut && bEditorCameraCut)
+	{
+		bEditorCameraCut = false;
+	}
+	bWasEditorCameraCut = bEditorCameraCut;
+
 	FEditorViewportClient::Tick(DeltaTime);
 
 	if (!GUnrealEd->IsPivotMovedIndependently() && GCurrentLevelEditingViewportClient == this &&
@@ -2748,7 +2756,10 @@ void FLevelEditorViewportClient::AbortTracking()
 	if (TrackingTransaction.IsActive())
 	{
 		// Applying the global undo here will reset the drag operation
-		GUndo->Apply();
+		if (GUndo)
+		{
+			GUndo->Apply();
+		}
 		TrackingTransaction.Cancel();
 		StopTracking();
 	}

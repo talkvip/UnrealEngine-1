@@ -348,10 +348,7 @@ public:
 	 *
 	 * @return	true if this object should not be loaded on servers
 	 */
-	virtual bool NeedsLoadForServer() const 
-	{ 
-		return true; 
-	}
+	virtual bool NeedsLoadForServer() const;
 
 	/**
 	 * Called during saving to determine the load flags to save with the object.
@@ -464,16 +461,6 @@ public:
 	virtual FName GetExporterName( void )
 	{
 		return( FName( TEXT( "" ) ) );
-	}
-
-	/**
-	 * Returns whether this wave file is a localized resource.
-	 *
-	 * @return true if it is a localized resource, false otherwise.
-	 */
-	virtual bool IsLocalizedResource()
-	{
-		return false;
 	}
 
 	/**
@@ -592,6 +579,9 @@ public:
 
 	/** Returns true if this object is considered an asset. */
 	virtual bool IsAsset() const;
+
+	/** Returns true if this object is considered a localized resource. */
+	virtual bool IsLocalizedResource() const;
 
 	/** Returns true if this object is safe to add to the root set. */
 	virtual bool IsSafeForRootSet() const;

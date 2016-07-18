@@ -248,14 +248,9 @@ public:
 	//~ Begin UObject Interface
 	virtual void Serialize( FArchive& Ar ) override;
 	virtual void PostLoad() override;
-	virtual bool IsLocalizedResource() override;
 #if WITH_EDITORONLY_DATA
 	virtual void GetAssetRegistryTags(TArray<FAssetRegistryTag>& OutTags) const override;
 #endif
-	virtual bool NeedsLoadForServer() const override
-	{
-		return false;
-	}
 	//~ End UObject interface
 
 	/**

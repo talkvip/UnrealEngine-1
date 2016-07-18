@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "../Misc/Build.h"
 
 // define all other platforms to be zero
 //@port Define the platform here to be zero when compiling for other platforms
@@ -173,9 +174,6 @@
 #endif
 #ifndef PLATFORM_COMPILER_HAS_DEFAULTED_FUNCTIONS
 	#define PLATFORM_COMPILER_HAS_DEFAULTED_FUNCTIONS	1
-#endif
-#ifndef PLATFORM_COMPILER_HAS_EXPLICIT_OPERATORS
-	#define PLATFORM_COMPILER_HAS_EXPLICIT_OPERATORS	1
 #endif
 #ifndef PLATFORM_COMPILER_COMMON_LANGUAGE_RUNTIME_COMPILATION
 	#define PLATFORM_COMPILER_COMMON_LANGUAGE_RUNTIME_COMPILATION 0
@@ -554,38 +552,6 @@ struct THasOperatorNotEquals
 	enum { Value = FHasOperatorImpl::NotEquals<T>::Value };
 };
 
-#if PLATFORM_COMPILER_HAS_EXPLICIT_OPERATORS
-	#define FORCEINLINE_EXPLICIT_OPERATOR_BOOL FORCEINLINE explicit operator bool
-	#define SAFE_BOOL_OPERATORS(...)		// not needed when compiler supports explicit operator bool()
-#elif PLATFORM_COMPILER_COMMON_LANGUAGE_RUNTIME_COMPILATION
-	// unsafe version
-	#define FORCEINLINE_EXPLICIT_OPERATOR_BOOL FORCEINLINE operator bool
-	#define SAFE_BOOL_OPERATORS(...)
-#else
-	#define FORCEINLINE_EXPLICIT_OPERATOR_BOOL \
-					private: \
-						template <typename TheClassType> \
-						static TheClassType UE_ClassTypeHelper(const TheClassType&); \
-						struct UE_PrivateBoolType \
-						{ \
-							int x; \
-						}; \
-					public: \
-						FORCEINLINE operator int UE_PrivateBoolType::*() const \
-						{ \
-							static_assert(THasOperatorEquals   <decltype(UE_ClassTypeHelper(*this))>::Value, "Class needs operator==()."); \
-							static_assert(THasOperatorNotEquals<decltype(UE_ClassTypeHelper(*this))>::Value, "Class needs operator!=()."); \
-							return UE_OperatorBool() ? &UE_PrivateBoolType::x : 0; \
-						} \
-						FORCEINLINE bool UE_OperatorBool
-
-	// these are left unimplemented to cause link errors if used
-	#define SAFE_BOOL_OPERATORS(...)	\
-			void operator ==( const __VA_ARGS__ & RHS ) const; \
-			void operator !=( const __VA_ARGS__ & RHS ) const;
-#endif
-
-
 // Console ANSICHAR/TCHAR command line handling
 #if PLATFORM_COMPILER_HAS_TCHAR_WMAIN
 #define INT32_MAIN_INT32_ARGC_TCHAR_ARGV() int32 wmain(int32 ArgC, TCHAR* ArgV[])
@@ -759,3 +725,30 @@ namespace TypeTests
 	static_assert(sizeof(SIZE_T) == sizeof(void *), "SIZE_T type size test failed.");
 	static_assert(SIZE_T(-1) > SIZE_T(0), "SIZE_T type sign test failed.");
 }
+
+// Platform specific compiler setup.
+#if PLATFORM_WINDOWS
+	#include "Windows/WindowsPlatformCompilerSetup.h"
+#elif PLATFORM_PS4
+	#include "PS4/PS4CompilerSetup.h"
+#elif PLATFORM_XBOXONE
+	#include "XboxOne/XboxOneCompilerSetup.h"
+#elif PLATFORM_MAC
+	#include "Mac/MacPlatformCompilerSetup.h"
+#elif PLATFORM_IOS
+	#include "IOS/IOSPlatformCompilerSetup.h"
+#elif PLATFORM_ANDROID
+	#include "Android/AndroidCompilerSetup.h"
+#elif PLATFORM_WINRT_ARM || PLATFORM_WINRT
+	#include "WinRT/WinRTCompilerSetup.h"
+#elif PLATFORM_HTML5
+	#include "HTML5/HTML5PlatformCompilerSetup.h"
+#elif PLATFORM_LINUX
+	#include "Linux/LinuxPlatformCompilerSetup.h"
+#else
+	#error Unknown Compiler
+#endif
+
+// Include defaults for defines that aren't explicitly set by the platform
+#include "UMemoryDefines.h"
+#include "../Misc/CoreMiscDefines.h"

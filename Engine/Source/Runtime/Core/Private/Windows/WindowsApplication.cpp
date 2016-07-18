@@ -2034,7 +2034,12 @@ void FWindowsApplication::SetForceFeedbackChannelValues(int32 ControllerId, cons
 	// send vibration to externally-implemented devices
 	for( auto DeviceIt = ExternalInputDevices.CreateIterator(); DeviceIt; ++DeviceIt )
 	{
-		(*DeviceIt)->SetChannelValues(ControllerId, Values);
+		// *N.B 06/20/2016*: Ideally, we would want to use GetHapticDevice instead
+		// but they're not implemented for SteamController and SteamVRController
+		if ((*DeviceIt)->IsGamepadAttached()) 
+		{
+			(*DeviceIt)->SetChannelValues(ControllerId, Values);
+		}
 	}
 }
 
@@ -2082,17 +2087,24 @@ HRESULT FWindowsApplication::OnOLEDragEnter( const HWND HWnd, const FDragDropOLE
 		return 0;
 	}
 
-	if ((OLEData.Type & FDragDropOLEData::Text) && (OLEData.Type & FDragDropOLEData::Files))
+	if ( Window->IsEnabled() )
 	{
-		*CursorEffect = MessageHandler->OnDragEnterExternal(Window.ToSharedRef(), OLEData.OperationText, OLEData.OperationFilenames);
+		if ((OLEData.Type & FDragDropOLEData::Text) && (OLEData.Type & FDragDropOLEData::Files))
+		{
+			*CursorEffect = MessageHandler->OnDragEnterExternal(Window.ToSharedRef(), OLEData.OperationText, OLEData.OperationFilenames);
+		}
+		else if (OLEData.Type & FDragDropOLEData::Text)
+		{
+			*CursorEffect = MessageHandler->OnDragEnterText(Window.ToSharedRef(), OLEData.OperationText);
+		}
+		else if (OLEData.Type & FDragDropOLEData::Files)
+		{
+			*CursorEffect = MessageHandler->OnDragEnterFiles(Window.ToSharedRef(), OLEData.OperationFilenames);
+		}
 	}
-	else if (OLEData.Type & FDragDropOLEData::Text)
+	else
 	{
-		*CursorEffect = MessageHandler->OnDragEnterText(Window.ToSharedRef(), OLEData.OperationText);
-	}
-	else if (OLEData.Type & FDragDropOLEData::Files)
-	{
-		*CursorEffect = MessageHandler->OnDragEnterFiles(Window.ToSharedRef(), OLEData.OperationFilenames);
+		*CursorEffect = EDropEffect::None;
 	}
 
 	return 0;
@@ -2104,7 +2116,14 @@ HRESULT FWindowsApplication::OnOLEDragOver( const HWND HWnd, DWORD KeyState, POI
 
 	if ( Window.IsValid() )
 	{
-		*CursorEffect = MessageHandler->OnDragOver( Window.ToSharedRef() );
+		if ( Window->IsEnabled() )
+		{
+			*CursorEffect = MessageHandler->OnDragOver( Window.ToSharedRef() );
+		}
+		else
+		{
+			*CursorEffect = EDropEffect::None;
+		}
 	}
 
 	return 0;
@@ -2114,7 +2133,7 @@ HRESULT FWindowsApplication::OnOLEDragOut( const HWND HWnd )
 {
 	const TSharedPtr< FWindowsWindow > Window = FindWindowByHWND( Windows, HWnd );
 
-	if ( Window.IsValid() )
+	if ( Window.IsValid() && Window->IsEnabled() )
 	{
 		// User dragged out of a Slate window. We must tell Slate it is no longer in drag and drop mode.
 		// Note that this also gets triggered when the user hits ESC to cancel a drag and drop.
@@ -2130,7 +2149,14 @@ HRESULT FWindowsApplication::OnOLEDrop( const HWND HWnd, const FDragDropOLEData&
 
 	if ( Window.IsValid() )
 	{
-		*CursorEffect = MessageHandler->OnDragDrop( Window.ToSharedRef() );
+		if ( Window->IsEnabled() )
+		{
+			*CursorEffect = MessageHandler->OnDragDrop(Window.ToSharedRef());
+		}
+		else
+		{
+			*CursorEffect = EDropEffect::None;
+		}
 	}
 
 	return 0;

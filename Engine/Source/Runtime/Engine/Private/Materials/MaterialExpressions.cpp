@@ -452,11 +452,6 @@ void UMaterialExpression::Serialize( FArchive& Ar )
 #endif
 }
 
-bool UMaterialExpression::NeedsLoadForServer() const
-{
-	return false; 
-}
-
 bool UMaterialExpression::NeedsLoadForClient() const
 {
 	// Expressions that reference texture objects need to be cooked
@@ -7287,6 +7282,7 @@ void UMaterialExpressionMaterialFunctionCall::PreEditChange(UProperty* PropertyA
 		// Save off the previous MaterialFunction value
 		SavedMaterialFunction = MaterialFunction;
 	}
+	Super::PreEditChange(PropertyAboutToChange);
 }
 
 void UMaterialExpressionMaterialFunctionCall::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
@@ -7836,6 +7832,7 @@ void UMaterialExpressionFunctionInput::PreEditChange(UProperty* PropertyAboutToC
 	{
 		InputNameBackup = InputName;
 	}
+	Super::PreEditChange(PropertyAboutToChange);
 }
 
 void UMaterialExpressionFunctionInput::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
@@ -8131,6 +8128,7 @@ void UMaterialExpressionFunctionOutput::PreEditChange(UProperty* PropertyAboutTo
 	{
 		OutputNameBackup = OutputName;
 	}
+	Super::PreEditChange(PropertyAboutToChange);
 }
 
 void UMaterialExpressionFunctionOutput::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)

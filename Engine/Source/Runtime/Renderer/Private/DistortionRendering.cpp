@@ -13,6 +13,8 @@
 #include "SceneFilterRendering.h"
 #include "SceneUtils.h"
 
+DECLARE_FLOAT_COUNTER_STAT(TEXT("Distortion"), Stat_GPU_Distortion, STATGROUP_GPU);
+
 /**
 * A pixel shader for rendering the full screen refraction pass
 */
@@ -798,7 +800,7 @@ bool FDistortionPrimSet::DrawAccumulatedOffsets(FRHICommandListImmediate& RHICmd
 							&View,
 							bInitializeOffsets,
 							StaticMesh,
-							StaticMesh.Elements.Num() == 1 ? 1 : View.StaticMeshBatchVisibility[StaticMesh.Id],
+							StaticMesh.bRequiresPerElementVisibility ? View.StaticMeshBatchVisibility[StaticMesh.Id] : ((1ull << StaticMesh.Elements.Num()) - 1),
 							false,
 							PrimitiveSceneProxy,
 							StaticMesh.BatchHitProxyId
@@ -832,6 +834,7 @@ void FSceneRenderer::RenderDistortion(FRHICommandListImmediate& RHICmdList)
 {
 	QUICK_SCOPE_CYCLE_COUNTER(STAT_FSceneRenderer_RenderDistortion);
 	SCOPED_DRAW_EVENT(RHICmdList, Distortion);
+	SCOPED_GPU_STAT(RHICmdList, Stat_GPU_Distortion);
 
 	// do we need to render the distortion pass?
 	bool bRender=false;

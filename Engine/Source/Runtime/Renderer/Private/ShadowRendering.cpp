@@ -67,6 +67,8 @@ static TAutoConsoleVariable<int32> CVarEnableModulatedSelfShadow(
 	TEXT("Allows modulated shadows to affect the shadow caster. (mobile only)"),
 	ECVF_RenderThreadSafe);
 
+DECLARE_FLOAT_COUNTER_STAT(TEXT("ShadowProjection"), Stat_GPU_ShadowProjection, STATGROUP_GPU);
+
 // 0:off, 1:low, 2:med, 3:high, 4:very high, 5:max
 uint32 GetShadowQuality()
 {
@@ -564,7 +566,7 @@ void FProjectedShadowInfo::RenderProjection(FRHICommandListImmediate& RHICmdList
 								*View,
 								FDepthDrawingPolicyFactory::ContextType(DDM_AllOccluders, false),
 								StaticMesh,
-								StaticMesh.Elements.Num() == 1 ? 1 : View->StaticMeshBatchVisibility[StaticMesh.Id],
+								StaticMesh.bRequiresPerElementVisibility ? View->StaticMeshBatchVisibility[StaticMesh.Id] : ((1ull << StaticMesh.Elements.Num() )- 1),
 								true,
 								DrawRenderState,
 								ReceiverPrimitiveSceneInfo->Proxy,
@@ -589,7 +591,7 @@ void FProjectedShadowInfo::RenderProjection(FRHICommandListImmediate& RHICmdList
 					*View,
 					FDepthDrawingPolicyFactory::ContextType(DDM_AllOccluders, false),
 					StaticMesh,
-					StaticMesh.Elements.Num() == 1 ? 1 : View->StaticMeshBatchVisibility[StaticMesh.Id],
+					StaticMesh.bRequiresPerElementVisibility ? View->StaticMeshBatchVisibility[StaticMesh.Id] : ((1ull << StaticMesh.Elements.Num() )- 1),
 					true,
 					DrawRenderState,
 					StaticMesh.PrimitiveSceneInfo->Proxy,
@@ -1278,6 +1280,7 @@ bool FDeferredShadingSceneRenderer::RenderShadowProjections(FRHICommandListImmed
 {
 	SCOPE_CYCLE_COUNTER(STAT_ProjectedShadowDrawTime);
 	SCOPED_DRAW_EVENT(RHICmdList, ShadowProjectionOnOpaque);
+	SCOPED_GPU_STAT(RHICmdList, Stat_GPU_ShadowProjection);
 
 	FVisibleLightInfo& VisibleLightInfo = VisibleLightInfos[LightSceneInfo->Id];
 

@@ -2,12 +2,24 @@
 
 #pragma once
 
-// #include "Containers/ContainerAllocationPolicies.h"
-// #include "HAL/Platform.h"
-// #include "Serialization/ArchiveBase.h"
-// #include "Templates/EnableIf.h"
-// #include "Templates/Sorting.h"
-// #include "Templates/UnrealTemplate.h"
+#include <initializer_list>
+
+namespace ArrayViewPrivate
+{
+	/**
+	 * Trait testing whether a type is compatible with the view type
+	 */
+	template <typename T, typename ElementType>
+	struct TIsCompatibleElementType
+	{
+	public:
+		/** NOTE:
+		 * The stars in the TPointerIsConvertibleFromTo test are *IMPORTANT*
+		 * They prevent TArrayView<Base>(TArray<Derived>&) from compiling!
+		 */
+		enum { Value = TPointerIsConvertibleFromTo<T*, ElementType* const>::Value };
+	};
+}
 
 /**
  * Templated fixed-size view of another array
@@ -15,32 +27,83 @@
  * A statically sized view of an array of typed elements.  Designed to allow functions to take either a fixed C array
  * or a TArray with an arbitrary allocator as an argument when the function neither adds nor removes elements
  *
- * Caution: When constructed from a TArray, the length and memory allocation of the underlying array must remain fixed for the lifetime of the array view!
+ * e.g.:
+ * int32 SumAll(TArrayView<const int32> array)
+ * {
+ *     return Algo::Accumulate(array);
+ * }
+ * 
+ * could be called as:
+ *     SumAll(MyTArray);
+ *     SumAll(MyCArray);
+ *     SumAll({1, 2, 3});
+ *     SumAll(MakeArrayView(Ptr, Num));
+ * 
+ * Note:
+ *   View classes are not const-propagating! If you want a view where the elements are const, you need "TArrayView<const T>" not "const TArrayView<T>"!
  *
- **/
+ * Caution:
+ *   Treat a view like a *reference* to the elements in the array. DO NOT free or reallocate the array while the view exists!
+ */
 template<typename InElementType>
-class TFixedSizeArrayView
+class TArrayView
 {
 public:
-	typedef InElementType ElementType;
+	using ElementType = InElementType;
 
 	/**
 	 * Constructor.
 	 */
-	TFixedSizeArrayView()
+	TArrayView()
 		: DataPtr(nullptr)
 		, ArrayNum(0)
-	{}
+	{
+	}
 
+private:
+	template <typename T>
+	using TIsCompatibleElementType = ArrayViewPrivate::TIsCompatibleElementType<T, ElementType>;
+
+public:
 	/**
 	 * Copy constructor from another view
 	 *
 	 * @param Other The source array view to copy
 	 */
-	TFixedSizeArrayView(const TFixedSizeArrayView& Other)
-		: DataPtr(Other.DataPtr)
-		, ArrayNum(Other.ArrayNum)
+	template <typename OtherElementType,
+		typename = typename TEnableIf<TIsCompatibleElementType<OtherElementType>::Value>::Type>
+	FORCEINLINE TArrayView(const TArrayView<OtherElementType>& Other)
+		: DataPtr(Other.GetData())
+		, ArrayNum(Other.Num())
 	{
+	}
+
+	/**
+	 * Construct a view of a C array with a compatible element type
+	 *
+	 * @param Other The source array to view.
+	 */
+	template <typename OtherElementType, size_t Size,
+		typename = typename TEnableIf<TIsCompatibleElementType<OtherElementType>::Value>::Type>
+	FORCEINLINE TArrayView(OtherElementType (&Other)[Size])
+		: DataPtr(Other)
+		, ArrayNum((int32)Size)
+	{
+		static_assert(Size <= MAX_int32, "Array Size too large! Size is only int32 for compatibility with TArray!");
+	}
+
+	/**
+	 * Construct a view of a C array with a compatible element type
+	 *
+	 * @param Other The source array to view.
+	 */
+	template <typename OtherElementType, size_t Size,
+		typename = typename TEnableIf<TIsCompatibleElementType<const OtherElementType>::Value>::Type>
+		FORCEINLINE TArrayView(const OtherElementType (&Other)[Size])
+		: DataPtr(Other)
+		, ArrayNum((int32)Size)
+	{
+		static_assert(Size <= MAX_int32, "Array Size too large! Size is only int32 for compatibility with TArray!");
 	}
 
 	/**
@@ -48,10 +111,32 @@ public:
 	 *
 	 * @param Other The source array to view.
 	 */
-	template <typename OtherElementType, typename OtherAllocator>
-	TFixedSizeArrayView(TArray<OtherElementType, OtherAllocator>& Other)
+	template <typename OtherElementType, typename OtherAllocator,
+		typename = typename TEnableIf<TIsCompatibleElementType<OtherElementType>::Value>::Type>
+	FORCEINLINE TArrayView(TArray<OtherElementType, OtherAllocator>& Other)
 		: DataPtr(Other.GetData())
 		, ArrayNum(Other.Num())
+	{
+	}
+
+	template <typename OtherElementType, typename OtherAllocator,
+		typename = typename TEnableIf<TIsCompatibleElementType<const OtherElementType>::Value>::Type>
+	FORCEINLINE TArrayView(const TArray<OtherElementType, OtherAllocator>& Other)
+		: DataPtr(Other.GetData())
+		, ArrayNum(Other.Num())
+	{
+	}
+
+	/**
+	 * Construct a view from an initializer list with a compatible element type
+	 *
+	 * @param List The initializer list to view.
+	 */
+	template <typename OtherElementType,
+		typename = typename TEnableIf<TIsCompatibleElementType<OtherElementType>::Value>::Type>
+	FORCEINLINE TArrayView(std::initializer_list<OtherElementType> List)
+		: DataPtr(&*List.begin())
+		, ArrayNum(List.size())
 	{
 	}
 
@@ -61,18 +146,23 @@ public:
 	 * @param InData	The data to view
 	 * @param InCount	The number of elements
 	 */
-	TFixedSizeArrayView(ElementType* InData, int32 InCount)
+	template <typename OtherElementType,
+		typename = typename TEnableIf<TIsCompatibleElementType<OtherElementType>::Value>::Type>
+	FORCEINLINE TArrayView(OtherElementType* InData, int32 InCount)
 		: DataPtr(InData)
 		, ArrayNum(InCount)
 	{
+		check(ArrayNum >= 0);
 	}
 
 	/**
-	 * Assignment operator.
+	 * Assignment operator
 	 *
-	 * @param Other The source array view to assign from.
+	 * @param Other The source array view to assign from
 	 */
-	TFixedSizeArrayView& operator=(const TFixedSizeArrayView& Other)
+	template <typename OtherElementType,
+		typename = typename TEnableIf<TIsCompatibleElementType<OtherElementType>::Value>::Type>
+	FORCEINLINE TArrayView& operator=(const TArrayView<OtherElementType>& Other)
 	{
 		if (this != &Other)
 		{
@@ -89,17 +179,7 @@ public:
 	 *
 	 * @returns Pointer to first array entry or nullptr if ArrayMax == 0.
 	 */
-	FORCEINLINE ElementType* GetData()
-	{
-		return DataPtr;
-	}
-
-	/**
-	 * Helper function for returning a typed pointer to the first array entry.
-	 *
-	 * @returns Pointer to first array entry or nullptr if ArrayMax == 0.
-	 */
-	FORCEINLINE const ElementType* GetData() const
+	FORCEINLINE ElementType* GetData() const
 	{
 		return DataPtr;
 	}
@@ -109,7 +189,7 @@ public:
 	 *
 	 * @returns Size in bytes of array type.
 	 */
-	FORCEINLINE uint32 GetTypeSize() const
+	FORCEINLINE size_t GetTypeSize() const
 	{
 		return sizeof(ElementType);
 	}
@@ -162,20 +242,7 @@ public:
 	 *
 	 * @returns Reference to indexed element.
 	 */
-	FORCEINLINE ElementType& operator[](int32 Index)
-	{
-		RangeCheck(Index);
-		return GetData()[Index];
-	}
-
-	/**
-	 * Array bracket operator. Returns reference to element at give index.
-	 *
-	 * Const version of the above.
-	 *
-	 * @returns Reference to indexed element.
-	 */
-	FORCEINLINE const ElementType& operator[](int32 Index) const
+	FORCEINLINE ElementType& operator[](int32 Index) const
 	{
 		RangeCheck(Index);
 		return GetData()[Index];
@@ -189,26 +256,25 @@ public:
 	 *
 	 * @returns Reference to n-th last element from the array.
 	 */
-	ElementType& Last(int32 IndexFromTheEnd = 0)
+	FORCEINLINE ElementType& Last(int32 IndexFromTheEnd = 0) const
 	{
 		RangeCheck(ArrayNum - IndexFromTheEnd - 1);
 		return GetData()[ArrayNum - IndexFromTheEnd - 1];
 	}
 
 	/**
-	 * Returns n-th last element from the array.
+	 * Returns a sliced view
 	 *
-	 * Const version of the above.
-	 *
-	 * @param IndexFromTheEnd (Optional) Index from the end of array.
-	 *                        Default is 0.
-	 *
-	 * @returns Reference to n-th last element from the array.
+	 * @param Index starting index of the new view
+	 * @param InNum number of elements in the new view
+	 * @returns Sliced view
 	 */
-	const ElementType& Last(int32 IndexFromTheEnd = 0) const
+	FORCEINLINE TArrayView Slice(int32 Index, int32 InNum)
 	{
-		RangeCheck(ArrayNum - IndexFromTheEnd - 1);
-		return GetData()[ArrayNum - IndexFromTheEnd - 1];
+		check(InNum > 0);
+		check(IsValidIndex(Index));
+		check(IsValidIndex(Index + InNum - 1));
+		return TArrayView(DataPtr + Index, InNum);
 	}
 
 	/**
@@ -257,26 +323,6 @@ public:
 	{
 		Index = this->FindLast(Item);
 		return Index != INDEX_NONE;
-	}
-
-	/**
-	 * Finds element within the array starting from the end.
-	 *
-	 * @param Item Item to look for.
-	 *
-	 * @returns Index of the found element. INDEX_NONE otherwise.
-	 */
-	int32 FindLast(const ElementType& Item) const
-	{
-		for (const ElementType* RESTRICT Start = GetData(), *RESTRICT Data = Start + ArrayNum; Data != Start; )
-		{
-			--Data;
-			if (*Data == Item)
-			{
-				return static_cast<int32>(Data - Start);
-			}
-		}
-		return INDEX_NONE;
 	}
 
 	/**
@@ -369,21 +415,7 @@ public:
 	 * @returns Pointer to the first matching element, or nullptr if none is found.
 	 */
 	template <typename KeyType>
-	FORCEINLINE const ElementType* FindByKey(const KeyType& Key) const
-	{
-		return const_cast<TFixedSizeArrayView*>(this)->FindByKey(Key);
-	}
-
-	/**
-	 * Finds an item by key (assuming the ElementType overloads operator== for
-	 * the comparison).
-	 *
-	 * @param Key The key to search by.
-	 *
-	 * @returns Pointer to the first matching element, or nullptr if none is found.
-	 */
-	template <typename KeyType>
-	ElementType* FindByKey(const KeyType& Key)
+	ElementType* FindByKey(const KeyType& Key) const
 	{
 		for (ElementType* RESTRICT Data = GetData(), *RESTRICT DataEnd = Data + ArrayNum; Data != DataEnd; ++Data)
 		{
@@ -401,25 +433,11 @@ public:
 	 *
 	 * @param Pred The functor to apply to each element.
 	 *
-	 * @returns Pointer to the first element for which the predicate returns
-	 *          true, or nullptr if none is found.
-	 */
-	template <typename Predicate>
-	FORCEINLINE const ElementType* FindByPredicate(Predicate Pred) const
-	{
-		return const_cast<TFixedSizeArrayView*>(this)->FindByPredicate(Pred);
-	}
-
-	/**
-	 * Finds an element which matches a predicate functor.
-	 *
-	 * @param Pred The functor to apply to each element.
-	 *
 	 * @return Pointer to the first element for which the predicate returns
 	 *         true, or nullptr if none is found.
 	 */
 	template <typename Predicate>
-	ElementType* FindByPredicate(Predicate Pred)
+	ElementType* FindByPredicate(Predicate Pred) const
 	{
 		for (ElementType* RESTRICT Data = GetData(), *RESTRICT DataEnd = Data + ArrayNum; Data != DataEnd; ++Data)
 		{
@@ -441,9 +459,9 @@ public:
 	 *          the subset of elements for which the functor returns true.
 	 */
 	template <typename Predicate>
-	TArray<ElementType> FilterByPredicate(Predicate Pred) const
+	TArray<typename TRemoveConst<ElementType>::Type> FilterByPredicate(Predicate Pred) const
 	{
-		TArray<ElementType> FilterResults;
+		TArray<typename TRemoveConst<ElementType>::Type> FilterResults;
 		for (const ElementType* RESTRICT Data = GetData(), *RESTRICT DataEnd = Data + ArrayNum; Data != DataEnd; ++Data)
 		{
 			if (Pred(*Data))
@@ -485,65 +503,13 @@ public:
 		return FindByPredicate(Pred) != nullptr;
 	}
 
-	/**
-	 * Equality operator.
-	 *
-	 * @param OtherArray Array to compare.
-	 *
-	 * @returns True if this array is the same as OtherArray. False otherwise.
-	 */
-	bool operator==(const TFixedSizeArrayView& OtherArray) const
-	{
-		const int32 Count = Num();
-
-		return (Count == OtherArray.Num()) && CompareItems(GetData(), OtherArray.GetData(), Count);
-	}
-
-	/**
-	 * Inequality operator.
-	 *
-	 * @param OtherArray Array to compare.
-	 *
-	 * @returns True if this array is NOT the same as OtherArray. False otherwise.
-	 */
-	bool operator!=(const TFixedSizeArrayView& OtherArray) const
-	{
-		return !(*this == OtherArray);
-	}
-
-	// Iterators
-	typedef TIndexedContainerIterator<      TFixedSizeArrayView,       ElementType, int32> TIterator;
-	typedef TIndexedContainerIterator<const TFixedSizeArrayView, const ElementType, int32> TConstIterator;
-
-	/**
-	 * Creates an iterator for the contents of this array
-	 *
-	 * @returns The iterator.
-	 */
-	TIterator CreateIterator()
-	{
-		return TIterator(*this);
-	}
-
-	/**
-	 * Creates a const iterator for the contents of this array
-	 *
-	 * @returns The const iterator.
-	 */
-	TConstIterator CreateConstIterator() const
-	{
-		return TConstIterator(*this);
-	}
-
 private:
 	/**
 	 * DO NOT USE DIRECTLY
 	 * STL-like iterators to enable range-based for loop support.
 	 */
-	FORCEINLINE friend TIterator      begin(      TFixedSizeArrayView& Array) { return TIterator     (Array); }
-	FORCEINLINE friend TConstIterator begin(const TFixedSizeArrayView& Array) { return TConstIterator(Array); }
-	FORCEINLINE friend TIterator      end  (      TFixedSizeArrayView& Array) { return TIterator     (Array, Array.Num()); }
-	FORCEINLINE friend TConstIterator end  (const TFixedSizeArrayView& Array) { return TConstIterator(Array, Array.Num()); }
+	FORCEINLINE friend ElementType* begin(const TArrayView& Array) { return Array.GetData(); }
+	FORCEINLINE friend ElementType* end  (const TArrayView& Array) { return Array.GetData() + Array.Num(); }
 
 public:
 	/**
@@ -594,7 +560,45 @@ private:
 };
 
 template <typename InElementType>
-struct TIsZeroConstructType<TFixedSizeArrayView<InElementType>>
+struct TIsZeroConstructType<TArrayView<InElementType>>
 {
 	enum { Value = true };
 };
+
+//////////////////////////////////////////////////////////////////////////
+
+template <typename ElementType, size_t Size>
+TArrayView<ElementType> MakeArrayView(ElementType(&Other)[Size])
+{
+	return TArrayView<ElementType>(Other);
+}
+
+template <typename ElementType, size_t Size>
+TArrayView<const ElementType> MakeArrayView(const ElementType(&Other)[Size])
+{
+	return TArrayView<ElementType>(Other);
+}
+
+template <typename ElementType, typename Allocator>
+TArrayView<ElementType> MakeArrayView(TArray<ElementType, Allocator>& Other)
+{
+	return TArrayView<ElementType>(Other);
+}
+
+template <typename ElementType, typename Allocator>
+TArrayView<const ElementType> MakeArrayView(const TArray<ElementType, Allocator>& Other)
+{
+	return TArrayView<const ElementType>(Other);
+}
+
+template<typename ElementType>
+TArrayView<ElementType> MakeArrayView(std::initializer_list<ElementType> List)
+{
+	return TArrayView<ElementType>(List);
+}
+
+template<typename ElementType>
+TArrayView<ElementType> MakeArrayView(ElementType* Pointer, int32 Size)
+{
+	return TArrayView<ElementType>(Pointer, Size);
+}

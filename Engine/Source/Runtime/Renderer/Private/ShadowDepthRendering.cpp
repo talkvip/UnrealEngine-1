@@ -12,6 +12,8 @@
 #include "SceneFilterRendering.h"
 #include "ScreenRendering.h"
 
+DECLARE_FLOAT_COUNTER_STAT(TEXT("Shadow Depths"), Stat_GPU_ShadowDepths, STATGROUP_GPU);
+
 /**
  * A vertex shader for rendering the depth of a mesh.
  */
@@ -1300,7 +1302,7 @@ void DrawMeshElements(FRHICommandList& RHICmdList, FShadowDepthDrawingPolicy<bRe
 
 	const FMeshDrawingRenderState DrawRenderState(View.GetDitheredLODTransitionState(*Mesh));
 	// Render only those batch elements that match the current LOD
-	uint64 BatchElementMask = Mesh->Elements.Num() == 1 ? 1 : View.StaticMeshBatchVisibility[Mesh->Id];
+	uint64 BatchElementMask = Mesh->bRequiresPerElementVisibility ? View.StaticMeshBatchVisibility[Mesh->Id] : ((1ull << Mesh->Elements.Num()) - 1);
 	int32 BatchElementIndex = 0;
 	do
 	{
@@ -2143,6 +2145,7 @@ void FSceneRenderer::RenderShadowDepthMaps(FRHICommandListImmediate& RHICmdList)
 	FSceneRenderTargets& SceneContext = FSceneRenderTargets::Get(RHICmdList);
 
 	SCOPED_DRAW_EVENT(RHICmdList, ShadowDepths);
+	SCOPED_GPU_STAT(RHICmdList, Stat_GPU_ShadowDepths);
 
 	FSceneRenderer::RenderShadowDepthMapAtlases(RHICmdList);
 

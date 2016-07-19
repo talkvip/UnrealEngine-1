@@ -16,6 +16,9 @@ DECLARE_CYCLE_STAT(TEXT("TranslucencyTimestampQuery Wait"), STAT_TranslucencyTim
 
 DECLARE_FLOAT_COUNTER_STAT(TEXT("Translucency GPU Time (MS)"), STAT_TranslucencyGPU, STATGROUP_SceneRendering);
 
+DECLARE_FLOAT_COUNTER_STAT(TEXT("Translucency"), Stat_GPU_Translucency, STATGROUP_GPU);
+
+
 static TAutoConsoleVariable<int32> CVarSeparateTranslucencyAutoDownsample(
 	TEXT("r.SeparateTranslucencyAutoDownsample"),
 	0,
@@ -809,7 +812,7 @@ void FTranslucentPrimSet::RenderPrimitive(
 					View,
 					FTranslucencyDrawingPolicyFactory::ContextType(TranslucentSelfShadow, TranslucenyPassType),
 					StaticMesh,
-					StaticMesh.Elements.Num() == 1 ? 1 : View.StaticMeshBatchVisibility[StaticMesh.Id],
+					StaticMesh.bRequiresPerElementVisibility ? View.StaticMeshBatchVisibility[StaticMesh.Id] : ((1ull << StaticMesh.Elements.Num()) - 1),
 					false,
 					PrimitiveSceneInfo->Proxy,
 					StaticMesh.BatchHitProxyId,
@@ -1177,6 +1180,7 @@ void FDeferredShadingSceneRenderer::RenderTranslucency(FRHICommandListImmediate&
 	if (ShouldRenderTranslucency())
 	{
 		SCOPED_DRAW_EVENT(RHICmdList, Translucency);
+		SCOPED_GPU_STAT(RHICmdList, Stat_GPU_Translucency);
 
 		if (GRHICommandList.UseParallelAlgorithms() && CVarParallelTranslucency.GetValueOnRenderThread())
 		{

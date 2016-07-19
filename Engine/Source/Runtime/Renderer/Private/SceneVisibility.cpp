@@ -1663,8 +1663,8 @@ struct FRelevancePacket
 						MarkMasks[StaticMesh.Id] = MarkMask;
 					}
 
-					// Static meshes with a single element always draw, as if the mask were 0x1.
-					if(bNeedsBatchVisibility && StaticMesh.Elements.Num() > 1)
+					// Static meshes which don't need per-element visibility always draw all elements
+					if (bNeedsBatchVisibility && StaticMesh.bRequiresPerElementVisibility)
 					{
 						WriteView.StaticMeshBatchVisibility[StaticMesh.Id] = StaticMesh.VertexFactory->GetStaticBatchElementVisibility(View, &StaticMesh);
 					}
@@ -2638,7 +2638,10 @@ void FSceneRenderer::PostVisibilityFrameSetup(FILCUpdatePrimTaskData& OutILCTask
 				{
 					FSphere Bounds = Proxy->GetBoundingSphere();
 					float DistanceSquared = (Bounds.Center - View.ViewMatrices.ViewOrigin).SizeSquared();
-					const bool bDrawLight = FMath::Square( FMath::Min( 0.0002f, GMinScreenRadiusForLights / Bounds.W ) * View.LODDistanceFactor ) * DistanceSquared < 1.0f;
+					float MaxDistSquared = Proxy->GetMaxDrawDistance() * Proxy->GetMaxDrawDistance();
+					const bool bDrawLight = (FMath::Square(FMath::Min(0.0002f, GMinScreenRadiusForLights / Bounds.W) * View.LODDistanceFactor) * DistanceSquared < 1.0f)
+												& (MaxDistSquared == 0 || DistanceSquared < MaxDistSquared);
+							
 					VisibleLightViewInfo.bInViewFrustum = bDrawLight;
 				}
 			}

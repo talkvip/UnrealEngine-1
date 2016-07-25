@@ -293,15 +293,11 @@ void FAudioDevice::AddReferencedObjects(FReferenceCollector& Collector)
 {	
 	Collector.AddReferencedObject(DefaultBaseSoundMix);
 	Collector.AddReferencedObjects(PrevPassiveSoundMixModifiers);
+	Collector.AddReferencedObjects(SoundMixModifiers);
 
 	for (TPair<FName, FActivatedReverb>& ActivatedReverbPair : ActivatedReverbs)
 	{
 		Collector.AddReferencedObject(ActivatedReverbPair.Value.ReverbSettings.ReverbEffect);
-	}
-
-	for (TPair<USoundMix*, FSoundMixState>& SoundMixModifierPair : SoundMixModifiers)
-	{
-		Collector.AddReferencedObject(SoundMixModifierPair.Key);
 	}
 
 	if (Effects)
@@ -1348,10 +1344,9 @@ void FAudioDevice::RemoveSoundMix(USoundMix* SoundMix)
 void FAudioDevice::RecurseIntoSoundClasses(USoundClass* CurrentClass, FSoundClassProperties& ParentProperties)
 {
 	// Iterate over all child nodes and recurse.
-	for (int32 ChildIndex = 0; ChildIndex < CurrentClass->ChildClasses.Num(); ChildIndex++)
+	for (USoundClass* ChildClass : CurrentClass->ChildClasses)
 	{
 		// Look up class and propagated properties.
-		USoundClass* ChildClass = CurrentClass->ChildClasses[ChildIndex];
 		FSoundClassProperties* Properties = SoundClasses.Find(ChildClass);
 
 		// Should never be NULL for a properly set up tree.
@@ -1394,7 +1389,7 @@ void FAudioDevice::UpdateHighestPriorityReverb()
 		FAudioThread::RunCommandOnAudioThread([AudioDevice, NewActiveReverbRef]()
 		{
 			AudioDevice->bHasActivatedReverb = true;
-			AudioDevice->HighestPriorityActivatedReverb = NewActiveReverbRef;
+			AudioDevice->HighestPriorityActivatedReverb = MoveTemp(NewActiveReverbRef);
 		}, GET_STATID(STAT_AudioUpdateHighestPriorityReverb));
 	}
 	else
@@ -1671,9 +1666,14 @@ USoundMix* FAudioDevice::FindNextHighestEQPrioritySoundMix(USoundMix* IgnoredSou
 
 void FAudioDevice::ClearSoundMix(USoundMix* SoundMix)
 {
+	if (SoundMix == nullptr)
+	{
+		return;
+	}
+
 	if (SoundMix == BaseSoundMix)
 	{
-		BaseSoundMix = NULL;
+		BaseSoundMix = nullptr;
 	}
 	SoundMixModifiers.Remove(SoundMix);
 	PrevPassiveSoundMixModifiers.Remove(SoundMix);
@@ -1682,7 +1682,7 @@ void FAudioDevice::ClearSoundMix(USoundMix* SoundMix)
 	FSoundMixClassOverrideMap* SoundMixOverrideMap = SoundMixClassEffectOverrides.Find(SoundMix);
 	if (SoundMixOverrideMap)
 	{
-		for (auto& Entry : *SoundMixOverrideMap)
+		for (TPair<USoundClass*, FSoundMixClassOverride>& Entry : *SoundMixOverrideMap)
 		{
 			Entry.Value.bOverrideApplied = false;
 		}
@@ -2479,32 +2479,39 @@ void FAudioDevice::DestroyEffect(FSoundSource* Source)
 
 void FAudioDevice::HandlePause(bool bGameTicking, bool bGlobalPause)
 {
-	// Pause all sounds if transitioning to pause mode.
-	if (!bGameTicking && (bGameWasTicking || bGlobalPause))
-	{
-		for (int32 i = 0; i < Sources.Num(); i++)
-		{
-			FSoundSource* Source = Sources[ i ];
-			if (!Source->IsPaused() && (bGlobalPause || Source->IsGameOnly()))
-			{
-				Source->Pause();
-			}
-		}
-	}
-	// Unpause all sounds if transitioning back to game.
-	else if (bGameTicking && (!bGameWasTicking || bGlobalPause))
-	{
-		for (int32 i = 0; i < Sources.Num(); i++)
-		{
-			FSoundSource* Source = Sources[ i ];
-			if (Source->IsPaused() && (bGlobalPause || Source->IsGameOnly()))
-			{
-				Source->Play();
-			}
-		}
-	}
+	DECLARE_CYCLE_STAT(TEXT("FAudioThreadTask.HandlePause"), STAT_AudioHandlePause, STATGROUP_AudioThreadCommands);
 
-	bGameWasTicking = bGameTicking;
+	FAudioDevice* AudioDevice = this;
+	FAudioThread::RunCommandOnAudioThread([AudioDevice, bGameTicking, bGlobalPause]()
+	{
+		// Pause all sounds if transitioning to pause mode.
+		if (!bGameTicking && (AudioDevice->bGameWasTicking || bGlobalPause))
+		{
+			for (int32 i = 0; i < AudioDevice->Sources.Num(); i++)
+			{
+				FSoundSource* Source = AudioDevice->Sources[ i ];
+				if (!Source->IsPaused() && (bGlobalPause || Source->IsGameOnly()))
+				{
+					Source->Pause();
+				}
+			}
+		}
+		// Unpause all sounds if transitioning back to game.
+		else if (bGameTicking && (!AudioDevice->bGameWasTicking || bGlobalPause))
+		{
+			for (int32 i = 0; i < AudioDevice->Sources.Num(); i++)
+			{
+				FSoundSource* Source = AudioDevice->Sources[ i ];
+				if (Source->IsPaused() && (bGlobalPause || Source->IsGameOnly()))
+				{
+					Source->Play();
+				}
+			}
+		}
+
+		AudioDevice->bGameWasTicking = bGameTicking;
+	}, GET_STATID(STAT_AudioHandlePause));
+
 }
 
 
@@ -3025,7 +3032,10 @@ void FAudioDevice::StopAllSounds(bool bShouldStopUISounds)
 
 void FAudioDevice::AddNewActiveSound(const FActiveSound& NewActiveSound)
 {
-	check(NewActiveSound.Sound);
+	if (NewActiveSound.Sound == nullptr)
+	{
+		return;
+	}
 
 	if (!IsInAudioThread())
 	{
@@ -3165,12 +3175,7 @@ FActiveSound* FAudioDevice::FindActiveSound(const uint64 AudioComponentID)
 	check(IsInAudioThread());
 
 	// find the active sound corresponding to this audio component
-	if (FActiveSound** ActiveSoundPtr = AudioComponentIDToActiveSoundMap.Find(AudioComponentID))
-	{
-		return *ActiveSoundPtr;
-	}
-
-	return nullptr;
+	return AudioComponentIDToActiveSoundMap.FindRef(AudioComponentID);
 }
 
 void FAudioDevice::RemoveActiveSound(FActiveSound* ActiveSound)
@@ -3185,7 +3190,7 @@ void FAudioDevice::RemoveActiveSound(FActiveSound* ActiveSound)
 		UAudioComponent::PlaybackCompleted(ActiveSound->GetAudioComponentID(), false);
 	}
 
-	int32 NumRemoved = ActiveSounds.Remove(ActiveSound);
+	const int32 NumRemoved = ActiveSounds.Remove(ActiveSound);
 	check(NumRemoved == 1);
 }
 
@@ -3799,6 +3804,7 @@ void FAudioDevice::StopSourcesUsingBuffer(FSoundBuffer* SoundBuffer)
 
 void FAudioDevice::RegisterSoundClass(USoundClass* InSoundClass)
 {
+	check(IsInAudioThread());
 	if (InSoundClass)
 	{
 		// If the sound class wasn't already registered get it in to the system.
@@ -3811,6 +3817,7 @@ void FAudioDevice::RegisterSoundClass(USoundClass* InSoundClass)
 
 void FAudioDevice::UnregisterSoundClass(USoundClass* SoundClass)
 {
+	check(IsInAudioThread());
 	if (SoundClass)
 	{
 		SoundClasses.Remove(SoundClass);

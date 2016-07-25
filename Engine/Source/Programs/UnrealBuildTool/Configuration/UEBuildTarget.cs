@@ -18,9 +18,6 @@ namespace UnrealBuildTool
 		Unknown,
 		Win32,
 		Win64,
-		WinRT,
-		WinRT_ARM,
-		UWP,
 		Mac,
 		XboxOne,
 		PS4,
@@ -250,6 +247,30 @@ namespace UnrealBuildTool
 		public UEBuildPlatformContext PlatformContext;
 	}
 
+    /// <summary>
+    /// Holds information for targeting specific platform (platform type + cook flavor)
+    /// </summary>
+    public struct TargetPlatformDescriptor
+    {
+        public UnrealTargetPlatform Type;
+        public string CookFlavor;
+
+        public TargetPlatformDescriptor(UnrealTargetPlatform InType)
+        {
+            Type = InType;
+            CookFlavor = "";
+        }
+        public TargetPlatformDescriptor(UnrealTargetPlatform InType, string InCookFlavor)
+        {
+            Type = InType;
+            CookFlavor = InCookFlavor;
+        }
+
+        public override string ToString()
+        {
+            return Type.ToString();
+        }
+    }
 
 	/// <summary>
 	/// A target that can be built
@@ -273,13 +294,10 @@ namespace UnrealBuildTool
 			{
 				case CPPTargetPlatform.Win32:			return UnrealTargetPlatform.Win32;
 				case CPPTargetPlatform.Win64:			return UnrealTargetPlatform.Win64;
-				case CPPTargetPlatform.UWP:				return UnrealTargetPlatform.UWP;
 				case CPPTargetPlatform.Mac:				return UnrealTargetPlatform.Mac;
 				case CPPTargetPlatform.XboxOne:			return UnrealTargetPlatform.XboxOne;
 				case CPPTargetPlatform.PS4:				return UnrealTargetPlatform.PS4;
 				case CPPTargetPlatform.Android:			return UnrealTargetPlatform.Android;
-				case CPPTargetPlatform.WinRT: 			return UnrealTargetPlatform.WinRT;
-				case CPPTargetPlatform.WinRT_ARM: 		return UnrealTargetPlatform.WinRT_ARM;
 				case CPPTargetPlatform.IOS:				return UnrealTargetPlatform.IOS;
 				case CPPTargetPlatform.HTML5:			return UnrealTargetPlatform.HTML5;
                 case CPPTargetPlatform.Linux:			return UnrealTargetPlatform.Linux;
@@ -2229,8 +2247,7 @@ namespace UnrealBuildTool
 				}
 				else
 				{
-					IsCurrentPlatform = Platform == UnrealTargetPlatform.Win64 || Platform == UnrealTargetPlatform.Win32 || Platform == UnrealTargetPlatform.UWP;
-
+					IsCurrentPlatform = Platform == UnrealTargetPlatform.Win64 || Platform == UnrealTargetPlatform.Win32;
 				}
 
 				if ((TargetRules.IsAGame(TargetType) || (TargetType == TargetRules.TargetType.Server))

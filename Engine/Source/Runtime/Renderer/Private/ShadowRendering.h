@@ -870,7 +870,7 @@ public:
 	/**
 	 * Adds a primitive to the shadow's subject list.
 	 */
-	void AddSubjectPrimitive(FPrimitiveSceneInfo* PrimitiveSceneInfo, TArray<FViewInfo>* ViewArray);
+	void AddSubjectPrimitive(FPrimitiveSceneInfo* PrimitiveSceneInfo, TArray<FViewInfo>* ViewArray, bool bRecordShadowSubjectForMobileShading);
 
 	/**
 	* @return TRUE if this shadow info has any casting subject prims to render
@@ -1678,8 +1678,12 @@ public:
 	void Set(FRHICommandList& RHICmdList, const ShaderRHIParamRef ShaderRHI, const FProjectedShadowInfo* ShadowInfo) const
 	{
 		FTextureRHIParamRef ShadowDepthTextureValue = ShadowInfo 
-			? ShadowInfo->RenderTargets.DepthTarget->GetRenderTargetItem().ShaderResourceTexture.GetReference()
+			? ShadowInfo->RenderTargets.DepthTarget->GetRenderTargetItem().ShaderResourceTexture->GetTextureCube()
 			: GBlackTextureCube->TextureRHI.GetReference();
+        if (!ShadowDepthTextureValue)
+        {
+            ShadowDepthTextureValue = GBlackTextureCube->TextureRHI.GetReference();
+        }
 
 		SetTextureParameter(
 			RHICmdList, 

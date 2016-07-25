@@ -5,11 +5,7 @@ D3D12Commands.cpp: D3D RHI commands implementation.
 =============================================================================*/
 
 #include "D3D12RHIPrivate.h"
-#if PLATFORM_WINRT
-#include "WinRT/D3D12RHIPrivateUtil.h"
-#else
 #include "Windows/D3D12RHIPrivateUtil.h"
-#endif
 #include "StaticBoundShaderState.h"
 #include "GlobalShader.h"
 #include "OneColorShader.h"
@@ -400,6 +396,11 @@ void FD3D12CommandContext::RHISetViewport(uint32 MinX, uint32 MinY, float MinZ, 
 		StateCache.SetViewport(Viewport);
 		SetScissorRectIfRequiredWhenSettingViewport(MinX, MinY, MaxX, MaxY);
 	}
+}
+
+void FD3D12CommandContext::RHISetStereoViewport(uint32 LeftMinX, uint32 RightMinX, uint32 MinY, float MinZ, uint32 LeftMaxX, uint32 RightMaxX, uint32 MaxY, float MaxZ)
+{
+	UE_LOG(LogD3D12RHI, Fatal, TEXT("D3D12 RHI does not support set stereo viewport!"));
 }
 
 void FD3D12CommandContext::RHISetScissorRect(bool bEnable, uint32 MinX, uint32 MinY, uint32 MaxX, uint32 MaxY)

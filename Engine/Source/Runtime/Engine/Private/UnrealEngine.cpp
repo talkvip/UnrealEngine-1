@@ -52,6 +52,7 @@
 #include "GameFramework/HUD.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/GameMode.h"
+#include "PhysicsEngine/BodySetup.h"
 #include "Engine/LevelStreamingVolume.h"
 #include "Engine/WorldComposition.h"
 #include "Engine/LevelScriptActor.h"
@@ -1254,7 +1255,7 @@ void UEngine::UpdateTimeAndHandleMaxTickRate()
 
 		// Get max tick rate based on network settings and current delta time.
 		const float GivenMaxTickRate = GetMaxTickRate(DeltaTime);
-		const float MaxTickRate = FABTest::StaticIsActive() ? 0.0f : bUseFixedFrameRate ? FMath::Min(GivenMaxTickRate, FixedFrameRate) : GivenMaxTickRate;
+		const float MaxTickRate = FABTest::StaticIsActive() ? 0.0f : (bUseFixedFrameRate ? FixedFrameRate : GivenMaxTickRate);
 		float WaitTime		= 0;
 		// Convert from max FPS to wait time.
 		if( MaxTickRate > 0 )
@@ -2068,18 +2069,44 @@ bool UEngine::InitializeHMDDevice()
 			// Sort modules by priority
 			HMDModules.Sort(IHeadMountedDisplayModule::FCompareModulePriority());
 
-			// Select first module able to create an HMDDevice
+			// Select first module with a connected HMD able to create a device
 			IHeadMountedDisplayModule* HMDModuleSelected = nullptr;
+			TArray<IHeadMountedDisplayModule*> HMDModulesDisconnected;
 
 			for (auto HMDModuleIt = HMDModules.CreateIterator(); HMDModuleIt; ++HMDModuleIt)
 			{
 				IHeadMountedDisplayModule* HMDModule = *HMDModuleIt;
-				HMDDevice = HMDModule->CreateHeadMountedDisplay();
 
-				if (HMDDevice.IsValid())
+				if(HMDModule->IsHMDConnected())
 				{
-					HMDModuleSelected = HMDModule;
-					break;
+					HMDDevice = HMDModule->CreateHeadMountedDisplay();
+
+					if (HMDDevice.IsValid())
+					{
+						HMDModuleSelected = HMDModule;
+						break;
+					}
+				}
+				else
+				{
+					HMDModulesDisconnected.Add(HMDModule);
+				}
+			}
+
+			// If no module selected yet, just select first module able to create a device, even if HMD is not connected.
+			if (!HMDModuleSelected)
+			{
+				for (auto HMDModuleIt = HMDModulesDisconnected.CreateIterator(); HMDModuleIt; ++HMDModuleIt)
+				{
+					IHeadMountedDisplayModule* HMDModule = *HMDModuleIt;
+
+					HMDDevice = HMDModule->CreateHeadMountedDisplay();
+
+					if (HMDDevice.IsValid())
+					{
+						HMDModuleSelected = HMDModule;
+						break;
+					}
 				}
 			}
 
@@ -7070,7 +7097,7 @@ void UEngine::PerformanceCapture(UWorld* World, const FString& MapName, const FS
 	// can be define by command line -BuildName="ByCustomBuildName" or "CL<changelist>"
 	FString BuildName = GetBuildNameForPerfTesting();
 
-	// e.g. XboxOne, AllDesktop, Android_.., PS4, HTML5, WinRT, 
+	// e.g. XboxOne, AllDesktop, Android_.., PS4, HTML5 
 	FString PlatformName = FPlatformProperties::PlatformName();
 	
 	// e.g. D3D11,OpenGL,Vulcan,D3D12

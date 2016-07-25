@@ -65,7 +65,7 @@ public partial class Project : CommandUtils
 	/// </summary>
 	/// <param name="Filename"></param>
 	/// <param name="ResponseFile"></param>
-	private static void WritePakResponseFile(string Filename, Dictionary<string, string> ResponseFile, bool Compressed)
+	private static void WritePakResponseFile(string Filename, Dictionary<string, string> ResponseFile, bool Compressed, bool EncryptIniFiles)
 	{
 		using (var Writer = new StreamWriter(Filename, false, new System.Text.UTF8Encoding(true)))
 		{
@@ -75,6 +75,11 @@ public partial class Project : CommandUtils
 				if (Compressed)
 				{
 					Line += " -compress";
+				}
+				
+				if (Path.GetExtension(Entry.Key).Contains(".ini") && EncryptIniFiles)
+				{
+					Line += " -encrypt";
 				}
 				Writer.WriteLine(Line);
 			}
@@ -93,7 +98,7 @@ public partial class Project : CommandUtils
 		return Result;
 	}
 
-    static public void RunUnrealPak(Dictionary<string, string> UnrealPakResponseFile, string OutputLocation, string EncryptionKeys, string PakOrderFileLocation, string PlatformOptions, bool Compressed, String PatchSourceContentPath)
+    static public void RunUnrealPak(Dictionary<string, string> UnrealPakResponseFile, string OutputLocation, string EncryptionKeys, string PakOrderFileLocation, string PlatformOptions, bool Compressed, bool EncryptIniFiles, String PatchSourceContentPath)
 	{
 		if (UnrealPakResponseFile.Count < 1)
 		{
@@ -101,7 +106,7 @@ public partial class Project : CommandUtils
 		}
 		string PakName = Path.GetFileNameWithoutExtension(OutputLocation);
 		string UnrealPakResponseFileName = CombinePaths(CmdEnv.LogFolder, "PakList_" + PakName + ".txt");
-		WritePakResponseFile(UnrealPakResponseFileName, UnrealPakResponseFile, Compressed);
+		WritePakResponseFile(UnrealPakResponseFileName, UnrealPakResponseFile, Compressed, EncryptIniFiles);
 
 		var UnrealPakExe = CombinePaths(CmdEnv.LocalRoot, "Engine/Binaries/Win64/UnrealPak.exe");
 
@@ -901,6 +906,10 @@ public partial class Project : CommandUtils
             PatchSourceContentPath = SC.StageTargetPlatform.GetReleasePakFilePath(SC, Params, PakFilename);
         }
 
+		ConfigCacheIni PlatformGameConfig = ConfigCacheIni.CreateConfigCacheIni(SC.StageTargetPlatform.IniPlatformType, "Game", new DirectoryReference(CommandUtils.GetDirectoryName(Params.RawProjectPath.FullName)));
+		bool PackageSettingsEncryptIniFiles = false;
+		PlatformGameConfig.GetBool("/Script/UnrealEd.ProjectPackagingSettings", "bEncryptIniFiles", out PackageSettingsEncryptIniFiles);
+
 		if (!bCopiedExistingPak)
 		{
 			if (File.Exists(OutputLocation))
@@ -913,7 +922,7 @@ public partial class Project : CommandUtils
 			}
 			if (!bCopiedExistingPak)
 			{
-				RunUnrealPak(UnrealPakResponseFile, OutputLocation, EncryptionKeys, PakOrderFileLocation, SC.StageTargetPlatform.GetPlatformPakCommandLine(), Params.Compressed, PatchSourceContentPath);
+				RunUnrealPak(UnrealPakResponseFile, OutputLocation, EncryptionKeys, PakOrderFileLocation, SC.StageTargetPlatform.GetPlatformPakCommandLine(), Params.Compressed, Params.EncryptIniFiles || PackageSettingsEncryptIniFiles, PatchSourceContentPath);
 			}
 		}
 
@@ -921,7 +930,7 @@ public partial class Project : CommandUtils
         if (Params.HasCreateReleaseVersion)
         {
             // copy the created pak to the release version directory we might need this later if we want to generate patches
-            //string ReleaseVersionPath = CombinePaths( SC.ProjectRoot, "Releases", Params.CreateReleaseVersion, SC.StageTargetPlatform.GetCookPlatform(Params.DedicatedServer, false, Params.CookFlavor), Path.GetFileName(OutputLocation) );
+            //string ReleaseVersionPath = CombinePaths( SC.ProjectRoot, "Releases", Params.CreateReleaseVersion, SC.StageTargetPlatform.GetCookPlatform(Params.DedicatedServer, false), Path.GetFileName(OutputLocation) );
             string ReleaseVersionPath = SC.StageTargetPlatform.GetReleasePakFilePath(SC, Params, Path.GetFileName(OutputLocation));
 
 			InternalUtils.SafeCreateDirectory(Path.GetDirectoryName(ReleaseVersionPath));
@@ -930,18 +939,27 @@ public partial class Project : CommandUtils
 
 		if (Params.CreateChunkInstall)
 		{
-			var RegEx = new Regex("pakchunk(\\d+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-			var Matches = RegEx.Matches(PakName);
+            var RegEx = new Regex("pakchunk(\\d+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+            var Matches = RegEx.Matches(PakName);
 
-			if (Matches.Count == 0 || Matches[0].Groups.Count < 2)
-			{
-				throw new AutomationException(String.Format("Failed Creating Chunk Install Data, Unable to parse chunk id from {0}", PakName));
-			}
+            int ChunkID = 0;
+            if (Matches.Count != 0 && Matches[0].Groups.Count > 1)
+            {
+                ChunkID = Convert.ToInt32(Matches[0].Groups[1].ToString());
+            }
+            else if (Params.HasDLCName) 
+            {
+                // Assuming DLC is a single pack file
+                ChunkID = 1; 
+            }
+            else
+            {
+                throw new AutomationException(String.Format("Failed Creating Chunk Install Data, Unable to parse chunk id from {0}", PakName));
+            }
 
-			int ChunkID = Convert.ToInt32(Matches[0].Groups[1].ToString());
-			if (ChunkID != 0)
+            if (ChunkID != 0)
 			{
-				var BPTExe = GetBuildPatchToolExecutable();
+                var BPTExe = GetBuildPatchToolExecutable();
 				EnsureBuildPatchToolExists();
 
 				string VersionString = Params.ChunkInstallVersionString;
@@ -955,11 +973,9 @@ public partial class Project : CommandUtils
 				}
 				InternalUtils.SafeCreateDirectory(RawDataPath, true);
 				InternalUtils.SafeCopyFile(OutputLocation, RawDataPakPath);
-				if (ChunkID != 0)
-				{
-					InternalUtils.SafeDeleteFile(OutputLocation, true);
-				}
-				if (Params.IsGeneratingPatch)
+				InternalUtils.SafeDeleteFile(OutputLocation, true);
+
+                if (Params.IsGeneratingPatch)
 				{
 					if (String.IsNullOrEmpty(PatchSourceContentPath))
 					{
@@ -973,6 +989,7 @@ public partial class Project : CommandUtils
 
 				string BuildRoot = MakePathSafeToUseWithCommandLine(RawDataPath);
 				string CloudDir = MakePathSafeToUseWithCommandLine(CombinePaths(ChunkInstallBasePath, "CloudDir"));
+                InternalUtils.SafeDeleteDirectory(CloudDir, true);
 				string ManifestDir = CombinePaths(ChunkInstallBasePath, "ManifestDir");
 				var AppID = 1; // For a chunk install this value doesn't seem to matter
 				string AppName = String.Format("{0}_{1}", SC.ShortProjectName, PakName);
@@ -1112,7 +1129,7 @@ public partial class Project : CommandUtils
 
 	private static string GetTmpPackagingPath(ProjectParams Params, DeploymentContext SC)
 	{
-		return CombinePaths(Path.GetDirectoryName(Params.RawProjectPath.FullName), "Saved", "TmpPackaging", SC.StageTargetPlatform.GetCookPlatform(SC.DedicatedServer, false, Params.CookFlavor));
+		return CombinePaths(Path.GetDirectoryName(Params.RawProjectPath.FullName), "Saved", "TmpPackaging", SC.StageTargetPlatform.GetCookPlatform(SC.DedicatedServer, false));
 	}
 
 	private static bool ShouldCreatePak(ProjectParams Params, DeploymentContext SC)
@@ -1583,19 +1600,19 @@ public partial class Project : CommandUtils
 	{
 		ParamList<string> ListToProcess = InDedicatedServer && (Params.Cook || Params.CookOnTheFly) ? Params.ServerCookedTargets : Params.ClientCookedTargets;
 		var ConfigsToProcess = InDedicatedServer && (Params.Cook || Params.CookOnTheFly) ? Params.ServerConfigsToBuild : Params.ClientConfigsToBuild;
-		var CreateWebSocketsServer = Params.ServerTargetPlatforms.Count() > 0 && Params.ClientTargetPlatforms.Contains(UnrealTargetPlatform.HTML5);
+		var CreateWebSocketsServer = Params.ServerTargetPlatforms.Count() > 0 && Params.ClientTargetPlatforms.Contains(new TargetPlatformDescriptor(UnrealTargetPlatform.HTML5));
 
-		List<UnrealTargetPlatform> PlatformsToStage = Params.ClientTargetPlatforms;
+		List<TargetPlatformDescriptor> PlatformsToStage = Params.ClientTargetPlatforms;
 		if (InDedicatedServer && (Params.Cook || Params.CookOnTheFly))
 		{
 			PlatformsToStage = Params.ServerTargetPlatforms;
         }
 
  		List<DeploymentContext> DeploymentContexts = new List<DeploymentContext>();
-			foreach (var StagePlatform in PlatformsToStage)
+		foreach (var StagePlatform in PlatformsToStage)
 		{
-			// Get the platform to get cooked data from, may differ from the stage platform
-			UnrealTargetPlatform CookedDataPlatform = Params.GetCookedDataPlatformForClientTarget(StagePlatform);
+            // Get the platform to get cooked data from, may differ from the stage platform
+            TargetPlatformDescriptor CookedDataPlatform = Params.GetCookedDataPlatformForClientTarget(StagePlatform);
 
 			if (InDedicatedServer && (Params.Cook || Params.CookOnTheFly))
 			{
@@ -1682,9 +1699,8 @@ public partial class Project : CommandUtils
             var SC = new DeploymentContext(Params.RawProjectPath, CmdEnv.LocalRoot,
                 StageDirectory,
                 ArchiveDirectory,
-				Params.CookFlavor,
-				Params.GetTargetPlatformInstance(CookedDataPlatform),
-				Params.GetTargetPlatformInstance(StagePlatform),
+				Platform.Platforms[CookedDataPlatform],
+                Platform.Platforms[StagePlatform],
 				ConfigsToProcess,
 				TargetsToStage,
 				ExecutablesToStage,
@@ -1702,7 +1718,7 @@ public partial class Project : CommandUtils
 
 			// If we're a derived platform make sure we're at the end, otherwise make sure we're at the front
 
-			if (CookedDataPlatform != StagePlatform)
+			if (!CookedDataPlatform.Equals(StagePlatform))
 			{
 				DeploymentContexts.Add(SC);
 			}
@@ -1741,31 +1757,41 @@ public partial class Project : CommandUtils
 
 					if (Params.Deploy)
 					{
-						// get the deployed file data
-						Dictionary<string, string> DeployedUFSFiles = new Dictionary<string, string>();
-						Dictionary<string, string> DeployedNonUFSFiles = new Dictionary<string, string>();
 						List<string> UFSManifests;
 						List<string> NonUFSManifests;
-						if (SC.StageTargetPlatform.RetrieveDeployedManifests(Params, SC, out UFSManifests, out NonUFSManifests))
-						{
-							DeployedUFSFiles = ReadDeployedManifest(Params, SC, UFSManifests);
-							DeployedNonUFSFiles = ReadDeployedManifest(Params, SC, NonUFSManifests);
-						}
 
 						// get the staged file data
 						Dictionary<string, string> StagedUFSFiles = ReadStagedManifest(Params, SC, SC.UFSDeployedManifestFileName);
 						Dictionary<string, string> StagedNonUFSFiles = ReadStagedManifest(Params, SC, SC.NonUFSDeployedManifestFileName);
 
-						WriteObsoleteManifest(Params, SC, DeployedUFSFiles, StagedUFSFiles, DeploymentContext.UFSDeployObsoleteFileName);
-						WriteObsoleteManifest(Params, SC, DeployedNonUFSFiles, StagedNonUFSFiles, DeploymentContext.NonUFSDeployObsoleteFileName);
+                        foreach (var DeviceName in Params.DeviceNames)
+                        {
+                            string UniqueName = "";
+                            if (SC.StageTargetPlatform.SupportsMultiDeviceDeploy)
+                            {
+                                UniqueName = DeviceName;
+                            }
 
-						if (Params.IterativeDeploy)
-						{
-							
-							// write out the delta file data
-							WriteDeltaManifest(Params, SC, DeployedUFSFiles, StagedUFSFiles, DeploymentContext.UFSDeployDeltaFileName);
-							WriteDeltaManifest(Params, SC, DeployedNonUFSFiles, StagedNonUFSFiles, DeploymentContext.NonUFSDeployDeltaFileName);
-						}
+                            // get the deployed file data
+                            Dictionary<string, string> DeployedUFSFiles = new Dictionary<string, string>();
+                            Dictionary<string, string> DeployedNonUFSFiles = new Dictionary<string, string>();
+
+                            if (SC.StageTargetPlatform.RetrieveDeployedManifests(Params, SC, DeviceName, out UFSManifests, out NonUFSManifests))
+                            {
+                                DeployedUFSFiles = ReadDeployedManifest(Params, SC, UFSManifests);
+                                DeployedNonUFSFiles = ReadDeployedManifest(Params, SC, NonUFSManifests);
+                            }
+                            
+                            WriteObsoleteManifest(Params, SC, DeployedUFSFiles, StagedUFSFiles, DeploymentContext.UFSDeployObsoleteFileName + UniqueName);
+                            WriteObsoleteManifest(Params, SC, DeployedNonUFSFiles, StagedNonUFSFiles, DeploymentContext.NonUFSDeployObsoleteFileName + UniqueName);
+
+                            if (Params.IterativeDeploy)
+                            {
+                                // write out the delta file data
+                                WriteDeltaManifest(Params, SC, DeployedUFSFiles, StagedUFSFiles, DeploymentContext.UFSDeployDeltaFileName + UniqueName);
+                                WriteDeltaManifest(Params, SC, DeployedNonUFSFiles, StagedNonUFSFiles, DeploymentContext.NonUFSDeployDeltaFileName + UniqueName);
+                            }
+                        }
 					}
 
 					if (Params.bCodeSign)

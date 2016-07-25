@@ -1760,6 +1760,15 @@ namespace UnrealBuildTool
 					Files.Add(new FileReference(Resource.ResourcePath));
 				}
 
+				// Add any zip files from Additional Frameworks
+				foreach (UEBuildFramework Framework in Rules.PublicAdditionalFrameworks)
+				{
+					if (!String.IsNullOrEmpty(Framework.FrameworkZipPath))
+					{
+						Files.Add(FileReference.Combine(Module.ModuleDirectory, Framework.FrameworkZipPath));
+					}
+				}
+
 				// Add all the include paths etc. for external modules
 				UEBuildExternalModule ExternalModule = Module as UEBuildExternalModule;
 				if (ExternalModule != null)
@@ -2048,8 +2057,12 @@ namespace UnrealBuildTool
 							{
 								foreach (RuntimeDependency RuntimeDependency in Module.RuntimeDependencies)
 								{
-									string SourcePath = TargetReceipt.InsertPathVariables(RuntimeDependency.Path, UnrealBuildTool.EngineDirectory, ProjectDirectory);
-									Receipt.PrecompiledRuntimeDependencies.Add(SourcePath);
+									// Ignore project-relative dependencies when we're compiling targets without projects - we won't be able to resolve them.
+									if(ProjectFile != null || RuntimeDependency.Path.IndexOf("$(ProjectDir)", StringComparison.InvariantCultureIgnoreCase) == -1)
+									{
+										string SourcePath = TargetReceipt.InsertPathVariables(RuntimeDependency.Path, UnrealBuildTool.EngineDirectory, ProjectDirectory);
+										Receipt.PrecompiledRuntimeDependencies.Add(SourcePath);
+									}
 								}
 							}
 						}

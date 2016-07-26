@@ -191,7 +191,7 @@
 			<Compile Target="UE4Game" Platform="IOS" Configuration="Shipping" Tag="#UE4Game IOS" Arguments="-precompile"/>
 
 			<Tag Files="#UE4Game IOS" Filter="$(IOSStripFilter)" With="#UE4Game IOS Unstripped"/>
-			<Strip BaseDir="$(RootDir)" OutputDir="$(SavedOutput)" Platform="IOS" Files="##UE4Game IOS Unstripped" Tag="#UE4Game IOS Stripped"/>
+			<Strip BaseDir="$(RootDir)" OutputDir="$(SavedOutput)" Platform="IOS" Files="#UE4Game IOS Unstripped" Tag="#UE4Game IOS Stripped"/>
 
 			<!-- Tag the generated includes for this target -->
 			<Tag Files="Engine/Intermediate/Build/IOS/UE4/Inc/...;Engine/Plugins/.../Intermediate/Build/IOS/UE4/Inc/..." With="#UE4Game IOS Includes"/>
@@ -224,6 +224,7 @@
 			<Compile Target="BootstrapPackagedGame" Configuration="Shipping" Platform="Win64" Tag="#Build Tools Win64"/>
 			<Compile Target="BuildPatchTool" Configuration="Shipping" Platform="Win64" Tag="#Build Tools Win64"/>
 
+			<CsCompile Project="Engine\Source\Editor\SwarmInterface\DotNET\SwarmInterface.csproj" Configuration="Development" Platform="AnyCPU" Tag="#Build Tools Win64" TagReferences="#Build Tools Win64"/>
 			<CsCompile Project="Engine\Source\Programs\UnrealSwarm\SwarmCoordinator\SwarmCoordinator.csproj" Configuration="Development" Platform="AnyCPU" Tag="#Build Tools Win64" TagReferences="#Build Tools Win64"/>
 			<CsCompile Project="Engine\Source\Programs\UnrealSwarm\Agent\Agent.csproj" Configuration="Development" Platform="AnyCPU" Tag="#Build Tools Win64" TagReferences="#Build Tools Win64"/>
 			<CsCompile Project="Engine\Source\Programs\NetworkProfiler\NetworkProfiler\NetworkProfiler.csproj" Configuration="Development" Platform="AnyCPU" Tag="#Build Tools Win64" TagReferences="#Build Tools Win64"/>
@@ -487,6 +488,9 @@
 			<Property Name="CopyInstalledFilter" Value="$(CopyInstalledFilter);Engine/Build/BatchFiles/RunUAT.bat"/>
 			<Property Name="CopyInstalledFilter" Value="$(CopyInstalledFilter);Engine/Build/BatchFiles/GetVSComnToolsPath.bat"/>
 
+			<!-- Binaries which are explicitly staged by UAT rather than listing runtime dependencies -->
+			<Property Name="CopyInstalledFilter" Value="$(CopyInstalledFilter);Engine/Binaries/ThirdParty/OpenSSL/..."/>
+		
 			<!-- Extra tools -->
 			<Property Name="CopyInstalledFilter" Value="$(CopyInstalledFilter);Engine/Extras/3dsMaxScripts/..."/>
 			<Property Name="CopyInstalledFilter" Value="$(CopyInstalledFilter);Engine/Extras/VisualStudioDebugging/UE4.natvis"/>
@@ -675,6 +679,8 @@
 			<Property Name="CopyInstalledFilter" Value="$(CopyInstalledFilter);Engine/Build/BatchFiles/Mac/RunXBuild.sh"/>
 			<Property Name="CopyInstalledFilter" Value="$(CopyInstalledFilter);Engine/Build/BatchFiles/RunUAT.command"/>
 			<Property Name="CopyInstalledFilter" Value="$(CopyInstalledFilter);Engine/Build/BatchFiles/RunUAT.sh"/>
+
+			<Property Name="CopyInstalledFilter" Value="$(CopyInstalledFilter);Engine/Binaries/ThirdParty/Mono/Mac/..."/>
 
 			<Property Name="CopyInstalledFilter" Value="$(CopyInstalledFilter);Engine/Extras/LLDBDataFormatters/UE4DataFormatters.py"/>
 			<Property Name="CopyInstalledFilter" Value="$(CopyInstalledFilter);Engine/Extras/Maya_AnimationRiggingTools/ArtToolsOSX/..."/>

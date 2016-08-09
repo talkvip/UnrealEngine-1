@@ -10,12 +10,15 @@
 	#pragma warning(disable:28253)
 #endif
 	#include <unicode/umachine.h>
+	#include <unicode/gregocal.h>
 #if defined(_MSC_VER) && USING_CODE_ANALYSIS
 	#pragma warning(pop)
 #endif
 
-// Linux needs to have those compiled statically at least until we settle on .so location for deployed/native builds
-#define NEEDS_ICU_DLLS		(IS_PROGRAM || !IS_MONOLITHIC) && PLATFORM_DESKTOP && !PLATFORM_LINUX
+// This should be defined by ICU.build.cs
+#ifndef NEEDS_ICU_DLLS
+	#define NEEDS_ICU_DLLS 0
+#endif
 
 class FICUInternationalization
 {
@@ -35,6 +38,8 @@ public:
 	TArray<FString> GetPrioritizedCultureNames(const FString& Name);
 	FCulturePtr GetCulture(const FString& Name);
 
+	UDate UEDateTimeToICUDate(const FDateTime& DateTime);
+
 private:
 #if NEEDS_ICU_DLLS
 	void LoadDLLs();
@@ -47,6 +52,8 @@ private:
 
 	enum class EAllowDefaultCultureFallback : uint8 { No, Yes, };
 	FCulturePtr FindOrMakeCulture(const FString& Name, const EAllowDefaultCultureFallback AllowDefaultFallback);
+
+	void InitializeInvariantGregorianCalendar();
 
 private:
 	struct FICUCultureData
@@ -84,6 +91,9 @@ private:
 
 	TMap<FString, FCultureRef> CachedCultures;
 	FCriticalSection CachedCulturesCS;
+
+	TUniquePtr<icu::GregorianCalendar> InvariantGregorianCalendar;
+	FCriticalSection InvariantGregorianCalendarCS;
 
 	static UBool OpenDataFile(const void* context, void** fileContext, void** contents, const char* path);
 	static void CloseDataFile(const void* context, void* const fileContext, void* const contents);

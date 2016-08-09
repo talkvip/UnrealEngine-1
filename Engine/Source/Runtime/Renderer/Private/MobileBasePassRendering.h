@@ -203,6 +203,7 @@ public:
 		PixelParametersType::Bind(Initializer.ParameterMap);
 		ReflectionCubemap.Bind(Initializer.ParameterMap, TEXT("ReflectionCubemap"));
 		ReflectionSampler.Bind(Initializer.ParameterMap, TEXT("ReflectionCubemapSampler"));
+		InvReflectionCubemapAverageBrightness.Bind(Initializer.ParameterMap, TEXT("InvReflectionCubemapAverageBrightness"));
 		EditorCompositeParams.Bind(Initializer.ParameterMap);
 		LightPositionAndInvRadiusParameter.Bind(Initializer.ParameterMap, TEXT("LightPositionAndInvRadius"));
 		LightColorAndFalloffExponentParameter.Bind(Initializer.ParameterMap, TEXT("LightColorAndFalloffExponent"));
@@ -242,6 +243,7 @@ public:
 			const FShaderResourceParameter* ReflectionSamplerParameters[MaxNumReflections] = { &ReflectionSampler, &ReflectionSampler1, &ReflectionSampler2 };
 			FTexture* ReflectionCubemapTextures[MaxNumReflections] = { GBlackTextureCube, GBlackTextureCube, GBlackTextureCube };
 			FVector4 CapturePositions[MaxNumReflections] = { FVector4(0, 0, 0, 0), FVector4(0, 0, 0, 0), FVector4(0, 0, 0, 0) };
+			FVector AverageBrightness(1, 1, 1);
 
 			if (PrimitiveSceneInfo)
 			{
@@ -256,6 +258,7 @@ public:
 						{
 							ReflectionCubemapTextures[i] = PrimitiveSceneInfo->CachedReflectionCaptureProxies[i]->EncodedHDRCubemap;
 						}
+						AverageBrightness[i] = ReflectionProxy->AverageBrightness;
 					}
 				}
 			}
@@ -272,21 +275,26 @@ public:
 			{
 				SetShaderValueArray(RHICmdList, PixelShader, ReflectionPositionsAndRadii, CapturePositions, MaxNumReflections);
 			}
+
+			SetShaderValue(RHICmdList, PixelShader, InvReflectionCubemapAverageBrightness, FVector(1.0f / AverageBrightness.X, 1.0f / AverageBrightness.Y, 1.0f / AverageBrightness.Z));
 		}
 		else if (ReflectionCubemap.IsBound())
 		{
 			FTexture* ReflectionTexture = GBlackTextureCube;
+			float AverageBrightness = 1.0f;
 
 			if (PrimitiveSceneInfo 
 				&& PrimitiveSceneInfo->CachedReflectionCaptureProxy
 				&& PrimitiveSceneInfo->CachedReflectionCaptureProxy->EncodedHDRCubemap
 				&& PrimitiveSceneInfo->CachedReflectionCaptureProxy->EncodedHDRCubemap->IsInitialized())
 			{
+				AverageBrightness = PrimitiveSceneInfo->CachedReflectionCaptureProxy->AverageBrightness;
 				ReflectionTexture = PrimitiveSceneInfo->CachedReflectionCaptureProxy->EncodedHDRCubemap;
 			}
 
 			// Set the reflection cubemap
 			SetTextureParameter(RHICmdList, PixelShader, ReflectionCubemap, ReflectionSampler, ReflectionTexture);
+			SetShaderValue(RHICmdList, PixelShader, InvReflectionCubemapAverageBrightness, FVector(1.0f / AverageBrightness, 0, 0));
 		}
 
 		if (NumDynamicPointLights > 0)
@@ -315,6 +323,7 @@ public:
 		PixelParametersType::Serialize(Ar);
 		Ar << ReflectionCubemap;
 		Ar << ReflectionSampler;
+		Ar << InvReflectionCubemapAverageBrightness;
 		Ar << EditorCompositeParams;
 		Ar << LightPositionAndInvRadiusParameter;
 		Ar << LightColorAndFalloffExponentParameter;
@@ -339,6 +348,7 @@ private:
 
 	FShaderResourceParameter ReflectionCubemap;
 	FShaderResourceParameter ReflectionSampler;
+	FShaderParameter InvReflectionCubemapAverageBrightness;
 	FEditorCompositingParameters EditorCompositeParams;
 	FShaderParameter LightPositionAndInvRadiusParameter;
 	FShaderParameter LightColorAndFalloffExponentParameter;
@@ -897,17 +907,18 @@ void ProcessMobileBasePassMesh(
 	const bool bIsLitMaterial = Parameters.ShadingModel != MSM_Unlit;
 	if (bIsLitMaterial)
 	{
-		const FLightMapInteraction LightMapInteraction = (Parameters.Mesh.LCI && bIsLitMaterial) 
-			? Parameters.Mesh.LCI->GetLightMapInteraction(Parameters.FeatureLevel) 
+		const FLightMapInteraction LightMapInteraction = (Parameters.Mesh.LCI && bIsLitMaterial)
+			? Parameters.Mesh.LCI->GetLightMapInteraction(Parameters.FeatureLevel)
 			: FLightMapInteraction();
 
 		const FScene* Scene = Action.GetScene();
-		const int32 LightChannel = GetFirstLightingChannelFromMask(Parameters.PrimitiveSceneProxy->GetLightingChannelMask());
-		const FLightSceneInfo* MobileDirectionalLight = 
-			(Parameters.PrimitiveSceneProxy && Scene && LightChannel>=0)
-			? GetSceneMobileDirectionalLights(Scene, LightChannel)
-			: nullptr;
-
+		const FLightSceneInfo* MobileDirectionalLight = nullptr;
+		if (Parameters.PrimitiveSceneProxy && Scene)
+		{
+			const int32 LightChannel = GetFirstLightingChannelFromMask(Parameters.PrimitiveSceneProxy->GetLightingChannelMask());
+			MobileDirectionalLight = LightChannel >= 0 ? GetSceneMobileDirectionalLights(Scene, LightChannel) : nullptr;
+		}
+	
 		const bool bUseMovableLight = MobileDirectionalLight && !MobileDirectionalLight->Proxy->HasStaticShadowing();
 
 		static auto* CVarMobileEnableStaticAndCSMShadowReceivers = IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.Mobile.EnableStaticAndCSMShadowReceivers"));

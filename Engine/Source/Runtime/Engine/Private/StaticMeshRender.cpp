@@ -821,6 +821,9 @@ void FStaticMeshSceneProxy::GetDynamicMeshElements(const TArray<const FSceneView
 	const bool bDrawMesh = !bInCollisionView && 
 	(	IsRichView(ViewFamily) || HasViewDependentDPG()
 		|| EngineShowFlags.Collision
+#if !(UE_BUILD_SHIPPING)
+		|| bDrawMeshCollisionWireframe
+#endif // !(UE_BUILD_SHIPPING)
 		|| EngineShowFlags.Bounds
 		|| bProxyIsSelected 
 		|| IsHovered()
@@ -1165,14 +1168,13 @@ FPrimitiveViewRelevance FStaticMeshSceneProxy::GetViewRelevance(const FSceneView
 		bInCollisionView ||
 		View->Family->EngineShowFlags.Bounds ||
 #endif
+#if !(UE_BUILD_SHIPPING)
+		bDrawMeshCollisionWireframe ||
+#endif // !(UE_BUILD_SHIPPING)
 		// Force down dynamic rendering path if invalid lightmap settings, so we can apply an error material in DrawRichMesh
 		(HasStaticLighting() && !HasValidSettingsForStaticLighting()) ||
 		HasViewDependentDPG() ||
 		 !IsStaticPathAvailable()
-#if WITH_EDITOR
-		//only check these in the editor
-		|| IsSelected() || IsHovered()
-#endif
 		)
 	{
 		Result.bDynamicRelevance = true;
@@ -1188,6 +1190,11 @@ FPrimitiveViewRelevance FStaticMeshSceneProxy::GetViewRelevance(const FSceneView
 	else
 	{
 		Result.bStaticRelevance = true;
+
+#if WITH_EDITOR
+		//only check these in the editor
+		Result.bEditorStaticSelectionRelevance = (IsSelected() || IsHovered());
+#endif
 	}
 
 	Result.bShadowRelevance = IsShadowCast(View);

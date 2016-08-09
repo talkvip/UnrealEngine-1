@@ -193,8 +193,8 @@ void FSceneViewport::UpdateCachedGeometry( const FGeometry& InGeometry )
 
 void FSceneViewport::UpdateModifierKeys( const FPointerEvent& InMouseEvent )
 {
-	KeyStateMap.Add( EKeys::LeftAlt, InMouseEvent.IsLeftAltDown() );
-	KeyStateMap.Add( EKeys::RightAlt, InMouseEvent.IsRightAltDown() );
+	KeyStateMap.Add(EKeys::LeftAlt, InMouseEvent.IsLeftAltDown());
+	KeyStateMap.Add(EKeys::RightAlt, InMouseEvent.IsRightAltDown());
 	KeyStateMap.Add(EKeys::LeftControl, InMouseEvent.IsLeftControlDown());
 	KeyStateMap.Add(EKeys::RightControl, InMouseEvent.IsRightControlDown());
 	KeyStateMap.Add(EKeys::LeftShift, InMouseEvent.IsLeftShiftDown());
@@ -259,7 +259,6 @@ void FSceneViewport::ProcessAccumulatedPointerInput()
 	MouseDelta = FIntPoint::ZeroValue;
 	NumMouseSamplesX = 0;
 	NumMouseSamplesY = 0;
-
 }
 
 FVector2D FSceneViewport::VirtualDesktopPixelToViewport(FIntPoint VirtualDesktopPointPx) const
@@ -340,6 +339,20 @@ FCursorReply FSceneViewport::OnCursorQuery( const FGeometry& MyGeometry, const F
 	if (bCursorHiddenDueToCapture)
 	{
 		return FCursorReply::Cursor(EMouseCursor::None);
+	}
+
+	// In game mode we may be using a borderless window, which needs OnCursorQuery call to handle window resize cursors
+	if (IsRunningGame() && GEngine && GEngine->GameViewport)
+	{
+		TSharedPtr<SWindow> Window = GEngine->GameViewport->GetWindow();
+		if (Window.IsValid())
+		{
+			FCursorReply Reply = Window->OnCursorQuery(MyGeometry, CursorEvent);
+			if (Reply.IsEventHandled())
+			{
+				return Reply;
+			}
+		}
 	}
 
 	EMouseCursor::Type MouseCursorToUse = EMouseCursor::Default;

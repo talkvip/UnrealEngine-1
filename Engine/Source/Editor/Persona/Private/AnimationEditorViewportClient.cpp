@@ -1589,6 +1589,12 @@ void FAnimationViewportClient::SetViewportType(ELevelViewportType InViewportType
 	FocusViewportOnPreviewMesh();
 }
 
+void FAnimationViewportClient::RotateViewportType()
+{
+	FEditorViewportClient::RotateViewportType();
+	FocusViewportOnPreviewMesh();
+}
+
 bool FAnimationViewportClient::InputKey( FViewport* InViewport, int32 ControllerId, FKey Key, EInputEvent Event, float AmountDepressed, bool bGamepad )
 {
 	const int32 HitX = InViewport->GetMouseX();
@@ -1643,6 +1649,9 @@ bool FAnimationViewportClient::InputKey( FViewport* InViewport, int32 Controller
 		bHandled = true;
 		FocusViewportOnPreviewMesh();
 	}
+
+	FAdvancedPreviewScene* AdvancedScene = static_cast<FAdvancedPreviewScene*>(PreviewScene);
+	bHandled |= AdvancedScene->HandleInputKey(InViewport, ControllerId, Key, Event, AmountDepressed, bGamepad);
 
 	// Pass keys to standard controls, if we didn't consume input
 	return (bHandled)
@@ -2149,6 +2158,8 @@ void FAnimationViewportClient::UpdateCameraSetup()
 		FVector CustomOrbitLookAt = BoundSphere.Center;
 
 		SetCameraSetup(CustomOrbitLookAt, CustomOrbitRotation, CustomOrbitZoom, CustomOrbitLookAt, GetViewLocation(), GetViewRotation() );
+		
+		GetAdvancedPreviewScene()->SetFloorOffset(GetFloorOffset());
 	}
 }
 

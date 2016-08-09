@@ -1,29 +1,19 @@
 Availability:Public
-Title:1. Install the Android SDK
+Title:1. Required Android Setup
 Crumbs:%ROOT%, Platforms, Platforms/Android, Platforms/Android/GettingStarted
 Description: Install the CodeWorks for Android 1R4 SDK.
-Version:4.9
+Version:4.12
 Skilllevel:Intermediate
-
-[VAR:Steps]
-[OBJECT:Navigation]
-	[PARAM:previous]
-	[/PARAM]
-	[PARAM:current]
-	[/PARAM]
-	[PARAM:home]
-		[Quick Start Home](Platforms/Android/GettingStarted)
-	[/PARAM]
-	[PARAM:next]
-		[Next Step](Platforms/Android/GettingStarted/2 "%Platforms/Android/GettingStarted/2:title%")
-	[/PARAM]
-[/OBJECT]
-[/VAR]
+Tags:Android
+type:sequential
+parent:Platforms/Android/GettingStarted
+order:1
+Checkpoint:AndroidQS
 
 
-%Steps%
+[nav]
 
-
+## Steps
 The first thing we need to do to start developing for Android is to install CodeWorks for Android 1R4, which will 
 ensure that you have all the required programs and code needed to deploy to Android devices.
 In the following section, we will cover how you can get CodeWorks for Android 1R4 installed on your development PC.
@@ -69,10 +59,10 @@ If you already have CodeWorks for Android 1R4 installed, but your environment va
 [/REGION]
 
 [region:warning]
-It is highly recommended that you install CodeWorks for Android 1R4 while the editor and launcher are both closed to ensure that there are not problems with the install.
+It is highly recommended that you install CodeWorks for Android 1R4 while the editor and launcher are both closed to ensure that there are no problems with the install.
 [/region]
 
-1. To install CodeWorks for Android 1R4 navigate to the **Engine** > **Extras** > **Android** folder. 
+1. To install CodeWorks for Android 1R4, navigate to the **Engine** > **Extras** > **Android** folder. 
 
 	[region:note]
 	The CodeWorks for Android 1R4 installer requires an installation of Visual Studio to complete successfully. Supported versions are 2010, 2012 or 2013 (not 2015).
@@ -85,20 +75,20 @@ It is highly recommended that you install CodeWorks for Android 1R4 while the ed
 
 	[region:note]
 	If you downloaded UE4 from **Github** you will need to perform the following steps before you can run the CodeWorks for Android 1R4 installer. 
-	Please note that the follow applies to both Windows and Mac based PCs that download the UE4 source code from Github.
-	If you are using the binary build downloaded from the launcher then you can skip this part and go right into installing CodeWorks for Android 1R4. 
+	Please note that the following applies to both Windows and Mac based PCs that download the UE4 source code from Github.
+	If you are using the binary build downloaded from the launcher, then you can skip this part and go right into installing CodeWorks for Android 1R4. 
 
 	1. Once UE4 has been downloaded from Github and extracted, run the **Setup.bat** file to download the required files as well as the **CodeWorks for Android 1R4** installer.
 
-	1. After the **Setup.bat** has finished running locate and run the CodeWorks for Android 1R4 installer following the instructions below.
+	1. After the **Setup.bat** has finished running, locate and run the CodeWorks for Android 1R4 installer, following the instructions below.
 
 	[/region]
 
-1. **Double-click** on the **AndroidWorks-1R1-windows.exe** file to initiate the install process.
+1. Double-click on the **CodeWorksforAndroid-1R4-windows.exe** file to initiate the install process.
 
 	![](AndroidWorks_11.png)
 
-1. Click the **Next** button on the first window to begin the install process.
+1. Click the **Next** button on the first window to begin the installation process.
     
 	![](AndroidWorks_00.png)
 
@@ -124,12 +114,12 @@ It is highly recommended that you install CodeWorks for Android 1R4 while the ed
 
 1.	A new window will be displayed that will show you the download and install progress of the required CodeWorks for Android 1R4 tools. 
 	[region:note]
-	You will need an internet connection to complete this portion. Depending on the speed of that internet connection this could take a few minute to a few hours to complete.
+	You will need an internet connection to complete this portion. Depending on the speed of your internet connection, this could take a few minute to a few hours to complete.
 	[/region]
 	
 	![](AndroidWorks_06.png)
 
-1.	When all required tools have been downloaded and installed the following window will be displayed. Press the **Next** button continue the install process.
+1.	When all required tools have been downloaded and installed, the following window will be displayed. Press the **Next** button continue the install process.
 	
 	![](AndroidWorks_08.png)
 
@@ -157,7 +147,7 @@ If you already have CodeWorks for Android 1R4 installed, but your environment va
 [/REGION]
 
 [region:warning]
-It is highly recommended that you install CodeWorks for Android 1R4 while the editor and launcher are both closed to ensure that there are not problems with the install.
+It is highly recommended that you install CodeWorks for Android 1R4 while the editor and launcher are both closed to ensure that there are no problems with the install.
 [/region]
 Before you can install CodeWorks for Android 1R4 to your Mac you will need to make sure that both Java 6 and Java 7 are installed. 
 Use the links provide below to download and install the correct versions of Java.
@@ -176,17 +166,17 @@ Use the links provide below to download and install the correct versions of Java
 	Please note that the follow applies to both Windows and Mac based PCs that download the UE4 source code from Github.
 	If you are using the binary build downloaded from the launcher then you can skip this part and go right into installing CodeWorks for Android 1R4. 
 
-	1. Once UE4 has been downloaded from Github and extracted, run the **Setup.bat** file to download the required files as well as the CodeWorks for Android 1R4 installer.
+	1. Once UE4 has been downloaded from Github and extracted, run the **Setup.command** file to download the required files as well as the CodeWorks for Android 1R4 installer.
 
-	1. After  **Setup.bat** has finished running locate and run the CodeWorks for Android 1R4 installer following the instructions below.
+	1. After **Setup.command** has finished running locate and run the CodeWorks for Android 1R4 installer following the instructions below.
 
 	[/region]
 
-1. **Double-click** on the **AndroidWorks-1R1-osx.dmg** to load the CodeWorks for Android 1R4 installer.
+1. Double-click on the ** CodeWorks for Android 1R4-osx.dmg** to load the CodeWorks for Android 1R4 installer.
 	
 	![](AndroidWorks_Mac_00.png)
 
-1. **Double-click** the CodeWorks for Android 1R4 installer icon to start the install process.
+1. Double-click the CodeWorks for Android 1R4 installer icon to start the installation process.
 
 	![](AndroidWorks_Mac_01.png)
 
@@ -198,7 +188,7 @@ Use the links provide below to download and install the correct versions of Java
 
 	![](AndroidWorks_Mac_03.png)
 
-1. Specify a location where CodeWorks for Android 1R4 should be installed then press the **Next** button.
+1. Specify a location where CodeWorks for Android 1R4 should be installed, then press the **Next** button.
 
 	[region:note]
 	It is perfectly fine to leave this set to the default location.
@@ -216,11 +206,11 @@ Use the links provide below to download and install the correct versions of Java
 
 1. The CodeWorks for Android 1R4 Component Manager will now begin to download and install the required tools. 
 	[region:note]
-	For this part of the setup will take a few minutes to completed and you will need an internet connection to complete it.
+	You will need an internet connection to complete this portion. Depending on the speed of your internet connection, this could take a few minute to a few hours to complete.
 	[/region]
 	![](AndroidWorks_Mac_07.png)
 
-1. Once everything has been installed the following window will be displayed. Click on the **Next** button to continue.
+1. Once everything has been installed, the following window will be displayed. Click on the **Next** button to continue.
 
 	![](AndroidWorks_Mac_08.png)
 
@@ -229,11 +219,14 @@ Use the links provide below to download and install the correct versions of Java
 	![](AndroidWorks_Mac_09.png)
 
 	[region:note]
-	If you downloaded UE4 from Github, when CodeWorks for Android 1R4 has finished installing, restart your Mac so the environment variables are set and then run the **Setup.bat** file one more time to download the required Android Development files.
+	If you downloaded UE4 from Github, when CodeWorks for Android 1R4 has finished installing, restart your Mac so the environment variables are set and then run the **Setup.command** file one more time to download the required Android Development files.
 	[/region]
 
 [/EXCERPT:MacOSSetup]
 -->
 
-%Steps%
+## End Result
+When completed you will now have all of the required Android SDK's installed and ready for use in building a UE4 project that can work on Android  devices.
+
+[nav]
 

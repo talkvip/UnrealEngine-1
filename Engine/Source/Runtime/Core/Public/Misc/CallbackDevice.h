@@ -266,6 +266,10 @@ public:
 	DECLARE_MULTICAST_DELEGATE(FOnPreMainInit);
 	static FOnPreMainInit& GetPreMainInitDelegate();
 	
+	/** Sent when GConfig is finished initializing */
+	DECLARE_MULTICAST_DELEGATE(FConfigReadyForUse);
+	static FConfigReadyForUse ConfigReadyForUse;
+
 	/** Callback for notifications regarding changes of the rendering thread. */
 	DECLARE_MULTICAST_DELEGATE(FRenderingThreadChanged)
 
@@ -276,6 +280,12 @@ public:
 
 	// Called when appInit is called.
 	static FSimpleMulticastDelegate OnFEngineLoopInitComplete;
+
+	// Callback to allow custom resolution of package names. Arguments are InRequestedName, OutResolvedName.
+	// Should return True of resolution occured.
+	DECLARE_DELEGATE_RetVal_TwoParams(bool, FResolvePackageNameDelegate, const FString&, FString&);
+	static TArray<FResolvePackageNameDelegate> PackageNameResolvers;
+
 private:
 
 	// Callbacks for hotfixes

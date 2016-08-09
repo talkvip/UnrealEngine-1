@@ -1293,6 +1293,35 @@ bool UEdGraphSchema_K2::PinDefaultValueIsEditable(const UEdGraphPin& InGraphPin)
 	return true;
 }
 
+void UEdGraphSchema_K2::SelectAllInputNodes(UEdGraph* Graph, UEdGraphPin* InGraphPin)
+{
+	TArray<UEdGraphPin*> AllPins = InGraphPin->LinkedTo;
+
+	if (AllPins.Num() == 0)
+	{
+		return;
+	}
+
+	for (UEdGraphPin* Pin : AllPins)
+	{
+		UEdGraphNode* OwningNode = Pin->GetOwningNode();
+		FKismetEditorUtilities::AddToSelection(Graph, OwningNode);
+
+		TArray<UEdGraphPin*> LinkedPins = Pin->GetOwningNode()->GetAllPins();
+		for (UEdGraphPin* InputPin : LinkedPins)
+		{
+			if (InputPin->Direction == EEdGraphPinDirection::EGPD_Output)
+			{
+				continue;
+			}
+			else
+			{
+				SelectAllInputNodes(Graph, InputPin);
+			}
+		}
+	}
+}
+
 void UEdGraphSchema_K2::GetContextMenuActions(const UEdGraph* CurrentGraph, const UEdGraphNode* InGraphNode, const UEdGraphPin* InGraphPin, FMenuBuilder* MenuBuilder, bool bIsDebugging) const
 {
 	check(CurrentGraph);
@@ -1319,6 +1348,12 @@ void UEdGraphSchema_K2::GetContextMenuActions(const UEdGraph* CurrentGraph, cons
 				// add sub menu for break link to
 				if (InGraphPin->LinkedTo.Num() > 0)
 				{
+					MenuBuilder->AddMenuEntry(
+						LOCTEXT("SelectAllInputNodes", "Select All Input Nodes"),
+						LOCTEXT("SelectAllInputNodesTooltip", "Adds all input Nodes linked to this Pin to selection"),
+						FSlateIcon(),
+						FUIAction(FExecuteAction::CreateUObject((UEdGraphSchema_K2*const)this, &UEdGraphSchema_K2::SelectAllInputNodes, const_cast<UEdGraph*>(CurrentGraph), const_cast<UEdGraphPin*>(InGraphPin))));
+
 					if(InGraphPin->LinkedTo.Num() > 1)
 					{
 						MenuBuilder->AddSubMenu(
@@ -6151,6 +6186,14 @@ void UEdGraphSchema_K2::SplitPin(UEdGraphPin* Pin) const
 			{
 				OriginalDefaults.Add(TEXT("0.0"));
 			}
+			
+			// Rotator OriginalDefaults are in the form of Y,Z,X but our pins are in the form of X,Y,Z
+			// so we have to change the OriginalDefaults order here to match our pins
+			if (StructType == TBaseStructure<FRotator>::Get())
+			{
+				OriginalDefaults.Swap(0, 2);
+				OriginalDefaults.Swap(1, 2);
+			}
 		}
 		else if (StructType == TBaseStructure<FVector2D>::Get())
 		{
@@ -6219,12 +6262,19 @@ void UEdGraphSchema_K2::RecombinePin(UEdGraphPin* Pin) const
 		UScriptStruct* StructType = CastChecked<UScriptStruct>(ParentPin->PinType.PinSubCategoryObject.Get());
 
 		TArray<FString> OriginalDefaults;
-		if (   StructType == TBaseStructure<FVector>::Get()
-			|| StructType == TBaseStructure<FRotator>::Get())
+		if (StructType == TBaseStructure<FVector>::Get())
 		{
 			ParentPin->DefaultValue = ParentPin->SubPins[0]->DefaultValue + TEXT(",") 
 									+ ParentPin->SubPins[1]->DefaultValue + TEXT(",")
 									+ ParentPin->SubPins[2]->DefaultValue;
+		}
+		else if (StructType == TBaseStructure<FRotator>::Get())
+		{
+			// Our pins are in the form X,Y,Z but the Rotator pin type expects the form Y,Z,X
+			// so we need to make sure they are added in that order here
+			ParentPin->DefaultValue = ParentPin->SubPins[1]->DefaultValue + TEXT(",")
+									+ ParentPin->SubPins[2]->DefaultValue + TEXT(",")
+									+ ParentPin->SubPins[0]->DefaultValue;
 		}
 		else if (StructType == TBaseStructure<FVector2D>::Get())
 		{

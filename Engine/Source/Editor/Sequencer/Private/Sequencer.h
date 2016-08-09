@@ -5,6 +5,7 @@
 #include "Editor/EditorWidgets/Public/ITransportControl.h"
 #include "EditorUndoClient.h"
 #include "MovieSceneClipboard.h"
+#include "MovieScenePossessable.h"
 #include "SequencerLabelManager.h"
 #include "LevelEditor.h"
 
@@ -214,9 +215,21 @@ public:
 	void ConvertToSpawnable(TSharedRef<FSequencerObjectBindingNode> NodeToBeConverted);
 
 	/**
+	 * Converts the specified spawnable GUID to a possessable
+	 *
+	 * @param	SpawnableGuid		The guid of the spawnable to convert
+	 */
+	void ConvertToPossessable(TSharedRef<FSequencerObjectBindingNode> NodeToBeConverted);
+
+	/**
 	 * Converts all the currently selected nodes to be spawnables, if possible
 	 */
 	void ConvertSelectedNodesToSpawnables();
+
+	/**
+	 * Converts all the currently selected nodes to be possessables, if possible
+	 */
+	void ConvertSelectedNodesToPossessables();
 
 protected:
 
@@ -375,6 +388,10 @@ public:
 	/** @return Whether or not this sequencer is used in the level editor */
 	bool IsLevelEditorSequencer() const { return bIsEditingWithinLevelEditor; }
 
+	/** @return Whether to show the curve editor or not */
+	void SetShowCurveEditor(bool bInShowCurveEditor);
+	bool GetShowCurveEditor() const { return bShowCurveEditor; }
+
 	/** Called to save the current movie scene */
 	void SaveCurrentMovieScene();
 
@@ -391,6 +408,14 @@ public:
 	/** Called when a user executes the delete node menu item */
 	void DeleteNode(TSharedRef<FSequencerDisplayNode> NodeToBeDeleted);
 	void DeleteSelectedNodes();
+
+	/** Called when a user executes the copy track menu item */
+	void CopySelectedTracks(TArray<TSharedPtr<FSequencerTrackNode>>& TrackNodes);
+	void ExportTracksToText(TArray<UMovieSceneTrack*> TrackToExport, /*out*/ FString& ExportedText);
+
+	/** Called when a user executes the paste track menu item */
+	void PasteCopiedTracks(TArray<TSharedPtr<FSequencerObjectBindingNode>>& ObjectNodes);
+	void ImportTracksFromText(const FString& TextToImport, /*out*/ TArray<UMovieSceneTrack*>& ImportedTrack);
 
 	/** Called when a user executes the active node menu item */
 	void ToggleNodeActive();
@@ -420,6 +445,12 @@ public:
 	void SynchronizeSequencerSelectionWithExternalSelection();
 
 public:
+
+	/** Copy the selection, whether it's keys or tracks */
+	void CopySelection();
+
+	/** Cut the selection, whether it's keys or tracks */
+	void CutSelection();
 
 	/** Copy the selected keys to the clipboard */
 	void CopySelectedKeys();
@@ -544,6 +575,7 @@ public:
 	virtual void NotifyMapChanged(UWorld* NewWorld, EMapChangeType MapChangeType) override;
 	virtual FOnGlobalTimeChanged& OnGlobalTimeChanged() override { return OnGlobalTimeChangedDelegate; }
 	virtual FOnMovieSceneDataChanged& OnMovieSceneDataChanged() override { return OnMovieSceneDataChangedDelegate; }
+	virtual FOnSelectionChangedObjectGuids& GetSelectionChangedObjectGuids() override { return OnSelectionChangedObjectGuidsDelegate; }
 	virtual FGuid CreateBinding(UObject& InObject, const FString& InName) override;
 	virtual UObject* GetPlaybackContext() const override;
 	virtual TArray<UObject*> GetEventContexts() const override;
@@ -788,6 +820,9 @@ protected:
 	/** Internal conversion function that doesn't perform expensive reset/update tasks */
 	FMovieSceneSpawnable* ConvertToSpawnableInternal(FGuid PossessableGuid);
 
+	/** Internal conversion function that doesn't perform expensive reset/update tasks */
+	FMovieScenePossessable* ConvertToPossessableInternal(FGuid SpawnableGuid);
+
 	/** Internal function to render movie for a given start/end time */
 	void RenderMovieInternal(float InStartTime, float InEndTime) const;
 
@@ -903,6 +938,8 @@ private:
 	/** True if this sequencer is being edited within the level editor */
 	bool bIsEditingWithinLevelEditor;
 
+	bool bShowCurveEditor;
+
 	/** Generic Popup Entry */
 	TWeakPtr<IMenu> EntryPopupMenu;
 
@@ -933,6 +970,9 @@ private:
 	/** A delegate which is called any time the movie scene data is changed. */
 	FOnMovieSceneDataChanged OnMovieSceneDataChangedDelegate;
 
+	/** A delegate which is called any time the sequencer selection changes. */
+	FOnSelectionChangedObjectGuids OnSelectionChangedObjectGuidsDelegate;
+
 	/** A map of all the transport controls to viewports that this sequencer has made */
 	TMap< TSharedPtr<class ILevelViewport>, TSharedPtr<class SWidget> > TransportControls;
 
@@ -947,7 +987,7 @@ private:
 	FLevelEditorModule::FLevelEditorMenuExtender ViewMenuExtender;
 	FDelegateHandle LevelEditorExtenderDelegateHandle;
 
-	/** When true the sequencer selection is being updated from changes to the external seleciton. */
+	/** When true the sequencer selection is being updated from changes to the external selection. */
 	bool bUpdatingSequencerSelection;
 
 	/** When true the external selection is being updated from changes to the sequencer selection. */

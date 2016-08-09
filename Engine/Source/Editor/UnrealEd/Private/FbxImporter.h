@@ -459,7 +459,7 @@ public:
 	/**
 	 * Get Animation Time Span - duration of the animation
 	 */
-	FbxTimeSpan GetAnimationTimeSpan(FbxNode* RootNode, FbxAnimStack* AnimStack);
+	FbxTimeSpan GetAnimationTimeSpan(FbxNode* RootNode, FbxAnimStack* AnimStack, int32 ResampleRate);
 
 	/**
 	 * Import one animation from CurAnimStack
@@ -725,6 +725,9 @@ public:
 	// current Fbx scene we are importing. Make sure to release it after import
 	FbxScene* Scene;
 	FBXImportOptions* ImportOptions;
+
+	//We cache the hash of the file when we open the file. This is to avoid calculating the hash many time when importing many asset in one fbx file.
+	FMD5Hash Md5Hash;
 
 protected:
 	enum IMPORTPHASE

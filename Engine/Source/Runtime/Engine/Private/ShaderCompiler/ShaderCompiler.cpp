@@ -2472,6 +2472,23 @@ void GlobalBeginCompileShader(
 			Input.Environment.CompilerFlags.Add(CFLAG_KeepDebugInfo);
 		}
 	}
+
+	{
+		static const auto CVar = IConsoleManager::Get().FindConsoleVariable(TEXT("r.Shaders.FastMath"));
+		if (CVar && CVar->GetInt() == 0)
+		{
+			Input.Environment.CompilerFlags.Add(CFLAG_NoFastMath);
+		}
+	}
+
+	if (IsD3DPlatform((EShaderPlatform)Target.Platform, false))
+	{
+		static const auto CVar = IConsoleManager::Get().FindConsoleVariable(TEXT("r.D3D.RemoveUnusedInterpolators"));
+		if (CVar && CVar->GetInt() != 0)
+		{
+			Input.Environment.CompilerFlags.Add(CFLAG_ForceRemoveUnusedInterpolators);
+		}
+	} 
 	
 	{
 		static const auto CVar = IConsoleManager::Get().FindConsoleVariable(TEXT("r.Shaders.ZeroInitialise"));
@@ -2546,6 +2563,11 @@ void GlobalBeginCompileShader(
 	{
 		static IConsoleVariable* CVar = IConsoleManager::Get().FindConsoleVariable(TEXT("r.ForwardShading"));
 		Input.Environment.SetDefine(TEXT("FORWARD_SHADING"), CVar ? (CVar->GetInt() != 0) : 0);
+	}
+
+	{
+		static IConsoleVariable* CVar = IConsoleManager::Get().FindConsoleVariable(TEXT("r.VertexFoggingForOpaque"));
+		Input.Environment.SetDefine(TEXT("VERTEX_FOGGING_FOR_OPAQUE"), CVar ? (CVar->GetInt() != 0) : 0);
 	}
 
 	if (GSupportsRenderTargetWriteMask)
@@ -2702,6 +2724,12 @@ public:
 			// fixup uniform expressions
 			UMaterialInterface::RecacheAllMaterialUniformExpressions();
 		}
+
+		ENQUEUE_UNIQUE_RENDER_COMMAND(
+			FRecreateBoundShaderStates,
+		{
+			RHIRecreateRecursiveBoundShaderStates();
+		});
 	}
 
 private:

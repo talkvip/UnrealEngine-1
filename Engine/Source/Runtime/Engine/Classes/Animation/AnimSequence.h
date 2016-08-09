@@ -370,6 +370,12 @@ class ENGINE_API UAnimSequence : public UAnimSequenceBase
 	TArray<struct FRawAnimSequenceTrack> SourceRawAnimationData;
 
 	/**
+	* Temporary base pose buffer for additive animation that is used by compression. Do not use this unless within compression. It is not available.
+	* This is used by remove linear key that has to rebuild to full transform in order to compress
+	*/
+	TArray<struct FRawAnimSequenceTrack> TemporaryAdditiveBaseAnimationData;
+
+	/**
 	 * The compression scheme that was most recently used to compress this animation.
 	 * May be NULL.
 	 */
@@ -803,15 +809,15 @@ public:
 	/**
 	 * Create Animation Sequence from Reference Pose of the Mesh
 	 */
-	bool CreateAnimation(class USkeletalMesh * Mesh);
+	bool CreateAnimation(class USkeletalMesh* Mesh);
 	/**
 	 * Create Animation Sequence from the Mesh Component's current bone transform
 	 */
-	bool CreateAnimation(class USkeletalMeshComponent * MeshComponent);
+	bool CreateAnimation(class USkeletalMeshComponent* MeshComponent);
 	/**
 	 * Create Animation Sequence from the given animation
 	 */
-	bool CreateAnimation(class UAnimSequence * Sequence);
+	bool CreateAnimation(class UAnimSequence* Sequence);
 
 	/**
 	 * Crops the raw anim data either from Start to CurrentTime or CurrentTime to End depending on

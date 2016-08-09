@@ -562,6 +562,7 @@ UPackage* CreatePackage( UObject* InOuter, const TCHAR* PackageName )
 
 	ResolveName( InOuter, InName, true, false );
 
+
 	UPackage* Result = NULL;
 	if ( InName.Len() == 0 )
 	{
@@ -655,6 +656,8 @@ bool ResolveName(UObject*& InPackage, FString& InOutName, bool Create, bool Thro
 
 	// Strip off the object class.
 	ConstructorHelpers::StripObjectClass( InOutName );
+
+	InOutName = FPackageName::GetDelegateResolvedPackagePath(InOutName);
 
 	// if you're attempting to find an object in any package using a dotted name that isn't fully
 	// qualified (such as ObjectName.SubobjectName - notice no package name there), you normally call
@@ -797,7 +800,7 @@ UObject* StaticLoadObjectInternal(UClass* ObjectClass, UObject* InOuter, const T
 	const bool bContainsObjectName = !!FCString::Strstr(InName, TEXT("."));
 
 	// break up the name into packages, returning the innermost name and its outer
-	ResolveName(InOuter, StrName, true, true, LoadFlags & LOAD_EditorOnly);
+	ResolveName(InOuter, StrName, true, true, LoadFlags & (LOAD_EditorOnly | LOAD_Quiet | LOAD_NoWarn));
 	if (InOuter)
 	{
 		// If we have a full UObject name then attempt to find the object in memory first,
@@ -1178,8 +1181,7 @@ static UPackage* LoadPackageInternalInner(UPackage* InOuter, const TCHAR* InLong
 		// The time tracker keeps track of time spent in LoadPackage.
 		FExclusiveLoadPackageTimeTracker::FScopedPackageTracker Tracker(Result);
 
-
-		// If we are loading a package for diff'ing, set the package flag
+		// If we are loading a package for diffing, set the package flag
 		if(LoadFlags & LOAD_ForDiff)
 		{
 			Result->SetPackageFlags(PKG_ForDiffing);

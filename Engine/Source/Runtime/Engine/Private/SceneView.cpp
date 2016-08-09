@@ -91,7 +91,6 @@ void FBuiltinSamplersUniformBuffer::ReleaseDynamicRHI()
 TGlobalResource<FBuiltinSamplersUniformBuffer> GBuiltinSamplersUniformBuffer;
 
 
-#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
 static TAutoConsoleVariable<float> CVarSSRMaxRoughness(
 	TEXT("r.SSR.MaxRoughness"),
 	-1.0f,
@@ -101,6 +100,9 @@ static TAutoConsoleVariable<float> CVarSSRMaxRoughness(
 	TEXT(" 0..1: use specified max roughness (overrride PostprocessVolume setting)\n")
 	TEXT(" -1: no override (default)"),
 	ECVF_Scalability | ECVF_RenderThreadSafe);
+
+#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+
 
 static TAutoConsoleVariable<int32> CVarShadowFreezeCamera(
 	TEXT("r.Shadow.FreezeCamera"),
@@ -228,7 +230,8 @@ static TAutoConsoleVariable<int32> CVarDefaultAntiAliasing(
 	TEXT("Engine default (project setting) for AntiAliasingMethod is (postprocess volume/camera/game setting still can override)\n")
 	TEXT(" 0: off (no anti-aliasing)\n")
 	TEXT(" 1: FXAA (faster than TemporalAA but much more shimmering for non static cases)\n")
-	TEXT(" 2: TemporalAA (default)"));
+	TEXT(" 2: TemporalAA (default)\n")
+	TEXT(" 3: MSAA (Forward shading only)"));
 
 static TAutoConsoleVariable<float> CVarMotionBlurScale(
 	TEXT("r.MotionBlur.Scale"),
@@ -455,6 +458,7 @@ FSceneView::FSceneView(const FSceneViewInitOptions& InitOptions)
 	, bAllowTranslucentPrimitivesInHitProxy( true )
 	, bHasSelectedComponents( false )
 #endif
+	, AntiAliasingMethod(AAM_None)
 	, FeatureLevel(InitOptions.ViewFamily ? InitOptions.ViewFamily->GetFeatureLevel() : GMaxRHIFeatureLevel)
 {
 	check(UnscaledViewRect.Min.X >= 0);
@@ -663,6 +667,66 @@ FSceneView::FSceneView(const FSceneViewInitOptions& InitOptions)
 
 	static const auto MultiViewCVar = IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("vr.MultiView"));
 	bIsMultiViewEnabled = ShaderPlatform == EShaderPlatform::SP_PS4 && (MultiViewCVar && MultiViewCVar->GetValueOnAnyThread() != 0);
+
+	SetupAntiAliasingMethod();
+}
+
+void FSceneView::SetupAntiAliasingMethod()
+{
+	{
+		int32 Value = CVarDefaultAntiAliasing.GetValueOnAnyThread();
+		if (Value >= 0 && Value < AAM_MAX)
+		{
+			AntiAliasingMethod = (EAntiAliasingMethod)Value;
+		}
+	}
+
+	static const auto CVarMobileMSAA = IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.MobileMSAA"));
+	if (FeatureLevel <= ERHIFeatureLevel::ES3_1 && CVarMobileMSAA ? CVarMobileMSAA->GetValueOnAnyThread() > 1 : false)
+	{
+		//@todo Ronin check what we support under MSAA
+
+		// Turn off various features which won't work with mobile MSAA.
+		//FinalPostProcessSettings.DepthOfFieldScale = 0.0f;
+		AntiAliasingMethod = AAM_None;
+	}
+
+	if (Family)
+	{
+		static IConsoleVariable* CVarMSAACount = IConsoleManager::Get().FindConsoleVariable(TEXT("r.MSAACount"));
+
+		if (AntiAliasingMethod == AAM_MSAA && IsForwardShadingEnabled(FeatureLevel) && CVarMSAACount->GetInt() <= 1)
+		{
+			// Fallback to temporal AA so we can easily toggle methods with r.MSAACount
+			AntiAliasingMethod = AAM_TemporalAA;
+		}
+
+		static const auto PostProcessAAQualityCVar = IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.PostProcessAAQuality"));
+		static auto* MobileHDRCvar = IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.MobileHDR"));
+		static auto* MobileMSAACvar = IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.MobileMSAA"));
+		static uint32 MSAAValue = GShaderPlatformForFeatureLevel[FeatureLevel] == SP_OPENGL_ES2_IOS ? 1 : MobileMSAACvar->GetValueOnAnyThread();
+
+		int32 Quality = FMath::Clamp(PostProcessAAQualityCVar->GetValueOnAnyThread(), 0, 6);
+		const bool bWillApplyTemporalAA = Family->EngineShowFlags.PostProcessing || bIsPlanarReflection;
+
+		if (!bWillApplyTemporalAA || !Family->EngineShowFlags.AntiAliasing || Quality <= 0
+			// Disable antialiasing in GammaLDR mode to avoid jittering.
+			|| (FeatureLevel == ERHIFeatureLevel::ES2 && MobileHDRCvar->GetValueOnAnyThread() == 0)
+			|| (FeatureLevel <= ERHIFeatureLevel::ES3_1 && (MSAAValue > 1))
+			|| Family->EngineShowFlags.VisualizeBloom
+			|| Family->EngineShowFlags.VisualizeDOF)
+		{
+			AntiAliasingMethod = AAM_None;
+		}
+
+		if (AntiAliasingMethod == AAM_TemporalAA)
+		{
+			if (!Family->EngineShowFlags.TemporalAA || !Family->bRealtimeUpdate || Quality < 3)
+			{
+				AntiAliasingMethod = AAM_FXAA;
+			}
+		}
+	}
 }
 
 static TAutoConsoleVariable<int32> CVarCompensateForFOV(
@@ -1035,6 +1099,24 @@ void FSceneView::OverridePostProcessSettings(const FPostProcessSettings& Src, fl
 		LERP_PP(ColorGain);
 		LERP_PP(ColorOffset);
 
+		LERP_PP(ColorSaturationShadows);
+		LERP_PP(ColorContrastShadows);
+		LERP_PP(ColorGammaShadows);
+		LERP_PP(ColorGainShadows);
+		LERP_PP(ColorOffsetShadows);
+
+		LERP_PP(ColorSaturationMidtones);
+		LERP_PP(ColorContrastMidtones);
+		LERP_PP(ColorGammaMidtones);
+		LERP_PP(ColorGainMidtones);
+		LERP_PP(ColorOffsetMidtones);
+
+		LERP_PP(ColorSaturationHighlights);
+		LERP_PP(ColorContrastHighlights);
+		LERP_PP(ColorGammaHighlights);
+		LERP_PP(ColorGainHighlights);
+		LERP_PP(ColorOffsetHighlights);
+
 		LERP_PP(FilmWhitePoint);
 		LERP_PP(FilmSaturation);
 		LERP_PP(FilmChannelMixerRed);
@@ -1197,11 +1279,6 @@ void FSceneView::OverridePostProcessSettings(const FPostProcessSettings& Src, fl
 		{
 			Dest.AmbientOcclusionRadiusInWS = Src.AmbientOcclusionRadiusInWS;
 		}
-
-		if (Src.bOverride_AntiAliasingMethod)
-		{
-			Dest.AntiAliasingMethod = Src.AntiAliasingMethod;
-		}
 	}
 	
 	// will be deprecated soon, use the new asset LightPropagationVolumeBlendable instead
@@ -1354,14 +1431,6 @@ void FSceneView::StartFinalPostprocessSettings(FVector InViewLocation)
 		}
 
 		{
-			int32 Value = CVarDefaultAntiAliasing.GetValueOnGameThread();
-			if (Value >= 0 && Value < AAM_MAX)
-			{
-				FinalPostProcessSettings.AntiAliasingMethod = (EAntiAliasingMethod)Value;
-			}
-		}
-
-		{
 			int32 Value = CVarDefaultAmbientOcclusionStaticFraction.GetValueOnGameThread();
 
 			if(!Value)
@@ -1423,18 +1492,6 @@ void FSceneView::EndFinalPostprocessSettings(const FSceneViewInitOptions& ViewIn
 		if(!Family->EngineShowFlags.GlobalIllumination)
 		{
 			Dest.LPVIntensity = 0.0f;
-		}
-	}
-
-	{
-		static const auto CVarMobileMSAA = IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.MobileMSAA"));
-		if (FeatureLevel <= ERHIFeatureLevel::ES3_1 && CVarMobileMSAA ? CVarMobileMSAA->GetValueOnGameThread() > 1 : false)
-		{
-			//@todo Ronin check what we support under MSAA
-
-			// Turn off various features which won't work with mobile MSAA.
-			//FinalPostProcessSettings.DepthOfFieldScale = 0.0f;
-			FinalPostProcessSettings.AntiAliasingMethod = AAM_None;
 		}
 	}
 
@@ -1594,7 +1651,6 @@ void FSceneView::EndFinalPostprocessSettings(const FSceneViewInitOptions& ViewIn
 		}
 	}
 
-#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
 	{
 		float Value = CVarSSRMaxRoughness.GetValueOnGameThread();
 
@@ -1603,7 +1659,6 @@ void FSceneView::EndFinalPostprocessSettings(const FSceneViewInitOptions& ViewIn
 			FinalPostProcessSettings.ScreenSpaceReflectionMaxRoughness = Value;
 		}
 	}
-#endif
 
 	{
 		static const auto AmbientOcclusionStaticFractionCVar = IConsoleManager::Get().FindTConsoleVariableDataFloat(TEXT("r.AmbientOcclusionStaticFraction"));
@@ -1689,36 +1744,6 @@ void FSceneView::EndFinalPostprocessSettings(const FSceneViewInitOptions& ViewIn
 	{
 		FinalPostProcessSettings.IndirectLightingColor = FLinearColor(0,0,0,0);
 		FinalPostProcessSettings.IndirectLightingIntensity = 0.0f;
-	}
-
-	// Anti-Aliasing
-	{
-		static const auto PostProcessAAQualityCVar = IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.PostProcessAAQuality")); 
-		static auto* MobileHDRCvar = IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.MobileHDR"));
-		static auto* MobileMSAACvar = IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.MobileMSAA"));
-		static uint32 MSAAValue = GShaderPlatformForFeatureLevel[SceneViewFeatureLevel] == SP_OPENGL_ES2_IOS ? 1 : MobileMSAACvar->GetValueOnGameThread();
-
-		int32 Quality = FMath::Clamp(PostProcessAAQualityCVar->GetValueOnGameThread(), 0, 6);
-		const bool bWillApplyTemporalAA = Family->EngineShowFlags.PostProcessing || bIsPlanarReflection;
-
-		if( !bWillApplyTemporalAA || !Family->EngineShowFlags.AntiAliasing || Quality <= 0
-			// Disable antialiasing in GammaLDR mode to avoid jittering.
-			|| (SceneViewFeatureLevel == ERHIFeatureLevel::ES2 && MobileHDRCvar->GetValueOnGameThread() == 0)
-			|| (SceneViewFeatureLevel <= ERHIFeatureLevel::ES3_1 && (MSAAValue > 1))
-			|| Family->EngineShowFlags.VisualizeBloom
-			|| Family->EngineShowFlags.VisualizeDOF)
-		{
-			FinalPostProcessSettings.AntiAliasingMethod = AAM_None;
-		}
-
-		if( FinalPostProcessSettings.AntiAliasingMethod == AAM_TemporalAA)
-		{
-			if( !Family->EngineShowFlags.TemporalAA || !Family->bRealtimeUpdate || Quality < 3 )
-			{
-				FinalPostProcessSettings.AntiAliasingMethod = AAM_FXAA;
-			}
-		}
-
 	}
 
 	if (AllowDebugViewmodes())

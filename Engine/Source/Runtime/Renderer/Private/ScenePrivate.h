@@ -1611,6 +1611,7 @@ public:
 	FLODSceneTree(FScene* InScene)
 		: Scene(InScene)
 		, TemporalLODSyncTime(0.0f)
+		, LastHLODDistanceScale(-1.0f)
 		, UpdateCount(0)
 	{
 		PrimitiveFadingLODMap.Empty();
@@ -1690,6 +1691,7 @@ private:
 	TBitArray<> PrimitiveFadingLODMap;
 	TBitArray<>	PrimitiveFadingOutLODMap;
 	float		TemporalLODSyncTime;
+	float		LastHLODDistanceScale;
 
 	/**  Update Count. This is used to skip Child node that has been updated */
 	int32 UpdateCount;
@@ -1754,6 +1756,7 @@ public:
 		bool bEnableStationarySkylight;
 		bool bEnableAtmosphericFog;
 		bool bEnableLowQualityLightmaps;
+		bool bEnableVertexFoggingForOpaque;
 	};
 
 	/** An optional world associated with the scene. */
@@ -1807,6 +1810,10 @@ public:
 	template<typename LightMapPolicyType>
 	TStaticMeshDrawList<TMobileBasePassDrawingPolicy<LightMapPolicyType, 0> >& GetMobileBasePassCSMDrawList(EBasePassDrawListType DrawType);
 
+#if WITH_EDITOR
+	/** Draw list to use for selected static meshes in the editor only */
+	TStaticMeshDrawList<FEditorSelectionDrawingPolicy> EditorSelectionDrawList;
+#endif
 	/**
 	 * The following arrays are densely packed primitive data needed by various
 	 * rendering passes. PrimitiveSceneInfo->PackedIndex maintains the index
@@ -1834,9 +1841,6 @@ public:
 	 * Lights in this array cannot be in the Lights array.  They also are not fully set up, as AddLightSceneInfo_RenderThread is not called for them.
 	 */
 	TSparseArray<FLightSceneInfoCompact> InvisibleLights;
-
-	/** Map from light id to the cached shadowmap data for that light. */
-	TMap<int32, FCachedShadowMapData> CachedShadowMaps;
 
 	/** The mobile quality level for which static draw lists have been built. */
 	bool bStaticDrawListsMobileHDR;
@@ -1892,6 +1896,11 @@ public:
 
 	/** Distance field object scene data. */
 	FDistanceFieldSceneData DistanceFieldSceneData;
+	
+	/** Map from light id to the cached shadowmap data for that light. */
+	TMap<int32, FCachedShadowMapData> CachedShadowMaps;
+
+	TRefCountPtr<IPooledRenderTarget> PreShadowCacheDepthZ;
 
 	/** Preshadows that are currently cached in the PreshadowCache render target. */
 	TArray<TRefCountPtr<FProjectedShadowInfo> > CachedPreshadows;
@@ -1987,7 +1996,7 @@ public:
 	virtual void UpdateSceneCaptureContents(class USceneCaptureComponentCube* CaptureComponent) override;
 	virtual void UpdatePlanarReflectionContents(UPlanarReflectionComponent* CaptureComponent, FSceneRenderer& MainSceneRenderer) override;
 	virtual void AllocateReflectionCaptures(const TArray<UReflectionCaptureComponent*>& NewCaptures) override;
-	virtual void UpdateSkyCaptureContents(const USkyLightComponent* CaptureComponent, bool bCaptureEmissiveOnly, UTextureCube* SourceCubemap, FTexture* OutProcessedTexture, FSHVectorRGB3& OutIrradianceEnvironmentMap) override; 
+	virtual void UpdateSkyCaptureContents(const USkyLightComponent* CaptureComponent, bool bCaptureEmissiveOnly, UTextureCube* SourceCubemap, FTexture* OutProcessedTexture, float& OutAverageBrightness, FSHVectorRGB3& OutIrradianceEnvironmentMap) override; 
 	virtual void PreCullStaticMeshes(const TArray<UStaticMeshComponent*>& ComponentsToPreCull, const TArray<TArray<FPlane> >& CullVolumes) override;
 	virtual void AddPrecomputedLightVolume(const class FPrecomputedLightVolume* Volume) override;
 	virtual void RemovePrecomputedLightVolume(const class FPrecomputedLightVolume* Volume) override;

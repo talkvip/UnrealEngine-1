@@ -823,6 +823,11 @@ int32 FEngineLoop::PreInit( const TCHAR* CmdLine )
 			}
 		}
 	}
+
+	if (FParse::Param(FCommandLine::Get(), TEXT("emitdrawevents")))
+	{
+		GEmitDrawEvents = true;
+	}	
 #endif // !UE_BUILD_SHIPPING
 
 	// Switch into executable's directory (may be required by some of the platform file overrides)
@@ -2522,22 +2527,24 @@ void FEngineLoop::ProcessLocalPlayerSlateOperations() const
 
 			if ( ViewportWidget.IsValid() )
 			{
-				for( FConstPlayerControllerIterator Iterator = CurWorld->GetPlayerControllerIterator(); Iterator; ++Iterator )
+				FWidgetPath PathToWidget;
+				SlateApp.GeneratePathToWidgetUnchecked(ViewportWidget.ToSharedRef(), PathToWidget);
+
+				if (PathToWidget.IsValid())
 				{
-					APlayerController* PlayerController = *Iterator;
-					if( PlayerController )
+					for (FConstPlayerControllerIterator Iterator = CurWorld->GetPlayerControllerIterator(); Iterator; ++Iterator)
 					{
-						ULocalPlayer* LocalPlayer = Cast< ULocalPlayer >( PlayerController->Player );
-						if( LocalPlayer )
+						APlayerController* PlayerController = *Iterator;
+						if (PlayerController)
 						{
-							FReply& TheReply = LocalPlayer->GetSlateOperations();
+							ULocalPlayer* LocalPlayer = Cast< ULocalPlayer >(PlayerController->Player);
+							if (LocalPlayer)
+							{
+								FReply& TheReply = LocalPlayer->GetSlateOperations();
+								SlateApp.ProcessReply(PathToWidget, TheReply, nullptr, nullptr, LocalPlayer->GetControllerId());
 
-							FWidgetPath PathToWidget;
-							SlateApp.GeneratePathToWidgetUnchecked( ViewportWidget.ToSharedRef(), PathToWidget );
-
-							SlateApp.ProcessReply( PathToWidget, TheReply, nullptr, nullptr, LocalPlayer->GetControllerId() );
-
-							TheReply = FReply::Unhandled();
+								TheReply = FReply::Unhandled();
+							}
 						}
 					}
 				}
@@ -2817,6 +2824,7 @@ void FEngineLoop::Tick()
 
 		if (FSlateApplication::IsInitialized() && !bIdleMode)
 		{
+			SCOPE_TIME_GUARD(TEXT("SlateInput"));
 			QUICK_SCOPE_CYCLE_COUNTER(STAT_FEngineLoop_Tick_SlateInput);
 
 			FSlateApplication& SlateApp = FSlateApplication::Get();
@@ -3243,6 +3251,12 @@ bool FEngineLoop::AppInit( )
 	{
 		return false;
 	}
+
+	// Register the callback that allows the text localization manager to load data for plugins
+	FTextLocalizationManager::Get().GatherAdditionalLocResPathsCallback.AddLambda([](TArray<FString>& OutLocResPaths)
+	{
+		IPluginManager::Get().GetLocalizationPathsForEnabledPlugins(OutLocResPaths);
+	});
 
 	PreInitHMDDevice();
 

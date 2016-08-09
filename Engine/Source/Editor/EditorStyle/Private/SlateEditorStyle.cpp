@@ -1331,7 +1331,7 @@ void FSlateEditorStyle::FStyle::SetupGeneralStyles()
 		Set( "WorldBrowser.LevelStreamingBlueprint", new IMAGE_BRUSH( "Icons/icon_levels_blueprinttype_7x16", Icon7x16 ) );
 		Set( "WorldBrowser.LevelsMenuBrush", new IMAGE_BRUSH( "Icons/icon_levels_levelsmenu_40x", Icon25x25 ) );
 		Set( "WorldBrowser.HierarchyButtonBrush", new IMAGE_BRUSH( "Icons/icon_levels_hierarchybutton_16x", Icon16x16 ) );
-		Set( "WorldBrowser.DetailsButtonBrush", new IMAGE_BRUSH( "Icons/icon_levels_detailsbutton_16x", Icon16x16 ) );
+		Set( "WorldBrowser.DetailsButtonBrush", new IMAGE_BRUSH( "Icons/icon_levels_detailsbutton_40x", Icon16x16 ) );
 		Set( "WorldBrowser.CompositionButtonBrush", new IMAGE_BRUSH( "Icons/icon_levels_compositionbutton_16x", Icon16x16 ) );
 		
 		Set( "WorldBrowser.StatusBarText", FTextBlockStyle(NormalText)
@@ -4891,8 +4891,8 @@ void FSlateEditorStyle::FStyle::SetupLevelEditorStyle()
 			.SetCheckedImage(BOX_BRUSH("Common/SmallRoundedToggleRight", FMargin(7.f / 16.f), SelectionColor)));
 
 		Set("BlueprintProfiler.TableView.Row", FTableRowStyle(NormalTableRowStyle)
-			.SetActiveBrush(IMAGE_BRUSH("Common/Selection", Icon8x8, FLinearColor(0.728f, 0.364f, 0.003f, 0.15f)))
-			.SetActiveHoveredBrush(IMAGE_BRUSH("Common/Selection", Icon8x8, FLinearColor(0.728f, 0.364f, 0.003f, 0.2f)))
+			.SetActiveBrush(IMAGE_BRUSH("Common/Selection", Icon8x8, FLinearColor(0.25f, 0.25f, 0.25f, 0.35f)))
+			.SetActiveHoveredBrush(IMAGE_BRUSH("Common/Selection", Icon8x8, FLinearColor(0.25f, 0.25f, 0.25f, 0.5f)))
 			.SetInactiveBrush(IMAGE_BRUSH("Common/Selection", Icon8x8, FLinearColor(0.25f, 0.25f, 0.25f, 0.15f)))
 			.SetInactiveHoveredBrush(IMAGE_BRUSH("Common/Selection", Icon8x8, FLinearColor(0.25f, 0.25f, 0.25f, 0.2f))));
 
@@ -6861,7 +6861,10 @@ void FSlateEditorStyle::FStyle::SetupAutomationStyles()
 		Set("SettingsEditor.GoodIcon", new IMAGE_BRUSH("Settings/Settings_Good", Icon40x40));
 		Set("SettingsEditor.WarningIcon", new IMAGE_BRUSH("Settings/Settings_Warning", Icon40x40));
 
-		Set( "SettingsEditor.CheckoutWarningBorder", new BOX_BRUSH( "Common/GroupBorderLight", FMargin(4.0f/16.0f) ) );
+		Set("SettingsEditor.CheckoutWarningBorder", new BOX_BRUSH( "Common/GroupBorderLight", FMargin(4.0f/16.0f) ) );
+
+		Set("SettingsEditor.CatgoryAndSectionFont", TTF_CORE_FONT("Slate/Fonts/Roboto-Regular", 18));
+		Set("SettingsEditor.TopLevelObjectFontStyle", TTF_CORE_FONT("Fonts/Roboto-Bold", 12));
 	}
 
 	{

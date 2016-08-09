@@ -1403,18 +1403,36 @@ static int32 FindMorphTarget(const TArray<FActiveMorphTarget>& ActiveMorphTarget
 
 void FAnimationRuntime::AppendActiveMorphTargets(const USkeletalMesh* InSkeletalMesh, const TMap<FName, float>& MorphCurveAnims, TArray<FActiveMorphTarget>& InOutActiveMorphTargets, TArray<float>& InOutMorphTargetWeights)
 {
+	if (!InSkeletalMesh)
+	{
+		return;
+	}
+
 	// Then go over the CurveKeys finding morph targets by name
 	for(auto CurveIter=MorphCurveAnims.CreateConstIterator(); CurveIter; ++CurveIter)
 	{
 		const FName& CurveName	= (CurveIter).Key();
 		const float Weight	= (CurveIter).Value();
 
+		// ensure the buffer fits the size
+
+		// @note that this only adds zero buffer if it doesn't have enough buffer with the correct size and that is intended
+		// there is three places to resize this buffer
+		//
+		// one is init anim, where we initialize the buffer first time. We need this so that if you don't call Tick, it can have buffer assigned for renderer to get
+		// second is tick component, where we make sure the buffer size is correct. We need that so that if you don't have animation or your morphtarget buffer size changes, we want to make sure that buffer is set correctly
+		// third is this place where the buffer really matters for game thread, we need to resize if needed in case morphtarget is deleted or added. 
+		// the reason you need this is because some other places calling append buffer without going through proper tick component - for example, calling TickAnimation directly
+		//
+		// if somehow it gets rendered without going through these places, there will be crash. Renderer expect the buffer size being same. 
+		InOutMorphTargetWeights.SetNumZeroed(InSkeletalMesh->MorphTargets.Num());
+
 		// If it has a valid weight
 		if(FMath::Abs(Weight) > MinMorphTargetBlendWeight)
 		{
 			// Find morph reference
 			int32 SkeletalMorphIndex = INDEX_NONE;
-			UMorphTarget* Target = InSkeletalMesh ? InSkeletalMesh->FindMorphTargetAndIndex(CurveName, SkeletalMorphIndex) : nullptr;
+			UMorphTarget* Target = InSkeletalMesh->FindMorphTargetAndIndex(CurveName, SkeletalMorphIndex);
 			if (Target != nullptr)
 			{
 				// See if this morph target already has an entry

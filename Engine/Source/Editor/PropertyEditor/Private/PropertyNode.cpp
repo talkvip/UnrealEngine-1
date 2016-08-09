@@ -10,6 +10,7 @@
 #include "Editor/UnrealEd/Public/Kismet2/BlueprintEditorUtils.h"
 #include "Engine/UserDefinedStruct.h"
 #include "Misc/ScopeExit.h"
+#include "PropertyHandleImpl.h"
 
 FPropertySettings& FPropertySettings::Get()
 {
@@ -124,9 +125,8 @@ void FPropertyNode::InitNode( const FPropertyNodeInitParams& InitParams )
 	}
 	else
 	{
-		FReadAddressListData ReadAddresses;
-		const bool GotReadAddresses = GetReadAddressUncached( *this, false, ReadAddresses, false );
-		const bool bSingleSelectOnly = GetReadAddressUncached( *this, true, ReadAddresses );
+		const bool GotReadAddresses = GetReadAddressUncached( *this, false, nullptr, false );
+		const bool bSingleSelectOnly = GetReadAddressUncached( *this, true, nullptr);
 		SetNodeFlags(EPropertyNodeFlags::SingleSelectOnly, bSingleSelectOnly);
 
 		UProperty* MyProperty = Property.Get();
@@ -328,7 +328,7 @@ FObjectPropertyNode* FPropertyNode::FindRootObjectItemParent()
 /** 
  * Used to see if any data has been destroyed from under the property tree.  Should only be called by PropertyWindow::OnIdle
  */
-FPropertyNode::DataValidationResult FPropertyNode::EnsureDataIsValid()
+EPropertyDataValidationResult FPropertyNode::EnsureDataIsValid()
 {
 	bool bValidateChildren = !HasNodeFlags(EPropertyNodeFlags::SkipChildValidation);
 
@@ -390,7 +390,7 @@ FPropertyNode::DataValidationResult FPropertyNode::EnsureDataIsValid()
 			if (!bSuccess)
 			{
 				UE_LOG( LogPropertyNode, Verbose, TEXT("Object is invalid %s"), *Property->GetName() );
-				return ObjectInvalid;
+				return EPropertyDataValidationResult::ObjectInvalid;
 			}
 
 
@@ -402,7 +402,7 @@ FPropertyNode::DataValidationResult FPropertyNode::EnsureDataIsValid()
 				if (Addr==NULL)
 				{
 					UE_LOG( LogPropertyNode, Verbose, TEXT("Object is invalid %s"), *Property->GetName() );
-					return ObjectInvalid;
+					return EPropertyDataValidationResult::ObjectInvalid;
 				}
 
 				if( ArrayProperty && !bIgnoreAllMismatch)
@@ -448,7 +448,7 @@ FPropertyNode::DataValidationResult FPropertyNode::EnsureDataIsValid()
 					}
 				}
 
-				return ArraySizeChanged;
+				return EPropertyDataValidationResult::ArraySizeChanged;
 			}
 
 			const bool bHasChildren = (GetNumChildNodes() != 0);
@@ -457,7 +457,7 @@ FPropertyNode::DataValidationResult FPropertyNode::EnsureDataIsValid()
 			if (ObjectProperty && ((!bObjectPropertyNull && !bHasChildren) || (bObjectPropertyNull && bHasChildren)))
 			{
 				RebuildChildren();
-				return PropertiesChanged;
+				return EPropertyDataValidationResult::PropertiesChanged;
 			}
 		}
 	}
@@ -466,10 +466,10 @@ FPropertyNode::DataValidationResult FPropertyNode::EnsureDataIsValid()
 	{
 		RebuildChildren();
 		// If this property is editinline and not edit const then its editinline new and we can optimize some of the refreshing in some cases.  Otherwise we need to refresh all properties in the view
-		return HasNodeFlags(EPropertyNodeFlags::EditInline) && !IsEditConst() ? EditInlineNewValueChanged : PropertiesChanged;
+		return HasNodeFlags(EPropertyNodeFlags::EditInline) && !IsEditConst() ? EPropertyDataValidationResult::EditInlineNewValueChanged : EPropertyDataValidationResult::PropertiesChanged;
 	}
 	
-	FPropertyNode::DataValidationResult FinalResult = DataValid;
+	EPropertyDataValidationResult FinalResult = EPropertyDataValidationResult::DataValid;
 
 	//go through my children
 	if (bValidateChildren)
@@ -479,8 +479,8 @@ FPropertyNode::DataValidationResult FPropertyNode::EnsureDataIsValid()
 			TSharedPtr<FPropertyNode>& ChildNode = ChildNodes[Scan];
 			check(ChildNode.IsValid());
 
-			FPropertyNode::DataValidationResult ChildDataResult = ChildNode->EnsureDataIsValid();
-			if (FinalResult == DataValid && ChildDataResult != DataValid)
+			EPropertyDataValidationResult ChildDataResult = ChildNode->EnsureDataIsValid();
+			if (FinalResult == EPropertyDataValidationResult::DataValid && ChildDataResult != EPropertyDataValidationResult::DataValid)
 			{
 				FinalResult = ChildDataResult;
 			}
@@ -624,7 +624,7 @@ bool FPropertyNode::GetQualifiedName( FString& PathPlusIndex, const bool bWithAr
 
 bool FPropertyNode::GetReadAddressUncached( FPropertyNode& InPropertyNode,
 									bool InRequiresSingleSelection,
-									FReadAddressListData& OutAddresses,
+									FReadAddressListData* OutAddresses,
 									bool bComparePropertyContents,
 									bool bObjectForceCompare,
 									bool bArrayPropertiesCanDifferInSize ) const
@@ -666,7 +666,7 @@ bool FPropertyNode::GetReadAddress(bool InRequiresSingleSelection,
 	bool bAllValuesTheSame = false;
 	if (ParentNodeWeakPtr.IsValid())
 	{
-		bAllValuesTheSame = GetReadAddressUncached( *this, InRequiresSingleSelection, CachedReadAddresses, bComparePropertyContents, bObjectForceCompare, bArrayPropertiesCanDifferInSize );
+		bAllValuesTheSame = GetReadAddressUncached( *this, InRequiresSingleSelection, &CachedReadAddresses, bComparePropertyContents, bObjectForceCompare, bArrayPropertiesCanDifferInSize );
 		OutAddresses.ReadAddressListData = &CachedReadAddresses;
 		CachedReadAddresses.bAllValuesTheSame = bAllValuesTheSame;
 		CachedReadAddresses.bRequiresCache = false;
@@ -1516,6 +1516,8 @@ void FPropertyNode::ResetToDefault( FNotifyHook* InNotifyHook )
 		// Whether or not an edit inline new was reset as a result of this reset to default
 		bool bEditInlineNewWasReset = false;
 
+		TArray< TMap<FString, int32> > ArrayIndicesPerObject;
+
 		for( int32 ObjIndex = 0; ObjIndex < ObjectNode->GetNumObjects(); ++ObjIndex )
 		{
 			TWeakObjectPtr<UObject> ObjectWeakPtr = ObjectNode->GetUObject( ObjIndex );
@@ -1659,6 +1661,9 @@ void FPropertyNode::ResetToDefault( FNotifyHook* InNotifyHook )
 						// restore the original (editor) GWorld
 						RestoreEditorWorld( OldGWorld );
 					}
+
+					ArrayIndicesPerObject.Add(TMap<FString, int32>());
+					FPropertyValueImpl::GenerateArrayIndexMapToObjectNode(ArrayIndicesPerObject[ObjIndex], this);
 				}
 			}
 		}
@@ -1668,6 +1673,8 @@ void FPropertyNode::ResetToDefault( FNotifyHook* InNotifyHook )
 			// Call PostEditchange on all the objects
 			// Assume reset to default, can change topology
 			FPropertyChangedEvent ChangeEvent( TheProperty, EPropertyChangeType::ValueSet );
+			ChangeEvent.SetArrayIndexPerObject(ArrayIndicesPerObject);
+
 			NotifyPostChange( ChangeEvent, InNotifyHook );
 		}
 

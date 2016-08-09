@@ -452,10 +452,11 @@ FString FFrame::GetStackTrace() const
 //////////////////////////////////////////////////////////////////////////
 // FScriptInstrumentationSignal
 
-FScriptInstrumentationSignal::FScriptInstrumentationSignal(EScriptInstrumentation::Type InEventType, const UObject* InContextObject, const struct FFrame& InStackFrame)
+FScriptInstrumentationSignal::FScriptInstrumentationSignal(EScriptInstrumentation::Type InEventType, const UObject* InContextObject, const struct FFrame& InStackFrame, const FName EventNameIn)
 	: EventType(InEventType)
 	, ContextObject(InContextObject)
 	, Function(InStackFrame.Node)
+	, EventName(EventNameIn)
 	, StackFramePtr(&InStackFrame)
 	, LatentLinkId(INDEX_NONE)
 {
@@ -473,7 +474,7 @@ const UClass* FScriptInstrumentationSignal::GetFunctionClassScope() const
 
 FName FScriptInstrumentationSignal::GetFunctionName() const
 {
-	return Function->GetFName();
+	return EventName.IsNone() ? Function->GetFName() : EventName;
 }
 
 int32 FScriptInstrumentationSignal::GetScriptCodeOffset() const
@@ -994,7 +995,7 @@ bool UObject::CallFunctionByNameWithArguments(const TCHAR* Str, FOutputDevice& A
 		return false;
 	}
 	UFunction* Function = FindFunction(Message);
-	if(NULL == Function)
+	if(nullptr == Function)
 	{
 		UE_LOG(LogScriptCore, Verbose, TEXT("CallFunctionByNameWithArguments: Function not found '%s'"), Str);
 		return false;
@@ -1005,7 +1006,7 @@ bool UObject::CallFunctionByNameWithArguments(const TCHAR* Str, FOutputDevice& A
 		return false;
 	}
 
-	UProperty* LastParameter=NULL;
+	UProperty* LastParameter = nullptr;
 
 	// find the last parameter
 	for ( TFieldIterator<UProperty> It(Function); It && (It->PropertyFlags&(CPF_Parm|CPF_ReturnParm)) == CPF_Parm; ++It )
@@ -1013,18 +1014,17 @@ bool UObject::CallFunctionByNameWithArguments(const TCHAR* Str, FOutputDevice& A
 		LastParameter = *It;
 	}
 
-	UStrProperty* LastStringParameter = dynamic_cast<UStrProperty*>(LastParameter);
-
-
 	// Parse all function parameters.
 	uint8* Parms = (uint8*)FMemory_Alloca(Function->ParmsSize);
 	FMemory::Memzero( Parms, Function->ParmsSize );
 
+	const uint32 ExportFlags = PPF_Localized;
 	bool Failed = 0;
 	int32 NumParamsEvaluated = 0;
 	for( TFieldIterator<UProperty> It(Function); It && (It->PropertyFlags & (CPF_Parm|CPF_ReturnParm))==CPF_Parm; ++It, NumParamsEvaluated++ )
 	{
-		UProperty* propertyParam = *It;
+		UProperty* PropertyParam = *It;
+		checkSlow(PropertyParam); // Fix static analysis warning
 		if (NumParamsEvaluated == 0 && Executor)
 		{
 			UObjectPropertyBase* Op = dynamic_cast<UObjectPropertyBase*>(*It);
@@ -1036,14 +1036,19 @@ bool UObject::CallFunctionByNameWithArguments(const TCHAR* Str, FOutputDevice& A
 			}
 		}
 
-		FParse::Next( &Str );
+		// Keep old string around in case we need to pass the whole remaining string
+		const TCHAR* RemainingStr = Str;
 
-		// if Str is empty but we have more params to read parse the function to see if these have defaults, if so set them
+		// Parse a new argument out of Str
+		FString ArgStr;
+		FParse::Token(Str, ArgStr, true);
+
+		// if ArgStr is empty but we have more params to read parse the function to see if these have defaults, if so set them
 		bool bFoundDefault = false;
 		bool bFailedImport = true;
-		if (!FCString::Strcmp(Str, TEXT("")))
+		if (!FCString::Strcmp(*ArgStr, TEXT("")))
 		{
-			const FName DefaultPropertyKey(*(FString(TEXT("CPP_Default_")) + propertyParam->GetName()));
+			const FName DefaultPropertyKey(*(FString(TEXT("CPP_Default_")) + PropertyParam->GetName()));
 #if WITH_EDITOR
 			const FString PropertyDefaultValue = Function->GetMetaData(DefaultPropertyKey);
 #else
@@ -1052,33 +1057,24 @@ bool UObject::CallFunctionByNameWithArguments(const TCHAR* Str, FOutputDevice& A
 			if (!PropertyDefaultValue.IsEmpty()) 
 			{
 				bFoundDefault = true;
-				uint32 ExportFlags = PPF_Localized;
 
-				// if this is the last parameter of the exec function and it's a string, make sure that it accepts the remainder of the passed in value
-				if ( LastStringParameter != *It )
-				{
-					ExportFlags |= PPF_Delimited;
-				}
 				const TCHAR* Result = It->ImportText( *PropertyDefaultValue, It->ContainerPtrToValuePtr<uint8>(Parms), ExportFlags, NULL );
-				bFailedImport = Result == NULL;
+				bFailedImport = (Result == nullptr);
 			}
 		}
 
 		if (!bFoundDefault)
 		{
-			uint32 ExportFlags = PPF_Localized;
-
-			// if this is the last parameter of the exec function and it's a string, make sure that it accepts the remainder of the passed in value
-			if ( LastStringParameter != *It )
+			// if this is the last string property and we have remaining arguments to process, we have to assume that this
+			// is a sub-command that will be passed to another exec (like "cheat giveall weapons", for example). Therefore
+			// we need to use the whole remaining string as an argument, regardless of quotes, spaces etc.
+			if (PropertyParam == LastParameter && PropertyParam->IsA<UStrProperty>() && FCString::Strcmp(Str, TEXT("")) != 0)
 			{
-				ExportFlags |= PPF_Delimited;
+				ArgStr = RemainingStr;
 			}
-			const TCHAR* PreviousStr = Str;
-			const TCHAR* Result = It->ImportText( Str, It->ContainerPtrToValuePtr<uint8>(Parms), ExportFlags, NULL );
-			bFailedImport = (Result == NULL || Result == PreviousStr);
-			
-			// move to the next parameter
-			Str = Result;
+
+			const TCHAR* Result = It->ImportText(*ArgStr, It->ContainerPtrToValuePtr<uint8>(Parms), ExportFlags, NULL );
+			bFailedImport = (Result == nullptr);
 		}
 		
 		if( bFailedImport )
@@ -1620,9 +1616,19 @@ void UObject::execInstrumentation( FFrame& Stack, RESULT_DECL )
 		}
 	}
 #endif
-	FScriptInstrumentationSignal InstrumentationEventInfo(EventType, this, Stack);
-	FBlueprintCoreDelegates::InstrumentScriptEvent(InstrumentationEventInfo);
-	Stack.SkipCode(1);
+	if (EventType == EScriptInstrumentation::InlineEvent)
+	{
+		const FName& EventName = *reinterpret_cast<FName*>(&Stack.Code[1]);
+		FScriptInstrumentationSignal InstrumentationEventInfo(EScriptInstrumentation::Event, this, Stack, EventName);
+		FBlueprintCoreDelegates::InstrumentScriptEvent(InstrumentationEventInfo);
+		Stack.SkipCode(sizeof(FName) + 1);
+	}
+	else
+	{
+		FScriptInstrumentationSignal InstrumentationEventInfo(EventType, this, Stack);
+		FBlueprintCoreDelegates::InstrumentScriptEvent(InstrumentationEventInfo);
+		Stack.SkipCode(1);
+	}
 #endif
 }
 IMPLEMENT_VM_FUNCTION( EX_InstrumentationEvent, execInstrumentation );

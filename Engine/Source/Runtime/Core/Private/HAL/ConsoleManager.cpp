@@ -552,6 +552,8 @@ static TAutoConsoleVariable<int32> CVarDebugEarlyCheat(
 
 void FConsoleManager::CallAllConsoleVariableSinks()
 {
+	QUICK_SCOPE_CYCLE_COUNTER(ConsoleManager_CallAllConsoleVariableSinks);
+
 #if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
 	check(IsInGameThread());
 
@@ -2068,6 +2070,15 @@ static TAutoConsoleVariable<int32> CVarSetVSyncEnabled(
 	TEXT("1: VSync is enabled."),
 	ECVF_Scalability | ECVF_RenderThreadSafe);
 
+#if WITH_EDITOR
+static TAutoConsoleVariable<int32> CVarSetVSyncEditorEnabled(
+	TEXT("r.VSyncEditor"),
+	0,
+	TEXT("0: VSync is disabled in editor.(default)\n")
+	TEXT("1: VSync is enabled in editor."),
+	ECVF_RenderThreadSafe);
+#endif
+
 static TAutoConsoleVariable<int32> CVarFinishCurrentFrame(
 	TEXT("r.FinishCurrentFrame"),
 	0,
@@ -2296,4 +2307,20 @@ static TAutoConsoleVariable<int32> CVarDisableThreadedRendering(
 	TEXT("Sets whether or not to allow threaded rendering for a particular Android device profile.\n")
 	TEXT("	0 = Allow threaded rendering [default]\n")
 	TEXT("	1 = Disable creation of render thread on startup"),
+	ECVF_ReadOnly);
+
+static TAutoConsoleVariable<int32> CVarDisableVulkanSupport(
+	TEXT("r.Android.DisableVulkanSupport"),
+	0,
+	TEXT("Disable support for vulkan API. (Android Only)\n")
+	TEXT("  0 = vulkan API will be used (providing device and project supports it) [default]\n")
+	TEXT("  1 = vulkan will be disabled, opengl fall back will be used."),
+	ECVF_ReadOnly);
+
+static TAutoConsoleVariable<int32> CVarDisableOpenGLES31Support(
+	TEXT("r.Android.DisableOpenGLES31Support"),
+	0,
+	TEXT("Disable support for OpenGLES 3.1 API. (Android Only)\n")
+	TEXT("  0 = OpenGLES 3.1 API will be used (providing device and project supports it) [default]\n")
+	TEXT("  1 = OpenGLES 3.1 will be disabled, OpenGL ES2 fall back will be used."),
 	ECVF_ReadOnly);

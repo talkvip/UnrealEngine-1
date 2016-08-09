@@ -432,7 +432,6 @@ void USkinnedMeshComponent::SendRenderDynamicData_Concurrent()
 			ActiveMorphTargets.Empty();
 		}
 
-		MorphTargetWeights.SetNum(SkeletalMesh->MorphTargets.Num());
 		MeshObject->Update(UseLOD,this,ActiveMorphTargets, MorphTargetWeights);  // send to rendering thread
 		MeshObject->bHasBeenUpdatedAtLeastOnce = true;
 		
@@ -832,6 +831,12 @@ FTransform USkinnedMeshComponent::GetBoneTransform(int32 BoneIdx, const FTransfo
 	const USkinnedMeshComponent* const MasterPoseComponentInst = MasterPoseComponent.Get();
 	if(MasterPoseComponentInst)
 	{
+		if (!MasterPoseComponentInst->IsRegistered())
+		{
+			// We aren't going to get anything valid from the master pose if it
+			// isn't valid so for now return identity
+			return FTransform::Identity;
+		}
 		if(BoneIdx < MasterBoneMap.Num())
 		{
 			int32 ParentBoneIndex = MasterBoneMap[BoneIdx];
@@ -1071,6 +1076,8 @@ void USkinnedMeshComponent::SetPhysicsAsset(class UPhysicsAsset* InPhysicsAsset,
 
 void USkinnedMeshComponent::SetMasterPoseComponent(class USkinnedMeshComponent* NewMasterBoneComponent)
 {
+	USkinnedMeshComponent* OldMasterPoseComponent = MasterPoseComponent.Get();
+
 	MasterPoseComponent = NewMasterBoneComponent;
 
 	// now add to slave components list, 
@@ -1099,6 +1106,18 @@ void USkinnedMeshComponent::SetMasterPoseComponent(class USkinnedMeshComponent* 
 		{
 			MasterPoseComponent->SlavePoseComponents.Add(this);
 		}
+	}
+
+	if(OldMasterPoseComponent != nullptr)
+	{
+		// remove tick dependency between master & slave components
+		PrimaryComponentTick.RemovePrerequisite(OldMasterPoseComponent, OldMasterPoseComponent->PrimaryComponentTick);
+	}
+
+	if (MasterPoseComponent.IsValid())
+	{
+		// set up tick dependency between master & slave components
+		PrimaryComponentTick.AddPrerequisite(MasterPoseComponent.Get(), MasterPoseComponent->PrimaryComponentTick);
 	}
 
 	AllocateTransformData();

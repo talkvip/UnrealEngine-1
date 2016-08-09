@@ -10,6 +10,7 @@ const FVector DefaultRefVector(0);
 // FCoreDelegates
 
 TArray<FCoreDelegates::FHotFixDelegate> FCoreDelegates::HotFixDelegates;
+TArray<FCoreDelegates::FResolvePackageNameDelegate> FCoreDelegates::PackageNameResolvers;
 
 FCoreDelegates::FHotFixDelegate& FCoreDelegates::GetHotfixDelegate(EHotfixDelegates::Type HotFix)
 {
@@ -91,3 +92,5 @@ FCoreDelegates::FRenderingThreadChanged FCoreDelegates::PostRenderingThreadCreat
 FCoreDelegates::FRenderingThreadChanged FCoreDelegates::PreRenderingThreadDestroyed;
 FSimpleMulticastDelegate FCoreDelegates::OnFEngineLoopInitComplete;
 FCoreDelegates::FApplicationReceivedOnScreenOrientationChangedNotificationDelegate FCoreDelegates::ApplicationReceivedScreenOrientationChangedNotificationDelegate;
+
+FCoreDelegates::FConfigReadyForUse FCoreDelegates::ConfigReadyForUse;

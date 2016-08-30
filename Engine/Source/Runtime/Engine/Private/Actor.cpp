@@ -1779,6 +1779,11 @@ void AActor::SetNetDormancy(ENetDormancy NewDormancy)
 			MyWorld->AddNetworkActor( this );
 
 			NetDriver->FlushActorDormancy(this);
+
+			if (MyWorld->DemoNetDriver && MyWorld->DemoNetDriver != NetDriver)
+			{
+				MyWorld->DemoNetDriver->FlushActorDormancy(this);
+			}
 		}
 	}
 }
@@ -1803,13 +1808,20 @@ void AActor::FlushNetDormancy()
 		return;
 	}
 
+	UWorld* MyWorld = GetWorld();
+
 	// Add to network actors list if needed
-	GetWorld()->AddNetworkActor( this );
+	MyWorld->AddNetworkActor( this );
 	
 	UNetDriver* NetDriver = GetNetDriver();
 	if (NetDriver)
 	{
 		NetDriver->FlushActorDormancy(this);
+
+		if (MyWorld->DemoNetDriver && MyWorld->DemoNetDriver!= NetDriver)
+		{
+			MyWorld->DemoNetDriver->FlushActorDormancy(this);
+		}
 	}
 }
 
@@ -1887,12 +1899,12 @@ void AActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 		bActorInitialized = false;
 		GetWorld()->RemoveNetworkActor(this);
+	}
 
-		// Clear any ticking lifespan timers
-		if (InitialLifeSpan > 0.f)
-		{
-			SetLifeSpan(0.f);
-		}
+	// Clear any ticking lifespan timers
+	if (TimerHandle_LifeSpanExpired.IsValid())
+	{
+		SetLifeSpan(0.f);
 	}
 
 	UNavigationSystem::OnActorUnregistered(this);
@@ -3882,15 +3894,14 @@ void AActor::GetAllChildActors(TArray<AActor*>& ChildActors, bool bIncludeDescen
 
 // COMPONENTS
 
-void AActor::UnregisterAllComponents()
+void AActor::UnregisterAllComponents(const bool bForReregister)
 {
 	TInlineComponentArray<UActorComponent*> Components;
 	GetComponents(Components);
 
-	for(int32 CompIdx = 0; CompIdx < Components.Num(); CompIdx++)
+	for(UActorComponent* Component : Components)
 	{
-		UActorComponent* Component = Components[CompIdx]; 
-		if( Component->IsRegistered()) // In some cases unregistering one component can unregister another, so we do a check here to avoid trying twice
+		if( Component->IsRegistered() && (!bForReregister || Component->AllowReregistration())) // In some cases unregistering one component can unregister another, so we do a check here to avoid trying twice
 		{
 			Component->UnregisterComponent();
 		}
@@ -4045,7 +4056,7 @@ void AActor::MarkComponentsAsPendingKill()
 
 void AActor::ReregisterAllComponents()
 {
-	UnregisterAllComponents();
+	UnregisterAllComponents(true);
 	RegisterAllComponents();
 }
 

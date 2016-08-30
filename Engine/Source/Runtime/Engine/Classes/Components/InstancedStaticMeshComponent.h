@@ -66,7 +66,7 @@ class ENGINE_API UInstancedStaticMeshComponent : public UStaticMeshComponent
 	GENERATED_UCLASS_BODY()
 
 	/** Array of instances, bulk serialized. */
-	UPROPERTY(EditAnywhere, Transient, DuplicateTransient, DisplayName="Instances", Category=Instances, meta=(MakeEditWidget=true))
+	UPROPERTY(EditAnywhere, SkipSerialization, DisplayName="Instances", Category=Instances, meta=(MakeEditWidget=true))
 	TArray<FInstancedStaticMeshInstanceData> PerInstanceSMData;
 
 	/** Value used to seed the random number stream that generates random numbers for each of this mesh's instances.
@@ -107,6 +107,15 @@ class ENGINE_API UInstancedStaticMeshComponent : public UStaticMeshComponent
 	bool GetInstanceTransform(int32 InstanceIndex, FTransform& OutInstanceTransform, bool bWorldSpace = false) const;
 
 	virtual void OnUpdateTransform(EUpdateTransformFlags UpdateTransformFlags, ETeleportType Teleport) override;
+
+
+	/**
+	* Return whether this primitive should have data for texture streaming.
+	* Instanced Static Mesh component don't have valid build data yet.
+	*
+	* @return	true if a rebuild is required.
+	*/
+	virtual bool RequiresStreamingTextureData() const override { return false; }
 
 	/**
 	* Update the transform for the instance specified.
@@ -178,8 +187,10 @@ public:
 
 	//~ Begin UPrimitiveComponent Interface
 	virtual FPrimitiveSceneProxy* CreateSceneProxy() override;
-	virtual void CreatePhysicsState() override;
-	virtual void DestroyPhysicsState() override;
+protected:
+	virtual void OnCreatePhysicsState() override;
+	virtual void OnDestroyPhysicsState() override;
+public:
 	virtual bool CanEditSimulatePhysics() override;
 
 	virtual FBoxSphereBounds CalcBounds(const FTransform& BoundTransform) const override;

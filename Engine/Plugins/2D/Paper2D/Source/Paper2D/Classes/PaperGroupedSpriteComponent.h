@@ -2,11 +2,11 @@
 
 #pragma once
 
-class FGroupedSpriteSceneProxy;
-
 #include "PaperSprite.h"
 
 #include "PaperGroupedSpriteComponent.generated.h"
+
+class FGroupedSpriteSceneProxy;
 
 USTRUCT()
 struct FSpriteInstanceData
@@ -104,8 +104,10 @@ public:
 
 	// UActorComponent interface
 	virtual bool ShouldCreatePhysicsState() const override;
-	virtual void CreatePhysicsState() override;
-	virtual void DestroyPhysicsState() override;
+protected:
+	virtual void OnCreatePhysicsState() override;
+	virtual void OnDestroyPhysicsState() override;
+public:
 	virtual const UObject* AdditionalStatObject() const override;
 #if WITH_EDITOR
 	virtual void CheckForErrors() override;

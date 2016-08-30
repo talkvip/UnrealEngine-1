@@ -783,6 +783,29 @@ DECLARE_CYCLE_STAT(TEXT("Init Articulated"), STAT_InitArticulated, STATGROUP_Phy
 
 TAutoConsoleVariable<int32> CVarEnableRagdollPhysics(TEXT("p.RagdollPhysics"), 1, TEXT("If 1, ragdoll physics will be used. Otherwise just root body is simulated"));
 
+int32 USkeletalMeshComponent::FindRootBodyIndex() const
+{
+	// Find root physics body
+	int32 RootBodyIndex = RootBodyData.BodyIndex;
+	if(RootBodyIndex == INDEX_NONE && SkeletalMesh)
+	{
+		if(const UPhysicsAsset* PhysicsAsset = GetPhysicsAsset())
+		{
+			for (int32 i = 0; i<SkeletalMesh->RefSkeleton.GetNum(); i++)
+			{
+				int32 BodyInstIndex = PhysicsAsset->FindBodyIndex(SkeletalMesh->RefSkeleton.GetBoneName(i));
+				if (BodyInstIndex != INDEX_NONE)
+				{
+					RootBodyIndex = BodyInstIndex;
+					break;
+				}
+			}
+		}
+	}
+
+	return RootBodyIndex;
+}
+
 void USkeletalMeshComponent::InitArticulated(FPhysScene* PhysScene)
 {
 	SCOPE_CYCLE_COUNTER(STAT_InitArticulated);
@@ -804,16 +827,8 @@ void USkeletalMeshComponent::InitArticulated(FPhysScene* PhysScene)
 	const float Scale = Scale3D.GetAbsMin();
 
 	// Find root physics body
-	int32 RootBodyIndex = INDEX_NONE;
-	for(int32 i=0; i<SkeletalMesh->RefSkeleton.GetNum(); i++)
-	{
-		int32 BodyInstIndex = PhysicsAsset->FindBodyIndex( SkeletalMesh->RefSkeleton.GetBoneName(i) );
-		if(BodyInstIndex != INDEX_NONE)
-		{
-			RootBodyIndex = BodyInstIndex;
-			break;
-		}
-	}
+	RootBodyData.BodyIndex = INDEX_NONE;	//Reset the root body index just in case we need to refind a new one
+	const int32 RootBodyIndex = FindRootBodyIndex();
 
 	if(RootBodyIndex == INDEX_NONE)
 	{
@@ -894,16 +909,6 @@ void USkeletalMeshComponent::InitArticulated(FPhysScene* PhysScene)
 			FTransform BoneTransform = GetBoneTransform( BoneIndex );
 			BodyInst->InitBody( PhysicsAssetBodySetup, BoneTransform, this, PhysScene, Aggregate);
 #endif //WITH_PHYSX
-
-			// Remember if we have bodies in sync/async scene, so we know which scene(s) to lock when moving bodies
-			if(BodyInst->UseAsyncScene(PhysScene))
-			{
-				bHasBodiesInAsyncScene = true;
-			}
-			else
-			{
-				bHasBodiesInSyncScene = true;
-			}
 		}
 	}
 
@@ -914,7 +919,7 @@ void USkeletalMeshComponent::InitArticulated(FPhysScene* PhysScene)
 	if (PhysScene)
 	{
 		// Get the scene type from the SkeletalMeshComponent's BodyInstance
-		const uint32 SceneType = (bHasBodiesInAsyncScene && PhysScene->HasAsyncScene()) ? PST_Async : PST_Sync;
+		const uint32 SceneType = GetPhysicsSceneType(*PhysicsAsset, *PhysScene);
 		PxScene* PScene = PhysScene->GetPhysXScene(SceneType);
 		SCOPED_SCENE_WRITE_LOCK(PScene);
 		// add Aggregate into the scene
@@ -936,8 +941,8 @@ void USkeletalMeshComponent::InitArticulated(FPhysScene* PhysScene)
 		Constraints[i] = new FConstraintInstance;
 		FConstraintInstance* ConInst = Constraints[i];
 		check( ConInst );
-		ConInst->ConstraintIndex = i; // Set the ConstraintIndex property in the ConstraintInstance.
 		ConInst->CopyConstraintParamsFrom(&ConstraintSetup->DefaultInstance);
+		ConInst->ConstraintIndex = i; // Set the ConstraintIndex property in the ConstraintInstance.
 #if WITH_EDITOR
 		if(GetWorld()->IsGameWorld())
 		{
@@ -975,7 +980,8 @@ void USkeletalMeshComponent::TermArticulated()
 
 #if WITH_PHYSX
 	uint32 SkelMeshCompID = GetUniqueID();
-	FPhysScene * PhysScene = GetWorld()->GetPhysicsScene();
+	UWorld* MyWorld = GetWorld();
+	FPhysScene* PhysScene = (MyWorld ? MyWorld->GetPhysicsScene() : nullptr);
 	if (PhysScene)
 	{
 		PhysScene->DeferredRemoveCollisionDisableTable(SkelMeshCompID);
@@ -1020,10 +1026,11 @@ void USkeletalMeshComponent::TermArticulated()
 		Aggregate = NULL;
 	}
 #endif //WITH_PHYSX
+}
 
-	// Reset bools for scenes
-	bHasBodiesInAsyncScene = false;
-	bHasBodiesInSyncScene = false;
+uint32 USkeletalMeshComponent::GetPhysicsSceneType(const UPhysicsAsset& PhysAsset, const FPhysScene& PhysScene)
+{
+	return (PhysAsset.bUseAsyncScene && PhysScene.HasAsyncScene()) ? PST_Async : PST_Sync;
 }
 
 void USkeletalMeshComponent::TermBodiesBelow(FName ParentBoneName)
@@ -1472,20 +1479,20 @@ bool USkeletalMeshComponent::ShouldCreatePhysicsState() const
 	return bShouldCreatePhysicsState;
 }
 
-void USkeletalMeshComponent::CreatePhysicsState()
+void USkeletalMeshComponent::OnCreatePhysicsState()
 {
 	//	UE_LOG(LogSkeletalMesh, Warning, TEXT("Creating Physics State (%s : %s)"), *GetNameSafe(GetOuter()),  *GetName());
 	// Init physics
 	if (bEnablePerPolyCollision == false)
 	{
 		InitArticulated(GetWorld()->GetPhysicsScene());
-		USceneComponent::CreatePhysicsState(); // Need to route CreatePhysicsState, skip PrimitiveComponent
+		USceneComponent::OnCreatePhysicsState(); // Need to route CreatePhysicsState, skip PrimitiveComponent
 	}
 	else
 	{
 		CreateBodySetup();
 		BodySetup->CreatePhysicsMeshes();
-		Super::CreatePhysicsState();	//If we're doing per poly we'll use the body instance of the primitive component
+		Super::OnCreatePhysicsState();	//If we're doing per poly we'll use the body instance of the primitive component
 	}
 
 	// Notify physics created
@@ -1493,7 +1500,7 @@ void USkeletalMeshComponent::CreatePhysicsState()
 }
 
 
-void USkeletalMeshComponent::DestroyPhysicsState()
+void USkeletalMeshComponent::OnDestroyPhysicsState()
 {
 	if (bEnablePerPolyCollision == false)
 	{
@@ -1502,7 +1509,7 @@ void USkeletalMeshComponent::DestroyPhysicsState()
 		TermArticulated();
 	}
 
-	Super::DestroyPhysicsState();
+	Super::OnDestroyPhysicsState();
 }
 
 
@@ -4000,7 +4007,7 @@ bool USkeletalMeshComponent::GetClothSimulatedPosition(int32 AssetIndex, int32 V
 
 void USkeletalMeshComponent::TickClothing(float DeltaTime, FTickFunction& ThisTickFunction)
 {
-	if (CVarEnableClothPhysics.GetValueOnGameThread() == 0)
+	if (SkeletalMesh == nullptr || CVarEnableClothPhysics.GetValueOnGameThread() == 0)
 	{
 		return;
 	}

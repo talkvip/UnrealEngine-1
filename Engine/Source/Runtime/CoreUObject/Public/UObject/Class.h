@@ -6,8 +6,8 @@
 
 #pragma once
 
-#include "ObjectBase.h"
-#include "UObject.h"
+#include "ObjectMacros.h"
+#include "Object.h"
 #include "GarbageCollection.h"
 
 /*-----------------------------------------------------------------------------
@@ -340,7 +340,7 @@ public:
 	virtual void DestroyStruct(void* Dest, int32 ArrayDim = 1) const;
 
 #if WITH_EDITOR
-private:
+public:
 	virtual UProperty* CustomFindProperty(const FName InName) const { return NULL; };
 #endif // WITH_EDITOR
 public:
@@ -1783,21 +1783,21 @@ namespace EIncludeSuperFlag
 	class FFastIndexingClassTreeRegistrar
 	{
 	public:
-		FFastIndexingClassTreeRegistrar();
-		FFastIndexingClassTreeRegistrar(const FFastIndexingClassTreeRegistrar&);
-		~FFastIndexingClassTreeRegistrar();
+		COREUOBJECT_API FFastIndexingClassTreeRegistrar();
+		COREUOBJECT_API FFastIndexingClassTreeRegistrar(const FFastIndexingClassTreeRegistrar&);
+		COREUOBJECT_API ~FFastIndexingClassTreeRegistrar();
 
 	private:
 		friend class UClass;
 		friend class UObjectBaseUtility;
 		friend class FFastIndexingClassTree;
 
-		bool IsAUsingFastTree(const FFastIndexingClassTreeRegistrar& Parent) const
+		FORCEINLINE bool IsAUsingFastTree(const FFastIndexingClassTreeRegistrar& Parent) const
 		{
 			return ClassTreeIndex - Parent.ClassTreeIndex <= Parent.ClassTreeNumChildren;
 		}
 
-		FFastIndexingClassTreeRegistrar& operator=(const FFastIndexingClassTreeRegistrar&);
+		FFastIndexingClassTreeRegistrar& operator=(const FFastIndexingClassTreeRegistrar&) = delete;
 
 		uint32 ClassTreeIndex;
 		uint32 ClassTreeNumChildren;

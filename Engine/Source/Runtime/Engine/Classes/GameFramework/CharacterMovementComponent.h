@@ -884,20 +884,32 @@ public:
 	/** Moving actor's group mask */
 	UPROPERTY(Category="Character Movement: Avoidance", EditAnywhere, BlueprintReadOnly, AdvancedDisplay)
 	FNavAvoidanceMask AvoidanceGroup;
-	UFUNCTION(BlueprintCallable, Category="Pawn|Components|CharacterMovement")
+
+	UFUNCTION(BlueprintCallable, Category="Pawn|Components|CharacterMovement", meta=(DeprecatedFunction, DeprecationMessage="Please use SetAvoidanceGroupMask function instead."))
 	void SetAvoidanceGroup(int32 GroupFlags);
+
+	UFUNCTION(BlueprintCallable, Category = "Pawn|Components|CharacterMovement")
+	void SetAvoidanceGroupMask(const FNavAvoidanceMask& GroupMask);
 
 	/** Will avoid other agents if they are in one of specified groups */
 	UPROPERTY(Category="Character Movement: Avoidance", EditAnywhere, BlueprintReadOnly, AdvancedDisplay)
 	FNavAvoidanceMask GroupsToAvoid;
-	UFUNCTION(BlueprintCallable, Category="Pawn|Components|CharacterMovement")
+
+	UFUNCTION(BlueprintCallable, Category="Pawn|Components|CharacterMovement", meta = (DeprecatedFunction, DeprecationMessage = "Please use SetGroupsToAvoidMask function instead."))
 	void SetGroupsToAvoid(int32 GroupFlags);
+
+	UFUNCTION(BlueprintCallable, Category = "Pawn|Components|CharacterMovement")
+	void SetGroupsToAvoidMask(const FNavAvoidanceMask& GroupMask);
 
 	/** Will NOT avoid other agents if they are in one of specified groups, higher priority than GroupsToAvoid */
 	UPROPERTY(Category="Character Movement: Avoidance", EditAnywhere, BlueprintReadOnly, AdvancedDisplay)
 	FNavAvoidanceMask GroupsToIgnore;
-	UFUNCTION(BlueprintCallable, Category="Pawn|Components|CharacterMovement")
+
+	UFUNCTION(BlueprintCallable, Category="Pawn|Components|CharacterMovement", meta = (DeprecatedFunction, DeprecationMessage = "Please use SetGroupsToIgnoreMask function instead."))
 	void SetGroupsToIgnore(int32 GroupFlags);
+
+	UFUNCTION(BlueprintCallable, Category = "Pawn|Components|CharacterMovement")
+	void SetGroupsToIgnoreMask(const FNavAvoidanceMask& GroupMask);
 
 	/** De facto default value 0.5 (due to that being the default in the avoidance registration function), indicates RVO behavior. */
 	UPROPERTY(Category="Character Movement: Avoidance", EditAnywhere, BlueprintReadOnly)
@@ -2080,6 +2092,10 @@ public:
 	UPROPERTY(Transient)
 	FRootMotionMovementParams RootMotionParams;
 
+	/** Velocity extracted from RootMotionParams when there is anim root motion active. Invalid to use when HasAnimRootMotion() returns false. */
+	UPROPERTY(Transient)
+	FVector AnimRootMotionVelocity;
+
 	/** True when SimulatedProxies are simulating RootMotion */
 	UPROPERTY(Transient)
 	bool bWasSimulatingRootMotion;
@@ -2095,12 +2111,21 @@ public:
 	void SimulateRootMotion(float DeltaSeconds, const FTransform& LocalRootMotionTransform);
 
 	/**
-	 * Calculate velocity from root motion. Under some movement conditions, only portions of root motion may be used (e.g. when falling Z may be ignored).
+	 * Calculate velocity from anim root motion.
 	 * @param RootMotionDeltaMove	Change in location from root motion.
 	 * @param DeltaSeconds			Elapsed time
 	 * @param CurrentVelocity		Non-root motion velocity at current time, used for components of result that may ignore root motion.
+	 * @see ConstrainAnimRootMotionVelocity
 	 */
+	virtual FVector CalcAnimRootMotionVelocity(const FVector& RootMotionDeltaMove, float DeltaSeconds, const FVector& CurrentVelocity) const;
+
+	DEPRECATED(4.13, "CalcRootMotionVelocity() has been replaced by CalcAnimRootMotionVelocity() instead, and ConstrainAnimRootMotionVelocity() now handles restricting root motion velocity under different conditions.")
 	virtual FVector CalcRootMotionVelocity(const FVector& RootMotionDeltaMove, float DeltaSeconds, const FVector& CurrentVelocity) const;
+
+	/**
+	 * Constrain components of root motion velocity that may not be appropriate given the current movement mode (e.g. when falling Z may be ignored).
+	 */
+	virtual FVector ConstrainAnimRootMotionVelocity(const FVector& RootMotionVelocity, const FVector& CurrentVelocity) const;
 
 	// RVO Avoidance
 

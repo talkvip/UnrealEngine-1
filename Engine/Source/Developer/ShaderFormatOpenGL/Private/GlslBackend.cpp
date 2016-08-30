@@ -1,5 +1,5 @@
 // Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
-// .
+// ..
 
 // This code is largely based on that in ir_print_glsl_visitor.cpp from
 // glsl-optimizer.
@@ -30,8 +30,8 @@
 	CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
-#include "ShaderFormatOpenGL.h"
 #include "Core.h"
+#include "ShaderFormatOpenGL.h"
 #include "hlslcc.h"
 #include "hlslcc_private.h"
 #include "GlslBackend.h"

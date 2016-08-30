@@ -920,7 +920,7 @@ void FVulkanBoundShaderState::SetTexture(EShaderFrequency Stage, uint32 BindPoin
 
 	FVulkanShader* StageShader = GetShaderPtr((EShaderFrequency)Stage);
 	uint32 VulkanBindingPoint = StageShader->GetBindingTable().CombinedSamplerBindingIndices[BindPoint];
-	DescriptorSamplerImageInfoForStage[Stage][VulkanBindingPoint].imageView = VulkanTextureBase ? VulkanTextureBase->View.View : VK_NULL_HANDLE;
+	DescriptorSamplerImageInfoForStage[Stage][VulkanBindingPoint].imageView = VulkanTextureBase ? VulkanTextureBase->DefaultView.View : VK_NULL_HANDLE;
 
 	DirtyTextures[Stage] = true;
 #if VULKAN_ENABLE_RHI_DEBUGGING
@@ -946,6 +946,18 @@ void FVulkanBoundShaderState::SetSamplerState(EShaderFrequency Stage, uint32 Bin
 #endif
 }
 
+void FVulkanBoundShaderState::SetTextureView(EShaderFrequency Stage, uint32 BindPoint, const FVulkanTextureView& TextureView)
+{
+	FVulkanShader* StageShader = GetShaderPtr((EShaderFrequency)Stage);
+	uint32 VulkanBindingPoint = StageShader->GetBindingTable().CombinedSamplerBindingIndices[BindPoint];
+	DescriptorSamplerImageInfoForStage[Stage][VulkanBindingPoint].imageView = TextureView.View;
+
+	DirtySamplerStates[Stage] = true;
+#if VULKAN_ENABLE_RHI_DEBUGGING
+	DebugInfo.SRVIs[Stage][BindPoint] = &TextureView;
+#endif
+}
+
 void FVulkanBoundShaderState::SetBufferViewState(EShaderFrequency Stage, uint32 BindPoint, FVulkanBufferView* View)
 {
 	// Validate BindPoint
@@ -962,21 +974,26 @@ void FVulkanBoundShaderState::SetBufferViewState(EShaderFrequency Stage, uint32 
 
 	DirtySRVs[Stage] = true;
 #if VULKAN_ENABLE_RHI_DEBUGGING
-	DebugInfo.SRVs[Stage][BindPoint] = View;
+	DebugInfo.SRVBs[Stage][BindPoint] = View;
 #endif
 }
 
 void FVulkanBoundShaderState::SetSRV(EShaderFrequency Stage, uint32 TextureIndex, FVulkanShaderResourceView* SRV)
 {
-	// @todo vulkan: Is this actually important to test? Other RHIs haven't checked this, we'd have to add the shader param to handle this
-	// check(&ShaderState.GetShader(SF_Vertex) == ResourceCast(VertexShaderRHI));
-
 	if (SRV)
 	{
 		// make sure any dynamically backed SRV points to current memory
-		SRV->UpdateView(Device);
-		checkf(SRV->BufferView != VK_NULL_HANDLE, TEXT("Empty SRV"));
-		SetBufferViewState(Stage, TextureIndex, SRV->BufferView);
+		SRV->UpdateView();
+		if (SRV->BufferView)
+		{
+			checkf(SRV->BufferView != VK_NULL_HANDLE, TEXT("Empty SRV"));
+			SetBufferViewState(Stage, TextureIndex, SRV->BufferView);
+		}
+		else
+		{
+			checkf(SRV->TextureView.View != VK_NULL_HANDLE, TEXT("Empty SRV"));
+			SetTextureView(Stage, TextureIndex, SRV->TextureView);
+		}
 	}
 	else
 	{
@@ -1080,7 +1097,7 @@ inline FVulkanDescriptorSets* FVulkanBoundShaderState::RequestDescriptorSets(FVu
 	}
 
 	FDescriptorSetsPair* NewEntry = new (FoundEntry->Pairs) FDescriptorSetsPair;
-	NewEntry->DescriptorSets = new FVulkanDescriptorSets(Device, this, Context->GetDescriptorPool());
+	NewEntry->DescriptorSets = new FVulkanDescriptorSets(Device, this, Context);
 	NewEntry->FenceCounter = CmdBufferFenceSignaledCounter;
 	return NewEntry->DescriptorSets;
 }
@@ -1260,4 +1277,31 @@ FBoundShaderStateRHIRef FVulkanDynamicRHI::RHICreateBoundShaderState(
 	}
 
 	return new FVulkanBoundShaderState(Device, VertexDeclarationRHI,VertexShaderRHI,PixelShaderRHI,HullShaderRHI,DomainShaderRHI,GeometryShaderRHI);
+}
+
+FVulkanDescriptorPool* FVulkanCommandListContext::AllocateDescriptorSets(const VkDescriptorSetAllocateInfo& InDescriptorSetAllocateInfo, VkDescriptorSet* OutSets)
+{
+	FVulkanDescriptorPool* Pool = DescriptorPools.Last();
+	VkDescriptorSetAllocateInfo DescriptorSetAllocateInfo = InDescriptorSetAllocateInfo;
+	DescriptorSetAllocateInfo.descriptorPool = Pool->GetHandle();
+
+	VkResult Result = VulkanRHI::vkAllocateDescriptorSets(Device->GetInstanceHandle(), &DescriptorSetAllocateInfo, OutSets);
+
+	if (Result < VK_SUCCESS)
+	{
+		if (Pool->IsEmpty())
+		{
+			VERIFYVULKANRESULT(Result);
+		}
+		else
+		{
+			// Spec says any negative value could be due to fragmentation, so create a new Pool. If it fails here then we really are out of memory!
+			Pool = new FVulkanDescriptorPool(Device);
+			DescriptorPools.Add(Pool);
+			DescriptorSetAllocateInfo.descriptorPool = Pool->GetHandle();
+			VERIFYVULKANRESULT_EXPANDED(VulkanRHI::vkAllocateDescriptorSets(Device->GetInstanceHandle(), &DescriptorSetAllocateInfo, OutSets));
+		}
+	}
+
+	return Pool;
 }

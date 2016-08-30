@@ -1,0 +1,45 @@
+﻿INTSourceChangelist:3091148
+Availability:Docs
+Title:BuildGraph
+Crumbs: %ROOT%, Programming, Programming/Development
+Description:BuildGraph スクリプティング システムを使って、インストールしたビルドをカスタマイズしましょう。
+Version:4.13
+type:landing
+parent:Programming/Development
+tags:BuildGraph
+
+**BuildGraph** はスクリプト ベースのビルド自動化システムです。アンリアル エンジン 4 (UE4) のプロジェクトに共通のビルディング ブロックのグラフを特徴とします。 
+BuildGraph は UnrealBuildTool、 AutomationTool、およびエディタと統合し、プロジェクトに応じて拡張したり、カスタマイズすることができます。
+
+BuildGraph スクリプトは [XML](https://www.w3.org/TR/NOTE-dcd]) で記述され、ユーザー定義のノードのグラフを 
+その依存関係と共に指定します。各ノードは何らかの出力を生成するためにシーケンスで実行されるタスクで構成されます 
+ (例、プロジェクトをコンパイルしてからクックし、テストを実行するなど)。ターゲット (つまり、ノードまたは名前付けされた出力) をビルドするように求められると BuildGraph は、 
+ビルドが起こるために必要なグラフ内のすべてのノードを実行します。
+
+他のビルド ツールとは異なり、BuildGraph は makefile のようなスクリプティング言語とビルド ファームのコンフィギュレーション スクリプトとを 
+合わせたようなものです。ステップが実行されると想定されるマシンのタイプに対するアノテーションを可能にし、 
+ステップが失敗した場合に失敗通知の受取者のリスト、および明示的なユーザーのトリガー後にのみ実行される 
+グループ ノードを提供します。マシンのファーム全体に分散されているグラフの実行 (可能な場合はノードが並列して実行) や 
+ネットワーク間を転送されている中間アーティファクトが自動的に共有されるのに役立つようなやり方で 
+タスク実行からの出力ファイルの作成も追跡します。
+
+エピックでは BuildGraph を使って、UE4 のバイナリ リリースの準備、マーケットプレイスのサンプルのパッケージ化をはじめ、 
+特に自分たちのゲームのパイプラインの実装を行っています。いくつかの BuildGraph のサンプル スクリプトは、 
+`[UE4Root]/Engine/Build/Graph/Examples` ディレクトリでご覧いただけます。 UE4 配布のバイナリを作成するためのスクリプトは、 
+`[UE4Root]/Engine/Build/InstalledEngineBuild.xml` にあります。
+
+Visual Studio でスクリプトを開くと、`[UE4Root]Engine/Build/Graph/Schema.xsd` にあるスキーマを使用し、 
+編集中に豊富なツールチップ、バリデーション、インテリセンス機能を提供します。
+
+## BuildGraph スクリプトを記述する
+
+[REGION:topics third]
+%Programming/Development/BuildGraph/ScriptAnatomy:topiccompact%
+[/REGION]
+
+## BuildGraph を使用する
+
+[REGION:topics third]
+%Programming/Development/BuildGraph/Usage:topiccompact%
+%Programming/Development/InstalledBuildReference:topiccompact%
+[/REGION]

@@ -4,6 +4,7 @@
 LandscapeLight.cpp: Static lighting for LandscapeComponents
 =============================================================================*/
 
+#include "LandscapePrivatePCH.h"
 #include "Landscape.h"
 #include "LandscapeLight.h"
 #include "LandscapeInfo.h"
@@ -126,7 +127,7 @@ FLandscapeStaticLightingMesh::FLandscapeStaticLightingMesh(ULandscapeComponent* 
 		FMath::Square(((InComponent->ComponentSizeQuads + 1) >> InLOD) + 2 * InExpandQuadsX),
 		FMath::Square(((InComponent->ComponentSizeQuads + 1) >> InLOD) + 2 * InExpandQuadsX),
 		0,
-		(InComponent->GetOwner() && InComponent->GetOwner()->bHidden) ? !!(InComponent->bCastHiddenShadow) : !!(InComponent->CastShadow),
+		!!(InComponent->CastShadow | InComponent->bCastHiddenShadow),
 		false,
 		InRelevantLights,
 		InComponent,
@@ -409,7 +410,7 @@ void FLandscapeStaticLightingMesh::GetHeightmapData(int32 InLOD, int32 GeometryL
 	check(Info);
 
 	bool bUseRenderedWPO = LandscapeComponent->GetLandscapeProxy()->bUseMaterialPositionOffsetInStaticLighting &&
-	                       LandscapeComponent->MaterialInstance->GetMaterial()->WorldPositionOffset.IsConnected();
+	                       LandscapeComponent->GetLandscapeMaterial()->GetMaterial()->WorldPositionOffset.IsConnected();
 
 	HeightData.Empty(FMath::Square(NumVertices));
 	HeightData.AddUninitialized(FMath::Square(NumVertices));

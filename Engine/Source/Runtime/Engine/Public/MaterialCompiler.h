@@ -38,6 +38,8 @@ public:
 
 	virtual ERHIFeatureLevel::Type GetFeatureLevel() = 0;
 
+	virtual EMaterialShadingModel GetMaterialShadingModel() const = 0;
+
 	/** 
 	 * Casts the passed in code to DestType, or generates a compile error if the cast is not valid. 
 	 * This will truncate a type (float4 -> float3) but not add components (float2 -> float3), however a float1 can be cast to any float type by replication. 
@@ -206,6 +208,8 @@ public:
 	virtual int32 SpeedTree(ESpeedTreeGeometryType GeometryType, ESpeedTreeWindType WindType, ESpeedTreeLODType LODType, float BillboardThreshold, bool bAccurateWindVelocities) = 0;
 	virtual int32 TextureCoordinateOffset() = 0;
 	virtual int32 EyeAdaptation() = 0;
+	virtual int32 AtmosphericLightVector() = 0;
+	virtual int32 AtmosphericLightColor() = 0;
 	// The compiler can run in a different state and this affects caching of sub expression, Expressions are different (e.g. View.PrevWorldViewOrigin) when using previous frame's values
 	// If possible we should re-factor this to avoid having to deal with compiler state
 	virtual bool IsCurrentlyCompilingForPreviousFrame() const { return false; }
@@ -226,6 +230,7 @@ public:
 
 	// Simple pass through all other material operations unmodified.
 
+	virtual EMaterialShadingModel GetMaterialShadingModel() const { return Compiler->GetMaterialShadingModel();  }
 	virtual void SetMaterialProperty(EMaterialProperty InProperty, EShaderFrequency OverrideShaderFrequency, bool bUsePreviousFrameTime) override { Compiler->SetMaterialProperty(InProperty, OverrideShaderFrequency, bUsePreviousFrameTime); }
 	virtual EShaderFrequency GetCurrentShaderFrequency() const override { return Compiler->GetCurrentShaderFrequency(); }
 	virtual int32 Error(const TCHAR* Text) override { return Compiler->Error(Text); }
@@ -393,6 +398,16 @@ public:
 	virtual int32 AtmosphericFogColor(int32 WorldPosition) override
 	{
 		return Compiler->AtmosphericFogColor(WorldPosition);
+	}
+
+	virtual int32 AtmosphericLightVector() override
+	{
+		return Compiler->AtmosphericLightVector();
+	}
+
+	virtual int32 AtmosphericLightColor() override
+	{
+		return Compiler->AtmosphericLightColor();
 	}
 
 	virtual int32 TextureCoordinateOffset() override

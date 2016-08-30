@@ -1,7 +1,7 @@
-Availability:Docs
+Availability:Public
 Title: Lighting Channels
 Crumbs: %ROOT%, Engine
-Description:The Lighting Channels feature overview.
+Description:Lighting Channels ia a rendering feature that enables you to choose what renderable surfaces are lit by specific lights.
 Navigation:topic
 Version: 4.13
 
@@ -84,15 +84,19 @@ The performance impact of using **Lighting Channels** is minimal, but also non-z
 
 <!--
 [EXCERPT:per1]
-0.08ms   CopyStencilToLightingChannels 1 draws 1 prims 3 verts
-
+0.08ms   CopyStencilToLightingChannels 1 draws 1 prims 3 verts  
 0.45ms   StandardDeferredLighting 1 draws 1 prims 3 verts
 [/EXCERPT]
 -->
 
 ## On Mobile
 
-As of Unreal Engine 4.12, **Lighting Channels** works on mobile renderers.
+As of Unreal Engine 4.13, Lighting Channels works on mobile renderers with the following features supported:
+
+* Multiple directional lights are supported in different channels.
+* Each primitives can only be affected by one directional, and it will use the directional light from first lighting channel it has set.
+* CSM shadows from stationary or movable directional lights cast only on primitives with matching lighting channels.
+* Dynamic point lights fully support lighting channels.
 
 
 

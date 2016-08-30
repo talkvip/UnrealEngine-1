@@ -15,6 +15,12 @@ class ICompressedAudioInfo;
 class IAudioSpatializationPlugin;
 class IAudioSpatializationAlgorithm;
 class UReverbEffect;
+class USoundConcurrency;
+class FViewport;
+class FViewportClient;
+class FCanvas;
+
+struct FAudioComponentParam;
 
 /** 
  * Debug state of the audio system
@@ -355,6 +361,9 @@ private:
 	bool HandlePlayAllPIEAudioCommand(const TCHAR* Cmd, FOutputDevice& Ar);
 	bool HandleAudio3dVisualizeCommand(const TCHAR* Cmd, FOutputDevice& Ar);
 	bool HandleAudioMemoryInfo(const TCHAR* Cmd, FOutputDevice& Ar);
+	bool HandleAudioSoloSoundClass(const TCHAR* Cmd, FOutputDevice& Ar);
+	bool HandleAudioSoloSoundWave(const TCHAR* Cmd, FOutputDevice& Ar);
+	bool HandleAudioSoloSoundCue(const TCHAR* Cmd, FOutputDevice& Ar);
 
 	/**
 	* Lists a summary of loaded sound collated by class
@@ -993,6 +1002,7 @@ public:
 
 	void UpdateSoundShowFlags(const uint8 OldSoundShowFlags, const uint8 NewSoundShowFlags);
 	void UpdateRequestedStat(const uint8 InRequestedStat);
+	void ResolveDesiredStats(FViewportClient* ViewportClient);
 
 	FAudioStats& GetAudioStats()
 	{

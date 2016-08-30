@@ -1356,6 +1356,11 @@ namespace UnrealBuildTool
 				// NOTE: We disable mutex when launching UBT from within UBT to clean UHT
 				UBTArguments.Append(" -NoMutex -Clean");
 
+				if(UnrealBuildTool.CommandLineContains("-ignorejunk"))
+				{
+					UBTArguments.Append(" -ignorejunk");
+				}
+
 				ExternalExecution.RunExternalExecutable(UnrealBuildTool.GetUBTPath(), UBTArguments.ToString());
 			}
 		}
@@ -1709,13 +1714,16 @@ namespace UnrealBuildTool
 			// Search all the output directories for files with a name matching one of our output files
 			foreach(DirectoryReference OutputDirectory in OutputFiles.Select(x => x.Directory).Distinct())
 			{
-				foreach(FileReference ExistingFile in OutputDirectory.EnumerateFileReferences())
+				if(OutputDirectory.Exists())
 				{
-					FileReference OutputFile;
-					if(OutputFileNames.TryGetValue(ExistingFile.GetFileName(), out OutputFile) && !OutputFiles.Contains(ExistingFile))
+					foreach(FileReference ExistingFile in OutputDirectory.EnumerateFileReferences())
 					{
-						Log.TraceInformation("Deleting '{0}' to avoid ambiguity with '{1}'", ExistingFile, OutputFile);
-						CleanFile(ExistingFile.FullName);
+						FileReference OutputFile;
+						if(OutputFileNames.TryGetValue(ExistingFile.GetFileName(), out OutputFile) && !OutputFiles.Contains(ExistingFile))
+						{
+							Log.TraceInformation("Deleting '{0}' to avoid ambiguity with '{1}'", ExistingFile, OutputFile);
+							CleanFile(ExistingFile.FullName);
+						}
 					}
 				}
 			}
@@ -2711,6 +2719,12 @@ namespace UnrealBuildTool
 					}
 				}
 				AppBinaries = FilteredBinaries;
+
+				// Check we have at least one match
+				if(AppBinaries.Count == 0)
+				{
+					throw new BuildException("Couldn't find any module containing {0} in {1}.", SingleFileItem.Reference, TargetName);
+				}
 			}
 
 			if (ShouldCheckOutputDistributionLevel() && !ProjectFileGenerator.bGenerateProjectFiles)

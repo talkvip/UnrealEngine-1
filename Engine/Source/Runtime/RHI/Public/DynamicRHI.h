@@ -1051,8 +1051,8 @@ public:
 	virtual bool RHIIsRenderingSuspended() { return false; };
 
 	// FlushType: Flush Immediate
-	virtual void RHIEnqueueDecompress(uint8_t* SrcBuffer, uint8_t* DestBuffer, int CompressedSize, void* ErrorCodeBuffer) {}
-	virtual void RHIEnqueueCompress(uint8_t* SrcBuffer, uint8_t* DestBuffer, int UnCompressedSize, void* ErrorCodeBuffer) {}
+	virtual bool RHIEnqueueDecompress(uint8_t* SrcBuffer, uint8_t* DestBuffer, int CompressedSize, void* ErrorCodeBuffer) { return false; }
+	virtual bool RHIEnqueueCompress(uint8_t* SrcBuffer, uint8_t* DestBuffer, int UnCompressedSize, void* ErrorCodeBuffer) { return false; }
 
 	// FlushType: Flush Immediate
 	virtual void RHIRecreateRecursiveBoundShaderStates() {}
@@ -1338,7 +1338,7 @@ public:
 	virtual bool IsSupported() = 0;
 
 	/** Creates a new instance of the dynamic RHI implemented by the module. */
-	virtual FDynamicRHI* CreateRHI() = 0;
+	virtual FDynamicRHI* CreateRHI(ERHIFeatureLevel::Type RequestedFeatureLevel = ERHIFeatureLevel::Num) = 0;
 };
 
 /**

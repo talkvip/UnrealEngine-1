@@ -28,9 +28,15 @@
 #include "PhysicsEngine/PhysicsAsset.h"
 #include "Engine/AssetUserData.h"
 #include "Animation/AnimMontage.h"
+#include "Animation/AnimInstance.h"
 
 #if WITH_EDITOR
 #include "MeshUtilities.h"
+
+#if WITH_APEX_CLOTHING
+#include "ApexClothingUtils.h"
+#endif
+
 #endif // #if WITH_EDITOR
 
 #include "Net/UnrealNetwork.h"
@@ -48,7 +54,6 @@
 #define LOCTEXT_NAMESPACE "SkeltalMesh"
 
 DEFINE_LOG_CATEGORY(LogSkeletalMesh);
-
 DECLARE_CYCLE_STAT(TEXT("GetShadowShapes"), STAT_GetShadowShapes, STATGROUP_Anim);
 
 // Custom serialization version for RecomputeTangent
@@ -64,6 +69,8 @@ struct FSkeletalMeshCustomVersion
 		CombineSoftAndRigidVerts = 2,
 		// Need to recalc max bone influences
 		RecalcMaxBoneInfluences = 3,
+		// Add NumVertices that can be accessed when stripping editor data
+		SaveNumVertices = 4,
 		// -----<new versions can be added above this line>-------------------------------------------------
 		VersionPlusOne,
 		LatestVersion = VersionPlusOne - 1
@@ -1277,9 +1284,28 @@ FArchive& operator<<(FArchive& Ar,FSkelMeshSection& S)
 			}
 		}
 
+		// If loading content newer than CombineSectionWithChunk but older than SaveNumVertices, update NumVertices here
+		if (Ar.IsLoading() && Ar.CustomVer(FSkeletalMeshCustomVersion::GUID) < FSkeletalMeshCustomVersion::SaveNumVertices)
+		{
+			if (!StripFlags.IsDataStrippedForServer())
+			{
+				S.NumVertices = S.SoftVertices.Num();
+			}
+			else
+			{
+				UE_LOG(LogSkeletalMesh, Warning, TEXT("Cannot set FSkelMeshSection::NumVertices for older content, loading in non-editor build."));
+				S.NumVertices = 0;
+			}
+		}
+
 		Ar << S.BoneMap;
 
-		// Removed NumRigidVertices and NumSoftVertices, just use array size
+		if (Ar.CustomVer(FSkeletalMeshCustomVersion::GUID) >= FSkeletalMeshCustomVersion::SaveNumVertices)
+		{
+			Ar << S.NumVertices;
+		}
+
+		// Removed NumRigidVertices and NumSoftVertices
 		if (Ar.CustomVer(FSkeletalMeshCustomVersion::GUID) < FSkeletalMeshCustomVersion::CombineSoftAndRigidVerts)
 		{
 			int32 DummyNumRigidVerts, DummyNumSoftVerts;
@@ -1467,7 +1493,7 @@ void FStaticLODModel::Serialize( FArchive& Ar, UObject* Owner, int32 Idx )
 
 	// Array of Sections for backwards compat
 	Ar.UsingCustomVersion(FSkeletalMeshCustomVersion::GUID);
-	if (Ar.CustomVer(FSkeletalMeshCustomVersion::GUID) < FSkeletalMeshCustomVersion::CombineSectionWithChunk)
+	if (Ar.IsLoading() && Ar.CustomVer(FSkeletalMeshCustomVersion::GUID) < FSkeletalMeshCustomVersion::CombineSectionWithChunk)
 	{
 		TArray<FLegacySkelMeshChunk> LegacyChunks;
 
@@ -1476,7 +1502,20 @@ void FStaticLODModel::Serialize( FArchive& Ar, UObject* Owner, int32 Idx )
 		check(LegacyChunks.Num() == Sections.Num());
 		for (int32 ChunkIdx = 0; ChunkIdx < LegacyChunks.Num(); ChunkIdx++)
 		{
-			LegacyChunks[ChunkIdx].CopyToSection(Sections[ChunkIdx]);
+			FSkelMeshSection& Section = Sections[ChunkIdx];
+
+			LegacyChunks[ChunkIdx].CopyToSection(Section);
+
+			// Set NumVertices for older content on load
+			if (!StripFlags.IsDataStrippedForServer())
+			{
+				Section.NumVertices = Section.SoftVertices.Num();
+			}
+			else
+			{
+				UE_LOG(LogSkeletalMesh, Warning, TEXT("Cannot set FSkelMeshSection::NumVertices for older content, loading in non-editor build."));
+				Section.NumVertices = 0;
+			}
 		}
 	}
 	
@@ -2851,6 +2890,8 @@ void USkeletalMesh::Serialize( FArchive& Ar )
 
 	Super::Serialize(Ar);
 
+	Ar.UsingCustomVersion(FFrameworkObjectVersion::GUID);
+
 	FStripDataFlags StripFlags( Ar );
 
 	Ar << ImportedBounds;
@@ -2969,6 +3010,14 @@ void USkeletalMesh::Serialize( FArchive& Ar )
 	{
 		Ar << BodySetup;
 	}
+
+#if WITH_APEX_CLOTHING && WITH_EDITORONLY_DATA
+	if(GIsEditor && Ar.IsLoading() && Ar.CustomVer(FFrameworkObjectVersion::GUID) < FFrameworkObjectVersion::AddInternalClothingGraphicalSkinning)
+	{
+		ApexClothingUtils::BackupClothingDataFromSkeletalMesh(this);
+		ApexClothingUtils::ReapplyClothingDataToSkeletalMesh(this);
+	}
+#endif
 }
 
 void USkeletalMesh::AddReferencedObjects(UObject* InThis, FReferenceCollector& Collector)
@@ -4480,7 +4529,7 @@ void ASkeletalMeshActor::PreviewSetAnimPosition(FName SlotName, int32 ChannelInd
 	if(CanPlayAnimation(InAnimSequence))
 	{
 		TWeakObjectPtr<class UAnimMontage>& CurrentlyPlayingMontage = CurrentlyPlayingMontages.FindOrAdd(SlotName);
-		FAnimMontageInstance::PreviewMatineeSetAnimPositionInner(SlotName, SkeletalMeshComponent, InAnimSequence, CurrentlyPlayingMontage, InPosition, bLooping, bFireNotifies, DeltaTime);
+		CurrentlyPlayingMontage = FAnimMontageInstance::PreviewMatineeSetAnimPositionInner(SlotName, SkeletalMeshComponent, InAnimSequence, InPosition, bLooping, bFireNotifies, DeltaTime);
 	}
 }
 
@@ -4627,7 +4676,7 @@ void ASkeletalMeshActor::SetAnimPosition(FName SlotName, int32 ChannelIndex, UAn
 	if (CanPlayAnimation(InAnimSequence))
 	{
 		TWeakObjectPtr<class UAnimMontage>& CurrentlyPlayingMontage = CurrentlyPlayingMontages.FindOrAdd(SlotName);
-		FAnimMontageInstance::SetMatineeAnimPositionInner(SlotName, SkeletalMeshComponent, InAnimSequence, CurrentlyPlayingMontage, InPosition, bLooping);
+		CurrentlyPlayingMontage = FAnimMontageInstance::SetMatineeAnimPositionInner(SlotName, SkeletalMeshComponent, InAnimSequence, InPosition, bLooping);
 	}
 }
 

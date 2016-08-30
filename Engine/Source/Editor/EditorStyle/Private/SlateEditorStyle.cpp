@@ -4849,6 +4849,9 @@ void FSlateEditorStyle::FStyle::SetupLevelEditorStyle()
 		Set( "BlueprintProfiler.BPPinDisconnected", new IMAGE_BRUSH( "Icons/BPProfiler_ExecPin_Disconnected", Icon12x16 ) );
 		Set( "BlueprintProfiler.PureNode", new IMAGE_BRUSH( "/Icons/pill_16x", Icon16x16 ) );
 		Set( "BlueprintProfiler.BPNode", new IMAGE_BRUSH("Icons/Icon_Profiler_BPNode_16x", Icon16x16));
+		Set( "BlueprintProfiler.RegularNode.HeatDisplay", new BOX_BRUSH( "/Graph/RegularNode_heat_display", FMargin(36.0f/64.0f) ) );
+		Set( "BlueprintProfiler.VarNode.HeatDisplay", new BOX_BRUSH( "/Graph/VarNode_heat_display", FMargin(36.0f/64.0f) ) );
+		Set( "BlueprintProfiler.CompactNode.HeatDisplay", new BOX_BRUSH( "/Graph/MathNode_heat_display", FMargin(26.0f/64.0f) ) );
 
 		Button = FButtonStyle()
 			.SetNormal( FSlateNoResource() )
@@ -6863,7 +6866,7 @@ void FSlateEditorStyle::FStyle::SetupAutomationStyles()
 
 		Set("SettingsEditor.CheckoutWarningBorder", new BOX_BRUSH( "Common/GroupBorderLight", FMargin(4.0f/16.0f) ) );
 
-		Set("SettingsEditor.CatgoryAndSectionFont", TTF_CORE_FONT("Slate/Fonts/Roboto-Regular", 18));
+		Set("SettingsEditor.CatgoryAndSectionFont", TTF_CORE_FONT("Fonts/Roboto-Regular", 18));
 		Set("SettingsEditor.TopLevelObjectFontStyle", TTF_CORE_FONT("Fonts/Roboto-Bold", 12));
 	}
 

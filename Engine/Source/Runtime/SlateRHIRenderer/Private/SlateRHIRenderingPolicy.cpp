@@ -240,6 +240,7 @@ static FSceneView& CreateSceneView( FSceneViewFamilyContext& ViewFamilyContext, 
 	ViewUniformShaderParameters.RealTime = View->Family->CurrentRealTime;
 	ViewUniformShaderParameters.Random = FMath::Rand();
 	ViewUniformShaderParameters.FrameNumber = View->Family->FrameNumber;
+	ViewUniformShaderParameters.bCheckerboardSubsurfaceProfileRendering = 0;
 
 	// Update noise buffers
 	UpdateNoiseTextureParameters(ViewUniformShaderParameters);
@@ -437,7 +438,9 @@ void FSlateRHIRenderingPolicy::DrawElements(FRHICommandListImmediate& RHICmdList
 					}
 					else
 					{	
-						TextureRHI = ((TSlateTexture<FTexture2DRHIRef>*)ShaderResource)->GetTypedResource();
+						FTextureRHIParamRef NativeTextureRHI = ((TSlateTexture<FTexture2DRHIRef>*)ShaderResource)->GetTypedResource();
+						// Atlas textures that have no content are never initialised but null textures are invalid on many platforms.
+						TextureRHI = NativeTextureRHI ? NativeTextureRHI : (FTextureRHIParamRef)GWhiteTexture->TextureRHI;
 					}
 
 					if ( DrawFlags == ( ESlateBatchDrawFlag::TileU | ESlateBatchDrawFlag::TileV ) )

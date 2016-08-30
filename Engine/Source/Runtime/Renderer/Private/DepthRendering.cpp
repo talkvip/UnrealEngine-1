@@ -103,7 +103,7 @@ public:
 		const bool bIsInstancedStereoEmulated
 		)
 	{
-		FMeshMaterialShader::SetParameters(RHICmdList, GetVertexShader(),MaterialRenderProxy,MaterialResource,View,ESceneRenderTargetsMode::DontSet);
+		FMeshMaterialShader::SetParameters(RHICmdList, GetVertexShader(),MaterialRenderProxy,MaterialResource,View,View.ViewUniformBuffer,ESceneRenderTargetsMode::DontSet);
 		
 		if (IsInstancedStereoParameter.IsBound())
 		{
@@ -206,7 +206,7 @@ public:
 
 	void SetParameters(FRHICommandList& RHICmdList, const FMaterialRenderProxy* MaterialRenderProxy,const FMaterial& MaterialResource,const FSceneView* View)
 	{
-		FMeshMaterialShader::SetParameters(RHICmdList, GetPixelShader(),MaterialRenderProxy,MaterialResource,*View,ESceneRenderTargetsMode::DontSet);
+		FMeshMaterialShader::SetParameters(RHICmdList, GetPixelShader(),MaterialRenderProxy,MaterialResource,*View,View->ViewUniformBuffer,ESceneRenderTargetsMode::DontSet);
 
 		// For debug view shaders, don't apply the depth offset as their base pass PS are using global shaders with depth equal.
 		SetShaderValue(RHICmdList, GetPixelShader(), ApplyDepthOffsetParameter, !View || !View->Family->UseDebugViewPS());
@@ -808,8 +808,7 @@ static void SetupPrePassView(FRHICommandList& RHICmdList, const FViewInfo& View)
 		}
 		else
 		{
-			// When rendering with instanced stereo, render the full frame.
-			RHICmdList.SetViewport(0, 0, 0, View.Family->FamilySizeX, View.ViewRect.Max.Y, 1);
+			RHICmdList.SetViewport(0, 0, 0, View.Family->InstancedStereoWidth, View.ViewRect.Max.Y, 1);
 		}
 	}
 }

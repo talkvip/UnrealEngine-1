@@ -82,12 +82,14 @@ DEFINE_STAT(STAT_FinishAsyncTraceTickTime);
 DEFINE_STAT(STAT_NetBroadcastTickTime);
 DEFINE_STAT(STAT_NetServerRepActorsTime);
 DEFINE_STAT(STAT_NetConsiderActorsTime);
+DEFINE_STAT(STAT_NetUpdateUnmappedObjectsTime);
 DEFINE_STAT(STAT_NetInitialDormantCheckTime);
 DEFINE_STAT(STAT_NetPrioritizeActorsTime);
 DEFINE_STAT(STAT_NetReplicateActorsTime);
 DEFINE_STAT(STAT_NetReplicateDynamicPropTime);
 DEFINE_STAT(STAT_NetSkippedDynamicProps);
 DEFINE_STAT(STAT_NetSerializeItemDeltaTime);
+DEFINE_STAT(STAT_NetUpdateGuidToReplicatorMap);
 DEFINE_STAT(STAT_NetReplicateStaticPropTime);
 DEFINE_STAT(STAT_NetBroadcastPostTickTime);
 DEFINE_STAT(STAT_NetRebuildConditionalTime);
@@ -106,6 +108,7 @@ extern bool GShouldLogOutAFrameOfSetBodyTransform;
 
 /** Static array of tickable objects */
 TArray<FTickableGameObject*> FTickableGameObject::TickableObjects;
+bool FTickableGameObject::bIsTickingObjects = false;
 
 /*-----------------------------------------------------------------------------
 	Detailed tick stats helper classes.
@@ -498,6 +501,11 @@ private:
  */
 void UWorld::ProcessLevelStreamingVolumes(FVector* OverrideViewLocation)
 {
+	if (GetWorldSettings()->bUseClientSideLevelStreamingVolumes != (GetNetMode() == NM_Client))
+	{
+		return;
+	}
+
 	// if we are delaying using streaming volumes, return now
 	if( StreamingVolumeUpdateDelay > 0 )
 	{
@@ -1078,6 +1086,51 @@ void EndTickDrawEvent(TDrawEvent<FRHICommandList>* TickDrawEvent)
 	});
 }
 
+
+void FTickableGameObject::TickObjects(UWorld* World, int32 InTickType, bool bIsPaused, float DeltaSeconds)
+{
+	check(!bIsTickingObjects);
+	bIsTickingObjects = true;
+
+	bool bNeedsCleanup = false;
+	ELevelTick TickType = (ELevelTick)InTickType;
+
+	for( int32 i=0; i < TickableObjects.Num(); ++i )
+	{
+		if (FTickableGameObject* TickableObject = TickableObjects[i])
+		{
+			const bool bTickIt = TickableObject->IsTickable() && (TickableObject->GetTickableGameObjectWorld() == World) &&
+				(
+					(TickType != LEVELTICK_TimeOnly && !bIsPaused) ||
+					(bIsPaused && TickableObject->IsTickableWhenPaused()) ||
+					(GIsEditor && (World == nullptr || !World->IsPlayInEditor()) && TickableObject->IsTickableInEditor())
+					);
+
+			if (bTickIt)
+			{
+				STAT(FScopeCycleCounter Context(TickableObject->GetStatId());)
+				TickableObject->Tick(DeltaSeconds);
+
+				if (TickableObjects[i] == nullptr)
+				{
+					bNeedsCleanup = true;
+				}
+			}
+		}
+		else
+		{
+			bNeedsCleanup = true;
+		}
+	}
+
+	if (bNeedsCleanup)
+	{
+		TickableObjects.RemoveAll([](FTickableGameObject* Object) { return Object == nullptr; });
+	}
+
+	bIsTickingObjects = false;
+}
+
 /**
  * Update the level after a variable amount of time, DeltaSeconds, has passed.
  * All child actors are ticked after their owners have been ticked.
@@ -1280,21 +1333,7 @@ void UWorld::Tick( ELevelTick TickType, float DeltaSeconds )
 			GetTimerManager().Tick(DeltaSeconds);
 		}
 
-		for( int32 i=0; i<FTickableGameObject::TickableObjects.Num(); i++ )
-		{
-			FTickableGameObject* TickableObject = FTickableGameObject::TickableObjects[i];
-			bool bTickIt = TickableObject->IsTickable() && 
-				(
-					(TickType != LEVELTICK_TimeOnly && !bIsPaused) ||
-					(bIsPaused && TickableObject->IsTickableWhenPaused()) ||
-					(GIsEditor && !IsPlayInEditor() && TickableObject->IsTickableInEditor())
-				);
-			if (bTickIt)
-			{
-				STAT(FScopeCycleCounter Context(TickableObject->GetStatId());)
-				TickableObject->Tick(DeltaSeconds);
-			}
-		}
+		FTickableGameObject::TickObjects(this, TickType, bIsPaused, DeltaSeconds);
 	}
 	
 	// Update cameras and streaming volumes
@@ -1313,14 +1352,14 @@ void UWorld::Tick( ELevelTick TickType, float DeltaSeconds )
 		if( !bIsPaused )
 		{
 			// Issues level streaming load/unload requests based on local players being inside/outside level streaming volumes.
-			if (IsGameWorld() && GetNetMode() != NM_Client)
+			if (IsGameWorld())
 			{
 				ProcessLevelStreamingVolumes();
-			}
 
-			if (IsGameWorld() && WorldComposition)
-			{
-				WorldComposition->UpdateStreamingState();
+				if (WorldComposition)
+				{
+					WorldComposition->UpdateStreamingState();
+				}
 			}
 		}
 	}

@@ -6,6 +6,7 @@
 
 #include "RendererPrivate.h"
 #include "SceneUtils.h"
+#include "ScreenSpaceReflections.h"
 
 // Changing this causes a full shader recompile
 static TAutoConsoleVariable<int32> CVarBasePassOutputsVelocity(
@@ -55,7 +56,7 @@ public:
 			SetShaderValue(RHICmdList, GetVertexShader(), InstancedEyeIndexParameter, 0);
 		}
 
-		FMeshMaterialShader::SetParameters(RHICmdList, GetVertexShader(), MaterialRenderProxy, *MaterialRenderProxy->GetMaterial(View.GetFeatureLevel()), View, ESceneRenderTargetsMode::DontSet);
+		FMeshMaterialShader::SetParameters(RHICmdList, GetVertexShader(), MaterialRenderProxy, *MaterialRenderProxy->GetMaterial(View.GetFeatureLevel()), View, View.ViewUniformBuffer, ESceneRenderTargetsMode::DontSet);
 	}
 
 	void SetMesh(FRHICommandList& RHICmdList, const FVertexFactory* VertexFactory, const FMeshBatch& Mesh, int32 BatchElementIndex, const FMeshDrawingRenderState& DrawRenderState, const FViewInfo& View, const FPrimitiveSceneProxy* Proxy, const FMatrix& InPreviousLocalToWorld)
@@ -167,7 +168,7 @@ public:
 
 	void SetParameters(FRHICommandList& RHICmdList, const FMaterialRenderProxy* MaterialRenderProxy,const FViewInfo& View)
 	{
-		FMeshMaterialShader::SetParameters(RHICmdList, (FDomainShaderRHIParamRef)GetDomainShader(), MaterialRenderProxy, *MaterialRenderProxy->GetMaterial(View.GetFeatureLevel()), View, ESceneRenderTargetsMode::DontSet);
+		FMeshMaterialShader::SetParameters(RHICmdList, (FDomainShaderRHIParamRef)GetDomainShader(), MaterialRenderProxy, *MaterialRenderProxy->GetMaterial(View.GetFeatureLevel()), View, View.ViewUniformBuffer, ESceneRenderTargetsMode::DontSet);
 	}
 
 protected:
@@ -221,7 +222,7 @@ public:
 
 	void SetParameters(FRHICommandList& RHICmdList, const FVertexFactory* VertexFactory,const FMaterialRenderProxy* MaterialRenderProxy,const FViewInfo& View)
 	{
-		FMeshMaterialShader::SetParameters(RHICmdList, GetPixelShader(), MaterialRenderProxy, *MaterialRenderProxy->GetMaterial(View.GetFeatureLevel()), View, ESceneRenderTargetsMode::DontSet);
+		FMeshMaterialShader::SetParameters(RHICmdList, GetPixelShader(), MaterialRenderProxy, *MaterialRenderProxy->GetMaterial(View.GetFeatureLevel()), View, View.ViewUniformBuffer, ESceneRenderTargetsMode::DontSet);
 	}
 
 	void SetMesh(FRHICommandList& RHICmdList, const FVertexFactory* VertexFactory, const FMeshBatch& Mesh,int32 BatchElementIndex,const FMeshDrawingRenderState& DrawRenderState,const FViewInfo& View, const FPrimitiveSceneProxy* Proxy, bool bBackFace)
@@ -702,7 +703,7 @@ static void SetVelocitiesState(FRHICommandList& RHICmdList, const FViewInfo& Vie
 		}
 		else
 		{
-			const uint32 MaxX = View.Family->FamilySizeX * VelocityBufferSize.X / BufferSize.X;
+			const uint32 MaxX = View.Family->InstancedStereoWidth * VelocityBufferSize.X / BufferSize.X;
 			RHICmdList.SetViewport(0, 0, 0.0f, MaxX, MaxY, 1.0f);
 		}
 	}
@@ -844,7 +845,9 @@ bool FDeferredShadingSceneRenderer::ShouldRenderVelocities() const
 		bool bMotionBlur = IsMotionBlurEnabled(View);
 		bool bDistanceFieldAO = ShouldPrepareForDistanceFieldAO();
 
-		bNeedsVelocity |= (bMotionBlur || bTemporalAA || bDistanceFieldAO) && !View.bIsSceneCapture;
+		bool bSSRTemporal = IsSSRTemporalPassRequired(View);
+
+		bNeedsVelocity |= (bMotionBlur || bTemporalAA || bDistanceFieldAO || bSSRTemporal) && !View.bIsSceneCapture;
 	}
 
 	return bNeedsVelocity;

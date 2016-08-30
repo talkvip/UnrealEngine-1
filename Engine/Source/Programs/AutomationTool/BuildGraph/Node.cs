@@ -143,7 +143,6 @@ namespace AutomationTool
 		/// Build all the tasks for this node
 		/// </summary>
 		/// <param name="Job">Information about the current job</param>
-		/// <param name="BuildProducts">Set of build products produced by this node.</param>
 		/// <param name="TagNameToFileSet">Mapping from tag names to the set of files they include. Should be set to contain the node inputs on entry.</param>
 		/// <returns>Whether the task succeeded or not. Exiting with an exception will be caught and treated as a failure.</returns>
 		public bool Build(JobContext Job, Dictionary<string, HashSet<FileReference>> TagNameToFileSet)
@@ -212,13 +211,20 @@ namespace AutomationTool
 		}
 
 		/// <summary>
-		/// Checks whether this node is downstream of the given trigger
+		/// Checks whether this node is behind the given trigger
 		/// </summary>
 		/// <param name="Trigger">The trigger to check</param>
-		/// <returns>True if the node is downstream of the trigger, false otherwise</returns>
-		public bool IsControlledBy(ManualTrigger Trigger)
+		/// <returns>True if the node is directly or indirectly behind the given trigger, false otherwise</returns>
+		public bool IsBehind(ManualTrigger Trigger)
 		{
-			return Trigger == null || ControllingTrigger == Trigger || (ControllingTrigger != null && ControllingTrigger.IsDownstreamFrom(Trigger));
+			for(ManualTrigger OtherTrigger = ControllingTrigger; OtherTrigger != Trigger; OtherTrigger = OtherTrigger.Parent)
+			{
+				if(OtherTrigger == null)
+				{
+					return false;
+				}
+			}
+			return true;
 		}
 
 		/// <summary>

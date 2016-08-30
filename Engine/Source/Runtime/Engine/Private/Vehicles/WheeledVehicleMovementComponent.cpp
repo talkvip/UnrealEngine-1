@@ -610,9 +610,9 @@ void LogVehicleSettings( PxVehicleWheels* Vehicle )
 	}
 }
 
-void UWheeledVehicleMovementComponent::CreatePhysicsState()
+void UWheeledVehicleMovementComponent::OnCreatePhysicsState()
 {
-	Super::CreatePhysicsState();
+	Super::OnCreatePhysicsState();
 
 	VehicleSetupTag = FPhysXVehicleManager::VehicleSetupTag;
 
@@ -648,9 +648,9 @@ void UWheeledVehicleMovementComponent::CreatePhysicsState()
 	}
 }
 
-void UWheeledVehicleMovementComponent::DestroyPhysicsState()
+void UWheeledVehicleMovementComponent::OnDestroyPhysicsState()
 {
-	Super::DestroyPhysicsState();
+	Super::OnDestroyPhysicsState();
 
 	if ( PVehicle )
 	{
@@ -1640,14 +1640,29 @@ void UWheeledVehicleMovementComponent::SetAvoidanceGroup(int32 GroupFlags)
 	AvoidanceGroup.SetFlagsDirectly(GroupFlags);
 }
 
+void UWheeledVehicleMovementComponent::SetAvoidanceGroupMask(const FNavAvoidanceMask& GroupMask)
+{
+	AvoidanceGroup.SetFlagsDirectly(GroupMask.Packed);
+}
+
 void UWheeledVehicleMovementComponent::SetGroupsToAvoid(int32 GroupFlags)
 {
 	GroupsToAvoid.SetFlagsDirectly(GroupFlags);
 }
 
+void UWheeledVehicleMovementComponent::SetGroupsToAvoidMask(const FNavAvoidanceMask& GroupMask)
+{
+	GroupsToAvoid.SetFlagsDirectly(GroupMask.Packed);
+}
+
 void UWheeledVehicleMovementComponent::SetGroupsToIgnore(int32 GroupFlags)
 {
 	GroupsToIgnore.SetFlagsDirectly(GroupFlags);
+}
+
+void UWheeledVehicleMovementComponent::SetGroupsToIgnoreMask(const FNavAvoidanceMask& GroupMask)
+{
+	GroupsToIgnore.SetFlagsDirectly(GroupMask.Packed);
 }
 
 void UWheeledVehicleMovementComponent::SetAvoidanceEnabled(bool bEnable)

@@ -2313,6 +2313,22 @@ void FBlueprintEditorUtils::MarkBlueprintAsModified(UBlueprint* Blueprint, FProp
 			}
 		}
 
+		if (PropertyChangedEvent.Property)
+		{
+			// If the property was an array, regenerate the custom property list since it contains an
+			// entry for every array element and some elements may be gone now.
+			// Regenerate for structs as well because they may contain arrays and we will only get one property
+			// event if the whole struct changes at once, thus implicitly changing the arrays inside.
+			if (PropertyChangedEvent.Property->IsA(UArrayProperty::StaticClass()) || PropertyChangedEvent.Property->IsA(UStructProperty::StaticClass()))
+			{
+				UBlueprintGeneratedClass* BPGC = Cast<UBlueprintGeneratedClass>(Blueprint->GeneratedClass);
+				if (BPGC)
+				{
+					BPGC->UpdateCustomPropertyListForPostConstruction();
+				}
+			}
+		}
+
 		Blueprint->Status = BS_Dirty;
 		Blueprint->MarkPackageDirty();
 		// Previously, PostEditChange() was called on the Blueprint which creates an empty FPropertyChangedEvent. In
@@ -4424,47 +4440,32 @@ void FBlueprintEditorUtils::RenameMemberVariable(UBlueprint* Blueprint, const FN
 			// Update any existing references to the old name
 			FBlueprintEditorUtils::ReplaceVariableReferences(Blueprint, OldName, NewName);
 
-			void* OldPropertyAddr = NULL;
-			void* NewPropertyAddr = NULL;
-
-			//Grab property of blueprint's current CDO
-			UClass* GeneratedClass = Blueprint->GeneratedClass;
-			UObject* GeneratedCDO = GeneratedClass->GetDefaultObject();
-			UProperty* TargetProperty = FindField<UProperty>(GeneratedClass, OldName);
-
-			if( TargetProperty )
 			{
-				// Grab the address of where the property is actually stored (UObject* base, plus the offset defined in the property)
-				OldPropertyAddr = TargetProperty->ContainerPtrToValuePtr<void>(GeneratedCDO);
-				if(OldPropertyAddr)
+				//Grab property of blueprint's current CDO
+				UClass* GeneratedClass = Blueprint->GeneratedClass;
+				UObject* GeneratedCDO = GeneratedClass ? GeneratedClass->GetDefaultObject(false) : nullptr;
+				if (GeneratedCDO)
 				{
-					// if there is a property for variable, it means the original default value was already copied, so it can be safely overridden
-					Variable.DefaultValue.Empty();
-					PropertyValueToString(TargetProperty, reinterpret_cast<const uint8*>(GeneratedCDO), Variable.DefaultValue);
+					UProperty* TargetProperty = FindField<UProperty>(GeneratedCDO->GetClass(), OldName); // GeneratedCDO->GetClass() is used instead of GeneratedClass, because CDO could use REINST class.
+					// Grab the address of where the property is actually stored (UObject* base, plus the offset defined in the property)
+					void* OldPropertyAddr = TargetProperty ? TargetProperty->ContainerPtrToValuePtr<void>(GeneratedCDO) : nullptr;
+					if (OldPropertyAddr)
+					{
+						// if there is a property for variable, it means the original default value was already copied, so it can be safely overridden
+						Variable.DefaultValue.Empty();
+						PropertyValueToString(TargetProperty, reinterpret_cast<const uint8*>(GeneratedCDO), Variable.DefaultValue);
+					}
 				}
-			}
-
-			// Validate child blueprints and adjust variable names to avoid a potential name collision
-			FBlueprintEditorUtils::ValidateBlueprintChildVariables(Blueprint, NewName);
-
-			// And recompile
-			FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
-
-			// Grab the new regenerated property and CDO
-			UClass* NewGeneratedClass = Blueprint->GeneratedClass;
-			UObject* NewGeneratedCDO = NewGeneratedClass->GetDefaultObject();
-			UProperty* NewTargetProperty = FindField<UProperty>(NewGeneratedClass, NewName);
-
-			if( NewTargetProperty )
-			{
-				// Get the property address of the new CDO
-				NewPropertyAddr = NewTargetProperty->ContainerPtrToValuePtr<void>(NewGeneratedCDO);
-
-				if( OldPropertyAddr && NewPropertyAddr )
+				else
 				{
-					// Copy the properties from old to new address.
-					NewTargetProperty->CopyCompleteValue(NewPropertyAddr, OldPropertyAddr);
+					UE_LOG(LogBlueprint, Warning, TEXT("Could not find default value of renamed variable '%s' (previously '%s') in %s"), *NewName.ToString(), *OldName.ToString(), *GetPathNameSafe(Blueprint));
 				}
+
+				// Validate child blueprints and adjust variable names to avoid a potential name collision
+				FBlueprintEditorUtils::ValidateBlueprintChildVariables(Blueprint, NewName);
+
+				// And recompile
+				FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
 			}
 
 			{
@@ -4790,33 +4791,6 @@ FBPVariableDescription FBlueprintEditorUtils::DuplicateVariableDescription(UBlue
 	return NewVar;
 }
 
-void FBlueprintEditorUtils::SetDefaultValueOnUserDefinedStructProperty(UBlueprint* InBlueprint, FString InScopeName, FBPVariableDescription* InOutVariableDescription)
-{
-	auto UserDefinedStruct = InOutVariableDescription ? Cast<UUserDefinedStruct>(InOutVariableDescription->VarType.PinSubCategoryObject.Get()) : nullptr;
-	if (UserDefinedStruct)
-	{
-		// Create a variable reference for the variable, so we can resolve it and use it to generate the default value
-		FMemberReference VariableReference;
-		VariableReference.SetLocalMember(InOutVariableDescription->VarName, InScopeName, InOutVariableDescription->VarGuid);
-		auto VariableProperty = VariableReference.ResolveMember<UStructProperty>(InBlueprint->SkeletonGeneratedClass);
-
-		if (VariableProperty && ensure(VariableProperty->Struct == UserDefinedStruct))
-		{
-			FStructOnScope StructData(UserDefinedStruct);
-
-		// Create the default value for the property
-			FStructureEditorUtils::Fill_MakeStructureDefaultValue(UserDefinedStruct, StructData.GetStructMemory());
-
-		// Export the default value as a string so we can store it with the variable description
-		FString DefaultValueString;
-			FBlueprintEditorUtils::PropertyValueToString_Direct(VariableProperty, StructData.GetStructMemory(), DefaultValueString);
-
-		// Set the default value
-		InOutVariableDescription->DefaultValue = DefaultValueString;
-	}
-}
-}
-
 bool FBlueprintEditorUtils::AddLocalVariable(UBlueprint* Blueprint, UEdGraph* InTargetGraph, const FName InNewVarName, const FEdGraphPinType& InNewVarType, const FString& DefaultValue/*= FString()*/)
 {
 	if(InTargetGraph != NULL && InTargetGraph->GetSchema()->GetGraphType(InTargetGraph) == GT_Function)
@@ -4849,13 +4823,6 @@ bool FBlueprintEditorUtils::AddLocalVariable(UBlueprint* Blueprint, UEdGraph* In
 		FunctionEntryNodes[0]->LocalVariables.Add(NewVar);
 
 		FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
-
-		if (NewVar.DefaultValue.IsEmpty())
-		{
-			// Pull the description of the new variable, we will update it's default value with the default value from the user defined struct.
-			FBPVariableDescription* VariableDescription = &FunctionEntryNodes[0]->LocalVariables[FunctionEntryNodes[0]->LocalVariables.Num() - 1];
-			SetDefaultValueOnUserDefinedStructProperty(Blueprint, TargetGraph->GetName(), VariableDescription);
-		}
 
 		return true;
 	}
@@ -5144,10 +5111,6 @@ void FBlueprintEditorUtils::ChangeLocalVariableType(UBlueprint* InBlueprint, con
 							Variable.PropertyFlags &= ~(CPF_DisableEditOnTemplate);
 						}
 					}
-				}
-				else
-				{
-					SetDefaultValueOnUserDefinedStructProperty(InBlueprint, FunctionEntry->GetGraph()->GetName(), VariablePtr);
 				}
 
 				// Reconstruct all local variables referencing the modified one
@@ -7835,14 +7798,14 @@ bool FBlueprintEditorUtils::PropertyValueToString_Direct(const UProperty* Proper
 {
 	check(Property && DirectValue);
 	OutForm.Reset();
-	if (Property->IsA(UStructProperty::StaticClass()))
+
+	const UStructProperty* StructProperty = Cast<UStructProperty>(Property);
+	if (StructProperty)
 	{
 		static UScriptStruct* VectorStruct = TBaseStructure<FVector>::Get();
 		static UScriptStruct* RotatorStruct = TBaseStructure<FRotator>::Get();
 		static UScriptStruct* TransformStruct = TBaseStructure<FTransform>::Get();
 		static UScriptStruct* LinearColorStruct = TBaseStructure<FLinearColor>::Get();
-
-		const UStructProperty* StructProperty = CastChecked<UStructProperty>(Property);
 
 		// Struct properties must be handled differently, unfortunately.  We only support FVector, FRotator, and FTransform
 		if (StructProperty->Struct == VectorStruct)
@@ -7874,7 +7837,17 @@ bool FBlueprintEditorUtils::PropertyValueToString_Direct(const UProperty* Proper
 	bool bSuccedded = true;
 	if (OutForm.IsEmpty())
 	{
-		bSuccedded = Property->ExportText_Direct(OutForm, DirectValue, DirectValue, nullptr, 0);
+		const uint8* DefaultValue = DirectValue;
+
+		UUserDefinedStruct* UserDefinedStruct = StructProperty ? Cast<UUserDefinedStruct>(StructProperty->Struct) : nullptr;
+		FStructOnScope StructOnScope(UserDefinedStruct);
+		if (StructOnScope.IsValid())
+		{
+			UserDefinedStruct->InitializeDefaultValue(StructOnScope.GetStructMemory());
+			DefaultValue = StructOnScope.GetStructMemory();
+		}
+		
+		bSuccedded = Property->ExportText_Direct(OutForm, DirectValue, DefaultValue, nullptr, 0);
 	}
 	return bSuccedded;
 }

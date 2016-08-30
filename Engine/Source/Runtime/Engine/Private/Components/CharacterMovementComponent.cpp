@@ -95,7 +95,7 @@ namespace CharacterMovementCVars
 	FAutoConsoleVariableRef CVarNetEnableListenServerSmoothing(
 		TEXT("p.NetEnableListenServerSmoothing"),
 		NetEnableListenServerSmoothing,
-		TEXT("Whether to enable move combining on the client to reduce bandwidth by combining similar moves.\n")
+		TEXT("Whether to enable mesh smoothing on listen servers for the local view of remote clients.\n")
 		TEXT("0: Disable, 1: Enable"),
 		ECVF_Default);
 
@@ -1393,7 +1393,8 @@ void UCharacterMovementComponent::SimulateRootMotion(float DeltaSeconds, const F
 		RootMotionParams.Set( WorldSpaceRootMotionTransform );
 
 		// Compute root motion velocity to be used by physics
-		Velocity = CalcRootMotionVelocity(WorldSpaceRootMotionTransform.GetTranslation(), DeltaSeconds, Velocity);
+		AnimRootMotionVelocity = CalcAnimRootMotionVelocity(WorldSpaceRootMotionTransform.GetTranslation(), DeltaSeconds, Velocity);
+		Velocity = ConstrainAnimRootMotionVelocity(AnimRootMotionVelocity, Velocity);
 
 		// Update replicated movement mode.
 		if (bNetworkMovementModeChanged)
@@ -1420,18 +1421,18 @@ void UCharacterMovementComponent::SimulateRootMotion(float DeltaSeconds, const F
 }
 
 
+// TODO: Deprecated, remove.
 FVector UCharacterMovementComponent::CalcRootMotionVelocity(const FVector& RootMotionDeltaMove, float DeltaSeconds, const FVector& CurrentVelocity) const
+{
+	return CalcAnimRootMotionVelocity(RootMotionDeltaMove, DeltaSeconds, CurrentVelocity);
+}
+
+
+FVector UCharacterMovementComponent::CalcAnimRootMotionVelocity(const FVector& RootMotionDeltaMove, float DeltaSeconds, const FVector& CurrentVelocity) const
 {
 	if (ensure(DeltaSeconds > 0.f))
 	{
 		FVector RootMotionVelocity = RootMotionDeltaMove / DeltaSeconds;
-
-		// Do not override Velocity.Z if in falling physics, we want to keep the effect of gravity.
-		if (IsFalling())
-		{
-			RootMotionVelocity.Z = CurrentVelocity.Z;
-		}
-
 		return RootMotionVelocity;
 	}
 	else
@@ -1440,6 +1441,19 @@ FVector UCharacterMovementComponent::CalcRootMotionVelocity(const FVector& RootM
 	}
 }
 
+
+FVector UCharacterMovementComponent::ConstrainAnimRootMotionVelocity(const FVector& RootMotionVelocity, const FVector& CurrentVelocity) const
+{
+	FVector Result = RootMotionVelocity;
+
+	// Do not override Velocity.Z if in falling physics, we want to keep the effect of gravity.
+	if (IsFalling())
+	{
+		Result.Z = CurrentVelocity.Z;
+	}
+
+	return Result;
+}
 
 void UCharacterMovementComponent::SimulateMovement(float DeltaSeconds)
 {
@@ -1937,7 +1951,8 @@ void UCharacterMovementComponent::PerformMovement(float DeltaSeconds)
 				// Then turn root motion to velocity to be used by various physics modes.
 				if( DeltaSeconds > 0.f )
 				{
-					Velocity = CalcRootMotionVelocity(RootMotionParams.GetRootMotionTransform().GetTranslation(), DeltaSeconds, Velocity);
+					AnimRootMotionVelocity = CalcAnimRootMotionVelocity(RootMotionParams.GetRootMotionTransform().GetTranslation(), DeltaSeconds, Velocity);
+					Velocity = ConstrainAnimRootMotionVelocity(AnimRootMotionVelocity, Velocity);
 				}
 				
 				UE_LOG(LogRootMotion, Log,  TEXT("PerformMovement WorldSpaceRootMotion Translation: %s, Rotation: %s, Actor Facing: %s, Velocity: %s")
@@ -3276,7 +3291,7 @@ void UCharacterMovementComponent::ApplyRootMotionToVelocity(float deltaTime)
 	// Animation root motion is distinct from root motion sources right now and takes precedence
 	if( HasAnimRootMotion() && deltaTime > 0.f )
 	{
-		Velocity = CalcRootMotionVelocity(RootMotionParams.GetRootMotionTransform().GetTranslation(), deltaTime, Velocity);
+		Velocity = ConstrainAnimRootMotionVelocity(AnimRootMotionVelocity, Velocity);
 		return;
 	}
 
@@ -8558,14 +8573,29 @@ void UCharacterMovementComponent::SetAvoidanceGroup(int32 GroupFlags)
 	AvoidanceGroup.SetFlagsDirectly(GroupFlags);
 }
 
+void UCharacterMovementComponent::SetAvoidanceGroupMask(const FNavAvoidanceMask& GroupMask)
+{
+	AvoidanceGroup.SetFlagsDirectly(GroupMask.Packed);
+}
+
 void UCharacterMovementComponent::SetGroupsToAvoid(int32 GroupFlags)
 {
 	GroupsToAvoid.SetFlagsDirectly(GroupFlags);
 }
 
+void UCharacterMovementComponent::SetGroupsToAvoidMask(const FNavAvoidanceMask& GroupMask)
+{
+	GroupsToAvoid.SetFlagsDirectly(GroupMask.Packed);
+}
+
 void UCharacterMovementComponent::SetGroupsToIgnore(int32 GroupFlags)
 {
 	GroupsToIgnore.SetFlagsDirectly(GroupFlags);
+}
+
+void UCharacterMovementComponent::SetGroupsToIgnoreMask(const FNavAvoidanceMask& GroupMask)
+{
+	GroupsToIgnore.SetFlagsDirectly(GroupMask.Packed);
 }
 
 void UCharacterMovementComponent::SetAvoidanceEnabled(bool bEnable)

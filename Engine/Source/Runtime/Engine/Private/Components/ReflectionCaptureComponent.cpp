@@ -858,7 +858,7 @@ void UReflectionCaptureComponent::PostInitProperties()
 	// If not, this guid will be overwritten when serialized
 	FPlatformMisc::CreateGuid(StateId);
 
-	if (!HasAnyFlags(RF_ClassDefaultObject))
+	if (!HasAnyFlags(RF_ClassDefaultObject | RF_ArchetypeObject))
 	{
 		ReflectionCapturesToUpdateForLoad.AddUnique(this);
 		bCaptureDirty = true; 
@@ -1383,6 +1383,12 @@ void ReadbackFromSM4Cubemap(FReflectionTextureCubeResource* SM4FullHDRCubemapTex
 
 void UReflectionCaptureComponent::ReadbackFromGPU(UWorld* WorldToUpdate)
 {
+	if (WorldToUpdate == nullptr || WorldToUpdate->Scene == nullptr)
+	{
+		// This can happen during autosave
+		return;
+	}
+
 	if (bDerivedDataDirty && !IsRunningCommandlet() && WorldToUpdate && WorldToUpdate->FeatureLevel >= ERHIFeatureLevel::SM4)
 	{
 		FReflectionCaptureFullHDR* NewDerivedData = new FReflectionCaptureFullHDR();

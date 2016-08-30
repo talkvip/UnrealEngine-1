@@ -5,6 +5,7 @@
 #include "MessageLog.h"
 #include "UObjectToken.h"
 #include "Runtime/Engine/Classes/Engine/TextureRenderTarget2D.h"
+#include "Runtime/Engine/Classes/Engine/CanvasRenderTarget2D.h"
 #include "ImageUtils.h"
 #include "FileManagerGeneric.h"
 #include "Paths.h"
@@ -19,10 +20,48 @@ UKismetRenderingLibrary::UKismetRenderingLibrary(const FObjectInitializer& Objec
 {
 }
 
-void UKismetRenderingLibrary::DrawMaterialToRenderTarget(UObject* WorldContextObject, UTextureRenderTarget2D* TextureRenderTarget, UMaterialInterface* Material)
+void UKismetRenderingLibrary::ClearRenderTarget2D(UObject* WorldContextObject, UTextureRenderTarget2D* TextureRenderTarget, FLinearColor ClearColor)
 {
 	check(WorldContextObject);
 	UWorld* World = GEngine->GetWorldFromContextObject(WorldContextObject);
+
+	if (TextureRenderTarget
+		&& TextureRenderTarget->Resource
+		&& World)
+	{
+		ENQUEUE_UNIQUE_RENDER_COMMAND_TWOPARAMETER(
+			ClearRTCommand,
+			FTextureRenderTargetResource*,RenderTargetResource,TextureRenderTarget->GameThread_GetRenderTargetResource(),
+			FLinearColor,ClearColor,ClearColor,
+		{
+			SetRenderTarget(RHICmdList, RenderTargetResource->GetRenderTargetTexture(), FTextureRHIRef(), true);
+			RHICmdList.Clear(true, ClearColor, false, 0.0f, false, 0, FIntRect());
+		});
+	}
+}
+
+UTextureRenderTarget2D* UKismetRenderingLibrary::CreateRenderTarget2D(UObject* WorldContextObject, int32 Width, int32 Height)
+{
+	check(WorldContextObject);
+	UWorld* World = GEngine->GetWorldFromContextObject(WorldContextObject);
+
+	if (Width > 0 && Height > 0 && World)
+	{
+		UTextureRenderTarget2D* NewRenderTarget2D = NewObject<UTextureRenderTarget2D>(WorldContextObject);
+		check(NewRenderTarget2D);
+		NewRenderTarget2D->InitAutoFormat(Width, Height); 
+		NewRenderTarget2D->UpdateResourceImmediate(true);
+
+		return NewRenderTarget2D; 
+	}
+
+	return nullptr;
+}
+
+void UKismetRenderingLibrary::DrawMaterialToRenderTarget(UObject* WorldContextObject, UTextureRenderTarget2D* TextureRenderTarget, UMaterialInterface* Material)
+{
+	check(WorldContextObject);
+	UWorld* World = GEngine->GetWorldFromContextObject(WorldContextObject, false);
 
 	if (TextureRenderTarget 
 		&& TextureRenderTarget->Resource 
@@ -70,6 +109,10 @@ void UKismetRenderingLibrary::DrawMaterialToRenderTarget(UObject* WorldContextOb
 				delete DrawMaterialToTargetEvent;
 			}
 		);
+	}
+	else if (!World)
+	{
+		FMessageLog("Blueprint").Warning(LOCTEXT("DrawMaterialToRenderTarget_InvalidWorldContextObject", "DrawMaterialToRenderTarget: WorldContextObject is not valid."));
 	}
 	else if (!Material)
 	{
@@ -168,7 +211,7 @@ void UKismetRenderingLibrary::ExportTexture2D(UObject* WorldContextObject, UText
 void UKismetRenderingLibrary::BeginDrawCanvasToRenderTarget(UObject* WorldContextObject, UTextureRenderTarget2D* TextureRenderTarget, UCanvas*& Canvas, FVector2D& Size, FDrawToRenderTargetContext& Context)
 {
 	check(WorldContextObject);
-	UWorld* World = GEngine->GetWorldFromContextObject(WorldContextObject);
+	UWorld* World = GEngine->GetWorldFromContextObject(WorldContextObject, false);
 
 	Canvas = NULL;
 	Size = FVector2D(0, 0);
@@ -209,6 +252,10 @@ void UKismetRenderingLibrary::BeginDrawCanvasToRenderTarget(UObject* WorldContex
 				*RTName.ToString());
 		});
 	}
+	else if (!World)
+	{
+		FMessageLog("Blueprint").Warning(LOCTEXT("BeginDrawCanvasToRenderTarget_InvalidWorldContextObject", "BeginDrawCanvasToRenderTarget: WorldContextObject is not valid."));
+	}
 	else if (!TextureRenderTarget)
 	{
 		FMessageLog("Blueprint").Warning(LOCTEXT("BeginDrawCanvasToRenderTarget_InvalidTextureRenderTarget", "BeginDrawCanvasToRenderTarget: TextureRenderTarget must be non-null."));
@@ -218,7 +265,7 @@ void UKismetRenderingLibrary::BeginDrawCanvasToRenderTarget(UObject* WorldContex
 void UKismetRenderingLibrary::EndDrawCanvasToRenderTarget(UObject* WorldContextObject, const FDrawToRenderTargetContext& Context)
 {
 	check(WorldContextObject);
-	UWorld* World = GEngine->GetWorldFromContextObject(WorldContextObject);
+	UWorld* World = GEngine->GetWorldFromContextObject(WorldContextObject, false);
 
 	if (World)
 	{
@@ -246,6 +293,10 @@ void UKismetRenderingLibrary::EndDrawCanvasToRenderTarget(UObject* WorldContextO
 			// Remove references to the context now that we've resolved it, to avoid a crash when EndDrawCanvasToRenderTarget is called multiple times with the same context
 			// const cast required, as BP will treat Context as an output without the const
 			const_cast<FDrawToRenderTargetContext&>(Context) = FDrawToRenderTargetContext();
+		}
+		else if (!World)
+		{
+			FMessageLog("Blueprint").Warning(LOCTEXT("EndDrawCanvasToRenderTarget_InvalidWorldContextObject", "EndDrawCanvasToRenderTarget: WorldContextObject is not valid."));
 		}
 		else if (!Context.RenderTarget)
 		{

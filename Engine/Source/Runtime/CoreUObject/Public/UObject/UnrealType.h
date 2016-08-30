@@ -6,10 +6,11 @@
 
 #pragma once
 
-#include "ObjectBase.h"
+#include "ObjectMacros.h"
 #include "PropertyPortFlags.h"
 #include "PropertyTag.h"
 #include "Templates/IsTriviallyDestructible.h"
+#include "Serialization/SerializedPropertyScope.h"
 
 COREUOBJECT_API DECLARE_LOG_CATEGORY_EXTERN(LogType, Log, All);
 
@@ -3781,6 +3782,7 @@ public:
 	// End of UProperty interface
 
 	static const TCHAR* ImportText_Static(UScriptStruct* InStruct, const FString& InName, const TCHAR* Buffer, void* Data, int32 PortFlags, UObject* OwnerObject, FOutputDevice* ErrorText);
+	static void ExportTextItem_Static(class UScriptStruct* InStruct, FString& ValueStr, const void* PropertyValue, const void* DefaultValue, UObject* Parent, int32 PortFlags, UObject* ExportRootScope);
 
 	bool UseBinaryOrNativeSerialization(const FArchive& Ar) const;
 
@@ -3795,9 +3797,6 @@ public:
 	 */
 	bool HasNoOpConstructor() const;
 #endif
-
-protected:
-	static void UStructProperty_ExportTextItem(class UScriptStruct* InStruct, FString& ValueStr, const void* PropertyValue, const void* DefaultValue, UObject* Parent, int32 PortFlags, UObject* ExportRootScope);
 };
 
 /*-----------------------------------------------------------------------------

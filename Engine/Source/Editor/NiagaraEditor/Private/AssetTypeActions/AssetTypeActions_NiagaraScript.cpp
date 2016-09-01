@@ -1,14 +1,8 @@
 // Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
-#include "AssetToolsPrivatePCH.h"
+#include "NiagaraEditorPrivatePCH.h"
+#include "AssetTypeActions_NiagaraScript.h"
 #include "NiagaraScript.h"
-
-#include "Toolkits/AssetEditorManager.h"
-
-#include "Editor/NiagaraEditor/Public/NiagaraEditorModule.h"
-#include "Editor/NiagaraEditor/Public/INiagaraEditor.h"
-
-#define LOCTEXT_NAMESPACE "AssetTypeActions"
 
 void FAssetTypeActions_NiagaraScript::OpenAssetEditor( const TArray<UObject*>& InObjects, TSharedPtr<IToolkitHost> EditWithinLevelEditor )
 {
@@ -19,8 +13,8 @@ void FAssetTypeActions_NiagaraScript::OpenAssetEditor( const TArray<UObject*>& I
 		auto Script = Cast<UNiagaraScript>(*ObjIt);
 		if (Script != NULL)
 		{
-			FNiagaraEditorModule& NiagaraEditorModule = FModuleManager::LoadModuleChecked<FNiagaraEditorModule>( "NiagaraEditor" );
-			TSharedRef< INiagaraEditor > NewNiagaraEditor = NiagaraEditorModule.CreateNiagaraEditor( EToolkitMode::Standalone, EditWithinLevelEditor, Script );
+			TSharedRef< FNiagaraEditor > NewNiagaraEditor(new FNiagaraEditor());
+			NewNiagaraEditor->InitNiagaraEditor(Mode, EditWithinLevelEditor, Script);
 		}
 	}
 }
@@ -29,6 +23,3 @@ UClass* FAssetTypeActions_NiagaraScript::GetSupportedClass() const
 { 
 	return UNiagaraScript::StaticClass(); 
 }
-
-
-#undef LOCTEXT_NAMESPACE

@@ -223,6 +223,14 @@ public:
 	DECLARE_DELEGATE_RetVal_OneParam(bool, FStringAssetReferenceLoaded, const FName&);
 	static FStringAssetReferenceLoaded StringAssetReferenceLoaded;
 
+	/** Sent when the platform needs the user to fix headset tracking on startup */
+	DECLARE_MULTICAST_DELEGATE(FVRHeadsetTrackingInitializingAndNeedsHMDToBeTrackedDelegate);
+	static FVRHeadsetTrackingInitializingAndNeedsHMDToBeTrackedDelegate VRHeadsetTrackingInitializingAndNeedsHMDToBeTrackedDelegate;
+
+	/** Sent when the platform finds that needed headset tracking on startup has completed */
+	DECLARE_MULTICAST_DELEGATE(FVRHeadsetTrackingInitializedDelegate);
+	static FVRHeadsetTrackingInitializedDelegate VRHeadsetTrackingInitializedDelegate;
+
 	/** Sent when the platform requests a low-level VR recentering */
 	DECLARE_MULTICAST_DELEGATE(FVRHeadsetRecenter);
 	static FVRHeadsetRecenter VRHeadsetRecenter;
@@ -270,6 +278,12 @@ public:
 	// Should return True of resolution occured.
 	DECLARE_DELEGATE_RetVal_TwoParams(bool, FResolvePackageNameDelegate, const FString&, FString&);
 	static TArray<FResolvePackageNameDelegate> PackageNameResolvers;
+
+	// Called when module integrity has been compromised. Code should do as little as
+	// possible since the app may be in an unknown state. Return 'true' to handle the
+	// event and prevent the default check/ensure process occuring
+	DECLARE_DELEGATE_RetVal_TwoParams(bool, FImageIntegrityChanged, const TCHAR*, int32);
+	static FImageIntegrityChanged OnImageIntegrityChanged;
 
 private:
 

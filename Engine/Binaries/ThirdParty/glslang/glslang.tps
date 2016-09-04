@@ -11,7 +11,7 @@
   <Redistribute>false</Redistribute>
   <IsSourceAvailable>false</IsSourceAvailable>
   <Notification>
-Redirect: ../../../Source/ThirdParty/glslang/gslang.tps
+Redirect: ../../../Source/ThirdParty/Vulkan/Vulkan.tps
 Notes:
 </Notification>
   <LicenseFolder />

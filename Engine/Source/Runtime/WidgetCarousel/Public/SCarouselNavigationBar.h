@@ -5,6 +5,8 @@
 
 #define LOCTEXT_NAMESPACE "WidgetCarousel"
 
+struct FWidgetCarouselNavigationBarStyle;
+
 /**
 * A horizontal bar of buttons for navigating to a specific item in the widget carousel.
 */

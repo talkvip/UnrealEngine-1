@@ -529,6 +529,41 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Collision")
 	void ClearMoveIgnoreActors();
 
+	/**
+	* Set of components to ignore during component sweeps in MoveComponent().
+	* These components will be ignored when this component moves or updates overlaps.
+	* The other components may also need to be told to do the same when they move.
+	* Does not affect movement of this component when simulating physics.
+	* @see IgnoreComponentWhenMoving()
+	*/
+	UPROPERTY(Transient, DuplicateTransient)
+	TArray<UPrimitiveComponent*> MoveIgnoreComponents;
+
+	/**
+	* Tells this component whether to ignore collision with another component when this component is moved.
+	* The other components may also need to be told to do the same when they move.
+	* Does not affect movement of this component when simulating physics.
+	*/
+	UFUNCTION(BlueprintCallable, Category = "Collision", meta=(Keywords="Move MoveIgnore"))
+	void IgnoreComponentWhenMoving(UPrimitiveComponent* Component, bool bShouldIgnore);
+
+	/**
+	* Returns the list of actors we currently ignore when moving.
+	*/
+	UFUNCTION(BlueprintCallable, meta=(DisplayName="GetMoveIgnoreComponents"), Category = "Collision")
+	TArray<UPrimitiveComponent*> CopyArrayOfMoveIgnoreComponents();
+
+	/**
+	* Returns the list of components we currently ignore when moving.
+	*/
+	const TArray<UPrimitiveComponent*>& GetMoveIgnoreComponents() const { return MoveIgnoreComponents; }
+
+	/**
+	* Clear the list of components we ignore when moving.
+	*/
+	UFUNCTION(BlueprintCallable, Category = "Collision")
+	void ClearMoveIgnoreComponents() { MoveIgnoreComponents.Empty(); }
+
 	/** Set the mask filter we use when moving. */
 	void SetMoveIgnoreMask(FMaskFilter InMoveIgnoreMask);
 
@@ -666,6 +701,7 @@ public:
 	 *	@note For collisions during physics simulation to generate hit events, 'Simulation Generates Hit Events' must be enabled for this component.
 	 *	@note When receiving a hit from another object's movement, the directions of 'Hit.Normal' and 'Hit.ImpactNormal'
 	 *	will be adjusted to indicate force from the other object against this object.
+	 *	@note NormalImpulse will be filled in for physics-simulating bodies, but will be zero for swept-component blocking collisions.
 	 */
 	UPROPERTY(BlueprintAssignable, Category="Collision")
 	FComponentHitSignature OnComponentHit;
@@ -1508,12 +1544,6 @@ public:
 	virtual void PostDuplicate(bool bDuplicateForPIE) override;
 	virtual SIZE_T GetResourceSize(EResourceSizeMode::Type Mode) override;
 
-	virtual void MarkAsEditorOnlySubobject() override
-	{
-		AlwaysLoadOnClient = false;
-		AlwaysLoadOnServer = false;
-	}
-
 #if WITH_EDITOR
 	/**
 	 * Called after importing property values for this object (paste, duplicate or .t3d import)
@@ -1647,6 +1677,14 @@ public:
 	 *	@param NewRot	New orienatation for the body
 	 */
 	virtual void SetAllPhysicsRotation(FRotator NewRot);
+
+	/**
+	 *	Set the rotation of all bodies in this component.
+	 *	If a SkeletalMeshComponent, the root body will be changed to the desired orientation, and the same delta is applied to all other bodies.
+	 *
+	 *	@param NewRot	New orienatation for the body
+	 */
+	virtual void SetAllPhysicsRotation(const FQuat& NewRot);
 	
 	/**
 	 *	Ensure simulation is running for all bodies in this component.
@@ -1737,7 +1775,7 @@ public:
 	 * @param       NewResponse  What the new response should be to the supplied Channel
 	 */
 	UFUNCTION(BlueprintCallable, Category="Collision")
-	void SetCollisionResponseToChannel(ECollisionChannel Channel, ECollisionResponse NewResponse);
+	virtual void SetCollisionResponseToChannel(ECollisionChannel Channel, ECollisionResponse NewResponse);
 	
 	/**
 	 *	Changes all ResponseToChannels container for this PrimitiveComponent. to be NewResponse
@@ -1745,14 +1783,14 @@ public:
 	 * @param       NewResponse  What the new response should be to the supplied Channel
 	 */
 	UFUNCTION(BlueprintCallable, Category="Collision")
-	void SetCollisionResponseToAllChannels(ECollisionResponse NewResponse);
+	virtual void SetCollisionResponseToAllChannels(ECollisionResponse NewResponse);
 	
 	/**
 	 *	Changes the whole ResponseToChannels container for this PrimitiveComponent.
 	 *
 	 * @param       NewResponses  New set of responses for this component
 	 */
-	void SetCollisionResponseToChannels(const FCollisionResponseContainer& NewReponses);
+	virtual void SetCollisionResponseToChannels(const FCollisionResponseContainer& NewReponses);
 	
 protected:
 

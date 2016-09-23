@@ -5859,6 +5859,12 @@ void FSlateApplication::ProcessMotionDetectedEvent( FMotionEvent& MotionEvent )
 	
 	if ( FSlateUser* User = GetOrCreateUser(MotionEvent.GetUserIndex()) )
 	{
+
+		if (InputPreProcessor.IsValid() && InputPreProcessor->HandleMotionDetectedEvent(*this, MotionEvent))
+		{
+			return;
+		}
+
 		if ( User->Focus.WidgetPath.IsValid() )
 		{
 			/* Get the controller focus target for this user */
@@ -6251,7 +6257,21 @@ void FSlateApplication::OnWindowClose( const TSharedRef< FGenericWindow >& Platf
 
 	if ( Window.IsValid() )
 	{
-		Window->RequestDestroyWindow();
+		bool bCanCloseWindow = true;
+		TSharedPtr< SViewport > CurrentGameViewportWidget = GameViewportWidget.Pin();
+		if (CurrentGameViewportWidget.IsValid())
+		{
+			TSharedPtr< ISlateViewport > SlateViewport = CurrentGameViewportWidget->GetViewportInterface().Pin();
+			if (SlateViewport.IsValid())
+			{
+				bCanCloseWindow = !SlateViewport->OnRequestWindowClose().bIsHandled;
+			}
+		}
+		
+		if (bCanCloseWindow)
+		{
+		    Window->RequestDestroyWindow();
+		}	 
 	}
 }
 

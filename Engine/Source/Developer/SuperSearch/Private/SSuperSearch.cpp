@@ -427,7 +427,10 @@ void SSuperSearchBox::OnTextChanged(const FText& InText)
 					if (SearchTags.Find(InText.ToString()) != INDEX_NONE)
 					{
 						FSearchEntry SearchEntry;
-						SearchEntry.Title = *ResultTitle;
+						if (ResultTitle)
+						{
+							SearchEntry.Title = *ResultTitle;
+						}
 						SearchEntry.URL = "";
 						SearchEntry.bCategory = false;
 						SearchEntry.AssetData = Asset;

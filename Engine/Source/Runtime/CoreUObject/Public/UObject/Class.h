@@ -282,6 +282,7 @@ public:
 	virtual void FinishDestroy() override;
 	virtual void RegisterDependencies() override;
 	static void AddReferencedObjects(UObject* InThis, FReferenceCollector& Collector);
+	virtual void GetPreloadDependencies(TArray<UObject*>& OutDeps) override;
 
 	// UField interface.
 	virtual void AddCppProperty(UProperty* Property) override;
@@ -424,6 +425,14 @@ public:
 
 	/** Try and find string metadata with the given key. If not found on this class, work up hierarchy looking for it. */
 	bool GetStringMetaDataHierarchical(const FName& Key, FString* OutValue = nullptr) const;
+
+	/**
+	* Determines if the struct or any of its super structs has any metadata associated with the provided key
+	*
+	* @param Key The key to lookup in the metadata
+	* @return pointer to the UStruct that has associated metadata, nullptr if Key is not associated with any UStruct in the hierarchy
+	*/
+	const UStruct* HasMetaDataHierarchical(const FName& Key) const;
 #endif
 
 #if HACK_HEADER_GENERATOR
@@ -1767,11 +1776,11 @@ namespace EIncludeSuperFlag
 }
 
 
-#if UCLASS_FAST_ISA_IMPL & 2
+#if UCLASS_FAST_ISA_IMPL == UCLASS_ISA_INDEXTREE
 
 	class FFastIndexingClassTreeRegistrar
 	{
-	public:
+	protected:
 		COREUOBJECT_API FFastIndexingClassTreeRegistrar();
 		COREUOBJECT_API FFastIndexingClassTreeRegistrar(const FFastIndexingClassTreeRegistrar&);
 		COREUOBJECT_API ~FFastIndexingClassTreeRegistrar();
@@ -1792,6 +1801,33 @@ namespace EIncludeSuperFlag
 		uint32 ClassTreeNumChildren;
 	};
 
+#elif UCLASS_FAST_ISA_IMPL == UCLASS_ISA_CLASSARRAY
+
+	class FClassBaseChain
+	{
+	protected:
+		COREUOBJECT_API FClassBaseChain();
+		COREUOBJECT_API ~FClassBaseChain();
+
+		// Non-copyable
+		FClassBaseChain(const FClassBaseChain&) = delete;
+		FClassBaseChain& operator=(const FClassBaseChain&) = delete;
+
+		COREUOBJECT_API void ReinitializeBaseChainArray();
+
+		FORCEINLINE bool IsAUsingClassArray(const FClassBaseChain& Parent) const
+		{
+			int32 NumParentClassBasesInChainMinusOne = Parent.NumClassBasesInChainMinusOne;
+			return NumParentClassBasesInChainMinusOne <= NumClassBasesInChainMinusOne && ClassBaseChainArray[NumParentClassBasesInChainMinusOne] == &Parent;
+		}
+
+	private:
+		FClassBaseChain** ClassBaseChainArray;
+		int32 NumClassBasesInChainMinusOne;
+
+		friend class UClass;
+	};
+
 #endif
 
 
@@ -1799,15 +1835,17 @@ namespace EIncludeSuperFlag
  * An object class.
  */
 class COREUOBJECT_API UClass : public UStruct
-#if UCLASS_FAST_ISA_IMPL & 2
+#if UCLASS_FAST_ISA_IMPL == UCLASS_ISA_INDEXTREE
 	, private FFastIndexingClassTreeRegistrar
+#elif UCLASS_FAST_ISA_IMPL == UCLASS_ISA_CLASSARRAY
+	, private FClassBaseChain
 #endif
 {
 	DECLARE_CASTED_CLASS_INTRINSIC_NO_CTOR(UClass, UStruct, 0, TEXT("/Script/CoreUObject"), CASTCLASS_UClass, NO_API)
 	DECLARE_WITHIN(UPackage)
 
 public:
-#if UCLASS_FAST_ISA_IMPL & 2
+#if UCLASS_FAST_ISA_IMPL == UCLASS_ISA_INDEXTREE
 	friend class FFastIndexingClassTree;
 #endif
 	friend class FRestoreClassInfo;
@@ -2351,10 +2389,18 @@ public:
 	virtual bool HasInstrumentation() const { return false; }
 
 private:
-	#if UCLASS_FAST_ISA_IMPL & 2
+	#if UCLASS_FAST_ISA_IMPL == UCLASS_ISA_INDEXTREE
 		// For UObjectBaseUtility
 		friend class UObjectBaseUtility;
 		using FFastIndexingClassTreeRegistrar::IsAUsingFastTree;
+	#elif UCLASS_FAST_ISA_IMPL == UCLASS_ISA_CLASSARRAY
+		// For UObjectBaseUtility
+		friend class UObjectBaseUtility;
+		using FClassBaseChain::IsAUsingClassArray;
+		using FClassBaseChain::ReinitializeBaseChainArray;
+
+		friend class FClassBaseChain;
+		friend class FBlueprintCompileReinstancer;
 	#endif
 
 	// This signature intentionally hides the method declared in UObjectBaseUtility to make it private.

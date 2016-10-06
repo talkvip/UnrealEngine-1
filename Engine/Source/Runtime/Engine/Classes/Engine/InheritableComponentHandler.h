@@ -66,6 +66,9 @@ struct FComponentOverrideRecord
 	GENERATED_USTRUCT_BODY()
 
 	UPROPERTY()
+	UClass* ComponentClass;
+
+	UPROPERTY()
 	UActorComponent* ComponentTemplate;
 
 	UPROPERTY()
@@ -75,7 +78,8 @@ struct FComponentOverrideRecord
 	FBlueprintCookedComponentInstancingData CookedComponentInstancingData;
 
 	FComponentOverrideRecord()
-		: ComponentTemplate(nullptr)
+		: ComponentClass(nullptr)
+		, ComponentTemplate(nullptr)
 	{}
 };
 
@@ -112,6 +116,7 @@ public:
 
 	//~ Begin UObject Interface
 	virtual void PostLoad() override;
+	virtual void GetPreloadDependencies(TArray<UObject*>& OutDeps) override;
 	//~ End UObject Interface
 
 	void PreloadAllTempates();

@@ -1169,6 +1169,9 @@ public:
 	 * have lighting rebuilt.
 	 **/
 	uint32 NumLightingUnbuiltObjects;
+	
+	/** Num of reflection capture components missing valid data. This can be non-zero only in game with FeatureLevel < SM4*/
+	uint32 NumInvalidReflectionCaptureComponents;
 
 	/** Num of components missing valid texture streaming data. Updated in map check. */
 	int32 NumTextureStreamingUnbuiltComponents;
@@ -1217,6 +1220,9 @@ public:
 
 	// Kismet debugging flags - they can be only editor only, but they're uint32, so it doens't make much difference
 	uint32 bDebugPauseExecution:1;
+
+	/** When set, camera is potentially moveable even when paused */
+	uint32 bIsCameraMoveableWhenPaused:1;
 
 	/** Indicates this scene always allows audio playback. */
 	uint32 bAllowAudioPlayback:1;
@@ -2116,6 +2122,12 @@ public:
 	/** Purges all sky capture cached derived data and forces a re-render of captured scene data. */
 	void UpdateAllSkyCaptures();
 
+	/** Returns the active lighting scenario for this world or NULL if none. */
+	ULevel* GetActiveLightingScenario() const;
+
+	/** Propagates a change to the active lighting scenario. */
+	void PropagateLightingScenarioChange();
+
 	/**
 	 * Associates the passed in level with the world. The work to make the level visible is spread across several frames and this
 	 * function has to be called till it returns true for the level to be visible/ associated with the world and no longer be in
@@ -2549,6 +2561,9 @@ public:
 
 	/** @return true if the world is in the paused state */
 	bool IsPaused() const;
+
+	/** @return true if the camera is in a moveable state (taking pausedness into account) */
+	bool IsCameraMoveable() const;
 
 	/**
 	 * Wrapper for DestroyActor() that should be called in the editor.

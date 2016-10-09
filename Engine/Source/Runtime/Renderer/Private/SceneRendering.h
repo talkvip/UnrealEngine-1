@@ -333,7 +333,8 @@ public:
 	* Draw all the primitives in this set for the mobile pipeline. 
 	* @param bRenderSeparateTranslucency - If false, only primitives with materials without mobile separate translucency enabled are rendered. Opposite if true.
 	*/
-	void DrawPrimitivesForMobile(FRHICommandListImmediate& RHICmdList, const class FViewInfo& View, const bool bRenderSeparateTranslucency) const;
+	template <class TDrawingPolicyFactory>
+	void DrawPrimitivesForMobile(FRHICommandListImmediate& RHICmdList, const FViewInfo& View, typename TDrawingPolicyFactory::ContextType& DrawingContext) const;
 
 	/**
 	* Insert a primitive to the translucency rendering list[s]
@@ -956,7 +957,7 @@ public:
 		return DrawRenderState;
 	}
 
-	inline FVector GetPrevViewDirection() const { return PrevViewMatrices.ViewMatrix.GetColumn(2); }
+	inline FVector GetPrevViewDirection() const { return PrevViewMatrices.GetViewMatrix().GetColumn(2); }
 
 	/** Create a snapshot of this view info on the scene allocator. */
 	FViewInfo* CreateSnapshot() const;
@@ -1053,14 +1054,7 @@ public:
 			Desc = &ColorTargets[0]->GetDesc();
 		}
 
-		if (Desc->IsCubemap())
-		{
-			return FIntPoint(Desc->Extent.X, Desc->Extent.X);
-		}
-		else
-		{
-			return Desc->Extent;
-		}
+		return Desc->Extent;
 	}
 
 	int64 ComputeMemorySize() const
@@ -1376,6 +1370,8 @@ public:
 
 	virtual void RenderHitProxies(FRHICommandListImmediate& RHICmdList) override;
 
+	bool RenderInverseOpacity(FRHICommandListImmediate& RHICmdList, const FViewInfo& View);
+
 protected:
 	/** Finds the visible dynamic shadows for each view. */
 	void InitDynamicShadows(FRHICommandListImmediate& RHICmdList);
@@ -1412,9 +1408,16 @@ protected:
 	/** Copy scene color from the mobile multi-view render targat array to side by side stereo scene color */
 	void CopyMobileMultiViewSceneColor(FRHICommandListImmediate& RHICmdList);
 
+	/** Gather information about post-processing pass, which can be used by render for optimizations. Called by InitViews */
+	void UpdatePostProcessUsageFlags();
+
+	/** Render inverse opacity for the dynamic meshes. */
+	bool RenderInverseOpacityDynamic(FRHICommandListImmediate& RHICmdList, const FViewInfo& View);
+	
 private:
 
 	bool bModulatedShadowsInUse;
+	bool bPostProcessUsesDepthTexture;
 };
 
 // The noise textures need to be set in Slate too.

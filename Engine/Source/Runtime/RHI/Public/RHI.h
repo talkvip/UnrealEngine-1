@@ -90,6 +90,9 @@ RHI_API bool IsRHIDeviceIntel();
 // to trigger GPU specific optimizations and fallbacks
 RHI_API bool IsRHIDeviceNVIDIA();
 
+// helper to convert GRHIVendorId into a printable string, or "Unknown" if unknown.
+RHI_API const TCHAR* RHIVendorIdToString();
+
 /** true if PF_G8 render targets are supported */
 extern RHI_API bool GSupportsRenderTargetFormat_PF_G8;
 
@@ -122,6 +125,9 @@ extern RHI_API bool GSupportsSeparateRenderTargetBlendState;
 
 /** True if the RHI can render to a depth-only render target with no additional color render target. */
 extern RHI_API bool GSupportsDepthRenderTargetWithoutColorRenderTarget;
+
+/** True if the RHI has artifacts with atlased CSM depths. */
+extern RHI_API bool GRHINeedsUnatlasedCSMDepthsWorkaround;
 
 /** true if the RHI supports 3D textures */
 extern RHI_API bool GSupportsTexture3D;
@@ -269,7 +275,7 @@ extern RHI_API bool GRHISupportsRHIThread;
 
 /** Whether or not the RHI supports parallel RHIThread executes / translates
 Requirements:
-* RHICreateBoundShaderState is threadsafe and GetCachedBoundShaderState must not be used. GetCachedBoundShaderState_Threadsafe has a slightly different protocol.
+* RHICreateBoundShaderState & RHICreateGraphicsPipelineState is threadsafe and GetCachedBoundShaderState must not be used. GetCachedBoundShaderState_Threadsafe has a slightly different protocol.
 ***/
 extern RHI_API bool GRHISupportsParallelRHIExecute;
 
@@ -564,6 +570,7 @@ struct FSamplerStateInitializerRHI
 		return Ar;
 	}
 };
+
 struct FRasterizerStateInitializerRHI
 {
 	TEnumAsByte<ERasterizerFillMode> FillMode;
@@ -584,6 +591,7 @@ struct FRasterizerStateInitializerRHI
 		return Ar;
 	}
 };
+
 struct FDepthStencilStateInitializerRHI
 {
 	bool bEnableDepthWrite;
@@ -653,6 +661,7 @@ struct FDepthStencilStateInitializerRHI
 		return Ar;
 	}
 };
+
 class FBlendStateInitializerRHI
 {
 public:

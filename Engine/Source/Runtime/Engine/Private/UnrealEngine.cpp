@@ -2043,7 +2043,7 @@ public:
 		RHICmdList.SetBlendState(TStaticBlendState<>::GetRHI());
 		RHICmdList.SetRasterizerState(TStaticRasterizerState<>::GetRHI());
 		RHICmdList.SetDepthStencilState(TStaticDepthStencilState<false, CF_Always>::GetRHI());
-		RHICmdList.Clear(true, FLinearColor::Black, false, 0, false, 0, FIntRect());
+		RHICmdList.ClearColorTexture(BackBuffer, FLinearColor::Black, FIntRect());
 	}
 
 	float FOVInDegrees;		// max(HFOV, VFOV) in degrees of imaginable HMD
@@ -7768,12 +7768,42 @@ float DrawMapWarnings(UWorld* World, FViewport* Viewport, FCanvas* Canvas, UCanv
 		{
 			SmallTextItem.SetColor(FLinearColor::Red);
 		}
-		// Use 'DumpUnbuiltLightInteractions' to investigate, if lighting is still unbuilt after a lighting build
-		SmallTextItem.Text = FText::FromString(FString::Printf(TEXT("LIGHTING NEEDS TO BE REBUILT (%u unbuilt object(s))"), World->NumLightingUnbuiltObjects));
+
+		int32 NumLightingScenariosEnabled = 0;
+
+		for (int32 LevelIndex = 0; LevelIndex < World->GetNumLevels(); LevelIndex++)
+		{
+			ULevel* Level = World->GetLevels()[LevelIndex];
+
+			if (Level->bIsLightingScenario && Level->bIsVisible)
+			{
+				NumLightingScenariosEnabled++;
+			}
+		}
+		
+		if (NumLightingScenariosEnabled > 1)
+		{
+			SmallTextItem.Text = FText::FromString( FString(TEXT("MULTIPLE LIGHTING SCENARIO LEVELS ENABLED")) );		
+		}
+		else
+		{
+			// Use 'DumpUnbuiltLightInteractions' to investigate, if lighting is still unbuilt after a lighting build
+			SmallTextItem.Text = FText::FromString( FString::Printf(TEXT("LIGHTING NEEDS TO BE REBUILT (%u unbuilt object(s))"), World->NumLightingUnbuiltObjects) );		
+		}
+
 		Canvas->DrawItem(SmallTextItem, FVector2D(MessageX, MessageY));
 		MessageY += FontSizeY;
 	}
 
+	// Warn about invalid reflection captures, this can appear only in game with FeatureLevel < SM4
+	if (World->NumInvalidReflectionCaptureComponents > 0)
+	{
+		SmallTextItem.SetColor(FLinearColor::Red);
+		SmallTextItem.Text = FText::FromString(FString::Printf(TEXT("INVALID REFLECTION CAPTURES (%u Components, resave map in the editor)"), World->NumInvalidReflectionCaptureComponents));
+		Canvas->DrawItem(SmallTextItem, FVector2D(MessageX, MessageY));
+		MessageY += FontSizeY;
+	}
+	
 	// Check HLOD clusters and show warning if unbuilt
 #if WITH_EDITOR
 	if (World->GetWorldSettings()->bEnableHierarchicalLODSystem)
@@ -9899,6 +9929,8 @@ bool UEngine::LoadMap( FWorldContext& WorldContext, FURL URL, class UPendingNetG
 			}
 		}
 		check(NewWorld);
+
+		NewWorld->PersistentLevel->HandleLegacyMapBuildData();
 
 		FScopeCycleCounterUObject MapScope(WorldPackage);
 

@@ -1065,8 +1065,8 @@ void UGameViewportClient::Draw(FViewport* InViewport, FCanvas* SceneCanvas)
 					}
 
 					// Add view information for resource streaming.
-					IStreamingManager::Get().AddViewInformation(View->ViewMatrices.ViewOrigin, View->ViewRect.Width(), View->ViewRect.Width() * View->ViewMatrices.ProjMatrix.M[0][0]);
-					MyWorld->ViewLocationsRenderedLastFrame.Add(View->ViewMatrices.ViewOrigin);
+					IStreamingManager::Get().AddViewInformation(View->ViewMatrices.GetViewOrigin(), View->ViewRect.Width(), View->ViewRect.Width() * View->ViewMatrices.GetProjectionMatrix().M[0][0]);
+					MyWorld->ViewLocationsRenderedLastFrame.Add(View->ViewMatrices.GetViewOrigin());
 				}
 			}
 		}
@@ -1293,8 +1293,7 @@ void UGameViewportClient::Draw(FViewport* InViewport, FCanvas* SceneCanvas)
 void UGameViewportClient::ProcessScreenShots(FViewport* InViewport)
 {
 	if (GIsDumpingMovie || FScreenshotRequest::IsScreenshotRequested() || GIsHighResScreenshot)
-	{
-	
+	{	
 		TArray<FColor> Bitmap;
 
 		bool bShowUI = false;
@@ -1322,6 +1321,12 @@ void UGameViewportClient::ProcessScreenShots(FViewport* InViewport)
 		{
 			if (ScreenshotCapturedDelegate.IsBound() && CVarScreenshotDelegate.GetValueOnGameThread())
 			{
+				// Ensure that all pixels' alpha is set to 255
+				for (auto& Color : Bitmap)
+				{
+					Color.A = 255;
+				}
+
 				// If delegate subscribed, fire it instead of writing out a file to disk
 				ScreenshotCapturedDelegate.Broadcast(Size.X, Size.Y, Bitmap);
 			}
